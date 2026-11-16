@@ -65,12 +65,21 @@ export function parseInput(input: string): ParseResult {
     }
     // -v で本文も出力した（-o /dev/null のない）場合、本文の行（ドキュメントの例の「HTTP/1.1 200 OK」、「* 」「> 」で始まる行など）を
     // 応答・情報行・送信ヘッダとして読まない。-L の次の応答は、curl が「< HTTP/」の形で出す
-    if (t.verbose && vBody) { if (/^< HTTP\//.test(line)) vBody = false; else continue; }
+    // -L や認証のやり直しで curl が次のリクエストを送るときの印（「* Issue another request」、「> GET /x HTTP/1.1」の要求行）でも終える。
+    // 終えないと、2つ目のホップの TLS（* SSL connection）や送信した Origin・Cookie を失う。本文の「* SSL connection …」だけの行では終えない
+    if (t.verbose && vBody) {
+      if (/^< HTTP\//.test(line) || /^\* Issue another request/.test(line) || /^> [A-Z]+ \S+ HTTP\/[\d.]+\s*$/.test(line)) vBody = false;
+      else continue;
+    }
     if (!inBody() && OPENSSL_START.test(line)) { close(); inOpenssl = true; }
     if (inOpenssl && !STATUS_RE.test(line) && !/^[*<>] /.test(line)) { t.openssl.push(line); continue; }
     inOpenssl = false;
     if (!inBody() && VERBOSE_HINT.test(line)) t.verbose = true;
     if (t.verbose && !inBody()) {                      // -v の解釈は verbose ターゲットのヘッダ部だけ
+      // 受信ヘッダ（< の行）の途中の空行は無視する。終端は「<」の行で、空行ではない。
+      // Windows の curl は受信ヘッダの行を CR CR LF で終え、画面の入力欄（textarea）はそれを改行2つ（空行）に変えるため、
+      // 空行で閉じると受信ヘッダがすべて失われる（パーサの CR CR LF の扱いは、入力欄を通ると効かない）
+      if (cur && inHeaders && !line.trim()) continue;
       if (line.startsWith('* ')) { t.info.push(line.slice(2)); continue; }
       if (line.startsWith('> ')) {
         const h = line.slice(2);
@@ -83,8 +92,9 @@ export function parseInput(input: string): ParseResult {
       if (/^<\s*$/.test(line)) {
         // 1xx と、プロキシの CONNECT への応答（トンネル）のあとには本文がなく、本当のリクエスト（* SSL connection、> Cookie、> Origin）が続く。
         // そこを本文として読み飛ばすと、送信した Origin・Cookie や合意した TLS を失う
-        const st = cur?.status ?? 0;
-        const tunnel = st >= 200 && st < 300 && (connectReq || /connection established/i.test(cur?.reason ?? ''));
+        const r = cur as HttpResponse | null;          // close() が書き換えるので、型の絞り込みに頼らない
+        const st = r?.status ?? 0;
+        const tunnel = st >= 200 && st < 300 && (connectReq || /connection established/i.test(r?.reason ?? ''));
         close(); vBody = st >= 200 && !tunnel; if (tunnel) connectReq = false;
         continue;
       }  // 受信ヘッダの終端。-v では本文を解析しない

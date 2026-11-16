@@ -1,6 +1,6 @@
 // rules/api.ts：第6章 WebAPI（A-01〜A-03、A-07〜A-11。A-04〜A-06は手動確認）
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
-import { baseLabel, finalResponse, responseKind } from '../parser/target';
+import { baseLabel, finalResponse, ownChain, responseKind } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
 import { header, mk } from './util';
 
@@ -32,7 +32,7 @@ export const API_TOP10: Record<string, string> = {
   'A-07': 'API3:2023', 'A-08': 'API8:2023', 'A-09': 'API8:2023', 'A-10': 'API8:2023', 'A-11': 'API5:2023・API9:2023',
 };
 
-const status = (ctx: RuleContext) => ctx.chain[0]?.status ?? ctx.final?.status ?? 0;
+const status = (ctx: RuleContext) => ownChain(ctx.target)[0]?.status ?? ctx.final?.status ?? 0;
 
 /**
  * A-01③：HTTP の応答で Basic 認証を求めているか。-L の転送をたどり、URL が http のホップの WWW-Authenticate だけを見る
@@ -64,7 +64,7 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!s) return [mk(unauthAccess, ctx, 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     if (s >= 200 && s < 300) return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
-    if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${ctx.chain[0]?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
+    if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${ownChain(ctx.target)[0]?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
     if (s === 401 && !www) return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', 'HTTP 401（WWW-Authenticate なし）', '')];
     return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', `HTTP ${s}${www ? ` / WWW-Authenticate: ${www}` : ''}`, '')];
   } };

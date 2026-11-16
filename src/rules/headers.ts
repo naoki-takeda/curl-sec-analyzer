@@ -1,8 +1,8 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext } from '../model';
-import { header, hstsDirective, mk, parseCsp } from './util';
+import { LOGOUT_FAILED_REC, header, hstsDirective, mk, parseCsp } from './util';
 import { maskValue } from '../mask';
-import { baseLabel } from '../parser/target';
+import { baseLabel, firstStatus, logoutFailed, ownChain } from '../parser/target';
 import { htmlBody, mixedContent } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
@@ -10,7 +10,7 @@ import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './cs
  * 判定に使う HSTS ヘッダ。apex は、apex 自身の応答（転送の最初のホップ）で見る。
  * -L や HAR で www への転送をたどった最後の応答は www のもの（H-02「apex自身もHSTSを返す」）
  */
-const hstsOf = (ctx: RuleContext) => (baseLabel(ctx.target.label) === 'apex' ? ctx.chain[0] : ctx.final)?.headers.get('strict-transport-security')?.[0];
+const hstsOf = (ctx: RuleContext) => (baseLabel(ctx.target.label) === 'apex' ? ownChain(ctx.target)[0] : ctx.final)?.headers.get('strict-transport-security')?.[0];
 
 export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS', 'MDN HTTP Observatory'],
@@ -267,6 +267,7 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'logout') return [];          // ログアウト応答だけ
     if (!ctx.final) return [mk(clearSiteData, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (logoutFailed(ctx.target)) return [mk(clearSiteData, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const csd = ctx.target.responses.flatMap(r => r.headers.get('clear-site-data') ?? [])[0];
     return csd ? [mk(clearSiteData, ctx, 'ok', 'info', 'pass', csd, '')]
                : [mk(clearSiteData, ctx, 1, 'info', 'fail', '(ヘッダなし)', 'Clear-Site-Data: "cache", "cookies", "storage"')];

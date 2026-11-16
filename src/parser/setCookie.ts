@@ -57,6 +57,13 @@ const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB|TS01[0-9a-f]{6}
 const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*)$/i;
 export const notSessionName = (name: string) => NOT_SESSION.test(name) || LOAD_BALANCER.test(name) || name.split(/[-_.]+/).some(w => NOT_SESSION_WORD.test(w));
 
+/**
+ * 名前だけでセッションCookieらしいか（リクエストの Cookie ヘッダには期限も属性もないため、名前で推定する）。
+ * 組織プロファイルで名前の指定があれば、それだけを使う
+ */
+export const looksLikeSessionName = (name: string): boolean =>
+  sessionConfig.names.length ? sessionConfig.names.some(n => n.toLowerCase() === name.toLowerCase()) : !notSessionName(name) && SESSION_NAME.test(name);
+
 /** now：削除用かどうか（過去の Expires）を判定する時刻。ルールからは採取時刻（RuleContext.now）を渡す */
 export function looksLikeSession(c: SetCookie, now = Date.now()): boolean {
   if (isDeletion(c, now)) return false;

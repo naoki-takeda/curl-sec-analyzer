@@ -33,7 +33,9 @@ export const decodeEntities = (v: string) => v.replace(/&(?:#(\d{1,7})|#[xX]([0-
 /** 開始タグを列挙する（属性名は小文字、値は文字参照を戻したもの） */
 export function tags(html: string, names: string[]): Tag[] {
   // 属性の長さに上限を付ける。上限がないと、> のない本文（<script の繰り返しなど）で毎回末尾まで走査し、時間が本文の長さの2乗になる
-  const re = new RegExp(`<(${names.join('|')})\\b([^>]{0,2000})>`, 'gi');
+  // 引用符で囲んだ属性の値の中の > では止めない（onsubmit="… && amt>0"、data-config='{"min":">100"}'）。止めると、残りの値が属性名として
+  // 証跡に出てしまう（値は伏せられるが、属性名は出る）。引用符の中の長さにも上限を付け、閉じていない引用符でも時間が線形になるようにする
+  const re = new RegExp(`<(${names.join('|')})\\b((?:[^>"']|"[^"]{0,2000}"|'[^']{0,2000}'){0,2000})>`, 'gi');
   const out: Tag[] = [];
   for (const m of html.matchAll(re)) {
     const attrs = new Map<string, string>();

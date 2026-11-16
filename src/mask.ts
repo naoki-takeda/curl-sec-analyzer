@@ -33,8 +33,9 @@ const SECRET_PART = /token|secret|passw|passphrase|pwd|apikey|authkey|accesskey|
 // エンコードした URL を別のパラメータの値に入れたもの（?next=%2Fcb%3Ftoken%3D…）や、スクリプトの中の URL でも見つけるため
 const SEP = String.raw`[?&#;]|%(?:25)*(?:3[Ff]|26|23|3[Bb])|\\u00(?:26)|\\x26|&amp;|&#0*(?:63|38);|&#[xX]0*(?:3[Ff]|26);|&quest;`;
 const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];|&equals;`;
-// 値はエンコードした区切りの前まで。名前は最短一致（エンコードした = を名前に含めない）
-const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)(${EQ})((?:(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]){1,4096})`, 'g');
+// 値はエンコードした区切りの前まで（長さの上限は付けない。上限で切ると、6KB の JWT などの残りが伏せられずに残る。繰り返しは入れ子でないので時間は線形）。
+// 名前は最短一致（エンコードした = を名前に含めない）
+const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)(${EQ})((?:(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\])+)`, 'g');
 // JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる
 const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-]))eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 // URL のユーザー情報（スキーム://ユーザー情報@ホスト）。スキームは語の先頭から32文字まで（\w+ だと長い英数字の並びで、入力の長さの2乗の時間がかかる）。
@@ -56,6 +57,15 @@ const MASKED = /…\(\d+ chars\)$/;
 // パラメータの値は空白の前で切れるので、「…(N」まで取り、直後が「 chars)」かを見る
 const maskedParam = (v: string, rest: string) => /…\(\d+$/.test(v) && rest.startsWith(' chars)');
 
+/**
+ * URL のパスに置いたトークン（/password/reset/<トークン>、/magic/<トークン>、Webhook の URL など）。
+ * パスの1つの部分が、英大文字・小文字・数字をすべて含む16文字以上、24文字以上の16進数（UUID を含む）、または数字を含む32文字以上の
+ * [A-Za-z0-9_-] なら伏せる。「2026-annual-report-v2」のような普通の名前は残す。マスク済みの「…(N chars)」は文字種が違うので、もう一度は伏せない
+ */
+const URL_PATH = /\b(https?:\/\/[^\s/?#"'<>]+)(\/[^\s?#"'<>]*)/gi;
+const secretSegment = (seg: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(seg) && (
+  (/[A-Z]/.test(seg) && /[a-z]/.test(seg) && /\d/.test(seg)) || /^[0-9a-f]{24,}$/i.test(seg.replace(/-/g, '')) || (seg.length >= 32 && /\d/.test(seg)));
+
 /** CSP の nonce の値（'nonce-…'）。どの証跡でも同じようにマスクする（H-04⑤ と同じ扱い） */
 const CSP_NONCE = /'nonce-([^']+)'/g;
 
@@ -71,6 +81,7 @@ function maskParams(s: string, depth = 0): string {
 /** ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする。マスク済みの文字列に使っても結果は変わらない */
 export function maskText(s: string): string {
   return maskParams(s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${maskValue(v)}'`)))
+          .replace(URL_PATH, (_, origin: string, path: string) => origin + path.split('/').map(seg => (secretSegment(seg) ? maskValue(seg) : seg)).join('/'))
           .replace(JWT, t => maskValue(t))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u)}@`);
 }

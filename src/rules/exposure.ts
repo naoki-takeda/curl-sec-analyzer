@@ -2,6 +2,7 @@
 import type { Rule, RuleContext } from '../model';
 import { clip, probePattern } from '../mask';
 import { header, mk } from './util';
+import { ownChain } from '../parser/target';
 
 const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : undefined);
 
@@ -31,7 +32,8 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・絶対パスを応答に含めない'));
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る
     const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Ruby on Rails|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|Express<\/title>|<title>Error \d{3}[^<]*<\/title>/i);
-    if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', clip(page[0], 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
+    // <title>Error 401 …</title>（Jetty など）の「…」は自由な文言で、アプリが「Invalid API key sk_live_…」のように秘密を入れうるので出さない
+    if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', clip(page[0].replace(/^(<title>Error \d{3})[^<]*/i, '$1 …'), 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
     return out.length ? out : [mk(errorDetail, ctx, 'ok', 'info', 'pass', 'エラーの詳細らしき記述なし', '')];
   } };
 
@@ -79,7 +81,7 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
   basis: ['OWASP API Security Top 10 2023: API8・API9'],
   run(ctx) {
     // ステータスは、そのURL自身の応答（転送の最初のホップ）で見る。/actuator からログイン画面に転送した先の 200 で①（高）にしないため
-    const p = path(ctx); const f = ctx.chain[0];
+    const p = path(ctx); const f = ownChain(ctx.target)[0];
     if (!f || !docSegment(p)) return [];
     const ok200 = f.status >= 200 && f.status < 300;
     const b = body(ctx) ?? '';
@@ -119,7 +121,7 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     const f = ctx.final; if (!f) return [];
     // そのURLがファイルを返した応答だけを見る：転送のない 2xx。404 のエラーページや、ログイン画面への転送先の HTML を、
     // アップロードしたファイルの inline 配信（①、高）にしないため
-    if (ctx.chain.length !== 1 || f.status < 200 || f.status >= 300) return [];
+    if (ownChain(ctx.target).length !== 1 || f.status < 200 || f.status >= 300) return [];
     const ct = header(ctx, 'content-type')[0] ?? ''; const cd = header(ctx, 'content-disposition')[0] ?? '';
     // アップロードしたファイルの配信らしいURL：アップロード先らしいディレクトリの下で、最後がファイル名（拡張子付き）のもの。
     // ディレクトリ名だけで判定すると、/media/press-releases/ や /download/ のような普通のHTMLページまで①（高）にしてしまう

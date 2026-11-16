@@ -22,3 +22,7 @@ export function parseCsp(v: string): Map<string, string[]> {
 /** HSTS のディレクティブ（includesubdomains・preload）があるか。H-01・H-02・横断ルール・画面の案内で同じ読み方にする（部分一致にしない） */
 export const hstsDirective = (v: string | undefined, name: 'includesubdomains' | 'preload'): boolean =>
   (v ?? '').split(';').some(d => d.trim().toLowerCase() === name);
+
+/** ログイン・ログアウトに失敗した採取での判定不能（na）の推奨対応（C-09・C-12・H-15） */
+export const LOGOUT_FAILED_REC = 'ログアウトの方法（POST など）に合わせて logout を採取し直す';
+export const LOGIN_FAILED_REC = 'テスト用アカウントでログインできることを確かめて、login を採取し直す';

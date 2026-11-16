@@ -27,6 +27,18 @@ export const finalResponse = (t: Target): HttpResponse | undefined =>
 export const chainOf = (t: Target): HttpResponse[] =>
   t.responses.filter(x => x.kind !== 'informational' && x.kind !== 'connect');
 
+/**
+ * そのターゲットの URL 自身の応答から始まるチェーン。HAR で http から https に転送されたチェーンは、ターゲットの URL を https にするので、
+ * 最初の https のホップから始める（apex の「自身の応答」や、E-05・E-11 の「そのURLの応答」に http の転送を使わないため）。
+ * 各ホップの URL が分からない curl の出力では chainOf と同じ
+ */
+export function ownChain(t: Target): HttpResponse[] {
+  const c = chainOf(t);
+  if (!/^https:/i.test(t.url ?? '')) return c;
+  const i = c.findIndex(r => /^https:/i.test(r.url ?? ''));
+  return i > 0 ? c.slice(i) : c;
+}
+
 export function isHttps(t: Target): boolean | undefined {
   const u = t.url ?? t.meta.url_effective;
   if (u) return /^https:\/\//i.test(u);   // スキームは大文字小文字を区別しない（HTTPS://…）
@@ -65,3 +77,11 @@ export function hostOf(t: Target): string | undefined {
   const u = t.url ?? t.meta.url_effective;
   try { return u ? new URL(u).host : undefined; } catch { return undefined; }
 }
+
+/** そのURL自身の最初の応答のステータス（分からなければ0） */
+export const firstStatus = (t: Target): number => ownChain(t)[0]?.status ?? 0;
+/**
+ * ログアウトの応答が失敗（4xx・5xx）しているか。GET の /logout に 405 を返すアプリなどでは、ログアウトしていないので、
+ * C-12（ログアウト後の無効化・Cookie の削除）と H-15 を判定しない
+ */
+export const logoutFailed = (t: Target): boolean => firstStatus(t) >= 400;

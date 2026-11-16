@@ -2,8 +2,8 @@
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
 import { isDeletion, looksLikeSession, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
-import { baseLabel, hostOf } from '../parser/target';
-import { mk } from './util';
+import { baseLabel, firstStatus, hostOf, logoutFailed } from '../parser/target';
+import { LOGOUT_FAILED_REC, mk } from './util';
 
 /** ターゲットの全応答（-L のホップを含む）から、削除用でない Set-Cookie を取り出す */
 export function cookiesOf(ctx: RuleContext): SetCookie[] {
@@ -149,6 +149,7 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'logout') return [];            // ①は横断ルール（logout と after-logout）
     if (!ctx.final) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (logoutFailed(ctx.target)) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const del = ctx.target.responses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
     return del.length ? [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', del.map(cookieEvidence).join(' / '), '')]
                       : [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', 'ログアウト応答でCookieを削除していない', 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];

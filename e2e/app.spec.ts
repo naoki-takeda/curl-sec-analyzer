@@ -193,3 +193,18 @@ test('英語UIでは、コマンド生成器の入力エラーも英語で出す
   await page.getByRole('button', { name: 'Build commands', exact: true }).click();
   await expect(page.getByText(/Use only letters, digits, hyphens and dots in the host name/)).toBeVisible();
 });
+
+// Windows の curl の -v（2>&1）は受信ヘッダの行を CR CR LF で終える。画面の入力欄（textarea）は値を受け取った時点でそれを改行2つに変えるので、
+// パーサに文字列を直接渡す単体テストでは確かめられない。貼り付けとファイルの読み込みの両方が入力欄を通る
+test('Windows の curl の -v（CR CR LF）を入力欄に入れても、受信ヘッダを失わない', async ({ page }) => {
+  await page.goto('/');
+  const lines = ['#TARGET url=https://a.example/api label=cors-reflect sensitive=1', '* Connected to a.example (192.0.2.1) port 443', '> GET /api HTTP/1.1', '> Origin: https://evil.example', '>',
+    '< HTTP/1.1 200 OK', '< Content-Type: application/json', '< Access-Control-Allow-Origin: https://evil.example', '< Access-Control-Allow-Credentials: true', '<'];
+  const cr = String.fromCharCode(13);
+  const text = lines.map(l => (l.startsWith('<') ? `${l}${cr}${cr}` : l)).join('\n') + '\n';
+  // 実際のファイルの読み込みと同じく、入力欄の value に入れる（fill はキー入力の扱いが違うため使わない）
+  await page.locator('#input').evaluate((el, v) => { (el as HTMLTextAreaElement).value = v; }, text);
+  expect(await page.locator('#input').evaluate(el => (el as HTMLTextAreaElement).value.includes('\n\n'))).toBe(true);   // 入力欄が改行を変えたことの確認
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(page.getByRole('region', { name: '判定結果' }).getByRole('cell', { name: 'R-01①' }).first()).toBeVisible();
+});

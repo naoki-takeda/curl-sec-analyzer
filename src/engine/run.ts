@@ -3,7 +3,7 @@
 // → ⑤条件単位の絞り込み（ターゲット単位の結果）→ ⑥API応答での重要度の引き下げ → ⑦例外の適用
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
 import { maskText } from '../mask';
-import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isSensitive, responseKind } from '../parser/target';
+import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isSensitive, ownChain, responseKind } from '../parser/target';
 import { looksLikeSession, parseSetCookie } from '../parser/setCookie';
 import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../rules/ruleset';
 import { allowedItems } from './labels';
@@ -35,7 +35,7 @@ export function hostHstsMap(targets: Target[]): Map<string, boolean> {
   const m = new Map<string, boolean>();
   for (const t of targets) {
     // apex は、apex 自身の応答（転送の最初のホップ）で見る（rules/headers.ts の H-01 と同じ）
-    const host = hostOf(t); const f = baseLabel(t.label) === 'apex' ? chainOf(t)[0] : finalResponse(t);
+    const host = hostOf(t); const f = baseLabel(t.label) === 'apex' ? ownChain(t)[0] : finalResponse(t);
     if (!host || isHttps(t) !== true || !f) continue;
     const age = Number(f.headers.get('strict-transport-security')?.[0]?.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? 0);
     m.set(host, (m.get(host) ?? false) || age > 0);

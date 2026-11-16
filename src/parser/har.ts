@@ -2,7 +2,7 @@
 // - request.postData（ログインのパスワードなど）は読まない。本文は HTML と JSON の先頭64KBだけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
-import { looksLikeSession, parseSetCookie, splitSetCookie } from './setCookie';
+import { looksLikeSession, looksLikeSessionName, parseSetCookie, splitSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
 import { baseLabel } from './target';
 
@@ -21,8 +21,10 @@ interface HarEntry {
 export interface HarChain {
   id: number; url: string; method: string; host: string; status: number; hops: number;
   finalUrl?: string;                // 最後のホップのURL（http から https に転送されたチェーンの判定に使う）
-  httpsFrom?: number;               // 最初の https のホップの位置（http から https に転送されたチェーンで、http のホップを判定から除くため）
-  responses: HttpResponse[]; sentAuth: boolean; at?: string;
+  responses: HttpResponse[];        // 各応答の url はそのホップのリクエストのURL（parser/target.ts の ownChain が使う）
+  sentAuth: boolean;                // 一覧の表示用の推定（Authorization か、セッションCookieらしい名前の Cookie を送った）
+  sentAuthorization: boolean; sentCookieNames: string[];   // 全ホップのリクエストで送った Authorization の有無と Cookie の名前（値は持たない）
+  at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
 }
 export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; total: number; failed: number; }   // failed：応答のない（status 0）エントリの数
@@ -87,12 +89,15 @@ export function importHar(text: string): HarImport {
       if (j < 0) break;
       used.add(j); cur = entries[j]; ci = j; hops.push(cur);
     }
-    const reqH = (e.request.headers ?? []).map(h => h.name.toLowerCase());
-    const sentAuth = reqH.includes('cookie') || reqH.includes('authorization');
-    if (sentAuth || hops.some(h => (h.response.headers ?? []).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
-    const httpsFrom = hops.findIndex(h => /^https:/i.test(h.request.url));
-    chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, httpsFrom: httpsFrom < 0 ? undefined : httpsFrom, method: e.request.method, host: hostOfUrl(e.request.url),
-      status: cur.response.status, hops: hops.length, responses: hops.map(toResponse), sentAuth, at: e.startedDateTime,
+    // 送った認証情報は全ホップのリクエストから見る。Secure の Cookie は https のホップでしか送らないため、最初の http のリクエストだけでは分からない
+    const reqHeaders = hops.flatMap(h => h.request.headers ?? []);
+    const sentAuthorization = reqHeaders.some(h => h.name.toLowerCase() === 'authorization');
+    const sentCookieNames = [...new Set(reqHeaders.filter(h => h.name.toLowerCase() === 'cookie').flatMap(h => String(h.value ?? '').split(';')).map(c => c.split('=')[0].trim()).filter(Boolean))];
+    const sentAuth = sentAuthOf(sentAuthorization, sentCookieNames);
+    if (sentAuthorization || sentCookieNames.length || hops.some(h => (h.response.headers ?? []).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
+    chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
+      status: cur.response.status, hops: hops.length, responses: hops.map(h => ({ ...toResponse(h), url: h.request.url })),
+      sentAuth, sentAuthorization, sentCookieNames, at: e.startedDateTime,
       suggested: '', label: '', sensitive: undefined, excluded: false });
   });
   suggestLabels(chains);
@@ -124,6 +129,12 @@ export function suggestLabels(chains: HarChain[], keepUserLabels = false): void 
   }
 }
 
+/**
+ * Cookie・Authorization を送ったか（機密応答の推定、第0章 0.3）。HAR では、ブラウザが解析用・同意用の Cookie もすべて送るため、
+ * Cookie を送っただけでは機密とみなさない。Authorization か、セッションCookieらしい名前の Cookie（組織プロファイルの指定があればそれ）を送ったときだけ
+ */
+const sentAuthOf = (authorization: boolean, cookieNames: string[]) => authorization || cookieNames.some(looksLikeSessionName);
+
 /** 画面で確定したチェーンをターゲットにする */
 export function harTargets(imp: HarImport, selectedHosts: Set<string>): { targets: Target[]; warnings: ParseWarning[] } {
   const targets: Target[] = []; const warnings: ParseWarning[] = [];
@@ -136,11 +147,10 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     const upgraded = /^http:/i.test(c.url) && /^https:/i.test(c.finalUrl ?? '');
     const https = upgraded && baseLabel(label) !== 'http';
     const url = https ? c.finalUrl! : c.url;
-    // https で判定するときは、http のホップを応答から除く。除かないと、apex の「自身の応答（最初のホップ）」が http の転送になり、
-    // https の apex が HSTS を返していても H-01①（高）にしてしまう
-    const responses = https && c.httpsFrom !== undefined ? c.responses.slice(c.httpsFrom) : c.responses;
+    // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ（parser/target.ts の ownChain）
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
-      responses, sentAuth: c.sentAuth, sentTokens: [], info: [],
+      // 送った認証情報の推定は、組織プロファイルのセッションCookieの名前で作り直す（Worker の中ではプロファイルが分からない）
+      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentTokens: [], info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });

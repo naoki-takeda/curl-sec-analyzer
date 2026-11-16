@@ -166,7 +166,7 @@ function analyzeUnsafe() {
   // 判定できなかったときは前の結果を消す（残すと、言語の切り替えなどで別の入力の結果が表示・出力される）
   if (new Blob([text]).size > MAX_BYTES) { say(T.tooLarge); state.last = null; renderEmpty(); return; }
   const parsed = text.trim() ? parseInput(text) : { targets: [], warnings: [] };
-  const fromHar = state.har ? harTargets(state.har.imp, state.har.hosts) : { targets: [], warnings: [] };
+  const fromHar = state.har ? withProfile(state.profile, () => harTargets(state.har!.imp, state.har!.hosts)) : { targets: [], warnings: [] };
   const targets = [...parsed.targets, ...fromHar.targets];
   const merged = uniqueLabels(targets);                       // 貼り付けと HAR で同じラベル（login など）を付けた場合
   const u = refs.urlInput.value.trim();
