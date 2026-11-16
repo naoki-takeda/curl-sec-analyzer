@@ -11,7 +11,7 @@ export const SESSION_PARAM_NAMES = ['PHPSESSID', 'JSESSIONID', 'sid', 'sessionid
 // OAuth・OpenID Connect の nonce、ワンタイムの番号（passcode・pin）、ハッシュ（パスワードの再設定やログインの検証に使う）、
 // JWT のクライアント認証（client_assertion）と SAML のアサーション
 const MASK_PARAM_NAMES = [...TOKEN_PARAM_NAMES, ...SESSION_PARAM_NAMES, 'code', 'password', 'passwd', 'pass', 'pw', 'secret', 'key', 'signature', 'sig',
-  'ticket', 'oauth_verifier', 'SAMLResponse', 'SAMLart', 'SAMLAssertion', 'accesskey', 'nonce', 'passcode', 'pin', 'hash', 'client_assertion'];
+  'ticket', 'oauth_verifier', 'SAMLResponse', 'SAMLart', 'SAMLAssertion', 'accesskey', 'nonce', 'passcode', 'pin', 'hash', 'client_assertion', 'mac'];   // mac は名前全体が mac のときだけ（mac_address・isMac は残す）
 const alt = (names: string[]) => names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 /** クエリ（?・&）、フラグメント（#）、パス引数（;）のどれに置かれても一致する */
 export const paramRegex = (names: string[], flags = 'i') => new RegExp(`([?&#;](?:${alt(names)})=)([^&\\s#;"'<>]+)`, flags);
@@ -19,7 +19,7 @@ const MASK_EXACT = new Set(MASK_PARAM_NAMES.map(n => n.toLowerCase()));
 /** 区切った語にこれがあればマスクする（x-amz-security-token、x-goog-signature、private_token、x-api-key、access-token など） */
 const MASK_WORDS = new Set(['token', 'secret', 'signature', 'sig', 'credential', 'credentials', 'password', 'passwd', 'pwd', 'pass', 'pw', 'key', 'apikey',
   'accesskey', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp', 'ticket', 'verifier', 'samlresponse', 'samlart', 'samlassertion',
-  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf']);   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
+  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf', 'hmac', 'hdnts', 'hdnea']);   // hdnts・hdnea は Akamai の署名トークン（acl=/* の値は持参人の資格情報）   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
 /**
  * 語 code と組み合わせても秘密ではない語（country_code、zip_code、error_code、currency_code）。名前の語が code とこれらだけなら伏せない。
  * code だけの名前と、auth_code・verification_code・otp_code・device_code のように秘密の語と組み合わせたものは伏せる
@@ -39,12 +39,14 @@ export const isSecretParamName = (name: string): boolean => {
   try { n = decodeURIComponent(name); } catch { n = name.replace(/%5[bd]/gi, '_'); }   // 不正なエンコードを含む名前は、角かっこだけ区切りにする
   if (MASK_EXACT.has(n.toLowerCase())) return true;
   const words = n.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[-_.[\]]+/).filter(Boolean);
-  // 最後の語が type の名前は、種類を表す公開の値（client_assertion_type=urn:…、token_type=Bearer、grant_type）
-  if (words.length > 1 && words[words.length - 1] === 'type') return false;
+  // 最後の語が type・method などの名前は、種類や設定を表す公開の値（client_assertion_type=urn:…、token_type=Bearer、code_challenge_method=S256、
+  // token_endpoint_auth_method、key_size=2048、max_password_length=64）。伏せると、PKCE の方式のようなセキュリティ上意味のある値が読めなくなる
+  if (words.length > 1 && PUBLIC_LAST_WORDS.has(words[words.length - 1])) return false;
   if (words.includes('code') && words.every(w => w === 'code' || PLAIN_CODE_WORDS.has(w))) return false;
   // 区切りのない1語の名前（authtoken、apitoken、secretkey、cftoken、sesskey、passphrase など）は、部分一致でも見る（伏せすぎるほうが安全）
   return words.some(w => MASK_WORDS.has(w)) || SECRET_PART.test(n.toLowerCase());
 };
+const PUBLIC_LAST_WORDS = new Set(['type', 'method', 'methods', 'size', 'length', 'len', 'policy', 'timeout', 'ttl', 'alg', 'algorithm']);
 const SECRET_PART = /token|secret|passw|passphrase|pwd|apikey|authkey|accesskey|privatekey|sessid|sesskey|credential|signature/;
 /** 値を伏せるパラメータか（名前のほかに、state は値も見る） */
 const secretParam = (name: string, value: string) => isSecretParamName(name) || (STATE_PARAM.test(name) && !plainStateValue(value));
@@ -158,7 +160,8 @@ const maskSegment = (seg: string, h: Hider = SHOW): string => { const asset = AS
   // webpack の [name].[contenthash].js（main.3f8a9c2e1b4d5f6a7b8c.js）のハッシュ（20文字以下の16進数）も伏せない
   // 16進数のハッシュは、語のあとに「.」でつないだもの（main.<ハッシュ>.js）だけ。名前全体が16進数のファイル（3F8A….png）はアップロードした
   // ファイルのランダムな名前のことがあるので伏せる
-  if (!secretPiece(plain) || (asset && (buildAssetName(body) || (/^[0-9a-f]{8,20}$/i.test(body) && /^[A-Za-z][\w-]*\.[0-9a-f]{8,20}\./i.test(seg))))) return piece;
+  // 画像（avatar.<ハッシュ>.png）は、アップロードしたファイルのランダムな名前のことがあるので、JS・CSS（とそのソースマップ）・フォントだけにする
+  if (!secretPiece(plain) || (asset && (buildAssetName(body) || (/^[0-9a-f]{8,20}$/i.test(body) && /^[A-Za-z][\w-]*\.[0-9a-f]{8,20}\.(?:(?:chunk\.)?(?:m?js|css)(?:\.map)?|woff2?|ttf|otf|eot)$/i.test(seg))))) return piece;
   const m = body.match(/^([A-Za-z]{3,20}[-_])(.+)$/);
   if (m && !wordPrefix(m[1].slice(0, -1))) return h.value(body) + pad;
   return m && secretPiece(m[2]) ? m[1] + h.bare(m[2]) + pad : h.value(body) + pad;
@@ -322,24 +325,99 @@ export const clip = (s: string, n: number) => {
  */
 // 値の終わり：空白、「・」（複数のコマンドのつなぎ）、URL の前の「_」、次のオプションの前の「_」（_--long、_-sS のような4文字までの短いオプション）。
 // 「_-」だけで止めると、base64url のトークンや Cookie の値の中の「_-」で止まり、残りが伏せられずに出た。引用符で始まる値は閉じる引用符まで
-const CMD_VALUE = String.raw`"[^"]*"?|'[^']*'?|(?:(?![\s・]|_(?:https?:|--[a-z]|-[A-Za-z]{1,4}(?=[_\s・]|$))).)+`;
-const CMD_OPTION = new RegExp(String.raw`(^|[\s_・])(--[a-z][\w-]*|-[A-Za-z])(?:([\s_=]+)(?!-)|(?=[^\s_-]))(${CMD_VALUE})`, 'g');
-const CRED_OPTIONS = new Set(['-u', '-U', '--user', '--proxy-user', '-b', '--cookie', '--oauth2-bearer', '-E', '--cert', '--pass', '--proxy-pass']);
-const DATA_OPTIONS = new Set(['-d', '--data', '--data-raw', '--data-binary', '--data-ascii', '--data-urlencode', '-F', '--form', '--form-string']);
+// 伏せた値の印「…(N chars)」は空白を含むので1つのかたまりとして読む（空白で切ると、もう一度伏せたときに結果が変わった）
+const UNQUOTED_VALUE = String.raw`(?:…\(\d+ chars\)|(?![\s・]|_(?:https?:|--[a-z]|-[A-Za-z]{1,4}(?=[_\s・]|$))).)+`;
+const CMD_VALUE = new RegExp(String.raw`"[^"]*"?|'[^']*'?|${UNQUOTED_VALUE}`, 'y');
+/**
+ * オプションの始まり。長いオプションの名前に「_」は含めない（curl の長いオプションに「_」はない。含めると「_」で区切った
+ * --user_alice:pw 全体を1つの名前と読み、値がそのまま出た）。短いオプションはまとめ書き（-sSu、-uadmin:pw）を1つとして取り、あとで分ける
+ */
+const CMD_START = /(?<=^|[\s_・])(?:(--[a-z][a-z0-9-]*)(?=[\s_=]|$)|-([A-Za-z]+))/g;
+const CMD_SEP = /[\s_=]+(?!-)/y;
+/** 値を取る短いオプション。まとめ書きでは、最初にこれが来たところから後ろが値になる（-sSu_alice:pw の u、-XPOST の X） */
+const SHORT_WITH_VALUE = new Set('AbcCdDeEFHKmoPQrtTuUwxXyYz');
+const CRED_OPTIONS = new Set(['-u', '-U', '--user', '--proxy-user', '-b', '--cookie', '--oauth2-bearer', '-E', '--cert', '--proxy-cert', '--pass', '--proxy-pass',
+  '--tlspassword', '--proxy-tlspassword']);
+const DATA_OPTIONS = new Set(['-d', '--data', '--data-raw', '--data-binary', '--data-ascii', '--data-urlencode', '-F', '--form', '--form-string', '--json', '--url-query']);
 const HEADER_OPTIONS = new Set(['-H', '--header', '--proxy-header']);
+const AUTH_SCHEME = String.raw`(?:(Basic|Bearer|Digest|Negotiate|NTLM)([\s_]+))?`;
+const secretHeaderName = (n: string) => /^(?:(?:proxy-)?authorization|cookie)$/i.test(n) || isSecretParamName(n);
+/** 認証情報の値を伏せる（q は値を囲む引用符） */
+const maskOptionValue = (opt: string, v: string): string => {
+  const q = /^["']/.test(v) ? v[0] : ''; const inner = q ? v.slice(1).replace(new RegExp(`${q}$`), '') : v; const close = q && v.endsWith(q) && v.length > 1 ? q : '';
+  if (CRED_OPTIONS.has(opt)) return `${q}****${close}`;
+  // --variable NAME=値（値は秘密のことが多い。%NAME の環境変数の読み込みと @ファイルは名前だけなので残す）
+  if (opt === '--variable') return inner.includes('=') ? `${q}${inner.slice(0, inner.indexOf('=') + 1)}****${close}` : v;
+  if (DATA_OPTIONS.has(opt)) return `${q}${maskText(`?${inner}`).slice(1)}${close}`;
+  if (HEADER_OPTIONS.has(opt)) {
+    const m = inner.match(new RegExp(String.raw`^([\w-]+)(:[\s_]*)${AUTH_SCHEME}`, 'i'));
+    if (m && secretHeaderName(m[1])) return `${q}${m[0]}****${close}`;
+  }
+  return v;
+};
+const SENSITIVE_OPTION = (opt: string) => CRED_OPTIONS.has(opt) || DATA_OPTIONS.has(opt) || HEADER_OPTIONS.has(opt) || opt === '--variable';
+/**
+ * 認証情報を持つオプションだけを探して値を伏せる。ほかのオプション（-X POST、--compressed）は値を読み飛ばさない
+ * （読み飛ばすと、-X_POST_-uadmin:pw の -u や、--compressed_-H_Cookie:… の -H が、前のオプションの値の中に入って伏せられなかった）
+ */
+// 名前は長さを区切る（区切らないと、「_」「-」の続く値の終わりまで読んでから戻り、「_-Habcde」の繰り返しで2乗の時間がかかった）
+const HEADER_HEAD = /["']?([A-Za-z0-9-]{1,100}):/y;
+const VARIABLE_HEAD = /["']?[%\w-]{1,100}=/y;
+/**
+ * オプションを探すのは、curl・httpie（http・https）・wget のコマンドだけ（「・」・改行で区切ったコマンドごと）。生成スクリプトの
+ * openssl x509 -subject -issuer や grep -qiE の値を、まとめ書きの -su・-E の値として伏せた
+ */
+const HTTP_CLIENT = /(?:^|[\s_/])(?:curl|https?|wget|xh)(?:\.exe)?(?:[\s_]|$)/i;
+const maskClientOptions = (s: string): string => s.split(/(・|\n)/).map((seg, i) => (i % 2 === 0 && HTTP_CLIENT.test(seg) ? maskOptions(seg) : seg)).join('');
+const maskOptions = (s: string): string => {
+  let out = ''; let last = 0;
+  for (const m of s.matchAll(CMD_START)) {
+    if (m.index < last) continue;   // 前に伏せた値の中
+    let opt: string; let p: number;
+    if (m[1]) { opt = m[1]; p = m.index + m[0].length; } else {
+      const k = [...m[2]].findIndex(c => SHORT_WITH_VALUE.has(c));
+      if (k < 0) continue;
+      opt = `-${m[2][k]}`; p = m.index + 2 + k;   // 値を取る文字の直後（まとめ書きの残り -uadmin の admin は値）
+    }
+    if (!SENSITIVE_OPTION(opt)) continue;
+    CMD_SEP.lastIndex = p;
+    const sep = CMD_SEP.exec(s);
+    if (sep) p += sep[0].length; else if (p < s.length && /[\s_=]/.test(s[p])) continue;   // 区切りのあとが次のオプション（値がない）
+    // -H と --variable は、伏せる値か（秘密らしいヘッダの名前、NAME=）を値を読む前に確かめる。値を読んでから伏せないと分かると、
+    // その値の中をまた読み直し、「_-Habcde」の繰り返しで入力の長さの2乗の時間がかかった
+    if (HEADER_OPTIONS.has(opt)) { HEADER_HEAD.lastIndex = p; const h = HEADER_HEAD.exec(s); if (!h || !secretHeaderName(h[1])) continue; }
+    if (opt === '--variable') { VARIABLE_HEAD.lastIndex = p; if (!VARIABLE_HEAD.test(s)) continue; }
+    CMD_VALUE.lastIndex = p;
+    const v = CMD_VALUE.exec(s)?.[0];
+    if (!v) continue;
+    const masked = maskOptionValue(opt, v);
+    if (masked === v) continue;   // 伏せなかった値（-H Accept:*/*）は読み飛ばさない（値の中の _-ualice:pw を見つけるため）
+    out += s.slice(last, p) + masked; last = p + v.length;
+  }
+  return out + s.slice(last);
+};
+/**
+ * オプションの外に書いた Authorization・Cookie・秘密らしい名前のヘッダ（httpie の Authorization:Bearer_…、-H の値の続き）も伏せる。
+ * ヘッダの名前に「_」は含めない（含めると、curl_-H_Cookie の全体を1つの名前と読んだ）
+ */
+// 秘密でない名前（https:、localhost:8080）では値を読み飛ばさない（読み飛ばすと、URL のあとの _Authorization:… が URL の値の中に入った）
+const LOOSE_HEADER_NAME = /(?<=^|[\s_・'"])[A-Za-z][A-Za-z0-9-]*(?=:(?!\/\/))/g;
+const LOOSE_HEADER_VALUE = new RegExp(String.raw`:[\s_]*${AUTH_SCHEME}(${UNQUOTED_VALUE.replace(String.raw`[\s・]`, String.raw`[\s・'"]`)})`, 'y');
+const maskLooseHeaders = (s: string): string => {
+  let out = ''; let last = 0;
+  for (const m of s.matchAll(LOOSE_HEADER_NAME)) {
+    if (m.index < last || !secretHeaderName(m[0])) continue;
+    LOOSE_HEADER_VALUE.lastIndex = m.index + m[0].length;
+    const v = LOOSE_HEADER_VALUE.exec(s);
+    if (!v || /^\*+$/.test(v[3])) continue;
+    const end = LOOSE_HEADER_VALUE.lastIndex;
+    out += s.slice(last, end - v[3].length) + '****'; last = end;
+  }
+  return out + s.slice(last);
+};
 // オプションの値を先に伏せてから、全体に maskText をかける（先に maskText をかけると、伏せた値の「…(N chars)」の空白で値が切れた）。
 // 値を囲む引用符は残す
-export const maskCommand = (s: string): string => maskText(s.replace(CMD_OPTION, (all: string, pre: string, opt: string, sep: string | undefined, v: string) => {
-  const head = `${pre}${opt}${sep ?? ''}`;
-  const q = /^["']/.test(v) ? v[0] : ''; const inner = q ? v.slice(1).replace(new RegExp(`${q}$`), '') : v; const close = q && v.endsWith(q) && v.length > 1 ? q : '';
-  if (CRED_OPTIONS.has(opt)) return `${head}${q}****${close}`;
-  if (DATA_OPTIONS.has(opt)) return `${head}${q}${maskText(`?${inner}`).slice(1)}${close}`;
-  if (HEADER_OPTIONS.has(opt)) {
-    const m = inner.match(/^([\w-]+)(:[\s_]*)(?:(Basic|Bearer|Digest|Negotiate|NTLM)([\s_]+))?/i);
-    if (m && (/^(?:(?:proxy-)?authorization|cookie)$/i.test(m[1]) || isSecretParamName(m[1]))) return `${head}${q}${m[0]}****${close}`;
-  }
-  return all;
-}));
+export const maskCommand = (s: string): string => maskText(maskLooseHeaders(maskClientOptions(s)));
 
 // #PROBE の head は判定にだけ使い、表示・エクスポートにはパターン名だけを出す。
 // [パターン名, 判定する項目, 対象パス, 先頭64バイトの目安]（ツール設計1「プローブの判定パターン」）

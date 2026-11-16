@@ -1,7 +1,7 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
-import { isChunkMarker, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
+import { isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
 import { baseLabel, firstStatus, hostOf, logoutFailed } from '../parser/target';
 import { LOGOUT_FAILED_REC, mk } from './util';
 
@@ -161,7 +161,7 @@ export const sessionIdStrength: Rule = { id: 'C-07', title: 'セッションID�
       const uuid = timeBasedUuid(c.value);
       const bits = uuid?.bits ?? estimateBits(c.value);
       return bits < 128 ? mk(sessionIdStrength, ctx, 1, 'high', 'fail', `${cookieEvidence(c)}（推定 約${bits}bit${uuid ? `。時刻から作る UUID v${uuid.version}` : ''}）`, '128bit以上のエントロピーを持つ乱数をセッションIDにする（ASVS 5.0.0 7.2.3）') : undefined;
-    }, c => looksLikeSession(c, ctx.now) && !isChunkMarker(c));   // 分割の印（chunks-2）は値を比べない
+    }, c => looksLikeSession(c, ctx.now) && !isChunkMarker(c) && !isChunkPiece(c));   // 分割の印（chunks-2）と2つ目以降のかけら（…C2）は値を見ない
   } };
 
 const DEFAULT_NAMES = /^(PHPSESSID|JSESSIONID|ASP\.NET_SessionId|connect\.sid|laravel_session|CFID|CFTOKEN)$/i;

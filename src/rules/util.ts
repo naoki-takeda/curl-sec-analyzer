@@ -29,8 +29,9 @@ export const isNosniff = (ctx: RuleContext): boolean =>
 
 // 静的リソース（JS・CSS・画像・フォント）と、誰にでも同じ内容を返す公開ファイル（robots.txt、sitemap.xml、/.well-known/ の下など）
 // 拡張子はパスの末尾だけで見る（クエリの ?avatar=me.png・?format=x.css で、利用者ごとの API を静的リソースとし、H-12①（高）を見逃さない）
-const STATIC_RE = /\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|map)$/i;
-const STATIC_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|image\/|font\/)/i;
+// 動画・音声・WebAssembly・旧式のフォント（eot）も含める（ログインした HAR で、Cookie を送っただけの mp4・wasm を機密応答として H-12①（高）にした）
+const STATIC_RE = /\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|map|wasm|mp4|m4v|webm|ogv|mov|mp3|m4a|aac|oga|ogg|opus|wav|flac)$/i;
+const STATIC_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|image\/|font\/|video\/|audio\/|application\/wasm\b)/i;
 const PUBLIC_FILE = /\/(?:robots\.txt|sitemap[\w-]*\.xml(?:\.gz)?|favicon\.ico|(?:app-)?ads\.txt|humans\.txt|security\.txt|crossdomain\.xml|browserconfig\.xml|manifest\.json|[\w-]+\.webmanifest)$|\/\.well-known\//i;
 const pathOf = (u: string) => { try { return new URL(u).pathname; } catch { return u.replace(/[?#].*$/s, ''); } };
 // JSONP（?callback=）は Content-Type が JS でも、利用者ごとのデータを返す動的な応答なので、静的リソースとしない
@@ -90,3 +91,8 @@ export const isLabelText = (key: string, v: string): boolean => {
  */
 export const isPublicClientValue = (v: string): boolean =>
   /^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(v) || /^pk_(?:live|test)_[A-Za-z0-9]+$/.test(v) || /^AIza[0-9A-Za-z_-]{35}$/.test(v);
+/**
+ * 伏せ字の値（"********"、"***"、"•••"、"[REDACTED]"、Rails の "[FILTERED]"、"<hidden>"）。値を出していないので、秘密情報の露出（A-07①・E-09①）にしない
+ */
+export const isPlaceholderValue = (v: string): boolean =>
+  /^(?:([*•●xX#.\-_])\1{2,}|[[(<{]?\s*(?:redacted|filtered|hidden|masked|protected|removed|omitted)\s*[\])>}]?)$/i.test(v.trim());

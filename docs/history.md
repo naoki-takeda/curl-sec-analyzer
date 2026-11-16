@@ -616,3 +616,32 @@
 | 第23回（カバレッジ） | 「一部の条件は入力不足」をターゲット名で判断し、C-12①・H-02③で出ない | 第25回で直っていた。テストを足した | `tests/backlog3.test.ts` |
 | コミット前のレビュー | 修正の途中で入った退行：長さを決めない`sha256-…`の除外が後ろのパスまで一致してトークンを残す、`https%3A//`のあとのホスト名を伏せる、語と数字の名前の判定が乱数のトークン（16文字で約0.1%）と`SessionToken2024Value`のような語の秘密を残す、どこにでもある`Connecting to`で普通のターゲットを openssl の出力にする。直し切れていなかったもの：`///`の直後、`_csv`の付いた名前、時刻のない古い出力をいちばん新しいとみなす、`HTTPS/1.1`・`SPDY/3.1`を製品の版とする、404・SPA の security.txt と robots.txt の 404 の扱い | それぞれ直した。語と数字の名前の判定は、修正前より新たに残る乱数のトークンが10万個に数個以下（16〜32文字の base62・base64url・base36）であることを確かめた | 同上 |
 | 未対応 | 判断が要るもの（ログアウトだけを採取したときの C-12② の na（同じ値で期限を延ばしただけのログアウトも②にならない）、語と数字の名前の判定で残りうる乱数のトークン（10万個に数個）と語だけの秘密（`CorrectHorseBatteryStaple42`）をどこまで許すか）、未確認のもの（第23回〜第25回の「未確認」の一覧） | 次回以降 | — |
+
+### レビュー指摘への対応（第27回、16回目の新鮮な目でのレビュー：独立した3人のレビュアー）
+
+入力とマスク、判定、第25回のコミットの副作用を、別々のレビュアーが独立に見た（第26回のコミットを含む今の版が対象）。第25回の修正が、`#META cmd=`の長いオプションの値の漏れ（第25回で直したばかりのものの再発）、C-12 のログインのフォームの誤検知などの退行を入れていた。32件に対応し、ルールセットを`2026.11-v0.4.34`にした。コミットの前に差分だけを見る独立したレビュアーに前後を比べてもらい、そこで見つかった修正の退行12件も直した。再現テストは`tests/review16.test.ts`と、ゴールデンテストのコーパスに加えた`tests/golden/cases/13-review16.txt`。修正前のソースでは、指摘32件のテストがすべて失敗することを確かめた（コミット前のレビューのテストは、修正の途中で入った退行を防ぐもので、修正前のソースでも通るものがある）。
+
+| 指摘 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 1・26（漏えい・第25回の退行） | CSV の実施コマンドで、`_`で区切った長いオプション（`--user_alice:pw`、`--header_X-Api-Key:_…`、`--cookie_…`）の値、値のない長いオプションのあとの`-H_Cookie:`、httpie の`Authorization:Bearer_…`、まとめ書きの`-sSu`、値を取るオプションのあとの`-uadmin:pw`、`--url-query`・`--tlspassword`・`--variable`の値を伏せない | 長いオプションの名前に`_`を含めない。秘密を持つオプションだけを探して値を伏せ、ほかのオプションの値は読み飛ばさない。オプションの外のヘッダも伏せる | ツール設計3「マスキングの対象」、`src/mask.ts` |
+| 2（高・第25回の退行） | C-12①が、`id="current-password"`のログインのフォームと、パスワード欄だけの2段階目の画面を、パスワード変更の画面とみなして高にする | パスワードを決める欄の印（`new`・`confirm`・`new-password`）を見る。`current`・`old`の欄は`autocomplete="current-password"`のときだけ認める。パスワード欄だけのフォームは、`current-password`で送り先がログインらしいときだけログイン画面 | 第2章、`src/rules/html.ts`（`loginForm`を`cross.ts`から移した） |
+| 3・11（高） | E-11①の`/download/`の除外が、Redmine の`/attachments/download/42/evil.html`の XSS を見逃す。ビルドした SVG（`/static/media/logo.<ハッシュ>.svg`）を、アップロードしたファイルとして高にする | 除外は、ほかのアップロード先らしいディレクトリを含まないときだけ。ビルドしたファイル（`/static/media/`・`/_next/static/`）をアップロード先から除く | 第5章、`src/rules/exposure.ts` |
+| 4・22 | C-07①が、分割した Cookie の最後のかけら（`…C2`）を単独で判定して高にする。oauth2-proxy の`_oauth2_proxy`をセッションCookie とみなさない | 2つ目以降のかけらは値を見ない。`_oauth2_proxy`を認証の Cookie の名前に加える | 第2章、`src/parser/setCookie.ts`、`src/rules/cookies.ts` |
+| 5（第25回の退行） | E-01②の無名のフレームが、JSON・スクリプトの文字列の中の「at /…:1:2」に出る | 行の始めにあり、パスに引用符・カンマを含まないものだけ | 第5章、`src/rules/exposure.ts` |
+| 6（第25回の退行） | C-12①が、`/Account/Login.aspx`・`/login.php`・トップ・Spring の`/oauth2/authorization/x`への転送と、`-L`でたどった IdP の入り口を na にする | ログイン画面のパスに加え、`-L`の転送を最後まで見る（トップへの転送は、トップが利用者の画面を返すアプリがあるので na のまま） | 第2章、`src/rules/cross.ts` |
+| 7・10 | E-05 が、本文に「Swagger UI」の語があるだけの SPA の画面を②にする。設計書のカバレッジの文言がコードと違う | タイトルと画面を作る要素・スクリプトで見る。設計書を直した | 第5章、ツール設計2、`src/rules/exposure.ts` |
+| 8・27・28 | 画像の`avatar.<ハッシュ>.png`を伏せない。Akamai の署名トークン（`hdnts=…~hmac=…`）、`?hmac=`・`?mac=`を伏せない。`code_challenge_method=S256`などの公開の設定値を伏せすぎる | ハッシュを残すのは JS・CSS だけ。`hdnts`・`hdnea`・`hmac`・`mac`を伏せる。最後の語が`method`・`size`・`length`などの名前は残す | ツール設計3「マスキングの対象」、`src/mask.ts` |
+| 9（性能） | `loginForm`の正規表現が、閉じない`<input `が並ぶ本文で2乗の時間になる | input のタグを1つずつ取り出して見る | `src/rules/html.ts` |
+| 12（高） | A-07①・E-09①が伏せ字の値（`"password":"********"`）を秘密情報とみなす | 伏せ字の値を除く（A-07 と E-09 で同じ関数） | 第5章・第6章、`src/rules/util.ts` |
+| 13 | T-09・T-10 が、openssl が一度も接続できなかった（プローブがすべて失敗）のに「旧バージョン・弱い暗号は拒否された」と合格にする | そのホストに TLS で接続できたと分かるときだけ合格にし、それ以外は na | 第4章、`src/rules/hostRules.ts` |
+| 14・21 | A-01①・A-11②が、SPA の index.html やログインのフォームを返す200 を保護データとして指摘する。A-01 が 404・5xx を合格にする | HTML の画面の200 は na（本文が JSON なら Content-Type が text/html でも HTML の画面としない）。A-01 の合格は 401・403・405 だけ | 第6章、`src/rules/api.ts` |
+| 15 | T-06 が`Location: /\evil.example`・`https:\evil.example/`を合格にする | 転送先をブラウザと同じ読み方（WHATWG URL）で解釈する | 第4章、`src/rules/transport.ts` |
+| 16・17・18 | H-12①・H-11①が、Cookie を送った mp4・wasm を機密応答とみなす。H-08①が 204・304 に出る。H-13①が本文の空の 401・201 に出る | 動画・音声・wasm を静的リソースに加える。204・304 は na。`Content-Length: 0`は対象外 | 第0章 0.3、第1章、`src/rules/util.ts`、`src/rules/headers.ts` |
+| 19 | T-11①が、SAN が IP アドレスの証明書をホスト名不一致にする | SAN の`IP Address:`も読む | 第4章、`src/parser/openssl.ts` |
+| 20 | HTML の同じ AWS のキーを、E-01① と E-09① で2回、高として数える | そのラベルで E-09 を判定する HTML の応答では、E-09① だけで数える | 第5章、`src/rules/exposure.ts` |
+| 23・24・25 | R-06 が Origin を送っていない応答の固定の ACAO に Vary を求める。H-06④が`frame-ancestors https://*`を合格にする。E-13 が埋め込んだソースマップ（`data:`）にも .map の取得を勧める | 適用外にする。ホストが`*`だけの指定も広い指定にする。証跡と推奨を分ける（①はプローブの条件なので②のまま） | 第3章・第1章・第5章、`src/rules/cors.ts`、`src/rules/headers.ts`、`src/rules/exposure.ts` |
+| 29・30（性能） | `splitSetCookie`が`a=b,`の繰り返しで、HAR の転送の連結が転送先のない302 の多い HAR で、2乗の時間になる | 前のかけらが属性を持つかを真偽値で持つ。転送先を URL の表で引く | `src/parser/setCookie.ts`、`src/parser/har.ts` |
+| 31・32 | 名前のないヘッダや null を含む HAR で取り込み全体が失敗する。curl 8.22 の時刻の欄のない進捗の行で警告が出る | そのヘッダだけを無視する。長い空白のある進捗の行も読み飛ばす | `src/parser/har.ts`、`src/parser/input.ts` |
+| コミット前のレビュー | 修正の途中で入った退行：E-09 を判定しないラベル（`error-*`）の HTML の AWS のキーを見逃す、C-12①がトップへの転送と`-L`でたどった利用者の画面を合格にする、A-01・A-11 が`text/html`で返した JSON を HTML の画面として na にする、A-01 がログイン欄のある画面を合格にする、ログインのフォームの判定が再認証の画面（`current_password`・sudo モード）をログイン画面とし、`password2`のログイン画面を外す、E-11 がアップロード先の`avatar.5f3a9c2e.svg`・`minutes.20241231.html`を見逃す、`#META cmd=`の`_-Habcde`の繰り返しで2乗の時間、openssl・grep のオプションを伏せる、E-01②が`<br>`・`&nbsp;`・JSON の配列の無名のフレームを見逃す、T-06 が`evil.example.`を見逃す、本文の数値の表を進捗の行として消す、`mac_address`とフォントのハッシュを伏せる | それぞれ直した | 同上 |
+| 既存のテストの書き直し | `tests/review5.test.ts`の HTML の AWS のキーの期待を、E-09① で数えるものにした | 仕様の変更に合わせた | — |
+| 未対応 | 未確認のもの（curl -v に出る mbedTLS・GnuTLS の暗号の名前、`authorize`を加えたことによる state のない`/oauth/authorize`への C-09 の na、`sameDocument`がスキームを比べないこと、Keycloak の`AUTH_SESSION_ID`の C-09①、`/actuator/health`の高、A-02 の`/api/auth/refresh`、COOP の`unsafe-none`） | 次回以降 | — |

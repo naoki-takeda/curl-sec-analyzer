@@ -9,6 +9,15 @@ const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Seve
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
      target: host, host, evidence, recommendation, references: rule.basis, score: 0 });
 
+/**
+ * そのホストに TLS で接続できたと分かるか：新しいバージョン（1.2・1.3）か弱くない暗号のプローブで接続できた、curl -v で合意した、
+ * openssl の出力に証明書がある。プロキシ経由の環境では curl はつながっても openssl（s_client）はつながらず、すべてのプローブが失敗する。
+ * そのとき「旧バージョン・弱い暗号は拒否された」と合格にすると、高の条件を確かめずに合格にする
+ */
+const reachedTls = (ts: Target[], negotiated: number): boolean => negotiated > 0
+  || ts.some(t => t.tlsProbes.some(p => p.result === 'accepted' && !OLD.test(p.version.replace(/\s/g, ''))) || t.cipherProbes.some(p => p.result === 'accepted'))
+  || ts.some(t => t.openssl.length > 0 && (() => { const i = parseOpenssl(t.openssl); return !!i && hasCertificate(i); })());
+const UNREACHED_TLS_REC = 'openssl が対象に届く環境（プロキシを通さない端末、-proxy の指定）で C12・C23 を実行し直す';
 const OLD = /^(ssl3|sslv3|tls1(?:\.0)?|tls1\.1|tls1_1|tls1_0|tlsv1(?:\.0)?|tlsv1\.1)$/i;   // -v の「SSL connection using SSLv3」も
 export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appliesTo: 'any', scope: 'host',
   basis: ['Mozilla Server Side TLS', 'IPA TLS暗号設定ガイドライン'],
@@ -25,7 +34,9 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
       if (accepted.length || oldNegotiated.length) out.push(hf(tlsVersion, host, 1, 'high', 'fail',
         [accepted.length ? `接続できた旧バージョン: ${accepted.map(p => p.version).join(', ')}` : '', oldNegotiated.length ? `合意したバージョン: ${oldNegotiated.join(', ')}` : ''].filter(Boolean).join('、'),
         'TLS 1.2 と 1.3 だけを有効にする'));
-      else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected')) out.push(hf(tlsVersion, host, 'ok', 'info', 'pass', '旧バージョンは拒否された', ''));
+      else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected'))
+        out.push(reachedTls(ts, negotiated.length) ? hf(tlsVersion, host, 'ok', 'info', 'pass', '旧バージョンは拒否された', '')
+          : hf(tlsVersion, host, 'na', 'info', 'na', 'どのバージョンでも接続できなかった（旧バージョンを拒否したのか、openssl が対象に届かないのかが分からない）', UNREACHED_TLS_REC));
       else if (probes.length) out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（手元のOpenSSLが非対応）', '旧バージョンに対応した環境で C12 を実行する'));
       // プローブがなく、合意したバージョン（-v）が新しいだけなら、旧バージョンを受け入れるか（①）は分からない。② だけで「判定済み」と数えないよう、①は na として出す
       else out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（#TLSPROBE がない。合意したバージョンだけでは分からない）', 'C12（プロトコルごとの接続の確認）を採取する'));
@@ -115,6 +126,8 @@ export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵
         const onlyNegotiated = !checked && (negotiated.length > 0 || !!info?.cipher);
         out.push(probes.length && errs === probes.length
           ? hf(cipherSuites, host, 'na', 'info', 'na', '手元のOpenSSLが試した暗号に対応していない', '弱い暗号に対応した環境で C23 を実行する')
+          : probes.length && !reachedTls(ts, negotiated.length)
+          ? hf(cipherSuites, host, 'na', 'info', 'na', 'どの暗号でも接続できなかった（弱い暗号を拒否したのか、openssl が対象に届かないのかが分からない）', UNREACHED_TLS_REC)
           : onlyNegotiated ? hf(cipherSuites, host, 'na', 'info', 'na', `合意した暗号（${[...new Set([...negotiated.map(m => `${m[1]} / ${m[2]}`), info?.cipher].filter(Boolean))].join(', ')}）だけでは、弱い暗号を受け入れるか・鍵と署名は分からない`, T10_REC)
           : !checked ? hf(cipherSuites, host, 'na', 'info', 'na', '暗号・鍵の情報がない（ハンドシェイクに失敗した可能性）', 'C11 の出力にエラーがないか確認して採取し直す')
           : hf(cipherSuites, host, 'ok', 'info', 'pass', [info?.cipher && `暗号: ${info.cipher}`, info?.keyBits && `鍵: ${info.keyType ?? ''} ${info.keyBits}bit`, probes.length && `弱い暗号${probes.length}種は拒否`].filter(Boolean).join(' / ') || '問題なし', ''));

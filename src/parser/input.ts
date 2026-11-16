@@ -26,6 +26,9 @@ const METER = String.raw`^\s*${PCT}\s+${NUM}\s+${PCT}\s+${NUM}\s+${PCT}\s+${NUM}
 // 進捗表示だけの行は、時刻の欄が1つ以上あるものだけ（本文の「1 2 3 4 5 6 7 8 9」のような数字の行を読み飛ばさない）。
 // 応答の行の前にくっついたもの（METER_PREFIX）は、直後がステータス行・送受信の行なので、時刻の欄がなくてもよい
 const METER_LINE = new RegExp(String.raw`^\s*(?:% Total\s+% Received|Dload\s+Upload\s+Total)|^(?=.*\d:\d\d)${METER.slice(1)}$`);
+// curl 8.22 は時刻の欄を空欄にした行（「0      0   0 … 0                              0」）も出すので、時刻の欄の代わりに長い空白（10個以上）が
+// 数字の欄のあいだにある行も進捗表示とする。ただし応答の本文の外だけ（本文の桁をそろえた数値の表を消さない）
+const METER_LINE_NO_TIME = new RegExp(String.raw`^(?=.*\d {10,}\d)${METER.slice(1)}$`);
 const METER_PREFIX = new RegExp(String.raw`${METER}(?=(?:< )?HTTP\/[\d.]+ \d{3}|[<>*] )`);
 
 // key=value を解析。ct= 以降は行末まで1つの値（空白を含むContent-Type対策）
@@ -73,7 +76,7 @@ export function parseInput(input: string): ParseResult {
   const lines = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').split('\n');
   for (let li = 0; li < lines.length; li++) {
     let line = lines[li];
-    if (METER_LINE.test(line)) continue;
+    if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;
     line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
     if (mk) {                                          // マーカー行は必ず応答を閉じる

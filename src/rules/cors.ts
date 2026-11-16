@@ -141,6 +141,8 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
   run(ctx) {
     const acao = acaoOf(ctx);
     if (!ctx.final || !acao || acao === '*') return [];       // Origin によって ACAO を変える応答だけ
+    // Origin を送っていない（-v の送信ヘッダに Origin がない）のに返した ACAO は、Origin によらない固定の値なので適用外（設計書：「ACAOを動的に返すなら」）
+    if (noOriginSent(ctx)) return [];
     const vary = (ctx.final.headers.get('vary') ?? []).join(',').toLowerCase();
     // 名前の一部（X-Origin-Id）ではなく、カンマで区切った1つの値として Origin か * があるか
     return vary.split(',').some(s => ['origin', '*'].includes(s.trim())) ? [mk(corsVary, ctx, 'ok', 'info', 'pass', `Vary: ${vary}`, '')]

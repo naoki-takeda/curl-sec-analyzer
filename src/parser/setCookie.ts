@@ -28,9 +28,11 @@ export function parseSetCookie(raw: string): SetCookie {
  */
 export function splitSetCookie(v: string): string[] {
   const out: string[] = [];
+  // 前のかけらが属性（;）を持つかは真偽値で持つ（伸びていくかけらに毎回 includes をかけると、'a=b,' の繰り返しで2乗の時間がかかった）
+  let lastHasAttr = false;
   for (const part of v.split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/)) {
-    if (out.length && !out[out.length - 1].includes(';')) out[out.length - 1] += `,${part}`;
-    else out.push(part);
+    if (out.length && !lastHasAttr) { out[out.length - 1] += `,${part}`; lastHasAttr = part.includes(';'); }
+    else { out.push(part); lastHasAttr = part.includes(';'); }
   }
   return out.map(s => s.trim()).filter(Boolean);
 }
@@ -52,7 +54,7 @@ const SESSION_WORD = /^(?:(?:j|php|s)?sess\w*|sid|token|auth|jwt|login|aspxauth)
 // 発行するので、推定ではセッションCookieに見えない（C-01① が②になり、C-02 を見逃した）
 // 4KB を超えて分割したもの（.AspNetCore.Identity.ApplicationC1・C2）も同じ。WordPress のログインの Cookie（wordpress_sec_<hash>・wordpress_logged_in_<hash>）と
 // Shibboleth のセッション（_shibsession_<id>）も、名前の語にセッションらしい語がないので、ここで挙げる
-const AUTH_COOKIE = /^(?:\.(?:AspNetCore\.(?:Identity\.Application|Cookies|Session)(?:C\d+)?|ASPXAUTH|AspNet\.ApplicationCookie)|wordpress_(?:sec|logged_in)_\w+|_shibsession_\w+)$/i;
+const AUTH_COOKIE = /^(?:\.(?:AspNetCore\.(?:Identity\.Application|Cookies|Session)(?:C\d+)?|ASPXAUTH|AspNet\.ApplicationCookie)|wordpress_(?:sec|logged_in)_\w+|_shibsession_\w+|_oauth2_proxy(?:_\d+)?)$/i;   // _oauth2_proxy は oauth2-proxy（大きいものは _oauth2_proxy_0・_1 に分ける）
 const SESSION_NAME = { test: (name: string) => AUTH_COOKIE.test(name) || name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).some(w => SESSION_WORD.test(w)) };
 /** 組織プロファイルで変えられる設定（engine/profile.ts の withProfile が実行中だけ差し替える） */
 export const sessionConfig = { names: [] as string[], maxAgeHours: 24 };
@@ -103,6 +105,11 @@ export const cookieNames = (v: string) => v.split(';').map(c => c.split('=')[0].
  * セッションCookie の推定から外すと、分割した Cookie 全体がセッションCookie とみなされなくなった（第24回の退行）
  */
 export const isChunkMarker = (c: SetCookie) => /^chunks-\d+$/.test(c.value);
+/**
+ * 分割した Cookie の2つ目以降のかけら（ASP.NET Core の …C2・C3、oauth2-proxy の _oauth2_proxy_1）。最後のかけらは端数の長さなので、
+ * 単独でエントロピーを推定すると C-07①（高）の誤検知になる。値は最初のかけら（…C1・_0）で見る
+ */
+export const isChunkPiece = (c: SetCookie) => /^\..*C(?:[2-9]|\d{2,})$/.test(c.name) ? AUTH_COOKIE.test(c.name) : /^_oauth2_proxy_[1-9]\d*$/.test(c.name);
 
 /** now：削除用かどうか（過去の Expires）を判定する時刻。ルールからは採取時刻（RuleContext.now）を渡す */
 export function looksLikeSession(c: SetCookie, now = Date.now()): boolean {

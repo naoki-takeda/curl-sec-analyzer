@@ -62,7 +62,8 @@ export const clickjacking: Rule = { id: 'H-06', title: 'クリックジャッキ
     // 1つでも広くないものがあれば、埋め込みはそれで制限される（* のポリシーと 'none' のポリシーが両方あれば 'none'）
     const fas = cspPolicies(ctx).map(parseCsp).filter(m => m.has('frame-ancestors')).map(m => m.get('frame-ancestors')!);
     // frame-ancestors は X-Frame-Options より優先されるので、広い指定（*、https: などのスキームだけ、*.example.com）は④にする
-    const isBroad = (fa: string[]) => fa.some(s => s === '*' || /^[a-z][\w+.-]*:$/i.test(s) || /^(?:[a-z][\w+.-]*:\/\/)?\*\./i.test(s));
+    // ホストが * だけのもの（https://*、*:443、https://*:*）も、どのサイトにも埋め込みを許すので広い指定とする
+    const isBroad = (fa: string[]) => fa.some(s => s === '*' || /^[a-z][\w+.-]*:$/i.test(s) || /^(?:[a-z][\w+.-]*:\/\/)?\*(?:\.|:(?:\d+|\*)\/?$|\/?$)/i.test(s));
     const strict = fas.find(fa => !isBroad(fa));
     if (fas.length && !strict) return [mk(clickjacking, ctx, 4, 'medium', 'fail', fas.map(fa => `frame-ancestors ${fa.join(' ')}`).join(' / '), "frame-ancestors は 'none' か 'self'（埋め込みを許す相手は個別のオリジン）にする")];
     if (strict) return [mk(clickjacking, ctx, 'ok', 'info', 'pass', `frame-ancestors ${strict.join(' ')}`, '')];
@@ -79,19 +80,20 @@ export const clickjacking: Rule = { id: 'H-06', title: 'クリックジャッキ
     return [mk(clickjacking, ctx, 1, 'medium', 'fail', `X-Frame-Options: ${raw}（不正な値。ブラウザは無視する）`, rec)];
   } };
 
+// 本文のない応答（204 No Content、304 Not Modified）。キャッシュに残す内容も、ほかのオリジンに読ませる内容もないので、H-12・H-11・H-08 の対象外（MIME スニッフィングする本文もない）
+// （ログインした HAR では、ビーコンや XHR の 204 のたびに H-12①（高）が出た。H-13 も同じ応答を除いている）
+const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（204・304 は対象外）';
+const NO_CONTENT = (ctx: RuleContext) => ctx.final?.status === 204 || ctx.final?.status === 304;
 export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS'],
   run(ctx) {
     if (!ctx.final) return [mk(nosniff, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (NO_CONTENT(ctx)) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const v = header(ctx, 'x-content-type-options').join(', ');
     if (isNosniff(ctx)) return [mk(nosniff, ctx, 'ok', 'info', 'pass', v, '')];
     return [mk(nosniff, ctx, 1, 'medium', 'fail', v || '(ヘッダなし)', 'X-Content-Type-Options: nosniff')];
   } };
 
-// 本文のない応答（204 No Content、304 Not Modified）。キャッシュに残す内容も、ほかのオリジンに読ませる内容もないので、H-12・H-11 の対象外
-// （ログインした HAR では、ビーコンや XHR の 204 のたびに H-12①（高）が出た。H-13 も同じ応答を除いている）
-const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（204・304 は対象外）';
-const NO_CONTENT = (ctx: RuleContext) => ctx.final?.status === 204 || ctx.final?.status === 304;
 export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS', 'OWASP REST Security CS'],
   run(ctx) {
@@ -274,6 +276,8 @@ export const contentType: Rule = { id: 'H-13', title: 'Content-Typeとcharset', 
     if (!f) return [mk(contentType, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (f.status === 204 || f.status === 304 || (f.status >= 300 && f.status < 400)) return [];   // 本文のない応答は適用外
     const ct = header(ctx, 'content-type')[0];
+    // 本文が空の応答（Content-Length: 0 の 401・201 など。Spring Security の API の 401）は、型を示す本文がないので①の対象外
+    if (!ct && header(ctx, 'content-length').some(v => /^\s*0\s*$/.test(v))) return [];
     if (!ct) return [mk(contentType, ctx, 1, 'medium', 'fail', '(Content-Typeなし)', 'Content-Type を必ず付ける（HTML は text/html; charset=utf-8）')];
     if (/^text\/html/i.test(ct) && !/charset=/i.test(ct)) return [mk(contentType, ctx, 2, 'medium', 'fail', ct, 'Content-Type: text/html; charset=utf-8')];
     return [mk(contentType, ctx, 'ok', 'info', 'pass', ct, '')];

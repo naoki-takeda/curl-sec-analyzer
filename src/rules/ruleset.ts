@@ -12,8 +12,8 @@ import { csrfToken, mixedContentRule, passwordForm, htmlSecrets, sriRule } from 
 import { apiDocsAdmin, dirListing, downloadResponse, errorDetail, jsonp, robotsSecurityTxt, sourceMap } from './exposure';
 import { crlfInjection, hostInjection, httpVersion, httpsRedirect, methods, openRedirect, redirectChain } from './transport';
 
-export const TOOL_VERSION = '0.4.33';
-export const RULESET_VERSION = '2026.11-v0.4.33';
+export const TOOL_VERSION = '0.4.34';
+export const RULESET_VERSION = '2026.11-v0.4.34';
 
 export const TARGET_RULES: Rule[] = [
   hsts, hstsPreload, cspPresence, cspScript, cspObjectBase, clickjacking, cspDeprecated, nosniff, referrerPolicy, permissionsPolicy,

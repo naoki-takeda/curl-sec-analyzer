@@ -101,7 +101,11 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
   basis: ['OWASP Unvalidated Redirects CS', 'IPA'],
   run(ctx) {
     if (!ctx.final) return [mk(openRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const evil = (l: string) => /^(?:https?:)?\/\/(?:[^/]*@)?evil\.example\b/i.test(l.trim());
+    // 転送先はブラウザと同じ読み方（WHATWG URL）で解釈する。http・https の URL の「\」は「/」と読まれるので、/\evil.example・https:\\evil.example/・
+    // ///evil.example も外部ホストへの転送になる（正規表現の //evil.example だけでは、よく使われる回避の値を合格にした）
+    const base = ctx.target.url ?? 'https://x.invalid/';
+    // 末尾のドット（FQDN の表記 evil.example.）も同じホスト
+    const evil = (l: string) => { try { return /(?:^|\.)evil\.example\.?$/i.test(new URL(l.trim(), base).hostname); } catch { return false; } };
     const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(evil);
     // Refresh ヘッダ（Refresh: 0; url=https://evil.example/）による転送も見る
     const refresh = ctx.target.responses.flatMap(r => r.headers.get('refresh') ?? []).map(v => v.match(/url\s*=\s*['"]?([^'"\s;]+)/i)?.[1] ?? '').find(evil);

@@ -1,0 +1,300 @@
+## targets
+top | https://www.example.com/ | key=top | responses=1
+logout | https://www.example.com/logout | key=logout | responses=1
+after-logout | https://www.example.com/mypage | key=- | responses=1
+upload-html | https://www.example.com/attachments/download/42/evil.html | key=upload-html | responses=1
+build-svg | https://www.example.com/static/media/logo.6ce24c58.svg | key=build-svg | responses=1
+swagger | https://www.example.com/swagger-ui/ | key=swagger | responses=1
+inline-map | https://www.example.com/app.js | key=inline-map | responses=1
+unauth-me | https://www.example.com/api/me | key=unauth-me | responses=1
+old-v1 | https://www.example.com/api/v1/users | key=old-v1 | responses=1
+profile | https://www.example.com/api/profile | key=profile | responses=1
+open-redirect | https://www.example.com/r?next=https://evil.example | key=open-redirect | responses=1
+beacon | https://www.example.com/beacon | key=beacon | responses=1
+empty-401 | https://www.example.com/api/session | key=empty-401 | responses=1
+video | https://www.example.com/assets/intro.mp4 | key=video | responses=1
+meter | https://www.example.com/ | key=meter | responses=1
+tls-probe | https://proxy-only.example.com/ | key=tls-probe | responses=0
+tls | https://192.0.2.10/ | key=- | responses=0
+
+## warnings
+
+## findings
+192.0.2.10 | T-10.na | info | na | 暗号・鍵の情報がない（ハンドシェイクに失敗した可能性）
+192.0.2.10 | T-11.ok | info | pass | notAfter: 2036-01-01 / SAN: 192.0.2.10
+after-logout | C-12.ok | info | pass | 旧Cookieでの認証後ページが HTTP 200 でログイン画面（パスワード欄）を返した
+beacon | A-02.ok | info | pass | URL・Location・本文にトークンなし
+beacon | H-01.1 | high | fail | (ヘッダなし)
+beacon | H-02.na | info | na | HSTSがない（H-01で判定）
+beacon | H-08.na | info | na | HTTP 204（本文のない応答）
+beacon | H-11.na | info | na | HTTP 204（本文のない応答）
+beacon | H-12.na | info | na | HTTP 204（本文のない応答）
+beacon | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+beacon | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+beacon | R-04.ok | info | pass | (ACAOなし)
+beacon | T-12.ok | info | pass | HTTP/2
+build-svg | A-02.ok | info | pass | URL・Location・本文にトークンなし
+build-svg | H-01.1 | high | fail | (ヘッダなし)
+build-svg | H-02.na | info | na | HSTSがない（H-01で判定）
+build-svg | H-08.1 | medium | fail | (ヘッダなし)
+build-svg | H-11.ok | info | pass | (該当なし)
+build-svg | H-12.3 | info | fail | (ヘッダなし)
+build-svg | H-13.ok | info | pass | image/svg+xml
+build-svg | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+build-svg | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+build-svg | R-04.ok | info | pass | (ACAOなし)
+build-svg | T-12.ok | info | pass | HTTP/2
+csp-sample-* | H-04.na | info | na | 
+empty-401 | A-02.ok | info | pass | URL・Location・本文にトークンなし
+empty-401 | H-01.1 | high | fail | (ヘッダなし)
+empty-401 | H-02.na | info | na | HSTSがない（H-01で判定）
+empty-401 | H-08.1 | medium | fail | (ヘッダなし)
+empty-401 | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+empty-401 | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+empty-401 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+empty-401 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+empty-401 | R-04.ok | info | pass | (ACAOなし)
+empty-401 | T-12.1 | info | fail | HTTP/1.1
+error-* | A-10.na | info | na | 
+inline-map | A-02.ok | info | pass | URL・Location・本文にトークンなし
+inline-map | E-13.2 | low | fail | 本文に埋め込んだソースマップ（data:。中身は表示しない）
+inline-map | H-01.1 | high | fail | (ヘッダなし)
+inline-map | H-02.na | info | na | HSTSがない（H-01で判定）
+inline-map | H-08.1 | medium | fail | (ヘッダなし)
+inline-map | H-11.ok | info | pass | (該当なし)
+inline-map | H-12.3 | info | fail | (ヘッダなし)
+inline-map | H-13.ok | info | pass | application/javascript
+inline-map | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+inline-map | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+inline-map | R-04.ok | info | pass | (ACAOなし)
+inline-map | T-12.ok | info | pass | HTTP/2
+logout | C-12.ok | info | pass | _oauth2_proxy=…(0 chars); Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/
+logout | H-15.1 | info | fail | (ヘッダなし)
+meter | A-02.ok | info | pass | URL・Location・本文にトークンなし
+meter | E-01.ok | info | pass | エラーの詳細らしき記述なし
+meter | H-01.1 | high | fail | (ヘッダなし)
+meter | H-02.na | info | na | HSTSがない（H-01で判定）
+meter | H-08.1 | medium | fail | (ヘッダなし)
+meter | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+meter | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+meter | H-13.ok | info | pass | text/plain; charset=utf-8
+meter | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+meter | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+meter | R-04.ok | info | pass | (ACAOなし)
+meter | T-12.ok | info | pass | HTTP/2
+old-v1 | A-11.ok | info | pass | HTTP 404
+open-redirect | T-06.1 | medium | fail | Location: /\evil.example
+pre-login/login | C-09.na | info | na | 
+profile | A-02.ok | info | pass | URL・Location・本文にトークンなし
+profile | A-07.ok | info | pass | キー4種に秘密情報・内部属性らしきものなし
+profile | A-09.3 | info | fail | CSPなし
+profile | E-01.ok | info | pass | エラーの詳細らしき記述なし
+profile | H-01.1 | high | fail | (ヘッダなし)
+profile | H-02.na | info | na | HSTSがない（H-01で判定）
+profile | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+profile | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+profile | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+profile | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
+profile | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+profile | H-08.ok | info | pass | nosniff
+profile | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+profile | H-10.1 | info | fail | (ヘッダなし)
+profile | H-11.1 | info | fail | 機密応答に Cross-Origin-Resource-Policy なし
+profile | H-12.1 | high | fail | (ヘッダなし)
+profile | H-13.ok | info | pass | application/json
+profile | H-14.1 | info | fail | (ヘッダなし)
+profile | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+profile | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+profile | R-04.ok | info | pass | (ACAOなし)
+profile | T-12.ok | info | pass | HTTP/2
+proxy-only.example.com | T-09.na | info | na | どのバージョンでも接続できなかった（旧バージョンを拒否したのか、openssl が対象に届かないのかが分からない）
+proxy-only.example.com | T-10.na | info | na | どの暗号でも接続できなかった（弱い暗号を拒否したのか、openssl が対象に届かないのかが分からない）
+session-sample-* | C-07.na | info | na | 
+swagger | A-02.ok | info | pass | URL・Location・本文にトークンなし
+swagger | E-01.ok | info | pass | エラーの詳細らしき記述なし
+swagger | E-02.ok | info | pass | 一覧表示なし
+swagger | E-05.na | info | na | /swagger-ui/（HTTP 200、HTML。その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性））
+swagger | E-07.ok | info | pass | http:// の資源なし
+swagger | E-08.ok | info | pass | 外部オリジンのscriptなし
+swagger | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+swagger | H-01.1 | high | fail | (ヘッダなし)
+swagger | H-02.na | info | na | HSTSがない（H-01で判定）
+swagger | H-03.1 | high | fail | (ヘッダなし)
+swagger | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+swagger | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+swagger | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+swagger | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+swagger | H-08.1 | medium | fail | (ヘッダなし)
+swagger | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+swagger | H-10.1 | info | fail | (ヘッダなし)
+swagger | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+swagger | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+swagger | H-13.ok | info | pass | text/html; charset=utf-8
+swagger | H-14.1 | low | fail | (ヘッダなし)
+swagger | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+swagger | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+swagger | R-04.ok | info | pass | (ACAOなし)
+swagger | T-12.ok | info | pass | HTTP/2
+tls-probe | A-09.na | info | na | 応答がない
+tls-probe | H-01.na | info | na | HTTPSかどうか判定できない
+tls-probe | H-02.na | info | na | HSTSがない（H-01で判定）
+tls-probe | H-08.na | info | na | 応答がない
+tls-probe | H-11.na | info | na | 応答がない
+tls-probe | H-12.na | info | na | 応答がない
+tls-probe | H-13.na | info | na | 応答がない
+tls-probe | H-16.na | info | na | 応答がない
+tls-probe | H-17.na | info | na | 応答がない
+tls-probe | R-04.na | info | na | 応答がない
+top | A-02.ok | info | pass | URL・Location・本文にトークンなし
+top | C-01.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
+top | C-02.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
+top | C-03.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
+top | C-04.ok | info | pass | .AspNetCore.Identity.Application, .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
+top | C-05.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
+top | C-06.1 | info | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(65 chars); path=/; secure; httponly; samesite=lax
+top | C-06.1 | info | fail | .AspNetCore.Identity.ApplicationC2=Xy…(10 chars); path=/; secure; httponly; samesite=lax
+top | C-08.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
+top | C-11.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
+top | C-13.ok | info | pass | 共有キャッシュの指定なし
+top | E-01.ok | info | pass | エラーの詳細らしき記述なし
+top | E-02.ok | info | pass | 一覧表示なし
+top | E-07.ok | info | pass | http:// の資源なし
+top | E-08.ok | info | pass | 外部オリジンのscriptなし
+top | E-09.1 | high | fail | 本文に「AWSアクセスキー」らしき値（値は表示しない）
+top | H-01.1 | high | fail | (ヘッダなし)
+top | H-02.na | info | na | HSTSがない（H-01で判定）
+top | H-03.ok | info | pass | frame-ancestors https://*
+top | H-04.2 | high | fail | script-src（csp_evaluator: MISSING_DIRECTIVES）
+top | H-05.1 | medium | fail | object-src も default-src もない
+top | H-05.2 | medium | fail | base-uri がない（default-src にはフォールバックしない）
+top | H-06.4 | medium | fail | frame-ancestors https://*
+top | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし
+top | H-08.1 | medium | fail | (ヘッダなし)
+top | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+top | H-10.1 | info | fail | (ヘッダなし)
+top | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+top | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+top | H-13.ok | info | pass | text/html; charset=utf-8
+top | H-14.1 | low | fail | (ヘッダなし)
+top | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+top | R-04.ok | info | pass | (ACAOなし)
+top | T-12.ok | info | pass | HTTP/2
+unauth-me | A-01.na | info | na | HTTP 200（HTML の画面。どのパスにも同じ画面を返す SPA の可能性。データを返したかは分からない）
+unauth-me | A-02.ok | info | pass | URL・Location・本文にトークンなし
+upload-html | A-02.ok | info | pass | URL・Location・本文にトークンなし
+upload-html | E-01.ok | info | pass | エラーの詳細らしき記述なし
+upload-html | E-02.ok | info | pass | 一覧表示なし
+upload-html | E-07.ok | info | pass | http:// の資源なし
+upload-html | E-08.ok | info | pass | 外部オリジンのscriptなし
+upload-html | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+upload-html | E-11.1 | high | fail | Content-Type: text/html; charset=utf-8 / Content-Disposition: (なし)
+upload-html | H-01.1 | high | fail | (ヘッダなし)
+upload-html | H-02.na | info | na | HSTSがない（H-01で判定）
+upload-html | H-03.1 | high | fail | (ヘッダなし)
+upload-html | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+upload-html | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+upload-html | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+upload-html | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+upload-html | H-08.1 | medium | fail | (ヘッダなし)
+upload-html | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+upload-html | H-10.1 | info | fail | (ヘッダなし)
+upload-html | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+upload-html | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+upload-html | H-13.ok | info | pass | text/html; charset=utf-8
+upload-html | H-14.1 | low | fail | (ヘッダなし)
+upload-html | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+upload-html | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+upload-html | R-04.ok | info | pass | (ACAOなし)
+upload-html | T-12.ok | info | pass | HTTP/2
+video | A-02.ok | info | pass | URL・Location・本文にトークンなし
+video | H-01.1 | high | fail | (ヘッダなし)
+video | H-02.na | info | na | HSTSがない（H-01で判定）
+video | H-08.1 | medium | fail | (ヘッダなし)
+video | H-11.ok | info | pass | (該当なし)
+video | H-12.ok | info | pass | public, max-age=86400
+video | H-13.ok | info | pass | video/mp4
+video | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+video | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+video | R-04.ok | info | pass | ACAO: https://app.example.com
+video | T-12.ok | info | pass | HTTP/2
+
+## coverage
+H-01 | evaluated | fails=10
+H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
+H-03 | evaluated | fails=2
+H-04 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | evaluated | fails=2
+H-06 | evaluated | fails=4
+H-07 | evaluated | fails=0
+H-08 | evaluated | fails=8
+H-09 | evaluated | fails=4
+H-10 | evaluated | fails=4
+H-11 | evaluated | fails=4
+H-12 | evaluated | fails=3
+H-13 | evaluated | fails=0
+H-14 | evaluated | fails=4
+H-15 | evaluated | fails=1
+H-16 | evaluated | fails=0
+H-17 | evaluated | fails=0
+C-01 | evaluated | fails=0
+C-02 | evaluated | fails=0
+C-03 | evaluated | fails=0
+C-04 | evaluated | fails=0
+C-05 | evaluated | fails=0
+C-06 | evaluated | fails=2
+C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | evaluated | fails=0
+C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
+C-10 | missing-input | fails=0 | 必要なラベル: http
+C-11 | evaluated | fails=0
+C-12 | evaluated | fails=0
+C-13 | evaluated | fails=0
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | missing-input | fails=0 | 必要なラベル: cors-*
+R-02 | missing-input | fails=0 | 必要なラベル: cors-*
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=0
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | missing-input | fails=0 | 必要なラベル: http
+T-05 | missing-input | fails=0 | 必要なラベル: （一般）, http
+T-06 | evaluated | fails=1
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | missing-input | fails=0 | openssl が対象に届く環境（プロキシを通さない端末、-proxy の指定）で C12・C23 を実行し直す
+T-10 | missing-input | fails=0 | openssl が対象に届く環境（プロキシを通さない端末、-proxy の指定）で C12・C23 を実行し直す / C11 の出力にエラーがないか確認して採取し直す
+T-11 | evaluated | fails=0
+T-12 | evaluated | fails=1
+T-13 | manual | fails=0
+E-01 | evaluated | fails=0
+E-02 | evaluated | fails=0
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | /swagger-ui/（HTTP 200、HTML。その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性））
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0
+E-08 | evaluated | fails=0
+E-09 | evaluated | fails=1
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | evaluated | fails=1
+E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-13 | evaluated | fails=1
+A-01 | missing-input | fails=0 | API の URL（JSON を返すもの）で採取し直す
+A-02 | evaluated | fails=0
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | evaluated | fails=0
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | evaluated | fails=1
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | evaluated | fails=0

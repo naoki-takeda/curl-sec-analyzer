@@ -55,7 +55,8 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
       pem = undefined;                     // 切れた PEM は使わない
     }
     if (l === '-----BEGIN CERTIFICATE-----') { if (!pemSeen) { pemSeen = true; pem = []; } continue; }
-    if (sanNext) { for (const m of l.matchAll(/DNS:([^,\s]+)/g)) info.sans.push(m[1].toLowerCase()); sanNext = false; continue; }   // push(...) に広げない（長い行でスタックがあふれる）
+    // IP アドレスの SAN（IP Address:192.0.2.10）も読む（読まないと、IP アドレスで接続する証明書を、ブラウザが見ない CN で比べてホスト名不一致にした）
+    if (sanNext) { for (const m of l.matchAll(/(?:DNS|IP Address):([^,\s]+)/g)) info.sans.push(m[1].toLowerCase()); sanNext = false; continue; }   // push(...) に広げない（長い行でスタックがあふれる）
     let m: RegExpMatchArray | null;
     if ((m = l.match(/^Protocol\s*:\s*(\S+)/))) info.protocol ??= m[1];
     else if ((m = l.match(/^New, (TLSv[\d.]+|SSLv3), Cipher is (\S+)/))) { info.protocol ??= m[1]; info.cipher ??= m[2]; }
@@ -88,6 +89,8 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
 export function nameMatches(pattern: string, host: string): boolean {
   const p = pattern.toLowerCase(), h = host.toLowerCase();
   if (p === h) return true;
+  // IPv6 のアドレス（SAN の IP Address:2001:DB8:0:0:0:0:0:1 と、URL のホスト [2001:db8::1]）は、書き方をそろえて比べる
+  if (p.includes(':') && h.includes(':')) { const v6 = (a: string) => { try { return new URL(`http://[${a.replace(/^\[|\]$/g, '')}]/`).hostname; } catch { return a; } }; return v6(p) === v6(h); }
   if (!p.startsWith('*.')) return false;
   const rest = p.slice(2);
   return h.endsWith(`.${rest}`) && !h.slice(0, -rest.length - 1).includes('.');

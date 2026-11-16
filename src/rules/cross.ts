@@ -4,7 +4,7 @@ import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutF
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp, splitPolicies } from './util';
-import { metaCspFromHtml } from './html';
+import { loginForm, metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
@@ -26,7 +26,8 @@ const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.no
 // 成功を失敗とみなさない）
 // ログイン画面・認証の入り口のパス：/login・/signin・Devise の /users/sign_in・WordPress の /wp-login.php・OIDC の …/openid-connect/auth・
 // /authorize・oauth2-proxy の /oauth2/start・SAML の /saml/login
-const LOGIN_PATH = /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login\.php|authorize|oauth2\/(?:start|auth(?:orize)?)|protocol\/openid-connect\/auth|saml2?\/(?:login|sso))\/?$/i;
+// 拡張子の付いたログイン画面（ASP.NET の /Account/Login.aspx、/login.php・.jsp・.do）と、Spring Security の /oauth2/authorization/<登録名> も含める
+const LOGIN_PATH = /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login|authorize|oauth2\/(?:start|auth(?:orize)?)|oauth2\/authorization\/[\w.-]+|protocol\/openid-connect\/auth|saml2?\/(?:login|sso))(?:\.(?:php|aspx?|jspx?|do|action|html?|cgi|pl))?\/?$/i;
 const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
 const trimSlash = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
 function loginRejected(login: Target, pre: Target): string | undefined {
@@ -130,20 +131,6 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
     return out.length ? out : [cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', '比較できるセッションCookieがない', '同じ名前のセッションCookieを2回以上採取する')];
   } };
 
-/**
- * ログインのフォーム：フォームごとに見て、パスワード欄が1つで、ユーザー名の欄（パスワード・ボタン以外の input。2段階のログイン画面の hidden の
- * username も）があり、パスワード変更の欄（name・id が new_password・current_password など）がないものが1つでもあるか。
- * ページ全体で数えると、ログインと登録のフォームが並ぶ画面（WooCommerce）を外し、autocomplete="current-password"（Django・Devise・Laravel・
- * ASP.NET Identity のログイン画面が付ける）をパスワード変更の欄とみなした
- */
-function loginForm(body: string): boolean {
-  const chunks = /<form\b/i.test(body) ? body.split(/<form\b/i).slice(1).map(c => c.split(/<\/form\s*>/i)[0]) : [body];
-  return chunks.some(f => (f.match(/type\s*=\s*["']?password/gi) ?? []).length === 1
-    && (/<input\b(?![^>]*type\s*=\s*["']?(?:hidden|password|submit|button|checkbox|radio|image|reset)(?![\w-]))[^>]*>/i.test(f)
-      || /<input\b(?=[^>]*type\s*=\s*["']?hidden)(?=[^>]*name\s*=\s*["']?(?:user(?:name)?|email|login|identifier|j_username))[^>]*>/i.test(f))
-    && !/(?:name|id)\s*=\s*["']?[\w-]*(?:new|current|old|confirm)[-_]?pass(?:word)?/i.test(f));
-}
-
 export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後のセッション無効化', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP Session Mgmt CS'],
   runCross(x) {
@@ -180,15 +167,28 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     // 合格にするのは、断られた（401・403）か、ログイン画面へ転送されたときだけ。404・5xx やほかのページへの転送は、セッションが無効かが分からない
     if (r.status === 401 || r.status === 403) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', ev, '')];
     if (r.status >= 300 && r.status < 400) {
-      let to: URL | undefined; try { to = new URL(r.headers.get('location')?.[0] ?? '', r.url ?? after.url ?? 'https://x.invalid/'); } catch { /* 解釈できない */ }
       const loginUrl = x.byLabel('login')?.url; let loginPath: string | undefined;
       try { loginPath = loginUrl ? trimSlash(new URL(loginUrl).pathname) : undefined; } catch { /* なし */ }
-      if (to && (LOGIN_PATH.test(trimSlash(to.pathname)) || (loginPath && loginPath !== '/' && trimSlash(to.pathname) === loginPath)))
-        return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} → ${to.pathname}（ログイン画面へ転送）`, '')];
-      // -L でたどった転送先があれば、そこで判定する（ログインのフォームを返した・断られたなら合格）
-      const next = chain[i + 1];
-      if (next && (next.status === 401 || next.status === 403 || (next.status >= 200 && next.status < 300 && loginForm(next.body ?? ''))))
-        return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} → HTTP ${next.status}（ログイン画面・認証が必要）`, '')];
+      // ログイン画面・認証の入り口への転送か。トップ（/）への転送はログイン画面とみなさない（トップが利用者の画面を返すアプリ（/dashboard → /）では、
+      // 旧Cookie が使えても / へ転送する。-L でたどった先がログインのフォームか 401・403 なら合格）
+      const loginRedirect = (h: typeof r): string | undefined => {
+        let to: URL | undefined; try { to = new URL(h.headers.get('location')?.[0] ?? '', h.url ?? after.url ?? 'https://x.invalid/'); } catch { return undefined; }
+        const p = trimSlash(to.pathname);
+        return LOGIN_PATH.test(p) || (loginPath && loginPath !== '/' && p === loginPath) ? to.pathname : undefined;
+      };
+      // -L でたどった転送は最後まで見る（/oauth2/authorization/x → IdP の …/openid-connect/auth のように、入り口の転送が続くもの）
+      for (let k = i; k < chain.length; k++) {
+        const h = chain[k];
+        if (h.status >= 300 && h.status < 400) {
+          const to = loginRedirect(h);
+          if (to) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} → ${to}（ログイン画面へ転送）`, '')];
+          continue;
+        }
+        // 転送の先で断られた・ログインのフォームを返したなら合格
+        if (h.status === 401 || h.status === 403 || (h.status >= 200 && h.status < 300 && loginForm(h.body ?? '')))
+          return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} → HTTP ${h.status}（ログイン画面・認証が必要）`, '')];
+        break;
+      }
       return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（転送先がログイン画面か分からない）`, '転送先まで（-L）採取し直す')];
     }
     return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（セッションが無効になったかは分からない）`, '')];

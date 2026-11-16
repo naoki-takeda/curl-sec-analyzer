@@ -2,7 +2,7 @@
 import type { Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
-import { isLabelText, isPublicClientValue, mk } from './util';
+import { isLabelText, isPlaceholderValue, isPublicClientValue, mk } from './util';
 import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
@@ -173,7 +173,7 @@ const ASSIGNED = /(?<![\w-])["']?(api[_-]?key|client[_-]?secret|secret[_-]?key|a
  * 英語の画面の文言（A-07 と同じ isLabelText）
  */
 const notSecretValue = (key: string, v: string): boolean =>
-  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v) || isPublicClientValue(v);
+  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v);
 // Google の API キー（AIza…）は、Maps・Firebase などブラウザから使う前提のキー（HTTP リファラーや API の制限で守る）なので、HTML にあっても①にしない。
 // Stripe の公開キー（pk_live_…）、PaymentIntent の client_secret も同じ（A-07 と同じ isPublicClientValue）
 const SECRETS: [string, { test(s: string): boolean }][] = [
@@ -283,3 +283,38 @@ export const csrfToken: Rule = { id: 'E-12', title: 'HTML本文：CSRFトーク�
       ctx.hostSessionSameSite === false ? 'POSTフォームにCSRFトークンを入れる（セッションCookieも SameSite=Lax/Strict でない。実効性の確認は範囲外）'
                                         : 'POSTフォームにCSRFトークンを入れる（セッションCookieが見つからないため SameSite は確認できない。実効性の確認は範囲外）'));
   } };
+
+/**
+ * ログインのフォーム：フォームごとに見て、パスワード欄が1つで、次のどれでもないもの：
+ * - パスワードを決める欄（name・id・autocomplete に new・confirm・確認用の retype・repeat があるもの。autocomplete="new-password"）
+ * - name・id に current・old があり、autocomplete が current-password でない欄（アカウントの削除・メールアドレスの変更の画面の current_password・
+ *   old_password。旧セッションが使えるときに出る再認証の画面）。web.dev が勧めるログイン画面（id="current-password" と
+ *   autocomplete="current-password"）は除かない
+ * そのうえで、ユーザー名の欄（パスワード・ボタン以外の input。2段階のログイン画面の hidden の username も）があるもの。パスワード欄だけの
+ * フォームは、autocomplete="current-password" で、フォームの送り先（action）がログインらしいもの（/login・/signin・/session など。sudo・
+ * reauth・confirm・verify を除く）だけ（ユーザー名を文字で表示した2段階目の画面。GitHub の sudo モードのような再認証の画面と分けるため）。
+ * ページ全体で数えると、ログインと登録のフォームが並ぶ画面（WooCommerce）を外した。
+ * input はタグごとに取り出して見る（閉じない「<input 」が並ぶ本文で、入力の長さの2乗の時間がかかった）
+ */
+const INPUT_TAG = /<input\b[^>]*(?:>|$)/gi;
+const attr = (tag: string, name: string) => tag.match(new RegExp(String.raw`(?<![\w-])${name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`, 'i'))?.slice(1).find(v => v !== undefined) ?? '';
+const NON_TEXT_INPUT = /^(?:hidden|password|submit|button|checkbox|radio|image|reset|file|range|color)$/i;
+const SETTING_FIELD = /(?:^|[\s_-])(?:new|confirm|confirmation|retype|repeat)(?:[\s_-]|$)|new[-_]?pass|(?:pass(?:word)?|pwd)[-_]?confirm/i;
+const REAUTH_FIELD = /(?:^|[\s_-])(?:current|old)(?:[\s_-]|$)|(?:current|old)[-_]?pass/i;
+export function loginForm(body: string): boolean {
+  const chunks = /<form\b/i.test(body) ? body.split(/<form\b/i).slice(1).map(c => c.split(/<\/form\s*>/i)[0]) : [body];
+  return chunks.some(f => {
+    const inputs = f.match(INPUT_TAG) ?? [];
+    const pw = inputs.filter(t => /^password$/i.test(attr(t, 'type')));
+    if (pw.length !== 1) return false;
+    const ac = attr(pw[0], 'autocomplete'), nameId = `${attr(pw[0], 'name')} ${attr(pw[0], 'id')}`;
+    if (SETTING_FIELD.test(`${nameId} ${ac}`)) return false;
+    const currentPassword = /\bcurrent-password\b/i.test(ac);
+    if (REAUTH_FIELD.test(nameId) && !currentPassword) return false;
+    const user = inputs.some(t => !NON_TEXT_INPUT.test(attr(t, 'type')))
+      || inputs.some(t => /^hidden$/i.test(attr(t, 'type')) && /^(?:user(?:name)?|email|login|identifier|j_username)$/i.test(attr(t, 'name')));
+    if (user) return true;
+    const action = attr(f.slice(0, Math.max(0, f.indexOf('>'))), 'action');
+    return currentPassword && /\/(?:log-?in|sign[-_]?in|signon|sessions?|auth(?:enticate)?)(?:[/?.#]|$)/i.test(action) && !/sudo|re-?auth|confirm|verify/i.test(action);
+  });
+}

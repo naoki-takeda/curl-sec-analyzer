@@ -2,7 +2,8 @@
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
 import { baseLabel, finalResponse, responseKind, sameDocumentHop } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { header, isLabelText, isNosniff, isPublicClientValue, mk } from './util';
+import { header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk } from './util';
+import { loginForm } from './html';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
   basis: ['OWASP REST Security CS', 'OWASP Secure Headers'],
@@ -35,6 +36,18 @@ export const API_TOP10: Record<string, string> = {
 // 同じページへの転送（末尾の / への 307 など）はたどった先のステータスで見る。たどれないときは 0（判定しない）にして、呼び出し側で na にする
 const status = (ctx: RuleContext) => { const { hop, unfollowed } = sameDocumentHop(ctx.target); return unfollowed ? 0 : hop?.status ?? ctx.final?.status ?? 0; };
 const UNFOLLOWED = (ctx: RuleContext) => sameDocumentHop(ctx.target).unfollowed;
+/**
+ * API の URL に HTML の画面を 200 で返したか（どのパスにも index.html を返す SPA、ログイン画面）。A-01・A-11 では、データを返したかが
+ * 分からないので①②にしない（E-05 の HTML の 200 と同じ考え方）。ログインのフォームなら、認証を求めたのと同じ
+ */
+const htmlPage = (ctx: RuleContext): 'login' | 'html' | undefined => {
+  const r = sameDocumentHop(ctx.target).hop ?? ctx.final;
+  const ct = r?.headers.get('content-type')?.[0] ?? ''; const b = r?.body ?? '';
+  // 本文が JSON（{・[ で始まる）なら、Content-Type が text/html でも HTML の画面ではない（PHP の既定の Content-Type のまま JSON を返す API）
+  if (/^\s*[{[]/.test(b)) return undefined;
+  if (!/^\s*(?:text\/html|application\/xhtml\+xml)/i.test(ct) && !/^\s*(?:<!doctype html|<html)/i.test(b)) return undefined;
+  return loginForm(b) ? 'login' : 'html';
+};
 
 /**
  * A-01③：HTTP の応答で Basic 認証を求めているか。-L の転送をたどり、URL が http のホップの WWW-Authenticate だけを見る
@@ -66,8 +79,16 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (UNFOLLOWED(ctx)) return [mk(unauthAccess, ctx, 'na', 'info', 'na', '同じページへの転送（末尾の / など）。転送先を採取していない', '-L を付けて、転送先まで採取し直す')];
     if (!s) return [mk(unauthAccess, ctx, 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
-    if (s >= 200 && s < 300) return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
+    if (s >= 200 && s < 300) {
+      const page = htmlPage(ctx);
+      // ログインのフォームがあっても合格にはしない（ゲスト用のログイン欄と利用者のデータを並べる画面がある）
+      if (page) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（HTML の画面${page === 'login' ? '。ログインのフォームを含む' : '。どのパスにも同じ画面を返す SPA の可能性'}。データを返したかは分からない）`, 'API の URL（JSON を返すもの）で採取し直す')];
+      return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
+    }
     if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${sameDocumentHop(ctx.target).hop?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
+    // 合格は、認証を求めた・断られた応答（401・403）と、メソッドで断られた応答（405）だけ。404（URL の誤りの可能性）と 5xx（認証の前に
+    // 落ちた可能性）、400・429 などは、認証で守られているかが分からない（A-08 と同じ考え方）
+    if (s !== 401 && s !== 403 && s !== 405) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（認証で守られているかは分からない）`, '存在する API の URL で、認証情報を付けずに採取し直す')];
     if (s === 401 && !www) return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', 'HTTP 401（WWW-Authenticate なし）', '')];
     return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', `HTTP ${s}${www ? ` / WWW-Authenticate: ${www}` : ''}`, '')];
   } };
@@ -168,7 +189,7 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   if (Array.isArray(v)) v.slice(0, 50).forEach(x => secretValuedKeys(x, `${prefix}[]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
     const p = prefix ? `${prefix}.${k}` : k;
-    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x)) out.add(p);
+    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x) && !isPlaceholderValue(x)) out.add(p);
     secretValuedKeys(x, p, out, depth + 1);
   }
   return out;
@@ -219,6 +240,9 @@ export const methodControl: Rule = { id: 'A-11', title: 'メソッド制御・�
     if (UNFOLLOWED(ctx)) return [mk(methodControl, ctx, 'na', 'info', 'na', '同じページへの転送（末尾の / など）。転送先を採取していない', '-L を付けて、転送先まで採取し直す')];
     if (!s) return [mk(methodControl, ctx, 'na', 'info', 'na', '応答がない', '')];
     const ok2xx = s >= 200 && s < 300;
+    // HTML の画面の 200（SPA の index.html・ログイン画面）は、そのメソッド・旧版の API が動いたかが分からない
+    const page = ok2xx ? htmlPage(ctx) : undefined;
+    if (page) return [mk(methodControl, ctx, 'na', 'info', 'na', `HTTP ${s}（${page === 'login' ? 'ログイン画面' : 'HTML の画面。どのパスにも同じ画面を返す SPA の可能性'}。API が処理したかは分からない）`, 'API の URL（JSON を返すもの）で採取し直す')];
     if (l.startsWith('method-')) return ok2xx
       ? [mk(methodControl, ctx, 1, 'medium', 'fail', `想定外のメソッドが HTTP ${s}`, '使わないメソッドは 405 と Allow を返す（権限の確認も行う）')]
       : [mk(methodControl, ctx, 'ok', 'info', 'pass', `HTTP ${s}${ctx.final?.headers.get('allow') ? ` / Allow: ${ctx.final.headers.get('allow')![0]}` : ''}`, '')];

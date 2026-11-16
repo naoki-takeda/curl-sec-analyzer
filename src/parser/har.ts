@@ -68,6 +68,8 @@ function toResponse(e: HarEntry): HttpResponse {
 const withoutHash = (u: string) => { const i = u.indexOf('#'); return i >= 0 ? u.slice(0, i) : u; };
 const JWT_IN_HEADER = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 /** Authorization・Cookie のリクエストヘッダにある JWT（A-03 が curl の -v と同じく送った JWT もデコードできるように） */
+/** 名前のあるヘッダだけ（名前のない要素や null を含む HAR で、取り込み全体が TypeError で失敗した） */
+const named = (hs: (HarHeader | null | undefined)[] | undefined): HarHeader[] => (Array.isArray(hs) ? hs : []).filter((h): h is HarHeader => typeof h?.name === 'string');
 const jwtsIn = (hs: HarHeader[]) => [...new Set(hs.filter(h => /^(?:authorization|cookie)$/i.test(h.name)).flatMap(h => String(h.value ?? '').match(JWT_IN_HEADER) ?? []))];
 const hostOfUrl = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
 
@@ -78,6 +80,9 @@ export function importHar(text: string): HarImport {
   // status 0 は、ブロック・キャンセル・CORSの失敗などで応答がなかったエントリ。ヘッダがないので判定に使うと誤検知になる
   const entries = all.filter(e => Number(e.response.status) > 0);
   const used = new Set<number>(); const chains: HarChain[] = [];
+  // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）
+  const byUrl = new Map<string, number[]>();
+  entries.forEach((x, k) => { const u = withoutHash(x.request.url); (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
   let anyCookie = false;
   entries.forEach((e, i) => {
     if (used.has(i)) return;
@@ -85,7 +90,7 @@ export function importHar(text: string): HarImport {
     const hops = [e];
     let cur = e, ci = i;
     while (cur.response.status >= 300 && cur.response.status < 400) {          // Location の先のエントリをつなぐ
-      const loc = cur.response.redirectURL || cur.response.headers?.find(h => h.name.toLowerCase() === 'location')?.value;
+      const loc = cur.response.redirectURL || named(cur.response.headers).find(h => h.name.toLowerCase() === 'location')?.value;
       if (!loc) break;
       let next: URL; try { next = new URL(loc, cur.request.url); } catch { break; }
       next.hash = '';   // ブラウザはフラグメントを除いた URL でリクエストを記録する（Location: /app/#/home → GET /app/）
@@ -93,16 +98,16 @@ export function importHar(text: string): HarImport {
       // 同じホストの http から https への転送はつなぐ
       if (next.hostname !== new URL(cur.request.url).hostname) break;
       const from = ci;
-      const j = entries.findIndex((x, k) => k > from && !used.has(k) && withoutHash(x.request.url) === next.href);
+      const j = byUrl.get(next.href)?.find(k => k > from && !used.has(k)) ?? -1;
       if (j < 0) break;
       used.add(j); cur = entries[j]; ci = j; hops.push(cur);
     }
     // 送った認証情報は全ホップのリクエストから見る。Secure の Cookie は https のホップでしか送らないため、最初の http のリクエストだけでは分からない
-    const reqHeaders = hops.flatMap(h => h.request.headers ?? []);
+    const reqHeaders = hops.flatMap(h => named(h.request.headers));
     const sentAuthorization = reqHeaders.some(h => h.name.toLowerCase() === 'authorization');
     const sentCookieNames = [...new Set(reqHeaders.filter(h => h.name.toLowerCase() === 'cookie').flatMap(h => cookieNames(String(h.value ?? ''))))];
     const sentAuth = sentAuthOf(sentAuthorization, sentCookieNames);
-    if (sentAuthorization || sentCookieNames.length || hops.some(h => (h.response.headers ?? []).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
+    if (sentAuthorization || sentCookieNames.length || hops.some(h => named(h.response.headers).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
     chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(h => ({ ...toResponse(h), url: h.request.url })),
       sentAuth, sentAuthorization, sentCookieNames, sentTokens: jwtsIn(reqHeaders), at: e.startedDateTime,

@@ -110,6 +110,11 @@ const EXACT: Record<string, string> = {
   'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない': 'Do not include stack traces, SQL statements, connection strings or absolute paths in responses',
   'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）': 'Check the network and run C13 again (HTTP 000 means the connection failed)',
   '-L を付けて、転送先まで採取し直す': 'Capture again with -L to follow the redirect',
+  'API の URL（JSON を返すもの）で採取し直す': 'Capture again with an API URL (one that returns JSON)',
+  '存在する API の URL で、認証情報を付けずに採取し直す': 'Capture again with an existing API URL, without credentials',
+  "本番ビルドではインラインのソースマップ（webpack の inline-source-map・Vite の sourcemap: 'inline' など）を出さない（sourcesContent に元のソースがあるかは手動で確認）":
+    "Do not emit inline source maps in production builds (webpack inline-source-map, Vite sourcemap: 'inline', etc.); check manually whether sourcesContent holds the original source",
+  'openssl が対象に届く環境（プロキシを通さない端末、-proxy の指定）で C12・C23 を実行し直す': 'Run C12 and C23 again where openssl can reach the target (a host without the proxy, or with -proxy)',
   'after-logout を採取し、古いセッションCookieが使えないかを C-12① で確かめる': 'Capture after-logout and use C-12① to check that the old session cookie no longer works',
   'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）': 'Capture again including the status line (for C10, also add #META response_code=)',
   'Cookie・Authorization を付けずに採取し直す': 'Capture again without Cookie or Authorization',

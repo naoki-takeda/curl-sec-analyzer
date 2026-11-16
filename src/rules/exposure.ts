@@ -3,6 +3,7 @@ import type { HttpResponse, Rule, RuleContext } from '../model';
 import { clip, probePattern } from '../mask';
 import { NO_BODY_REC, PROBE_UNREACHED_REC, bodyTruncated, header, isStaticResource, mk } from './util';
 import { ownChain } from '../parser/target';
+import { allowedItems } from '../engine/labels';
 
 const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : undefined);
 
@@ -22,8 +23,9 @@ const CREDENTIALS: RegExp[] = [
   /\bjdbc:oracle:\w+:[^\s/@:"'<>]+\/[^\s@"'<>]+@/i,
   /mongodb(?:\+srv)?:\/\/[^\s:]+:[^\s@]+@/i,
   /\b(?:Server|Data Source|Host|User ID|Uid|Database|Initial Catalog)\s*=[^;\n]{0,200};(?:[^;\n]{0,200};){0,10}?\s*(?:Password|PWD|Pwd)\s*=\s*[^;\s]+/,
-  /\bAKIA[0-9A-Z]{16}\b/,
 ];
+// AWS のアクセスキー。HTML の応答では E-09①（HTML本文の秘密情報）が同じ値を数えるので、E-01① では見ない（第0章 0.2「同じ事象は1つの項目でだけ減点」）
+const AWS_KEY = /\bAKIA[0-9A-Z]{16}\b/;
 const path = (ctx: RuleContext) => { try { return new URL(ctx.target.url ?? '').pathname; } catch { return ''; } };
 
 export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース・デバッグ情報', appliesTo: 'any', scope: 'target',
@@ -33,7 +35,9 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     const b = isStaticResource(ctx) ? undefined : body(ctx);
     if (!b) return [];
     const out = [];
-    const cred = CREDENTIALS.some(re => re.test(b));
+    // E-09 に任せるのは、そのラベルで E-09 を判定するときだけ（error-* のラベルは E-01 と A-10 だけを判定するので、任せると見逃した）
+    const e09 = ctx.responseKind === 'html' && allowedItems(ctx.target.label).allowsItem('E-09');
+    const cred = CREDENTIALS.some(re => re.test(b)) || (!e09 && AWS_KEY.test(b));
     if (cred)
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
     // 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする
@@ -42,10 +46,12 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     // Node.js（Express の開発用のエラーページ、JSON の stack）の「at 関数 (/パス:行:列)」と node:internal、Go の panic の goroutine、Symfony の例外も見る
     // Node.js のフレームは、ファイル（.js・.ts など）か node: の行と列まであるものだけ（文章の「at Building A (/floor:3:12)」に一致させない）
     // 無名のフレーム（at /app/index.js:7:9）と node: のフレーム（at node:internal/main/run_main_module:28:49）も見る。
+    // 無名のフレームは行の始め（JSON の stack の「\n    at」、HTML の <br> と &nbsp;、JSON の配列の要素の始まりを含む）にあり、パスに引用符・カンマを含まないものだけ（スクリプトの文字列
+    // "at /static/js/chunk.js:1:20345" や、JSON の {"tip":"look at /docs","entry":"main.js:1:2"} に一致させない）。
     // Docker でよく使う /app の下のスタックトレースは、行の形で見る：Rails の「/app/…/x.rb:12:in」、Python の「File "/app/main.py", line 41」、
     // Node.js の無名のフレーム（上の at /app/index.js:7:9）。/app を絶対パスの一覧に入れると、serviceWorker.register("/app/sw.js")・
     // {"entry":"/app/main.js"}・文章の「/app/index.js」まで②にした（第23回で外した誤検知が戻った）
-    const trace = b.match(/\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|\bat (?:\/|[A-Z]:\\)[^\s()]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
+    const trace = b.match(/\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?<=(?:^|[\r\n]|\\n|<br\s*\/?>|[[,]\s*")(?:[ \t]|&nbsp;){0,20})at (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
       // 資格情報を含む jdbc: は①だけにする（②にも出すと二重になる。設計書は②を資格情報のない jdbc: に限る）。スタックトレースがあれば、そちらを証跡にする
       ?? (cred ? null : b.match(/\bjdbc:\w+:(?=\S)/));
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
@@ -166,7 +172,9 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     // HTML の 200 は、その機能の画面だと分かるときだけ①②にする。どのパスにも index.html を 200 で返す SPA（Netlify・Vercel・Firebase Hosting・
     // S3＋CloudFront）では、/actuator・/swagger-ui/ も同じ画面になる（E-03② と同じ考え方）。actuator と API 仕様（openapi.json など）の本体は JSON・YAML
     const isHtml = /^\s*text\/html/i.test(header(ctx, 'content-type')[0] ?? '') || /^\s*(?:<!doctype html|<html)/i.test(b);
-    const ui = /swagger[- ]ui|SwaggerUIBundle|redoc|rapidoc|scalar/i.test(b);   // <title>Swagger UI</title> も
+    // 画面の印は、タイトルと、その画面を作る要素・スクリプトだけで見る（<title>Swagger UI</title>、<div id="swagger-ui">、swagger-ui-bundle.js、
+    // <redoc>、<rapi-doc>、@scalar/api-reference）。本文の「Swagger UI」の語だけで見ると、どのパスにも同じ画面を返す SPA の文中の語で②にした
+    const ui = /<title>[^<]{0,100}(?:swagger[- ]ui|redoc|rapidoc|scalar)|\bid\s*=\s*["']?(?:swagger-ui|api-reference)\b|swagger-ui(?:-bundle|-standalone-preset)?(?:\.min)?\.(?:js|css)\b|SwaggerUIBundle|<redoc\b|redoc\.standalone|<rapi-doc\b|@scalar\/api-reference/i.test(b);
     if (isHtml && !(docSegment(p) !== 'actuator' && ui))
       return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? '' : NO_BODY_REC)];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
@@ -213,8 +221,12 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     // サーバ側で動くページ（/download/index.php、/files/list.aspx）と、ディレクトリの index.html は、アップロードしたファイルではないので除く
     const uploadPath = /\/(uploads?|files?|attachments?|media|download)\//i.test(p) && /\/[^/]+\.[a-z0-9]{1,10}$/i.test(p)
       && !/\.(?:php\d?|phtml|aspx?|ashx|jspx?|do|action|cgi|pl|cfm|shtml)$|\/index\.html?$/i.test(p)
-      // /download/ の下の .html（/download/windows.html）は、配布物を案内する普通のページ。利用者のアップロード先（uploads・files・attachments・media）だけ HTML を①にする
-      && !/\/download\/(?:[^/]+\/)*[^/]+\.html?$/i.test(p);
+      // /download/ の下の .html（/download/windows.html）は、配布物を案内する普通のページ。ただし、アップロード先らしいディレクトリ
+      // （uploads・files・attachments・media）も含むもの（Redmine の /attachments/download/42/evil.html）は、利用者のファイルなので除かない
+      && !(/\/download\/(?:[^/]+\/)*[^/]+\.html?$/i.test(p) && !/\/(uploads?|files?|attachments?|media)\//i.test(p))
+      // ビルドしたファイル（Create React App の /static/media/logo.6ce24c58.svg、Next.js の /_next/static/media/…）は、ページが読み込むもので、
+      // 利用者がアップロードしたファイルではない。名前のハッシュだけでは見ない（/uploads/avatar.5f3a9c2e.svg、日付の minutes.20241231.html を見逃す）
+      && !/\/_next\/static\/|\/static\/media\//i.test(p);
     if (!DOWNLOAD_CT.test(ct) && !uploadPath && !cd) return [];   // ファイル配信の応答だけ
     // JSON の API の応答（/api/files/123.json など、パスがアップロード先らしくても）は、ダウンロードではない（DOWNLOAD_CT で +json を除くのと同じ）
     // Content-Type で見る（kind=api を明示したターゲットの SVG・PDF まで除かないため）
@@ -244,6 +256,9 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     const isJs = /javascript|ecmascript/i.test(header(ctx, 'content-type')[0] ?? '') || /\.m?js(?:[?#]|$)/.test(ctx.target.url ?? '');
     if (!isJs && !ref) return [];
     if (!ref && (!body(ctx) || bodyTruncated(ctx))) return [mk(sourceMap, ctx, 'na', 'info', 'na', body(ctx) ? '本文の先頭64KBに参照なし（参照は末尾にあることが多い）' : '本文を採取していない', NO_BODY_REC)];
+    // 本文に埋め込んだソースマップ（data:application/json;base64,…）は、.map を配信しているのと同じ（sourcesContent に元のソースを含みうる）。
+    // 「.map を C13 に追加して確かめる」は当てはまらないので、証跡と推奨を分ける（①はプローブ（probes ラベル）の条件なので②のまま。中身は証跡に出さない）
+    if (ref && /^data:/i.test(ref)) return [mk(sourceMap, ctx, 2, 'low', 'fail', '本文に埋め込んだソースマップ（data:。中身は表示しない）', '本番ビルドではインラインのソースマップ（webpack の inline-source-map・Vite の sourcemap: \'inline\' など）を出さない（sourcesContent に元のソースがあるかは手動で確認）')];
     return ref ? [mk(sourceMap, ctx, 2, 'low', 'fail', `参照: ${clip(ref, 120)}`, '本番ビルドでは sourceMappingURL を出さない。.map を C13 のパス一覧に追加して取得できるか確認する')]
                : [mk(sourceMap, ctx, 'ok', 'info', 'pass', 'ソースマップへの参照なし', '')];
   } };
