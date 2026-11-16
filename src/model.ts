@@ -10,6 +10,7 @@ export interface HttpResponse {
   rawNames: string[];               // 表示用の元の表記
   body?: string;                    // 先頭64KBまで
   kind: 'final' | 'redirect' | 'informational' | 'connect';
+  url?: string;                     // そのホップのリクエストのURL（HAR だけ。curl の出力からは分からない）
 }
 export interface ParseWarning {
   kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label';

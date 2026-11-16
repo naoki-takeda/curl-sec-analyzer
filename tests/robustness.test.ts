@@ -17,7 +17,7 @@ describe('性能（設計書の非機能要件）', () => {
     const one = readFileSync(new URL('./fixtures/generated_local.txt', import.meta.url), 'utf8');
     const big = one.repeat(Math.ceil(1_000_000 / one.length));
     expect(ms(() => runAll(parseInput(big).targets))).toBeLessThan(6000);
-  });
+  }, 15_000);   // 上限の6秒を測れるよう、テストのタイムアウト（既定5秒）を延ばす
 });
 
 describe('悪意のある入力（Q-1・Q-2）', () => {
@@ -88,7 +88,7 @@ describe('設定ファイルの組み合わせ（V-1）', () => {
       const out = toMarkdown(now, coverage(now, IMPLEMENTED), list, new Date(), { profile, diff: { rows, baselineAt: 'x' } }) + toCsv(now, targets);
       expect(out).not.toMatch(/undefined|NaN|\[object Object\]/);
     }), { numRuns: 300 });
-  });
+  }, 30_000);   // 300通りの組み合わせを試すため、並列で実行して重いときは既定の5秒を超えることがある
   it('形式が合わない指摘は除き、その件数を返す', () => {
     const r = parseBaseline(JSON.stringify({ findings: [
       { ruleId: 'H-01.1', item: 'H-01', target: 'top', status: 'fail', severity: 'high' },

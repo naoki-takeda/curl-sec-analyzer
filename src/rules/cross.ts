@@ -1,9 +1,9 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, finalResponse, isHttps } from '../parser/target';
+import { capturedAt, finalResponse, firstStatus, isHttps, logoutFailed, ownChain } from '../parser/target';
 import { isDeletion, looksLikeSession, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { hstsDirective, parseCsp } from './util';
+import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp } from './util';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
@@ -20,6 +20,9 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     if (!pre || !login) return na(sessionFixation, 'pre-login/login', 'pre-login, login');
     const before = sessionCookies(pre).map(c => `${c.name}=${c.value}`);
     const after = sessionCookies(login).map(c => `${c.name}=${c.value}`);
+    // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
+    const ls = firstStatus(login);
+    if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
     if (!before.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'ログイン前にセッションCookieが発行されていない', 'ログイン前にCookieを発行するページで pre-login を採取する')];
     if (!after.length || after.some(a => before.includes(a)))
       return [cf(sessionFixation, 'pre-login/login', 1, 'high', 'fail', 'login 応答でセッションIDが再発行されていない', 'ログイン成功時にセッションIDを再発行する')];
@@ -51,7 +54,12 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
     const samples = x.withPrefix('session-sample-');
     if (samples.length < 2) return na(sessionPredictable, 'session-sample-*', 'session-sample-1, session-sample-2（2つ以上）');
     const byName = new Map<string, string[]>();
-    for (const t of samples) for (const c of sessionCookies(t)) byName.set(c.name, [...(byName.get(c.name) ?? []), c.value]);
+    // サンプルごとに、名前ごとの値は1つ（最後のもの）にする。同じ応答に同じ Set-Cookie が2つある場合や、-L の転送で同じ Cookie を
+    // 再び送る場合に、1つのサンプルの値を2回数えて「同じ値が繰り返し発行された」にしないため
+    for (const t of samples) {
+      const last = new Map(sessionCookies(t).map(c => [c.name, c.value]));
+      for (const [name, value] of last) byName.set(name, [...(byName.get(name) ?? []), value]);
+    }
     const out: Finding[] = [];
     for (const [name, vals] of byName) {
       if (vals.length < 2) continue;
@@ -69,7 +77,14 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     if (!lo || !after) return na(logoutInvalidation, 'logout/after-logout', 'logout, after-logout');
     const f = finalResponse(after);
     if (!f) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', '応答がない', '')];
+    // ログアウトが失敗した（GET の /logout に 405 など）なら、旧Cookieが使えても当然なので①にしない。
+    // ログイン後のページ（mypage）が 2xx でないなら、そもそもセッションがなく、旧Cookieが使えないのも当然なので合格にしない
+    if (logoutFailed(lo)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(lo)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
+    const mp = x.byLabel('mypage'), ms = mp ? firstStatus(mp) : 0;
+    if (ms && !(ms >= 200 && ms < 300)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログイン後のページ（mypage）が HTTP ${ms}（ログインできていない）`, LOGIN_FAILED_REC)];
     const first = after.responses.find(r => r.kind !== 'informational' && r.kind !== 'connect')!;
+    // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
+    if (!first.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     return first.status >= 200 && first.status < 300
       ? [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', `旧Cookieでの認証後ページが HTTP ${first.status}`, 'ログアウト時にサーバ側のセッションを破棄する')]
       : [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `旧Cookieでの認証後ページが HTTP ${first.status}`, '')];
@@ -82,7 +97,8 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
     if (!preload) return [];                                   // preload を付けていなければ適用外
     const apex = x.byLabel('apex');
     if (!apex) return na(apexHsts, 'apex', 'apex（https://apexドメイン/）');
-    const v = finalResponse(apex)?.headers.get('strict-transport-security')?.[0];
+    // apex 自身の応答（転送の最初のホップ）で見る。-L や HAR で www への転送をたどった最後の応答は www のもの
+    const v = ownChain(apex)[0]?.headers.get('strict-transport-security')?.[0];
     return v ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };

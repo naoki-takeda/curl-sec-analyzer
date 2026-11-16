@@ -1,9 +1,9 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
-import { isDeletion, looksLikeSession, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
-import { baseLabel, hostOf } from '../parser/target';
-import { mk } from './util';
+import { isDeletion, isLoadBalancerCookie, looksLikeSession, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
+import { baseLabel, firstStatus, hostOf, logoutFailed } from '../parser/target';
+import { LOGOUT_FAILED_REC, mk } from './util';
 
 /** ターゲットの全応答（-L のホップを含む）から、削除用でない Set-Cookie を取り出す */
 export function cookiesOf(ctx: RuleContext): SetCookie[] {
@@ -52,6 +52,8 @@ export const cookieSameSite: Rule = { id: 'C-03', title: 'Cookie の SameSite �
       const v = typeof ss === 'string' ? ss.toLowerCase() : '';
       if (!['lax', 'strict', 'none'].includes(v)) return mk(cookieSameSite, ctx, 2, 'medium', 'fail', ev, 'SameSite の値は Lax・Strict・None のいずれか');
       if (v === 'none' && !c.attrs.has('secure')) return mk(cookieSameSite, ctx, 4, 'low', 'fail', ev, 'SameSite=None には Secure が必須（ブラウザが拒否する）');
+      // 負荷分散の Cookie（AWSALBCORS・ARRAffinitySameSite）は、CORS のリクエストでも同じサーバに届けるため、仕組み上 None にしている
+      if (v === 'none' && isLoadBalancerCookie(c.name)) return undefined;
       if (v === 'none') return mk(cookieSameSite, ctx, 3, 'medium', 'fail', ev, 'クロスサイトで送る必要がなければ Lax にする（必要なら理由を記録して例外登録）');
       return undefined;
     });
@@ -149,6 +151,7 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'logout') return [];            // ①は横断ルール（logout と after-logout）
     if (!ctx.final) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (logoutFailed(ctx.target)) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const del = ctx.target.responses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
     return del.length ? [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', del.map(cookieEvidence).join(' / '), '')]
                       : [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', 'ログアウト応答でCookieを削除していない', 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];
@@ -163,7 +166,8 @@ export const cookieSharedCache: Rule = { id: 'C-13', title: 'Set-Cookieと共有
       if (!cs.length) continue;
       any = true;
       const cc = (r.headers.get('cache-control') ?? []).join(', ').toLowerCase();
-      const shared = /\bpublic\b|s-maxage/.test(cc);
+      // no-store・private があれば共有キャッシュは保存しない（no-store, s-maxage=0 のような組み合わせも共有キャッシュには残らない）
+      const shared = /\bpublic\b|s-maxage/.test(cc) && !/\bno-store\b|\bprivate\b/.test(cc);
       if (!shared) continue;
       if (cs.some(c => looksLikeSession(c, ctx.now))) out.push(mk(cookieSharedCache, ctx, 1, 'high', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答は Cache-Control: no-store（少なくとも private）にする'));
       else if (/\bpublic\b/.test(cc)) out.push(mk(cookieSharedCache, ctx, 2, 'low', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答を public にしない'));

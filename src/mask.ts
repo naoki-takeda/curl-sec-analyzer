@@ -7,42 +7,98 @@ export const TOKEN_PARAM_NAMES = ['access_token', 'id_token', 'refresh_token', '
   'accessToken', 'idToken', 'refreshToken', 'clientSecret'];   // 照合は大文字小文字を区別しない（accesstoken も一致する）
 /** セッションIDとして扱うパラメータ名（C-09② の検出に使う。;jsessionid= のパス引数も含む） */
 export const SESSION_PARAM_NAMES = ['PHPSESSID', 'JSESSIONID', 'sid', 'sessionid', 'session_id'];
-/** マスクするパラメータ名：上の2つに、OAuthの認可コードやパスワードなどを加えたもの */
-const MASK_PARAM_NAMES = [...TOKEN_PARAM_NAMES, ...SESSION_PARAM_NAMES, 'code', 'password', 'passwd', 'secret', 'key', 'signature', 'sig'];
+/** マスクするパラメータ名：上の2つに、OAuthの認可コードやパスワード、CAS のチケット、SAML の応答などを加えたもの */
+const MASK_PARAM_NAMES = [...TOKEN_PARAM_NAMES, ...SESSION_PARAM_NAMES, 'code', 'password', 'passwd', 'pass', 'pw', 'secret', 'key', 'signature', 'sig',
+  'ticket', 'oauth_verifier', 'SAMLResponse', 'SAMLart', 'accesskey'];
 const alt = (names: string[]) => names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 /** クエリ（?・&）、フラグメント（#）、パス引数（;）のどれに置かれても一致する */
 export const paramRegex = (names: string[], flags = 'i') => new RegExp(`([?&#;](?:${alt(names)})=)([^&\\s#;"'<>]+)`, flags);
 const MASK_EXACT = new Set(MASK_PARAM_NAMES.map(n => n.toLowerCase()));
 /** 区切った語にこれがあればマスクする（x-amz-security-token、x-goog-signature、private_token、x-api-key、access-token など） */
-const MASK_WORDS = new Set(['token', 'secret', 'signature', 'sig', 'credential', 'credentials', 'password', 'passwd', 'pwd', 'key', 'apikey',
-  'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp']);
+const MASK_WORDS = new Set(['token', 'secret', 'signature', 'sig', 'credential', 'credentials', 'password', 'passwd', 'pwd', 'pass', 'pw', 'key', 'apikey',
+  'accesskey', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp', 'ticket', 'verifier', 'samlresponse', 'samlart']);
 /** マスクするパラメータ名か（検出用の一覧を含み、それより広い） */
-// 語の区切り：- _ . と角かっこ（user[password]、%5B・%5D）、キャメルケースの境目（accessToken、clientSecret）
+// 語の区切り：- _ . と角かっこ（user[password]、%5B・%5D）、キャメルケースの境目（accessToken、clientSecret）。
+// 名前がパーセントエンコードされていても（api%5Fkey）、デコードしてから照合する
 export const isSecretParamName = (name: string): boolean => {
-  if (MASK_EXACT.has(name.toLowerCase())) return true;
-  const words = name.replace(/%5[bd]/gi, '_').replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[-_.[\]]+/);
-  return words.some(w => MASK_WORDS.has(w));
+  let n: string;
+  try { n = decodeURIComponent(name); } catch { n = name.replace(/%5[bd]/gi, '_'); }   // 不正なエンコードを含む名前は、角かっこだけ区切りにする
+  if (MASK_EXACT.has(n.toLowerCase())) return true;
+  const words = n.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[-_.[\]]+/);
+  // 区切りのない1語の名前（authtoken、apitoken、secretkey、cftoken、sesskey、passphrase など）は、部分一致でも見る（伏せすぎるほうが安全）
+  return words.some(w => MASK_WORDS.has(w)) || SECRET_PART.test(n.toLowerCase());
 };
-const ANY_PARAM = /([?&#;])([\w.%[\]-]{1,100})=([^&\s#;"'<>]+)/g;
-const JWT = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
-// スキームは語の先頭から32文字まで（\w+ だと長い英数字の並びで、入力の長さの2乗の時間がかかる）
-const URL_CRED = /\b([A-Za-z][\w+.-]{0,31}:\/\/)([^/\s:@]{1,256}):([^/\s@]{1,256})@/g;
+const SECRET_PART = /token|secret|passw|passphrase|pwd|apikey|authkey|accesskey|privatekey|sessid|sesskey|credential|signature/;
+// パラメータの区切り：? & # ; と、そのエンコード（%3F・%26・%23・%3B と二重エンコードの %253F など、JS のエスケープ（\u0026 の6文字、\x26）、HTML の文字参照（&amp;・&#38;・&#x3D; など））。
+// エンコードした URL を別のパラメータの値に入れたもの（?next=%2Fcb%3Ftoken%3D…）や、スクリプトの中の URL でも見つけるため
+const SEP = String.raw`[?&#;]|%(?:25)*(?:3[Ff]|26|23|3[Bb])|\\u00(?:26)|\\x26|&amp;|&#0*(?:63|38);|&#[xX]0*(?:3[Ff]|26);|&quest;`;
+const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];|&equals;`;
+// 値はエンコードした区切りの前まで（長さの上限は付けない。上限で切ると、6KB の JWT などの残りが伏せられずに残る。繰り返しは入れ子でないので時間は線形）。
+// 名前は最短一致（エンコードした = を名前に含めない）
+const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)(${EQ})((?:(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\])+)`, 'g');
+// JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる
+const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-]))eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
+// URL のユーザー情報（スキーム://ユーザー情報@ホスト）。スキームは語の先頭から32文字まで（\w+ だと長い英数字の並びで、入力の長さの2乗の時間がかかる）。
+// ユーザー情報はホストの前の最後の @ まで（パスワードに @ を含む場合も残さない）。パス・クエリ・フラグメントの @ には一致させない。
+// スキームのない「//ユーザー情報@ホスト」（<script src="//user:pass@cdn…">）も含める
+const URL_CRED = /(\b[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)([^/\s?#<>"']{1,512})@/g;
+/** パスワードがあればユーザー名を残してパスワードを伏せる。ユーザー名だけ（https://<トークン>@host/ の形）なら、それをトークンとしてマスクする */
+const maskUserinfo = (u: string) => { const i = u.indexOf(':'); return i >= 0 ? `${u.slice(0, i)}:****` : maskValue(u); };
 
 export function maskValue(v: string): string {
   const keep = v.length <= 8 ? 0 : v.length <= 20 ? 2 : 4;
   return `${v.slice(0, keep)}…(${v.length} chars)`;
 }
+/**
+ * マスク済みの値（maskValue の出力「…(N chars)」で終わる）。もう一度マスクしても変えない（ルールで切り詰める前にマスクし、engine/run.ts でもマスクするため）。
+ * 「…」を含むだけで判定すると、URL の直後に続く日本語の文（?token=…詳しくは担当まで）の値を伏せずに残してしまう
+ */
+const MASKED = /…\(\d+ chars\)$/;
+// パラメータの値は空白の前で切れるので、「…(N」まで取り、直後が「 chars)」かを見る
+const maskedParam = (v: string, rest: string) => /…\(\d+$/.test(v) && rest.startsWith(' chars)');
 
-/** ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする */
+/**
+ * パスに置いたトークン（/password/reset/<トークン>、/magic/<トークン>、Webhook の URL など）。
+ * 完全な URL だけでなく、/ か %2F（二重エンコードを含む）のあとに続く部分なら、どこでも見る。相対パス（<form action="/reset/…">、
+ * 相対の Location）、スキームのない //cdn…、別のパラメータの値（?next=/invite/…、%2Finvite%2F…）、フラグメントのルート（#/reset/…）も含めるため。
+ * 部分を . と : で分け（<トークン>.pdf、bot123:<トークン>）、末尾の = （Base64 の詰め物）を除いたかけらが、英大文字・小文字・数字をすべて含む
+ * 16文字以上、24文字以上の16進数（UUID を含む）、または数字を含む32文字以上の [A-Za-z0-9_-] なら、そのかけらを伏せる。
+ * 「2026-annual-report-v2」のような普通の名前は残す。マスク済みの「…(N chars)」は文字種が違うので、もう一度は伏せない
+ */
+const PATH_SEGMENT = /(?<=\/|%(?:25)*2[Ff])[A-Za-z0-9_=.:~+-]{16,}/g;
+const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
+  (/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || (p.length >= 32 && /\d/.test(p)));
+const maskSegment = (seg: string): string => seg.replace(/[^.:~+]+/g, piece => {
+  const body = piece.replace(/=+$/, '');
+  return secretPiece(body) ? maskValue(body) + piece.slice(body.length) : piece;
+});
+
 /** CSP の nonce の値（'nonce-…'）。どの証跡でも同じようにマスクする（H-04⑤ と同じ扱い） */
 const CSP_NONCE = /'nonce-([^']+)'/g;
 
-export function maskText(s: string): string {
-  return s.replace(CSP_NONCE, (_, v) => `'nonce-${maskValue(v)}'`)
-          .replace(ANY_PARAM, (all, sep: string, k: string, v: string) => (isSecretParamName(k) ? `${sep}${k}=${maskValue(v)}` : all))
-          .replace(JWT, t => maskValue(t))
-          .replace(URL_CRED, (_, sc, u) => `${sc}${u}:****@`);
+/** パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る（深さ3まで） */
+function maskParams(s: string, depth = 0): string {
+  return s.replace(ANY_PARAM, (all: string, sep: string, k: string, eq: string, v: string, offset: number) => {
+    if (maskedParam(v, s.slice(offset + all.length, offset + all.length + 7))) return all;
+    if (isSecretParamName(k)) return `${sep}${k}${eq}${maskValue(v)}`;
+    return depth < 3 ? `${sep}${k}${eq}${maskParams(v, depth + 1)}` : all;
+  });
 }
+
+/** ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする。マスク済みの文字列に使っても結果は変わらない */
+export function maskText(s: string): string {
+  // 順序：パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる） → ユーザー情報 → パスの部分
+  return maskParams(s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${maskValue(v)}'`)))
+          .replace(JWT, t => maskValue(t))
+          .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u)}@`)
+          .replace(PATH_SEGMENT, maskSegment);
+}
+
+/**
+ * 証跡の抜粋：マスクしてから切り詰める。切り詰めてからマスクすると、途中で切れた JWT（ドットが足りない）や
+ * パラメータが一致せず、生の値が残るため
+ */
+export const clip = (s: string, n: number) => maskText(s).slice(0, n);
 
 // #PROBE の head は判定にだけ使い、表示・エクスポートにはパターン名だけを出す。
 // [パターン名, 判定する項目, 対象パス, 先頭64バイトの目安]（ツール設計1「プローブの判定パターン」）

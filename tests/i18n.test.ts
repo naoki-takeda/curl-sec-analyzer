@@ -33,6 +33,8 @@ function literals(): string[] {
       if (ts.isCallExpression(n) && ['mk', 'hf', 'cf'].includes(n.expression.getText()) && n.arguments[6] && ts.isStringLiteralLike(n.arguments[6])) out.add(n.arguments[6].text);
       if (ts.isPropertyAssignment(n) && n.name.getText() === 'recommendation' && ts.isStringLiteralLike(n.initializer)) out.add(n.initializer.text);
       if (ts.isVariableDeclaration(n) && n.name.getText() === 'rec' && n.initializer && ts.isStringLiteralLike(n.initializer)) out.add(n.initializer.text);
+      // 推奨対応の定数（LOGIN_FAILED_REC など、名前が _REC で終わる文字列）
+      if (ts.isVariableDeclaration(n) && /_REC$/.test(n.name.getText()) && n.initializer && ts.isStringLiteralLike(n.initializer)) out.add(n.initializer.text);
       // 推奨対応の表（CSP_REC など、名前が _REC で終わるオブジェクト）
       if (ts.isVariableDeclaration(n) && /_REC$/.test(n.name.getText()) && n.initializer && ts.isObjectLiteralExpression(n.initializer))
         for (const p of n.initializer.properties) if (ts.isPropertyAssignment(p) && ts.isStringLiteralLike(p.initializer)) out.add(p.initializer.text);

@@ -1,6 +1,6 @@
 // rules/api.ts：第6章 WebAPI（A-01〜A-03、A-07〜A-11。A-04〜A-06は手動確認）
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
-import { baseLabel, finalResponse, responseKind } from '../parser/target';
+import { baseLabel, finalResponse, ownChain, responseKind } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
 import { header, mk } from './util';
 
@@ -32,32 +32,57 @@ export const API_TOP10: Record<string, string> = {
   'A-07': 'API3:2023', 'A-08': 'API8:2023', 'A-09': 'API8:2023', 'A-10': 'API8:2023', 'A-11': 'API5:2023・API9:2023',
 };
 
-const status = (ctx: RuleContext) => ctx.chain[0]?.status ?? ctx.final?.status ?? 0;
+const status = (ctx: RuleContext) => ownChain(ctx.target)[0]?.status ?? ctx.final?.status ?? 0;
+
+/**
+ * A-01③：HTTP の応答で Basic 認証を求めているか。-L の転送をたどり、URL が http のホップの WWW-Authenticate だけを見る
+ * （http から https に転送した先の Basic は HTTPS なので対象外）。チャレンジは複数のヘッダ・カンマ区切りのどれにあってもよい
+ */
+function basicOverHttp(ctx: RuleContext): string | undefined {
+  let url = ctx.target.url ?? ctx.target.meta.url_effective;
+  for (const r of ctx.chain) {
+    if (!url || !/^http:/i.test(url)) return undefined;
+    const www = r.headers.get('www-authenticate') ?? [];
+    if (www.some(v => /(?:^|,)\s*basic\b/i.test(v))) return www.join(', ');
+    const loc = r.headers.get('location')?.[0];
+    if (r.kind !== 'redirect' || !loc) return undefined;
+    try { url = new URL(loc, url).href; } catch { return undefined; }
+  }
+  return undefined;
+}
 
 export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API2'],
   run(ctx) {
     const f = ctx.final; if (!f) return [];
     const www = (f.headers.get('www-authenticate') ?? []).join(', ');
-    if (ctx.isHttps === false && /^\s*basic\b/i.test(www))
-      return [mk(unauthAccess, ctx, 3, 'high', 'fail', `HTTPで WWW-Authenticate: ${www}`, 'Basic認証はHTTPSだけで受け付ける')];
+    const basic = ctx.isHttps === false ? basicOverHttp(ctx) : undefined;
+    if (basic) return [mk(unauthAccess, ctx, 3, 'high', 'fail', `HTTPで WWW-Authenticate: ${basic}`, 'Basic認証はHTTPSだけで受け付ける')];
     if (!ctx.target.label.startsWith('unauth-')) return [];   // ①②は認証情報を付けずに送ったターゲット（unauth-*）だけ
     if (ctx.target.sentAuth) return [mk(unauthAccess, ctx, 'na', 'info', 'na', '認証情報（Cookie・Authorization）を送っている', 'unauth-* は認証情報を付けずに採取する')];
     const s = status(ctx);
+    // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
+    if (!s) return [mk(unauthAccess, ctx, 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     if (s >= 200 && s < 300) return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
-    if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${ctx.chain[0]?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
+    if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${ownChain(ctx.target)[0]?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
     if (s === 401 && !www) return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', 'HTTP 401（WWW-Authenticate なし）', '')];
     return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', `HTTP ${s}${www ? ` / WWW-Authenticate: ${www}` : ''}`, '')];
   } };
 
-const TOKEN_PARAM = paramRegex(TOKEN_PARAM_NAMES);     // マスキングと同じ一覧（mask.ts）
+const TOKEN_PARAM = paramRegex(TOKEN_PARAM_NAMES, 'gi');     // マスキングと同じ一覧（mask.ts）
+/**
+ * 値がトークンらしいか。名前が一致しても、値が普通の語（?session=expired、?auth=required、?token=invalid）や短い値なら、
+ * トークンを URL に入れているのではなく状態を伝えているだけなので、A-02① にしない
+ */
+const tokenLikeValue = (v: string) => v.length >= 8 && !/^[a-z_-]+$/i.test(v);
+const hasTokenParam = (u: string) => [...u.matchAll(TOKEN_PARAM)].some(m => tokenLikeValue(m[2]));
 export const tokenExposure: Rule = { id: 'A-02', title: 'トークンの露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API2', 'RFC 6750 2.3'],
   run(ctx) {
     if (!ctx.final) return [];
     const out = [];
     const urls = [ctx.target.url ?? '', ...ctx.target.responses.flatMap(r => r.headers.get('location') ?? [])];
-    const inUrl = urls.find(u => TOKEN_PARAM.test(u));
+    const inUrl = urls.find(hasTokenParam);
     if (inUrl) out.push(mk(tokenExposure, ctx, 1, 'high', 'fail', inUrl, 'トークンはURLに入れず Authorization ヘッダで送る（ログやRefererに残る）'));
     const body = ctx.final.body ?? '';
     if (!['login', 'pre-login'].includes(baseLabel(ctx.target.label)) && /"refresh_token"\s*:\s*"[^"]{16,}"/.test(body))
@@ -102,6 +127,14 @@ export function jsonKeys(v: unknown, prefix = '', out: string[] = [], depth = 0)
   return out;
 }
 /**
+ * 英語の画面の文言らしい値（{"password":"Password"}、{"apiKey":"ApiKey"}、{"secret":"Secret"}）。値がキーの名前と同じ語か、
+ * 先頭だけ大文字の語をつないだもの（Password、NewPassword）なら、文言とみなす。秘密の値は、数字や記号を含むか、すべて小文字であることが多い
+ */
+const isLabelText = (key: string, v: string): boolean => {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+  return norm(v) === norm(key) || /^(?:[A-Z][a-z]+)+$/.test(v);
+};
+/**
  * 値が「秘密情報らしい文字列」のキー（配列の番号は [] にそろえる）。空白や ASCII 以外の文字を含む文字列は画面の文言（i18n の
  * {"password":"パスワード"} など）とみなし、null・数値・真偽値・オブジェクトも値を露出していないので除く
  */
@@ -110,7 +143,7 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   if (Array.isArray(v)) v.slice(0, 50).forEach(x => secretValuedKeys(x, `${prefix}[]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
     const p = prefix ? `${prefix}.${k}` : k;
-    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x)) out.add(p);
+    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x)) out.add(p);
     secretValuedKeys(x, p, out, depth + 1);
   }
   return out;

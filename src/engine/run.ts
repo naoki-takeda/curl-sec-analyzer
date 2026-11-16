@@ -3,7 +3,7 @@
 // → ⑤条件単位の絞り込み（ターゲット単位の結果）→ ⑥API応答での重要度の引き下げ → ⑦例外の適用
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
 import { maskText } from '../mask';
-import { capturedAt, chainOf, finalResponse, hostOf, isHttps, isSensitive, responseKind } from '../parser/target';
+import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isSensitive, ownChain, responseKind } from '../parser/target';
 import { looksLikeSession, parseSetCookie } from '../parser/setCookie';
 import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../rules/ruleset';
 import { allowedItems } from './labels';
@@ -34,7 +34,8 @@ export function dedupe(fs: Finding[]): Finding[] {
 export function hostHstsMap(targets: Target[]): Map<string, boolean> {
   const m = new Map<string, boolean>();
   for (const t of targets) {
-    const host = hostOf(t); const f = finalResponse(t);
+    // apex は、apex 自身の応答（転送の最初のホップ）で見る（rules/headers.ts の H-01 と同じ）
+    const host = hostOf(t); const f = baseLabel(t.label) === 'apex' ? ownChain(t)[0] : finalResponse(t);
     if (!host || isHttps(t) !== true || !f) continue;
     const age = Number(f.headers.get('strict-transport-security')?.[0]?.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? 0);
     m.set(host, (m.get(host) ?? false) || age > 0);
@@ -74,7 +75,8 @@ export function crossContext(targets: Target[], findings: Finding[]): CrossConte
   return {
     targets, findings,
     byLabel: l => targets.find(t => t.label === l),
-    withPrefix: p => targets.filter(t => t.label.startsWith(p)),
+    // 付け直したラベル（csp-sample-1#2 など）は除く。横断の判定には最初のものだけを使う（parser/target.ts の uniqueLabels）
+    withPrefix: p => targets.filter(t => t.label.startsWith(p) && !/#\d+$/.test(t.label)),
     byHost: () => {
       const m = new Map<string, Target[]>();
       for (const t of targets) { const h = hostOf(t); if (h) m.set(h, [...(m.get(h) ?? []), t]); }

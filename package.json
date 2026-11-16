@@ -1,13 +1,17 @@
 {
   "name": "curl-sec-analyzer",
   "private": true,
-  "version": "0.4.19",
+  "version": "0.4.25",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "playwright test",
     "lint": "tsc --noEmit && eslint .",
     "audit": "npm run audit:signatures && npm run audit:deps",
@@ -20,7 +24,7 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.65.0",
     "@tailwindcss/vite": "^4.3.5",
-    "@types/node": "^26.6.6",
+    "@types/node": "^24.19.2",
     "eslint": "^10.14.0",
     "fast-check": "^4.10.2",
     "globals": "^17.14.0",

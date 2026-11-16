@@ -15,10 +15,15 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
     const out: Finding[] = [];
     for (const [host, ts] of x.byHost()) {
       const probes = ts.flatMap(t => t.tlsProbes);
-      const negotiated = ts.flatMap(t => t.info).map(l => l.match(/SSL connection using (TLSv1\.\d|SSLv3)/)?.[1]).filter((v): v is string => !!v);
+      // OpenSSL は TLS 1.0 を「TLSv1」と出す
+      const negotiated = ts.flatMap(t => t.info).map(l => l.match(/SSL connection using (TLSv1(?:\.\d)?|SSLv3)\b/)?.[1]).filter((v): v is string => !!v);
       if (!probes.length && !negotiated.length) continue;         // TLSの情報がないホストは適用外
       const accepted = probes.filter(p => p.result === 'accepted' && OLD.test(p.version.replace(/\s/g, '')));
-      if (accepted.length) out.push(hf(tlsVersion, host, 1, 'high', 'fail', `接続できた旧バージョン: ${accepted.map(p => p.version).join(', ')}`, 'TLS 1.2 と 1.3 だけを有効にする'));
+      // C4 で旧バージョンを合意した場合も、そのバージョンで接続できたので①にする（②の「TLS 1.3 非対応」だけにしない）
+      const oldNegotiated = [...new Set(negotiated.filter(v => OLD.test(v)))];
+      if (accepted.length || oldNegotiated.length) out.push(hf(tlsVersion, host, 1, 'high', 'fail',
+        [accepted.length ? `接続できた旧バージョン: ${accepted.map(p => p.version).join(', ')}` : '', oldNegotiated.length ? `合意したバージョン: ${oldNegotiated.join(', ')}` : ''].filter(Boolean).join('、'),
+        'TLS 1.2 と 1.3 だけを有効にする'));
       else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected')) out.push(hf(tlsVersion, host, 'ok', 'info', 'pass', '旧バージョンは拒否された', ''));
       else if (probes.length) out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（手元のOpenSSLが非対応）', '旧バージョンに対応した環境で C12 を実行する'));
       if (negotiated.length && !negotiated.includes('TLSv1.3')) out.push(hf(tlsVersion, host, 2, 'info', 'fail', `合意したバージョン: ${[...new Set(negotiated)].join(', ')}`, 'TLS 1.3 を有効にする（curl 側が 1.3 に対応しているかも確認）'));
@@ -62,8 +67,12 @@ export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵
         if (WEAK.test(p.cipher)) out.push(hf(cipherSuites, host, 1, 'high', 'fail', `接続できた弱い暗号: ${p.cipher}`, 'RC4・3DES・NULL・EXPORT などを無効にする'));
         else if (!AEAD.test(p.cipher)) out.push(hf(cipherSuites, host, 3, 'medium', 'fail', `TLS 1.2で接続できたCBC・静的RSAの暗号: ${p.cipher}`, 'TLS 1.2 では ECDHE＋AEAD（AES-GCM、ChaCha20-Poly1305）だけにする'));
       }
-      for (const [, ver, c] of negotiated) if (ver === 'TLSv1.2' && !AEAD.test(c))
-        out.push(hf(cipherSuites, host, 3, 'medium', 'fail', `合意した暗号: ${ver} / ${c}`, 'ECDHE＋AEAD の暗号を優先する'));
+      // 合意した暗号：TLS 1.3 以外（1.2 以下）で、弱い暗号なら①、CBC・静的RSAなら③（旧バージョンで合意した CBC も合格にしない）
+      for (const [, ver, c] of negotiated) {
+        if (ver === 'TLSv1.3') continue;
+        if (WEAK.test(c)) out.push(hf(cipherSuites, host, 1, 'high', 'fail', `合意した弱い暗号: ${ver} / ${c}`, 'RC4・3DES・NULL・EXPORT などを無効にする'));
+        else if (!AEAD.test(c)) out.push(hf(cipherSuites, host, 3, 'medium', 'fail', `合意した暗号: ${ver} / ${c}`, 'ECDHE＋AEAD の暗号を優先する'));
+      }
       // ②鍵：OpenSSL 1.1・LibreSSL は「Server public key is N bit」だけで種類を出さない。256・384・521bit は楕円曲線、それ以外は RSA とみなす
       const ec = info?.keyType ? /^id-ec|^EC|ED25519|ED448/i.test(info.keyType) : [256, 384, 521].includes(info?.keyBits ?? 0);
       if (info?.keyBits && !ec && info.keyBits < 2048) out.push(hf(cipherSuites, host, 2, 'high', 'fail', `RSA ${info.keyBits}bit${info.keyType ? '' : '（鍵の種類は長さから推定）'}`, 'RSA 2048bit 以上か ECDSA P-256 の鍵にする'));
