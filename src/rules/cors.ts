@@ -47,6 +47,12 @@ export function isLookalike(ctx: RuleContext, origin?: string): boolean {
   return [...new Set([host.replace(/^www\./, ''), siteOf(host)])].some(c => h.includes(c));   // 例：example.com.evil.net、evilexample.com
 }
 
+/**
+ * -v で採取したのに Origin を送っていない（送信ヘッダは全部見えている）。CORS のミドルウェアの多くは Origin があるときだけ ACAO を返すので、
+ * ACAO がないことは「反射しない」「null を許可しない」の根拠にならない（合格にすると、カバレッジも水増しになる）。-i では送信ヘッダが見えないので対象外
+ */
+const noOriginSent = (ctx: RuleContext) => ctx.target.verbose && !ctx.target.sentOrigin;
+const NO_ORIGIN_REC = 'C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す';
 export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo: 'any', scope: 'target',
   basis: ['PortSwigger Web Security Academy: CORS', 'OWASP WSTG'],
   run(ctx) {
@@ -56,6 +62,7 @@ export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo:
     // 対象の URL 自身のオリジンを送った応答では、許可外の Origin を反射するかは分からない（反射しても正しい動作）
     if (isOwnOrigin(ctx, ctx.target.sentOrigin))
       return [mk(corsReflect, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin}（自サイトの Origin。許可外の Origin では試していない）`, 'C6 のとおり許可外の Origin（https://evil.example）で採取し直す')];
+    if (noOriginSent(ctx)) return [mk(corsReflect, ctx, 'na', 'info', 'na', 'Origin を送っていない（-v の送信ヘッダに Origin がない）', NO_ORIGIN_REC)];
     const ok = () => [mk(corsReflect, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     if (!acao || acao === '*' || acao === 'null') return ok();   // * は R-04、null は R-02 で判定する
     const sent = ctx.target.sentOrigin ?? (TEST_ORIGINS.includes(acao) ? acao : undefined);
@@ -71,6 +78,7 @@ export const corsNull: Rule = { id: 'R-02', title: 'null許可', appliesTo: 'any
   run(ctx) {
     if (!ctx.final) return [mk(corsNull, ctx, 'na', 'info', 'na', '応答がない', '')];
     const acao = acaoOf(ctx);
+    if (acao !== 'null' && noOriginSent(ctx)) return [mk(corsNull, ctx, 'na', 'info', 'na', 'Origin を送っていない（-v の送信ヘッダに Origin がない）', NO_ORIGIN_REC)];
     if (acao !== 'null') return [mk(corsNull, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     const cred = credOf(ctx);
     return [mk(corsNull, ctx, cred ? 1 : 2, cred ? 'high' : 'medium', 'fail', `ACAO: null${cred ? ' / ACAC: true' : ''}`, 'Origin: null を許可しない（サンドボックス化したiframeやファイルから送られる）')];
@@ -134,7 +142,8 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
 const SENSITIVE_EXPOSE = /\b(authorization|set-cookie|x-auth[\w-]*|[\w-]*token[\w-]*|x-internal[\w-]*|x-debug[\w-]*)\b/i;
 // 名前に token を含んでも、認証のトークンではないヘッダ（CSRF 対策のトークンは SPA が読むために公開する。ページ送りのトークンも秘密ではない）。
 // token を含む名前だけに使う（X-Debug-Async-Trace、X-Internal-Pagecache-Node のような内部ヘッダまで除かないため）
-const NOT_AUTH_TOKEN = /csrf|xsrf|page|next|continuation|cursor|sync/i;
+// レート制限の項目（x-ratelimit-remaining-tokens など。LLM の API は消費したトークン数を返す）も認証のトークンではない
+const NOT_AUTH_TOKEN = /csrf|xsrf|page|next|continuation|cursor|sync|rate-?limit|remaining|usage/i;
 export const corsExpose: Rule = { id: 'R-07', title: 'Access-Control-Expose-Headers', appliesTo: 'any', scope: 'target',
   basis: ['MDN'],
   run(ctx) {

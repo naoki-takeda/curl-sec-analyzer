@@ -51,7 +51,7 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
       pem = undefined;                     // 切れた PEM は使わない
     }
     if (l === '-----BEGIN CERTIFICATE-----') { if (!pemSeen) { pemSeen = true; pem = []; } continue; }
-    if (sanNext) { info.sans.push(...[...l.matchAll(/DNS:([^,\s]+)/g)].map(m => m[1].toLowerCase())); sanNext = false; continue; }
+    if (sanNext) { for (const m of l.matchAll(/DNS:([^,\s]+)/g)) info.sans.push(m[1].toLowerCase()); sanNext = false; continue; }   // push(...) に広げない（長い行でスタックがあふれる）
     let m: RegExpMatchArray | null;
     if ((m = l.match(/^Protocol\s*:\s*(\S+)/))) info.protocol ??= m[1];
     else if ((m = l.match(/^New, (TLSv[\d.]+|SSLv3), Cipher is (\S+)/))) { info.protocol ??= m[1]; info.cipher ??= m[2]; }

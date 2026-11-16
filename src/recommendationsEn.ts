@@ -114,6 +114,8 @@ const EXACT: Record<string, string> = {
   'Cookie・Authorization を付けずに採取し直す': 'Capture again without Cookie or Authorization',
   'C16 のとおり許可外の Origin（https://evil.example）で採取し直す': 'Capture again with a disallowed Origin (https://evil.example), as in C16',
   'C6 のとおり許可外の Origin（https://evil.example）で採取し直す': 'Capture again with a disallowed Origin (https://evil.example), as in C6',
+  'C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す': 'Capture again with an Origin header, as in C6 (-H "Origin: https://evil.example"; "Origin: null" for R-02)',
+  '一部の条件（ほかのラベルと比べる条件）は入力不足': 'Some conditions (those that compare with other labels) lack input',
   'GraphQL の IDE は本番で無効にするか、認証の内側に置く（introspection は POST して別に確かめる）': 'Disable the GraphQL IDE in production or put it behind authentication (check introspection separately with a POST)',
   'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする': 'Replace the framework default error page with your own (or RFC 9457 problem details)',
   'ディレクトリの一覧表示を無効にする（nginx: autoindex off、Apache: Options -Indexes）': 'Disable directory listing (nginx: autoindex off, Apache: Options -Indexes)',

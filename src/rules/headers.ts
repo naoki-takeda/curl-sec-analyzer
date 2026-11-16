@@ -3,7 +3,7 @@ import type { Rule, RuleContext } from '../model';
 import { LOGOUT_FAILED_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, sensitiveUnlessStatic, splitPolicies } from './util';
 import { clip, maskValue } from '../mask';
 import { baseLabel, firstStatus, logoutFailed, ownChain } from '../parser/target';
-import { htmlBody, mixedContent } from './html';
+import { htmlBody, metaCspPolicies, mixedContent } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
 /**
@@ -39,6 +39,9 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
     const rawEnforce = header(ctx, 'content-security-policy'); const enforce = cspPolicies(ctx);
     const ro = header(ctx, 'content-security-policy-report-only');
     const rec = "Content-Security-Policy: default-src 'self'; script-src 'nonce-…' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+    // ヘッダがなくても <meta http-equiv> の CSP があれば、ブラウザは強制するので①②にしない（frame-ancestors などは meta では効かないことを証跡に書く）
+    const meta = rawEnforce.length ? [] : metaCspPolicies(ctx);
+    if (meta.length) return [mk(cspPresence, ctx, 'ok', 'info', 'pass', `<meta http-equiv> の CSP: ${meta.join(' / ')}（frame-ancestors・report-uri・sandbox は meta では効かない）`, '')];
     if (!rawEnforce.length && !ro.length) return [mk(cspPresence, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
     if (!rawEnforce.length) return [mk(cspPresence, ctx, 2, 'medium', 'fail', `Report-Onlyのみ: ${ro[0]}`, '確認できたら強制モードの Content-Security-Policy に切り替える')];
     // ③は、ヘッダ値のどのポリシーにもディレクティブがないとき。カンマのあとのかけら（report-uri の URL の中のカンマなど）だけが
@@ -107,7 +110,8 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
 
 // ---- 以下 MVP で追加（H-02、H-04、H-05、H-07、H-09〜H-11、H-13〜H-17） ----
 
-const enforcedPolicies = (ctx: RuleContext) => cspPolicies(ctx).map(parseCsp);
+// ヘッダの CSP と、HTML の <meta> の CSP（ブラウザは両方を強制する）。H-06 の frame-ancestors はヘッダだけ（cspPolicies）で見る
+const enforcedPolicies = (ctx: RuleContext) => [...cspPolicies(ctx), ...metaCspPolicies(ctx)].map(parseCsp).filter(p => p.size > 0);
 
 export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'any', scope: 'target',
   basis: ['hstspreload.org', 'MDN'],
@@ -136,7 +140,8 @@ function coveredByOther(i: CspIssue, others: Policy[]): boolean {
 }
 
 /** 強制モードの各ポリシーを csp_evaluator で評価する（ポリシーごとのディレクティブと指摘） */
-const policiesOf = (ctx: RuleContext): Policy[] => cspPolicies(ctx).map(v => ({ dirs: parseCsp(v), issues: evaluateCsp(v) }));
+// ヘッダの CSP と <meta> の CSP（enforcedPolicies と同じ）を csp_evaluator で見る
+const policiesOf = (ctx: RuleContext): Policy[] => [...cspPolicies(ctx), ...metaCspPolicies(ctx)].map(v => ({ dirs: parseCsp(v), issues: evaluateCsp(v) })).filter(p => p.dirs.size > 0);
 
 /** 指定した項目の指摘だけを返す（同じ条件・ディレクティブ・値は1件にまとめる） */
 function cspIssues(ctx: RuleContext, item: CspIssue['item']): CspIssue[] {
@@ -291,7 +296,19 @@ const PRODUCT_HEADERS = ['server', 'x-powered-by', 'x-aspnet-version', 'x-aspnet
 const INTERNAL = /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|127\.0\.0\.1|localhost)\b|\b[\w-]+\.(?:internal|local|lan|corp|intra)(?![\w.-])/i;
 // CDN が付ける Server-Timing の項目（Cloudflare の cfL4・cfExtPri、CloudFront の cdn-*、Akamai の edge・origin・ak_p、Fastly）。アプリの内部処理ではない
 const CDN_TIMING = /^(?:cf[A-Z]\w*|cdn-[\w-]+|cdn|edge|origin|ak_p|fastly[\w-]*|x-cache|cache)$/;
-const appTimings = (v: string) => v.split(',').map(m => m.split(';')[0].trim()).filter(n => n && !CDN_TIMING.test(n));
+/**
+ * Server-Timing の項目の名前（RFC の token の形のものだけ）。カンマで分けるのは引用符の外だけ（desc="user lookup, bob@example.com" の
+ * カンマで分けると、desc の残りを項目の名前として証跡に出し、CDN の項目だけなのに⑤にもした）
+ */
+const appTimings = (v: string): string[] => {
+  const names: string[] = []; let start = 0, quoted = false;
+  for (let i = 0; i <= v.length; i++) {
+    const c = v[i];
+    if (c === '"' && v[i - 1] !== '\\') quoted = !quoted;
+    else if ((c === ',' && !quoted) || i === v.length) { names.push(v.slice(start, i).split(';')[0].trim()); start = i + 1; }
+  }
+  return names.filter(n => /^[!#$%&'*+.^_`|~\w-]+$/.test(n) && !CDN_TIMING.test(n));
+};
 export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン・デバッグ情報の露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG-INFO-02', 'IPA'],
   run(ctx) {

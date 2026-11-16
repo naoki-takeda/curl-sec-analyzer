@@ -24,6 +24,7 @@ export interface HarChain {
   responses: HttpResponse[];        // 各応答の url はそのホップのリクエストのURL（parser/target.ts の ownChain が使う）
   sentAuth: boolean;                // 一覧の表示用の推定（Authorization か、セッションCookieらしい名前の Cookie を送った）
   sentAuthorization: boolean; sentCookieNames: string[];   // 全ホップのリクエストで送った Authorization の有無と Cookie の名前（値は持たない）
+  sentTokens: string[];             // Authorization・Cookie で送った JWT。A-03 のデコードにだけ使い、画面・エクスポートには出さない（curl の -v と同じ）
   at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
 }
@@ -48,7 +49,8 @@ function toResponse(e: HarEntry): HttpResponse {
     // 1つのヘッダに複数の Set-Cookie を改行でつないで書き出すものがある。1件ずつに分けないと、2つ目以降の Cookie を判定せず、
     // 証跡（値は先頭の name=value だけをマスクする）に生の値が出てしまう
     const vals = k === 'set-cookie' ? String(h.value ?? '').split(/\r?\n/).flatMap(splitSetCookie) : [String(h.value ?? '')];
-    (headers.get(k) ?? headers.set(k, []).get(k)!).push(...vals);
+    const list = headers.get(k) ?? headers.set(k, []).get(k)!;
+    for (const x of vals) list.push(x);   // push(...) に広げない（長い Set-Cookie でスタックがあふれる）
   }
   if (e.response.redirectURL && !headers.has('location') && e.response.status >= 300 && e.response.status < 400) headers.set('location', [e.response.redirectURL]);
   let body: string | undefined;
@@ -64,6 +66,9 @@ function toResponse(e: HarEntry): HttpResponse {
 }
 
 const withoutHash = (u: string) => { const i = u.indexOf('#'); return i >= 0 ? u.slice(0, i) : u; };
+const JWT_IN_HEADER = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
+/** Authorization・Cookie のリクエストヘッダにある JWT（A-03 が curl の -v と同じく送った JWT もデコードできるように） */
+const jwtsIn = (hs: HarHeader[]) => [...new Set(hs.filter(h => /^(?:authorization|cookie)$/i.test(h.name)).flatMap(h => String(h.value ?? '').match(JWT_IN_HEADER) ?? []))];
 const hostOfUrl = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
 
 /** HAR の JSON を読み、チェーンにまとめる。request.postData はここで捨てる */
@@ -100,7 +105,7 @@ export function importHar(text: string): HarImport {
     if (sentAuthorization || sentCookieNames.length || hops.some(h => (h.response.headers ?? []).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
     chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(h => ({ ...toResponse(h), url: h.request.url })),
-      sentAuth, sentAuthorization, sentCookieNames, at: e.startedDateTime,
+      sentAuth, sentAuthorization, sentCookieNames, sentTokens: jwtsIn(reqHeaders), at: e.startedDateTime,
       // 304（ブラウザのキャッシュの再検証）は、サーバがセキュリティヘッダを付け直さなくてよい応答（RFC 9110 15.4.5）。
       // 通常の応答として判定すると H-01①（高）などの誤検知になるので、既定で除外する（画面でラベルを選べば判定する）
       suggested: '', label: '', sensitive: undefined, excluded: cur.response.status === 304 });
@@ -152,7 +157,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ（parser/target.ts の ownChain）
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
       // 送った認証情報の推定は、組織プロファイルのセッションCookieの名前で作り直す（Worker の中ではプロファイルが分からない）
-      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentCookieNames: c.sentCookieNames, sentTokens: [], info: [],
+      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens, info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });

@@ -33,12 +33,15 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     const b = isStaticResource(ctx) ? undefined : body(ctx);
     if (!b) return [];
     const out = [];
-    if (CREDENTIALS.some(re => re.test(b)))
+    const cred = CREDENTIALS.some(re => re.test(b));
+    if (cred)
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
     // 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする
     // ORA- は語の境目から（FLORA-12345 のような品番に一致させない）。絶対パスは URL のパスの一部（https://cdn…/opt/app.js、
     // src="/srv/main.js"、url(/srv/…)）には一致させない（直前が URL の文字か、属性・url() の始まり）
-    const trace = b.match(/\bjdbc:\w+:(?=\S)|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/);
+    const trace = b.match(/Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
+      // 資格情報を含む jdbc: は①だけにする（②にも出すと二重になる。設計書は②を資格情報のない jdbc: に限る）。スタックトレースがあれば、そちらを証跡にする
+      ?? (cred ? null : b.match(/\bjdbc:\w+:(?=\S)/));
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る。Rails も同じく、既定のエラーページ
     // （public/404.html・500.html）と開発用の画面の文言で見る（「Ruby on Rails」はブログの記事などにも出る）

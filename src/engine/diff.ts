@@ -48,6 +48,12 @@ const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
  * - 今回 fail：前回なしなら「新規」。前回 suppressed（例外の期限切れなど）は既知の指摘なので「継続」か「重要度の変化」
  * - 前回の指摘が今回ない場合、同じターゲットで同じ項目を判定していれば「解消」、判定していなければ「再診断していない」とする
  */
+/**
+ * v0.4.27 までの形式の HAR のキー（マスクの出力から作ったもの。値を伏せた「…」や、クエリの値「=」を含む）。v0.4.28 からはキーを URL の形だけで
+ * 作る（mask.ts の maskKey）ので、以前の例外ファイル・前回の結果の HAR のキーは突き合わない。黙って突き合わなくならないよう、読み込んだときに件数を知らせる
+ */
+export const legacyHarKey = (k?: string): boolean => !!k && /(?:^HAR \S+ |^\S+ )(?:https?:\/\/|\/)\S*(?:…|\?[^ ]*=)/.test(k);
+
 export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   const prev = new Map(before.filter(isOpen).map(f => [key(f), f]));
   const now = new Map(after.filter(isOpen).map(f => [key(f), f]));

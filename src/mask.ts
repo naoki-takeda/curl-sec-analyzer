@@ -94,17 +94,26 @@ const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
 /** 伏せ方：画面・エクスポート用（先頭の数文字と長さを残す）と、突き合わせのキー用（記録し直しても変わらないよう、何も残さない） */
 interface Hider { value: (v: string) => string; bare: (v: string) => string }
 const SHOW: Hider = { value: v => maskValue(v), bare: v => `…(${v.length} chars)` };
-const KEY: Hider = { value: () => '…', bare: () => '…' };
+const STAR: Hider = { value: () => '*', bare: () => '*' };
 /**
  * かけらを伏せる。英字だけの短い語と - か _ で始まるもの（application-<ダイジェスト>.js、vendor-<ダイジェスト>.js）は、その語を残して
  * 残りだけを伏せる（別のファイルを区別できるように。残りは先頭の文字を残さず、もう一度マスクしても変わらないようにする）
  */
 const maskSegment = (seg: string, h: Hider = SHOW): string => seg.replace(/[^.:~+]+/g, piece => {
   const body = piece.replace(/=+$/, ''); const pad = piece.slice(body.length);
-  if (!secretPiece(body)) return piece;
+  if (!secretPiece(body) || buildAssetName(body)) return piece;
   const m = body.match(/^([A-Za-z]{3,20}[-_])(.+)$/);
   return m && secretPiece(m[2]) ? m[1] + h.bare(m[2]) + pad : h.value(body) + pad;
 });
+/**
+ * ビルドしたファイルの名前（英字の語を - _ でつなぎ、最後に短いハッシュを付けたもの）。Vite の AdminDashboard-Dk3x9Lq2、vendor-react-BxYz12Ab、
+ * webpack の main-3f8a9c2e1b4d5f6a7b8c。ハッシュは12文字未満か、20文字以下の16進数。トークンではないので伏せない
+ * （伏せると、別のファイルが同じ表示・同じキーになる）
+ */
+const buildAssetName = (p: string): boolean => {
+  const m = p.match(/^((?:[A-Za-z]+[-_])+)([A-Za-z0-9]+)$/);
+  return !!m && (m[2].length < 12 || (m[2].length <= 20 && /^[0-9a-f]+$/i.test(m[2])));
+};
 /**
  * ASP.NET の Cookie を使わないセッション（/(S(<セッションID>))/、フォーム認証のチケット /(F(<チケット>))/、匿名ID の A(…)）。
  * パスの部分が「(」で始まるので、PATH_SEGMENT では見つからない
@@ -144,12 +153,17 @@ const maskJsonPairs = (s: string, h: Hider) => {
     .replace(JSON_NUMBER, (all, pre: string, k: string, v: string) => (NUMERIC_SECRET.test(k) ? rep(all, pre, k, v, '') : all));
 };
 
-/** パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る（深さ3まで） */
+/**
+ * パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る。
+ * 入れ子は深さ10まで見て、それより深い値も、秘密の名前のパラメータは伏せる（入れ子に戻らないだけ）。
+ * 深さで打ち切って値をそのまま返すと、?next=/a?r=/b?r=/c?r=/d?access_token=… のトークンが A-02①（高）の証跡に出た
+ */
 function maskParams(s: string, h: Hider, depth = 0): string {
   return s.replace(ANY_PARAM, (all: string, sep: string, k: string, eq: string, v: string, offset: number) => {
     if (maskedParam(v, s.slice(offset + all.length, offset + all.length + 7))) return all;
     if (secretParam(k, v)) return `${sep}${k}${eq}${h.value(v)}`;
-    return depth < 3 ? `${sep}${k}${eq}${maskParams(v, h, depth + 1)}` : all;
+    if (depth < 10) return `${sep}${k}${eq}${maskParams(v, h, depth + 1)}`;
+    return `${sep}${k}${eq}${v.replace(ANY_PARAM, (a: string, s2: string, k2: string, e2: string, v2: string) => (secretParam(k2, v2) ? `${s2}${k2}${e2}${h.value(v2)}` : a))}`;
   });
 }
 
@@ -164,15 +178,33 @@ function mask(s: string, h: Hider): string {
           .replace(PATH_SEGMENT, seg => maskSegment(seg, h));
 }
 
-/** ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする。マスク済みの文字列に使っても結果は変わらない */
-export const maskText = (s: string): string => mask(s, SHOW);
+/**
+ * ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする。マスク済みの文字列に使っても結果は変わらない（冪等）。
+ * 1回の処理では、前の手順で伏せた結果が後の手順の手がかり（直前の文字など）を変えることがあるので、変わらなくなるまで繰り返す
+ * （?code=xyz'nonce-… は、code を伏せたあとで初めて nonce が見つかる）。ふつうは2回で止まる
+ */
+export const maskText = (s: string): string => {
+  let out = mask(s, SHOW);
+  for (let i = 0; i < 4; i++) { const next = mask(out, SHOW); if (next === out) break; out = next; }
+  return out;
+};
 
 /**
- * 例外と前回の結果の突き合わせに使う URL（HAR の targetKey）。伏せる場所は maskText と同じだが、伏せた値を「…」だけにする。
- * maskText の出力（先頭の数文字と長さを残す）をキーにすると、同じページを記録し直したときに ?code= などの値でキーが変わり、
- * 例外が効かず、差分ではすべて「新規」になる
+ * 例外と前回の結果の突き合わせに使う URL（HAR の targetKey）。マスクとは切り離し、URL の形だけで作る：
+ * スキーム・ホスト・パス（トークンらしい部分は *、ASP.NET のセッション (S(…)) は (*)）と、クエリのパラメータの名前だけ（値は持たない）。
+ * マスクの出力をキーにすると、マスクの一覧を変えるたびに（v0.4.26・v0.4.27）キーが変わり、以前の例外と前回の結果が黙って突き合わなくなった。
+ * 値を持たないので秘密は入らず、同じページを記録し直しても変わらない。ユーザー情報とフラグメントは持たない
  */
-export const maskKey = (s: string): string => mask(s, KEY);
+export function maskKey(raw: string): string {
+  let u: URL; let relative = false;
+  try { u = new URL(raw); } catch {
+    try { u = new URL(raw, 'https://relative.invalid'); relative = true; } catch { return '*'; }
+  }
+  const path = u.pathname.split('/').map(seg => (/^\((?:[A-Z]\([^()]*\))+\)$/.test(seg) ? '(*)' : seg.length >= 16 ? maskSegment(seg, STAR) : seg)).join('/');
+  const names = [...new Set(u.searchParams.keys())].map(n => (n.length >= 16 && secretPiece(n) ? '*' : n));
+  const query = names.length ? `?${names.join('&')}` : '';
+  return relative ? `${path}${query}` : `${u.protocol}//${u.host}${path}${query}`;
+}
 
 /**
  * 証跡の抜粋：マスクしてから切り詰める。切り詰めてからマスクすると、途中で切れた JWT（ドットが足りない）や

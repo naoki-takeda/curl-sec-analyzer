@@ -77,6 +77,18 @@ export function tags(html: string, names: string[]): Tag[] {
 /** HTML本文があるか（-i・C2 で取得したもの） */
 export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ctx.final?.body?.trim() ? ctx.final.body : undefined);
 
+/**
+ * HTML の <meta http-equiv="Content-Security-Policy"> の CSP（ポリシーごと）。ヘッダを付けられない GitHub Pages・S3 などの配信では普通の形で、
+ * ブラウザは強制する。ただし frame-ancestors・report-uri・sandbox は meta では効かないので除く（H-06 のクリックジャッキング対策には使わない）
+ */
+export function metaCspPolicies(ctx: RuleContext): string[] {
+  const html = htmlBody(ctx); if (!html) return [];
+  return tags(html, ['meta']).filter(t => t.attrs.get('http-equiv')?.toLowerCase() === 'content-security-policy')
+    .flatMap(t => (t.attrs.get('content') ?? '').split(','))
+    .map(p => p.split(';').map(d => d.trim()).filter(d => d && !/^(?:frame-ancestors|report-uri|report-to|sandbox)(?![\w-])/i.test(d)).join('; '))
+    .filter(Boolean);
+}
+
 /** 混在コンテンツ：①script・iframe・stylesheet、②img など */
 export function mixedContent(html: string): { active: Tag[]; passive: Tag[] } {
   const ts = tags(html, ['script', 'iframe', 'link', 'img', 'audio', 'video', 'source', 'embed', 'object', 'form']);
@@ -180,7 +192,13 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     const html = htmlBody(ctx);
     if (!html) return [];
     const out = [];
-    for (const [name, re] of SECRETS) if (re.test(html)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
+    // OpenID Connect の response_mode=form_post：IdP は id_token・access_token を hidden の欄に入れて、アプリへ POST する画面を返す。
+    // 利用者のブラウザに渡すのが仕事のトークンなので、その欄の値は秘密情報の露出として数えない（自社の Keycloak などを対象にしたとき）
+    const posted = new Set(forms(html).filter(f => (f.form.attrs.get('method') ?? '').toLowerCase() === 'post')
+      .flatMap(f => f.inputs).filter(i => i.attrs.get('type')?.toLowerCase() === 'hidden' && /^(?:id_token|access_token|code|state)$/i.test(i.attrs.get('name') ?? ''))
+      .map(i => i.attrs.get('value') ?? '').filter(Boolean));
+    const scan = posted.size ? [...posted].reduce((h, v) => h.split(v).join(''), html) : html;
+    for (const [name, re] of SECRETS) if (re.test(scan)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
     const iu = internalUrl(html, hostOf(ctx.target)?.toLowerCase());
     if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
     // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す

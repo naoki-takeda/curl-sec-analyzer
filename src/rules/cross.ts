@@ -13,6 +13,23 @@ const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na',
 const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.now(); return (t?.responses ?? []).flatMap(r => r.headers.get('set-cookie') ?? [])
   .map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, now) && looksLikeSession(c, now)); };
 
+/**
+ * 2xx・3xx でもログインに失敗した応答。Spring Security の失敗時の転送（302 Location: /login?error）、ログイン画面への転送、
+ * パスワード欄のある画面を 200 で返し直すもの（Django、ASP.NET Identity、WordPress）。失敗ならセッションIDを再発行しないのは当然なので C-09① にしない
+ */
+function loginRejected(login: Target, pre: Target): string | undefined {
+  const first = ownChain(login)[0]; const fin = finalResponse(login);
+  const loc = first && first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
+  if (loc) {
+    let to: URL | undefined; try { to = new URL(loc, login.url ?? 'https://x.invalid/'); } catch { /* 解釈できない */ }
+    const pathOf = (u?: string) => { try { return u ? new URL(u).pathname : undefined; } catch { return undefined; } };
+    if (to && (/[?&](?:error|failed|fail|login_error|authfailed)(?:[=&]|$)/i.test(to.search) || [pathOf(login.url), pathOf(pre.url)].includes(to.pathname)))
+      return `HTTP ${first.status} でログイン画面に戻された`;
+  }
+  if (fin && fin.status >= 200 && fin.status < 300 && /type\s*=\s*["']?password/i.test(fin.body ?? '')) return `HTTP ${fin.status} でパスワード欄のある画面を返した`;
+  return undefined;
+}
+
 export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定化', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP Session Mgmt CS'],
   runCross(x) {
@@ -23,6 +40,8 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
+    const rejected = loginRejected(login, pre);
+    if (rejected) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（${rejected}）`, LOGIN_FAILED_REC)];
     // ログイン前のセッションIDは、pre-login で発行したものに加え、pre-login で送ったもの（トップページで発行され、ログイン画面では送るだけ。
     // ブラウザの普通の流れで、HAR ではほぼこの形になる）も数える。送っただけの値は分からないので、login で新しいセッションCookieを発行したかで見る
     const sent = (pre.sentCookieNames ?? []).filter(looksLikeSessionName);
@@ -33,7 +52,9 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
   } };
 
 /** 2つ以上のセッションIDを比べ、固定部分や連番がないかを見る */
-const JWT_VALUE = /^eyJ[\w-]*\.[\w-]*\.([\w-]*)$/;
+// Flask（itsdangerous）の圧縮したセッション（.eJw… で始まる「.ペイロード.時刻.署名」）も、同じアカウントではペイロードの大部分が共通になる。
+// JWT と同じく署名の部分だけで比べる（全体で比べると「先頭57文字が共通」と C-07②（高）の誤検知になる）
+const JWT_VALUE = /^(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.([\w-]*)$/;
 export function predictable(raw: string[]): string | undefined {
   // JWT は、同じアカウントで発行するとヘッダとクレーム（iat・exp まで）の大部分が共通になる。乱数性は署名の部分だけで比べる。
   // 署名がない（alg:none）JWT は A-03① で判定する

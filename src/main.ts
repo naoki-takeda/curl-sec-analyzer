@@ -8,7 +8,7 @@ import { countBySeverity, overall } from './engine/summarize';
 import { coverage, ITEMS } from './engine/coverage';
 import { isActive, parseSuppressions } from './engine/suppress';
 import { parseProfile, profileTemplate, withProfile } from './engine/profile';
-import { diff, parseBaseline } from './engine/diff';
+import { diff, legacyHarKey, parseBaseline } from './engine/diff';
 import { IMPLEMENTED, RULESET_VERSION, TOOL_VERSION } from './rules/ruleset';
 import { type Lang, getLang, setLang, tr } from './i18n';
 import sample from './sample';
@@ -60,7 +60,9 @@ function buildShell() {
   const fileIn = hidden('.txt,.log,.har,text/plain,application/json', openFile);
   const supIn = hidden('.json,application/json', async f => {
     const { list, errors } = parseSuppressions(await f.text());
-    state.suppressions = list; refresh(errors.length ? T.readErrors(T.suppressionsFile, joinMessages(errors, getLang())) : '');
+    state.suppressions = list;
+    const legacy = list.filter(s => legacyHarKey(s.target)).length;
+    refresh(errors.length ? T.readErrors(T.suppressionsFile, joinMessages(errors, getLang())) : legacy ? T.legacyHarKeys(legacy) : '');
   });
   const profIn = hidden('.json,application/json', async f => {
     const { profile: p, errors } = parseProfile(await f.text());
@@ -71,7 +73,9 @@ function buildShell() {
   });
   const baseIn = hidden('.json,application/json', async f => {
     const { baseline: b, error, skipped } = parseBaseline(await f.text());
-    if (b) state.baseline = b; refresh(error ? joinMessages([error], getLang()) : skipped ? T.baselineSkipped(skipped) : '');
+    if (b) state.baseline = b;
+    const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
+    refresh(error ? joinMessages([error], getLang()) : skipped ? T.baselineSkipped(skipped) : legacy ? T.legacyHarKeys(legacy) : '');
   });
 
   app.replaceChildren(

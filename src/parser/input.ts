@@ -16,8 +16,14 @@ const STUCK_MARKER = /([}\]>])(#(?:TARGET|META)[ \t]+(?:url|label|at|cmd|respons
 // （遅い応答では、進捗表示とステータス行が同じ行に出て、ターゲットごと失われる）。時刻の欄（--:--:-- か 0:00:01）を手がかりにする
 // 数字の行は欄が12個（% Total % Received % Xferd Dload Upload Total Spent Left Speed）。8個以上の数字の欄と時刻の欄を条件にし、
 // 本文の日時の行（2026-11-01 12:00:00）を読み飛ばさないようにする
-const METER_LINE = /^\s*(?:% Total\s+% Received|Dload\s+Upload\s+Total)|^\s*(?:[\d.]+[kMGTP]?\s+){5,}(?:(?:--:--:--|\d+:\d\d:\d\d)\s+){2,3}[\d.]+[kMGTP]?\s*$/;
-const METER_PREFIX = /^\s*(?:[\d.]+[kMGTP]?\s+){5,}(?:(?:--:--:--|\d+:\d\d:\d\d)\s+){2,3}[\d.]+[kMGTP]?\s*(?=(?:< )?HTTP\/[\d.]+ \d{3}|[<>*] )/;
+// 欄の並び：% Total、Total、% Received、Received、% Xferd、Xferd、Dload、Upload、時刻の欄（0〜3個）、Speed。
+// 時刻の欄は curl の版で違う（--:--:--、0:00:02、curl 8.22 の 00:02、空欄）ので、あってもなくてもよい。% の欄は 0〜100
+const PCT = String.raw`(?:100|\d{1,2})`, NUM = String.raw`[\d.]+[kMGTP]?`;
+const METER = String.raw`^\s*${PCT}\s+${NUM}\s+${PCT}\s+${NUM}\s+${PCT}\s+${NUM}\s+${NUM}\s+${NUM}(?:\s+(?:--:--:--|\d+:\d\d(?::\d\d)?))*\s+${NUM}\s*`;
+// 進捗表示だけの行は、時刻の欄が1つ以上あるものだけ（本文の「1 2 3 4 5 6 7 8 9」のような数字の行を読み飛ばさない）。
+// 応答の行の前にくっついたもの（METER_PREFIX）は、直後がステータス行・送受信の行なので、時刻の欄がなくてもよい
+const METER_LINE = new RegExp(String.raw`^\s*(?:% Total\s+% Received|Dload\s+Upload\s+Total)|^(?=.*\d:\d\d)${METER.slice(1)}$`);
+const METER_PREFIX = new RegExp(String.raw`${METER}(?=(?:< )?HTTP\/[\d.]+ \d{3}|[<>*] )`);
 
 // key=value を解析。ct= 以降は行末まで1つの値（空白を含むContent-Type対策）
 export function attrs(s: string): Record<string, string> {
@@ -100,7 +106,7 @@ export function parseInput(input: string): ParseResult {
         const ck = h.match(/^cookie:\s*(.*)$/i), au = /^authorization:/i.test(h);
         if (ck) t.sentCookieNames = [...new Set([...(t.sentCookieNames ?? []), ...cookieNames(ck[1])])];
         if (au) t.sentAuthorization = true;
-        if (ck || au) { t.sentAuth = sentAuthOf(!!t.sentAuthorization, t.sentCookieNames ?? []); t.sentTokens.push(...(h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? [])); }
+        if (ck || au) { t.sentAuth = sentAuthOf(!!t.sentAuthorization, t.sentCookieNames ?? []); for (const tok of h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) t.sentTokens.push(tok); }
         continue;
       }
       if (/^>\s*$/.test(line)) continue;               // 送信ヘッダの終端
@@ -127,7 +133,8 @@ export function parseInput(input: string): ParseResult {
       if (!json) { json = []; jsonBytes = 0; }
       json.push(line); jsonBytes += line.length;
       // JSON のオブジェクトは } で終わるので、そこまでは読み直さない（行ごとに全体をつないで解析すると、入力の長さの2乗の時間がかかる）
-      const r = /\}\s*$/.test(line) ? headerJson(json.join('\n'), t.meta.response_code) : jsonBytes > BODY_LIMIT ? null : undefined;
+      // 上限は先に見る（} で終わる行が続くと、行ごとに全体をつないで解析し直し、入力の長さの2乗の時間がかかる）
+      const r = jsonBytes > BODY_LIMIT ? null : /\}\s*$/.test(line) ? headerJson(json.join('\n'), t.meta.response_code) : undefined;
       // null：JSON としては読めたが、ヘッダの形ではない（curl -s で出力した API の本文など）。応答にせず、解析できない行として警告する
       if (r) { t.responses.push(r); json = null; } else if (r === null || json.length > 500) { unparsed += json.length; json = null; }
       continue;
@@ -143,7 +150,9 @@ export function parseInput(input: string): ParseResult {
     const i = line.indexOf(':'); if (i <= 0) continue;
     const raw = line.slice(0, i).trim(); last = raw.toLowerCase(); cur.rawNames.push(raw);
     const val = line.slice(i + 1).trim();
-    (cur.headers.get(last) ?? cur.headers.set(last, []).get(last)!).push(...(last === 'set-cookie' ? splitSetCookie(val) : [val]));
+    // 値を push(...) に広げない（5MB の Set-Cookie の行で、引数が多すぎてスタックがあふれ、解析全体が止まった）
+    const list = cur.headers.get(last) ?? cur.headers.set(last, []).get(last)!;
+    for (const x of last === 'set-cookie' ? splitSetCookie(val) : [val]) list.push(x);
   }
   close(); flush();
   for (const tg of targets) tg.responses.forEach((r, i) => {

@@ -130,7 +130,15 @@ export const jwtClaims: Rule = { id: 'A-03', title: 'JWTの中身', appliesTo: '
  * ものだけを残す。判定（SECRET_KEY・INTERNAL_KEY）は元のキーで行い、これは証跡を作るときだけ使う
  */
 const SECRET_KEY_NAME = /^(?:[spr]k_(?:live|test)_|whsec_|gh[pousr]_|xox[abprs]-)|^[0-9a-f-]{24,}$|^(?:AKIA|ASIA)[0-9A-Z]{16}$|^\d+$|^(?=[A-Za-z0-9]{16,}$)(?=.*\d)/i;
-export const safeKey = (k: string) => (/^[A-Za-z0-9_$][\w$.-]{0,127}$/.test(k) && !SECRET_KEY_NAME.test(k) ? k : '*');
+/**
+ * - _ . で区切った名前のかけらで見る秘密らしさ（sk-proj-<20文字>、glpat-<20文字>、npm_<36文字>、AIzaSy…-…）。区切りを含むキーは、
+ * 区切りのない形だけを見る SECRET_KEY_NAME では一致しない。かけらが英大文字・小文字・数字をすべて含む16文字以上か、
+ * 名前全体が英大文字・小文字・数字をすべて含む20文字以上なら、値をキーにしたものとみなす
+ */
+const mixed = (p: string) => /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p);
+const secretKeyName = (k: string) => SECRET_KEY_NAME.test(k) || /^(?:sk-(?:proj|live|test|svcacct)-|glpat-|npm_|AIza)/.test(k)
+  || k.split(/[-_.]/).some(p => p.length >= 16 && mixed(p)) || (k.length >= 20 && mixed(k));
+export const safeKey = (k: string) => (/^[A-Za-z0-9_$][\w$.-]{0,127}$/.test(k) && !secretKeyName(k) ? k : '*');
 /** JSONのキーを「a.b[0].c」の形で列挙する */
 export function jsonKeys(v: unknown, prefix = '', out: string[] = [], depth = 0): string[] {
   if (depth > 20 || out.length > 2000) return out;
