@@ -1,0 +1,227 @@
+## targets
+pre-login | https://app.example.com/login | key=pre-login | responses=1
+login | https://app.example.com/login | key=login | responses=1
+session-sample-1 | https://app.example.com/login | key=session-sample-1 | responses=1
+session-sample-2 | https://app.example.com/login | key=session-sample-2 | responses=1
+session-sample-3 | https://app.example.com/login | key=session-sample-3 | responses=1
+mypage | https://app.example.com/mypage | key=mypage | responses=1
+logout | https://app.example.com/logout | key=logout | responses=1
+after-logout | https://app.example.com/mypage | key=- | responses=1
+cookies | https://www.example.com/ | key=cookies | responses=1
+http | http://app.example.com/ | key=http | responses=1
+
+## warnings
+
+## findings
+after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200
+cookies | A-02.ok | info | pass | URL・Location・本文にトークンなし
+cookies | C-01.3 | low | fail | tracking=…(1 chars); Domain=.example.com（ホストはHSTSあり）
+cookies | C-02.ok | info | pass | __host-sid, session_id, PHPSESSID
+cookies | C-03.1 | medium | fail | __host-sid=Zx8f…(29 chars); Secure; HttpOnly; Path=/app
+cookies | C-03.2 | medium | fail | weird=…(1 chars); SameSite=Loose; Secure
+cookies | C-04.1 | medium | fail | tracking=…(1 chars); Domain=.example.com（ホスト www.example.com）
+cookies | C-04.3 | low | fail | pref=…(4 chars); Domain=www.example.com; Secure（ホスト www.example.com。サブドメインにも送られる）
+cookies | C-05.ok | info | pass | __host-sid, session_id, PHPSESSID
+cookies | C-06.1 | info | fail | PHPSESSID=…(6 chars); Secure; HttpOnly; SameSite=Lax
+cookies | C-06.1 | info | fail | session_id=6ba7…(36 chars); Secure; HttpOnly; SameSite=Lax
+cookies | C-06.2 | low | fail | __host-sid=Zx8f…(29 chars); Secure; HttpOnly; Path=/app
+cookies | C-08.1 | info | fail | PHPSESSID
+cookies | C-11.1 | info | fail | ARRAffinitySameSite=ab…(16 chars); Secure; SameSite=None
+cookies | C-13.1 | high | fail | Cache-Control: public, s-maxage=600
+cookies | H-01.ok | info | pass | max-age=63072000; includeSubDomains
+cookies | H-02.2 | info | fail | max-age=63072000; includeSubDomains
+cookies | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
+cookies | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+cookies | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+cookies | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+cookies | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+cookies | H-08.1 | medium | fail | (ヘッダなし)
+cookies | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+cookies | H-10.1 | info | fail | (ヘッダなし)
+cookies | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+cookies | H-12.na | info | na | 機密応答かどうか分からない（public, s-maxage=600）
+cookies | H-13.ok | info | pass | text/html; charset=utf-8
+cookies | H-14.1 | low | fail | (ヘッダなし)
+cookies | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+cookies | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+cookies | R-04.ok | info | pass | (ACAOなし)
+cookies | T-12.ok | info | pass | HTTP/2
+csp-sample-* | H-04.na | info | na | 
+error-* | A-10.na | info | na | 
+http | C-10.1 | high | fail | JSESSIONID=77aa…(30 chars); Path=/
+http | T-04.4 | info | fail | HTTP 303 → https://app.example.com/
+http | T-05.ok | info | pass | 1回の転送
+login | A-02.ok | info | pass | URL・Location・本文にトークンなし
+login | C-01.1 | high | fail | JSESSIONID=4f1c…(31 chars); Path=/; HttpOnly
+login | C-02.ok | info | pass | JSESSIONID, remember_token
+login | C-03.1 | medium | fail | JSESSIONID=4f1c…(31 chars); Path=/; HttpOnly
+login | C-03.1 | medium | fail | remember_token=9d8c…(30 chars); Max-Age=; Expires=Wed, 01 Jan 2031 00:00:00 GMT; Path=/; Secure; HttpOnly
+login | C-04.ok | info | pass | JSESSIONID, remember_token, BIGipServerpool_web, __cf_bm
+login | C-05.1 | medium | fail | remember_token=9d8c…(30 chars); Max-Age=; Expires=Wed, 01 Jan 2031 00:00:00 GMT; Path=/; Secure; HttpOnly（期限 約36527時間、基準 24時間）
+login | C-06.1 | info | fail | JSESSIONID=4f1c…(31 chars); Path=/; HttpOnly
+login | C-06.1 | info | fail | remember_token=9d8c…(30 chars); Max-Age=; Expires=Wed, 01 Jan 2031 00:00:00 GMT; Path=/; Secure; HttpOnly
+login | C-07.ok | info | pass | JSESSIONID, remember_token
+login | C-08.1 | info | fail | JSESSIONID
+login | C-09.ok | info | pass | URLにセッションIDなし
+login | C-11.1 | info | fail | __cf_bm=abcd…(30 chars); Path=/; Domain=.example.com; Secure; SameSite=None
+login | C-13.ok | info | pass | 共有キャッシュの指定なし
+login | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
+logout | C-12.ok | info | pass | JSESSIONID=…(0 chars); Max-Age=0; Path=/
+logout | H-15.1 | info | fail | (ヘッダなし)
+mypage | A-02.ok | info | pass | URL・Location・本文にトークンなし
+mypage | E-01.ok | info | pass | エラーの詳細らしき記述なし
+mypage | E-02.ok | info | pass | 一覧表示なし
+mypage | E-07.ok | info | pass | http:// の資源なし
+mypage | E-08.ok | info | pass | 外部オリジンのscriptなし
+mypage | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+mypage | E-12.1 | info | fail | <form action="/profile" method="post">
+mypage | H-01.1 | high | fail | (ヘッダなし)
+mypage | H-02.na | info | na | HSTSがない（H-01で判定）
+mypage | H-03.1 | high | fail | (ヘッダなし)
+mypage | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+mypage | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+mypage | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+mypage | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+mypage | H-08.1 | medium | fail | (ヘッダなし)
+mypage | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+mypage | H-10.1 | info | fail | (ヘッダなし)
+mypage | H-11.1 | low | fail | 機密応答に Cross-Origin-Resource-Policy なし
+mypage | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+mypage | H-12.2 | medium | fail | private
+mypage | H-13.ok | info | pass | text/html; charset=utf-8
+mypage | H-14.1 | low | fail | (ヘッダなし)
+mypage | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+mypage | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+mypage | R-04.ok | info | pass | (ACAOなし)
+mypage | T-12.ok | info | pass | HTTP/2
+pre-login | A-02.ok | info | pass | URL・Location・本文にトークンなし
+pre-login | C-01.1 | high | fail | JSESSIONID=4f1c…(31 chars); Path=/; HttpOnly
+pre-login | C-02.ok | info | pass | JSESSIONID
+pre-login | C-03.1 | medium | fail | JSESSIONID=4f1c…(31 chars); Path=/; HttpOnly
+pre-login | C-04.ok | info | pass | JSESSIONID
+pre-login | C-05.ok | info | pass | JSESSIONID
+pre-login | C-06.1 | info | fail | JSESSIONID=4f1c…(31 chars); Path=/; HttpOnly
+pre-login | C-07.ok | info | pass | JSESSIONID
+pre-login | C-08.1 | info | fail | JSESSIONID
+pre-login | C-09.ok | info | pass | URLにセッションIDなし
+pre-login | C-11.ok | info | pass | JSESSIONID
+pre-login | C-13.ok | info | pass | 共有キャッシュの指定なし
+pre-login | H-12.ok | info | pass | no-store
+pre-login/login | C-09.1 | high | fail | login 応答でセッションIDが再発行されていない
+session-sample-* | C-07.2 | high | fail | sid：先頭23文字が共通（aaaa…(24 chars) / aaaa…(24 chars) / aaaa…(24 chars)）
+session-sample-1 | C-01.ok | info | pass | sid
+session-sample-1 | C-02.ok | info | pass | sid
+session-sample-1 | C-03.ok | info | pass | sid
+session-sample-1 | C-04.ok | info | pass | sid
+session-sample-1 | C-05.ok | info | pass | sid
+session-sample-1 | C-06.1 | info | fail | sid=aaaa…(24 chars); Path=/; Secure; HttpOnly; SameSite=Lax
+session-sample-1 | C-07.ok | info | pass | sid
+session-sample-1 | C-08.ok | info | pass | sid
+session-sample-1 | C-09.ok | info | pass | URLにセッションIDなし
+session-sample-1 | C-11.ok | info | pass | sid
+session-sample-1 | C-13.ok | info | pass | 共有キャッシュの指定なし
+session-sample-1 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
+session-sample-2 | C-01.ok | info | pass | sid
+session-sample-2 | C-02.ok | info | pass | sid
+session-sample-2 | C-03.ok | info | pass | sid
+session-sample-2 | C-04.ok | info | pass | sid
+session-sample-2 | C-05.ok | info | pass | sid
+session-sample-2 | C-06.1 | info | fail | sid=aaaa…(24 chars); Path=/; Secure; HttpOnly; SameSite=Lax
+session-sample-2 | C-07.ok | info | pass | sid
+session-sample-2 | C-08.ok | info | pass | sid
+session-sample-2 | C-09.ok | info | pass | URLにセッションIDなし
+session-sample-2 | C-11.ok | info | pass | sid
+session-sample-2 | C-13.ok | info | pass | 共有キャッシュの指定なし
+session-sample-2 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
+session-sample-3 | C-01.ok | info | pass | sid
+session-sample-3 | C-02.ok | info | pass | sid
+session-sample-3 | C-03.ok | info | pass | sid
+session-sample-3 | C-04.ok | info | pass | sid
+session-sample-3 | C-05.ok | info | pass | sid
+session-sample-3 | C-06.1 | info | fail | sid=aaaa…(24 chars); Path=/; Secure; HttpOnly; SameSite=Lax
+session-sample-3 | C-07.ok | info | pass | sid
+session-sample-3 | C-08.ok | info | pass | sid
+session-sample-3 | C-09.ok | info | pass | URLにセッションIDなし
+session-sample-3 | C-11.ok | info | pass | sid
+session-sample-3 | C-13.ok | info | pass | 共有キャッシュの指定なし
+session-sample-3 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
+
+## coverage
+H-01 | evaluated | fails=1
+H-02 | evaluated | fails=1
+H-03 | evaluated | fails=1
+H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
+H-06 | evaluated | fails=2
+H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
+H-08 | evaluated | fails=2
+H-09 | evaluated | fails=2
+H-10 | evaluated | fails=2
+H-11 | evaluated | fails=3
+H-12 | evaluated | fails=1
+H-13 | evaluated | fails=0
+H-14 | evaluated | fails=2
+H-15 | evaluated | fails=1
+H-16 | evaluated | fails=0
+H-17 | evaluated | fails=0
+C-01 | evaluated | fails=3
+C-02 | evaluated | fails=0
+C-03 | evaluated | fails=5
+C-04 | evaluated | fails=2
+C-05 | evaluated | fails=1
+C-06 | evaluated | fails=9
+C-07 | evaluated | fails=1
+C-08 | evaluated | fails=3
+C-09 | evaluated | fails=1
+C-10 | evaluated | fails=1
+C-11 | evaluated | fails=2
+C-12 | evaluated | fails=1
+C-13 | evaluated | fails=1
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | missing-input | fails=0 | 必要なラベル: cors-*
+R-02 | missing-input | fails=0 | 必要なラベル: cors-*
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=0
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | evaluated | fails=1
+T-05 | evaluated | fails=0
+T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | missing-input | fails=0 | 必要なラベル: tls
+T-10 | missing-input | fails=0 | 必要なラベル: tls
+T-11 | missing-input | fails=0 | 必要なラベル: tls
+T-12 | evaluated | fails=0
+T-13 | manual | fails=0
+E-01 | evaluated | fails=0
+E-02 | evaluated | fails=0
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | 必要なラベル: （一般）
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0
+E-08 | evaluated | fails=0
+E-09 | evaluated | fails=0
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | evaluated | fails=1
+E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
+A-02 | evaluated | fails=0
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | missing-input | fails=0 | 必要なラベル: （一般）, unauth-*
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | missing-input | fails=0 | 必要なラベル: （一般）
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 必要なラベル: method-*, old-*

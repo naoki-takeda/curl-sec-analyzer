@@ -207,7 +207,7 @@ describe('レビュー指摘の修正（低優先度）', () => {
   it('HAR のラベル候補は組織プロファイルのセッションCookieの名前に従い、選び直したラベルは残す', async () => {
     const { suggestLabels } = await import('../src/parser/har');
     const { withProfile } = await import('../src/engine/profile');
-    const chain = (id: number, method: string, cookie?: string) => ({ id, url: `https://a.example/p${id}`, method, host: 'a.example', status: 200, hops: 1, sentAuth: false, sentAuthorization: false, sentCookieNames: [] as string[],
+    const chain = (id: number, method: string, cookie?: string) => ({ id, url: `https://a.example/p${id}`, method, host: 'a.example', status: 200, hops: 1, sentAuth: false, sentAuthorization: false, sentCookieNames: [] as string[], sentTokens: [] as string[],
       responses: [{ httpVersion: '2', status: 200, headers: new Map(cookie ? [['set-cookie', [cookie]]] : []), rawNames: [], kind: 'final' as const }],
       suggested: '', label: '', sensitive: undefined, excluded: false });
     const chains = [chain(0, 'POST', 'APPX=abc; Max-Age=3600; Secure'), chain(1, 'GET')];

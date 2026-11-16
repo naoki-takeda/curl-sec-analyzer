@@ -1,0 +1,127 @@
+#TARGET url=https://www.example.com/ label=top
+#META at=2026-11-01T10:00:00 cmd=curl_-sS_-i_--user_alice:CANARYpw01_--header_X-Api-Key:_CANARYkey02_-H_Cookie:_sid=CANARYsid03_https://www.example.com/
+HTTP/2 200
+content-type: text/html; charset=utf-8
+content-security-policy: frame-ancestors https://*
+set-cookie: .AspNetCore.Identity.Application=chunks-2; path=/; secure; httponly; samesite=lax
+set-cookie: .AspNetCore.Identity.ApplicationC1=CfDJ8Qw7Er2Ty9Ui4Op1As6Df3Gh8Jk5Lz0XcVb7Nm2Qw4Er6Ty8Ui0OpCANARYc1; path=/; secure; httponly; samesite=lax
+set-cookie: .AspNetCore.Identity.ApplicationC2=Xy7CANARY2; path=/; secure; httponly; samesite=lax
+
+<html><body><p>AKIAQWERTYUIOPASDFGH</p><a href="https://cdn.example.com/v/a.m3u8?hdnts=st=1763251200~exp=1763254800~acl=/*~hmac=CANARY0123456789abcdef0123456789abcdef0123456789abcdef">v</a><script>var c={"smtp":{"password":"************"}};var s="at /static/js/chunk.js:1:20345"</script></body></html>
+
+#TARGET url=https://www.example.com/logout label=logout
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+set-cookie: _oauth2_proxy=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/
+
+#TARGET url=https://www.example.com/mypage label=after-logout
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body><form method="post"><input type="email" name="email" autocomplete="username"><input id="current-password" name="current-password" type="password" autocomplete="current-password"></form></body></html>
+
+#TARGET url=https://www.example.com/attachments/download/42/evil.html label=upload-html
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<p>uploaded</p>
+
+#TARGET url=https://www.example.com/static/media/logo.6ce24c58.svg label=build-svg
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: image/svg+xml
+
+<svg/>
+
+#TARGET url=https://www.example.com/swagger-ui/ label=swagger
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><title>MyApp</title><p>We document our API with Swagger UI.</p></html>
+
+#TARGET url=https://www.example.com/app.js label=inline-map
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/javascript
+
+console.log(1)
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozfQ==
+
+#TARGET url=https://www.example.com/api/me label=unauth-me
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<!doctype html><html><div id="root"></div></html>
+
+#TARGET url=https://www.example.com/api/v1/users label=old-v1
+#META at=2026-11-01T10:00:00
+HTTP/2 404
+content-type: application/json
+
+{"error":"not found"}
+
+#TARGET url=https://www.example.com/api/profile label=profile kind=api sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+x-content-type-options: nosniff
+
+{"password":"********","apiKey":"***","secret":"[FILTERED]","name":"x"}
+
+#TARGET url=https://www.example.com/r?next=https://evil.example label=open-redirect
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /\evil.example
+
+#TARGET url=https://www.example.com/beacon label=beacon
+#META at=2026-11-01T10:00:00
+HTTP/2 204
+
+#TARGET url=https://www.example.com/api/session label=empty-401
+#META at=2026-11-01T10:00:00
+HTTP/1.1 401 Unauthorized
+www-authenticate: Bearer
+content-length: 0
+
+#TARGET url=https://www.example.com/assets/intro.mp4 label=video
+* Connected to www.example.com (192.0.2.1) port 443
+> GET /assets/intro.mp4 HTTP/1.1
+> Cookie: sessionid=abcdefCANARY0123456789
+>
+< HTTP/2 200
+< content-type: video/mp4
+< cache-control: public, max-age=86400
+< access-control-allow-origin: https://app.example.com
+<
+
+#TARGET url=https://www.example.com/ label=meter
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  0      0   0      0   0      0      0      0                              0
+HTTP/2 200
+content-type: text/plain; charset=utf-8
+
+ok
+
+#TARGET url=https://proxy-only.example.com/ label=tls-probe
+#TLSPROBE v=tls1 ok=0
+#TLSPROBE v=tls1_1 ok=0
+#TLSPROBE v=tls1_2 ok=0
+#TLSPROBE v=tls1_3 ok=0
+#CIPHERPROBE c=RC4-SHA ok=0
+#CIPHERPROBE c=DES-CBC3-SHA ok=0
+
+#TARGET url=https://192.0.2.10/ label=tls
+Certificate chain
+ 0 s:CN = internal-gw
+---
+Verify return code: 0 (ok)
+subject=CN = internal-gw
+notAfter=Jan  1 00:00:00 2036 GMT
+X509v3 Subject Alternative Name:
+    IP Address:192.0.2.10

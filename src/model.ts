@@ -9,8 +9,9 @@ export interface HttpResponse {
   headers: Map<string, string[]>;   // 名前は小文字
   rawNames: string[];               // 表示用の元の表記
   body?: string;                    // 先頭64KBまで
-  kind: 'final' | 'redirect' | 'informational' | 'connect';
-  url?: string;                     // そのホップのリクエストのURL（HAR だけ。curl の出力からは分からない）
+  // challenge：curl が認証し直した 401（--digest・--ntlm・--negotiate・--anyauth）。connect にはプロキシの 407 も含む
+  kind: 'final' | 'redirect' | 'informational' | 'connect' | 'challenge';
+  url?: string;                     // そのホップのリクエストのURL（HAR は記録から、curl はターゲットの URL から Location をたどって付ける）
 }
 export interface ParseWarning {
   kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label';
@@ -24,7 +25,10 @@ export interface TlsProbe { version: string; result: 'accepted' | 'rejected' | '
 export interface Target {
   label: string; url?: string; kind: 'html' | 'api' | 'auto'; sensitive?: boolean;
   verbose: boolean;                 // * Connected to などを検出したら true
-  responses: HttpResponse[]; sentOrigin?: string; sentAuth: boolean; info: string[];
+  responses: HttpResponse[]; sentOrigin?: string; info: string[];
+  /** 機密応答の推定（第0章 0.3②）：Authorization か、セッションCookieらしい名前の Cookie を送った。組織プロファイルの名前で engine/run.ts が作り直す */
+  sentAuth: boolean;
+  sentAuthorization?: boolean; sentCookieNames?: string[];   // 送った Authorization の有無と Cookie の名前（値は持たない。-v と HAR だけ）
   sentTokens: string[];             // -v の送信ヘッダにあったJWT。A-03 のデコードにだけ使い、画面・エクスポートには出さない
   meta: Record<string, string>; probes: Probe[]; tlsProbes: TlsProbe[]; cipherProbes: CipherProbe[]; openssl: string[];
 }
@@ -61,7 +65,10 @@ export interface Finding {
   condition?: number;               // 例: 1（①）
   obsId?: string; title: string; severity: Severity; status: Status;
   target: string; url?: string; host?: string;
-  targetKey?: string;               // 差分の突き合わせに使う。curl はラベル、HAR は「メソッド＋URL（マスク済み）」
+  partial?: boolean;                // 横断・ホスト単位の条件が入力不足で na（診断カバレッジで「一部の条件は入力不足」と示す）
+  limited?: boolean;                // 機密でない応答（静的リソースなど）だけで判定した（H-12。項目のすべてがこれなら、カバレッジで「機密応答では判定していない」と示す）
+  keyUrl?: string;                  // 対象の URL の突き合わせのキー（engine/targetKey.ts の urlKey。マスクした url ではなく生の URL から作る。例外の「ラベル URL」の照合に使う）
+  targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（マスク済み）」
   evidence: string; recommendation: string; references: string[];
   score: number;                    // obsId があるルール以外は常に0
   suppressedBy?: Suppression;       // 例外に該当したとき

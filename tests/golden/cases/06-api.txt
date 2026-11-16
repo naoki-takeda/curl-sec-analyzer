@@ -1,0 +1,83 @@
+#TARGET url=https://api.example.com/v1/users label=unauth-users
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+
+[{"id":1,"email":"alice@example.com","password":"Pa55CANARYword!","__v":0,"internal_notes":"vip"}]
+
+#TARGET url=https://api.example.com/v1/admin label=unauth-admin
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /login?next=%2Fv1%2Fadmin
+
+#TARGET url=https://api.example.com/v1/me label=unauth-me
+#META at=2026-11-01T10:00:00
+HTTP/2 401
+www-authenticate: Bearer realm="api"
+content-type: application/problem+json
+
+{"type":"about:blank","title":"Unauthorized","status":401}
+
+#TARGET url=https://api.example.com/v1/export?access_token=eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.c2lnQ0FOQVJZ&format=csv label=export
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+x-content-type-options: nosniff
+content-security-policy: default-src 'none'; frame-ancestors 'none'
+cache-control: no-store
+
+{"refresh_token":"rt_8f7e6d5cCANARYrefresh4b3a2910","data":[]}
+
+#TARGET url=https://api.example.com/v1/session label=jwt
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+set-cookie: access=eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIiwiZW1haWwiOiJhQGV4YW1wbGUuY29tIn0.; Path=/; Secure; HttpOnly; SameSite=Strict
+
+{"ok":true}
+
+#TARGET url=https://api.example.com/v1/items/abc label=error-api
+#META at=2026-11-01T10:00:00
+HTTP/2 400
+content-type: application/json
+
+{"error":"bad id"}
+
+#TARGET url=https://api.example.com/v1/nope label=error-notfound
+#META at=2026-11-01T10:00:00
+HTTP/2 404
+content-type: application/problem+json
+
+{"title":"Not Found","status":404}
+
+#TARGET url=https://api.example.com/v1/items label=ctype
+#META at=2026-11-01T10:00:00
+HTTP/2 201
+content-type: application/json
+
+{"id":2}
+
+#TARGET url=https://api.example.com/v1/items/1 label=method-delete
+#META at=2026-11-01T10:00:00
+HTTP/2 204
+
+#TARGET url=https://api.example.com/v0/items label=old-v0
+#META at=2026-11-01T10:00:00
+HTTP/2 410
+content-type: application/json
+
+{"error":"gone"}
+
+#TARGET url=https://api.example.com/v1/legacy label=legacy-json
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html
+
+{"items":[{"id":1}]}
+
+#TARGET url=https://api.example.com/graphql label=gql kind=api
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+
+{"data":{"user":{"__typename":"User","id":"1","isAdmin":false}}}

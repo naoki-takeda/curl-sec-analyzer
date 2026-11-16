@@ -1,0 +1,255 @@
+## targets
+unauth-users | https://api.example.com/v1/users | key=unauth-users | responses=1
+unauth-admin | https://api.example.com/v1/admin | key=unauth-admin | responses=1
+unauth-me | https://api.example.com/v1/me | key=unauth-me | responses=1
+export | https://api.example.com/v1/export?access_token=eyJh…(48 chars)&format=csv | key=export | responses=1
+jwt | https://api.example.com/v1/session | key=jwt | responses=1
+error-api | https://api.example.com/v1/items/abc | key=error-api | responses=1
+error-notfound | https://api.example.com/v1/nope | key=error-notfound | responses=1
+ctype | https://api.example.com/v1/items | key=ctype | responses=1
+method-delete | https://api.example.com/v1/items/1 | key=method-delete | responses=1
+old-v0 | https://api.example.com/v0/items | key=old-v0 | responses=1
+legacy-json | https://api.example.com/v1/legacy | key=legacy-json | responses=1
+gql | https://api.example.com/graphql | key=gql | responses=1
+
+## warnings
+
+## findings
+csp-sample-* | H-04.na | info | na | 
+ctype | A-08.1 | medium | fail | Content-Type: text/plain のJSONが HTTP 201 で処理された
+error-* | A-10.1 | info | fail | application/json: error-api / application/problem+json: error-notfound
+error-api | E-01.ok | info | pass | エラーの詳細らしき記述なし
+error-api | H-01.1 | high | fail | (ヘッダなし)
+error-api | H-02.na | info | na | HSTSがない（H-01で判定）
+error-api | H-03.1 | info | fail | (ヘッダなし)
+error-api | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-api | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-api | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
+error-api | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-api | H-08.1 | medium | fail | (ヘッダなし)
+error-api | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+error-api | H-10.1 | info | fail | (ヘッダなし)
+error-api | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+error-api | H-12.na | info | na | HTTP 400（鮮度の指定がなく、キャッシュされない応答）
+error-api | H-13.ok | info | pass | application/json
+error-api | H-14.1 | info | fail | (ヘッダなし)
+error-api | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+error-api | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+error-notfound | E-01.ok | info | pass | エラーの詳細らしき記述なし
+error-notfound | H-01.1 | high | fail | (ヘッダなし)
+error-notfound | H-02.na | info | na | HSTSがない（H-01で判定）
+error-notfound | H-03.1 | info | fail | (ヘッダなし)
+error-notfound | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-notfound | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-notfound | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
+error-notfound | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-notfound | H-08.1 | medium | fail | (ヘッダなし)
+error-notfound | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+error-notfound | H-10.1 | info | fail | (ヘッダなし)
+error-notfound | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+error-notfound | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-notfound | H-13.ok | info | pass | application/problem+json
+error-notfound | H-14.1 | info | fail | (ヘッダなし)
+error-notfound | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+error-notfound | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+export | A-02.1 | high | fail | https://api.example.com/v1/export?access_token=eyJh…(48 chars)&format=csv
+export | A-02.2 | medium | fail | 本文に refresh_token（値は表示しない）
+export | A-07.ok | info | pass | キー2種に秘密情報・内部属性らしきものなし
+export | A-09.ok | info | pass | application/json
+export | E-01.ok | info | pass | エラーの詳細らしき記述なし
+export | H-01.1 | high | fail | (ヘッダなし)
+export | H-02.na | info | na | HSTSがない（H-01で判定）
+export | H-03.ok | info | pass | default-src 'none'; frame-ancestors 'none'
+export | H-04.ok | info | pass | script-src 'none'
+export | H-05.2 | info | fail | base-uri がない（default-src にはフォールバックしない）
+export | H-06.ok | info | pass | frame-ancestors 'none'
+export | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし
+export | H-08.ok | info | pass | nosniff
+export | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+export | H-10.1 | info | fail | (ヘッダなし)
+export | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+export | H-12.ok | info | pass | no-store
+export | H-13.ok | info | pass | application/json
+export | H-14.1 | info | fail | (ヘッダなし)
+export | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+export | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+export | R-04.ok | info | pass | (ACAOなし)
+export | T-12.ok | info | pass | HTTP/2
+gql | A-02.ok | info | pass | URL・Location・本文にトークンなし
+gql | A-07.2 | medium | fail | キー: data.user.isAdmin
+gql | A-09.2 | medium | fail | nosniff なし
+gql | A-09.3 | info | fail | CSPなし
+gql | E-01.ok | info | pass | エラーの詳細らしき記述なし
+gql | E-05.na | info | na | HTTP 200（introspection を試した応答ではない）
+gql | H-01.1 | high | fail | (ヘッダなし)
+gql | H-02.na | info | na | HSTSがない（H-01で判定）
+gql | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+gql | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+gql | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+gql | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
+gql | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+gql | H-08.1 | medium | na | (ヘッダなし) | dedupedBy=A-09.2
+gql | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+gql | H-10.1 | info | fail | (ヘッダなし)
+gql | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+gql | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+gql | H-13.ok | info | pass | application/json
+gql | H-14.1 | info | fail | (ヘッダなし)
+gql | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+gql | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+gql | R-04.ok | info | pass | (ACAOなし)
+gql | T-12.ok | info | pass | HTTP/2
+jwt | A-02.ok | info | pass | URL・Location・本文にトークンなし
+jwt | A-03.1 | high | fail | alg: none
+jwt | A-03.2 | medium | fail | exp なし（alg: none）
+jwt | A-03.3 | medium | fail | 個人情報らしきクレーム: email（値は表示しない）
+jwt | A-07.ok | info | pass | キー1種に秘密情報・内部属性らしきものなし
+jwt | A-09.2 | medium | fail | nosniff なし
+jwt | A-09.3 | info | fail | CSPなし
+jwt | C-01.ok | info | pass | access
+jwt | C-02.ok | info | pass | access
+jwt | C-03.ok | info | pass | access
+jwt | C-04.ok | info | pass | access
+jwt | C-05.ok | info | pass | access
+jwt | C-06.1 | info | fail | access=eyJh…(68 chars); Path=/; Secure; HttpOnly; SameSite=Strict
+jwt | C-08.ok | info | pass | access
+jwt | C-11.ok | info | pass | access
+jwt | C-13.ok | info | pass | 共有キャッシュの指定なし
+jwt | E-01.ok | info | pass | エラーの詳細らしき記述なし
+jwt | H-01.1 | high | fail | (ヘッダなし)
+jwt | H-02.na | info | na | HSTSがない（H-01で判定）
+jwt | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+jwt | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+jwt | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+jwt | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
+jwt | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+jwt | H-08.1 | medium | na | (ヘッダなし) | dedupedBy=A-09.2
+jwt | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+jwt | H-10.1 | info | fail | (ヘッダなし)
+jwt | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+jwt | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+jwt | H-13.ok | info | pass | application/json
+jwt | H-14.1 | info | fail | (ヘッダなし)
+jwt | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+jwt | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+jwt | R-04.ok | info | pass | (ACAOなし)
+jwt | T-12.ok | info | pass | HTTP/2
+legacy-json | A-02.ok | info | pass | URL・Location・本文にトークンなし
+legacy-json | A-09.1 | medium | fail | Content-Type: text/html（本文はJSON）
+legacy-json | E-01.ok | info | pass | エラーの詳細らしき記述なし
+legacy-json | E-02.ok | info | pass | 一覧表示なし
+legacy-json | E-07.ok | info | pass | http:// の資源なし
+legacy-json | E-08.ok | info | pass | 外部オリジンのscriptなし
+legacy-json | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+legacy-json | H-01.1 | high | fail | (ヘッダなし)
+legacy-json | H-02.na | info | na | HSTSがない（H-01で判定）
+legacy-json | H-03.1 | high | fail | (ヘッダなし)
+legacy-json | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+legacy-json | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+legacy-json | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+legacy-json | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+legacy-json | H-08.1 | medium | fail | (ヘッダなし)
+legacy-json | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+legacy-json | H-10.1 | info | fail | (ヘッダなし)
+legacy-json | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+legacy-json | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+legacy-json | H-13.2 | medium | na | text/html | dedupedBy=A-09.1
+legacy-json | H-14.1 | low | fail | (ヘッダなし)
+legacy-json | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+legacy-json | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+legacy-json | R-04.ok | info | pass | (ACAOなし)
+legacy-json | T-12.ok | info | pass | HTTP/2
+logout/after-logout | C-12.na | info | na | 
+method-delete | A-11.1 | medium | fail | 想定外のメソッドが HTTP 204
+old-v0 | A-11.ok | info | pass | HTTP 410
+pre-login/login | C-09.na | info | na | 
+session-sample-* | C-07.na | info | na | 
+unauth-admin | A-01.2 | low | fail | HTTP 302 → /login?next=%2Fv1%2Fadmin
+unauth-admin | A-02.ok | info | pass | URL・Location・本文にトークンなし
+unauth-me | A-01.ok | info | pass | HTTP 401 / WWW-Authenticate: Bearer realm="api"
+unauth-me | A-02.ok | info | pass | URL・Location・本文にトークンなし
+unauth-me | A-07.ok | info | pass | キー3種に秘密情報・内部属性らしきものなし
+unauth-users | A-01.1 | high | fail | 認証なしで HTTP 200
+unauth-users | A-02.ok | info | pass | URL・Location・本文にトークンなし
+unauth-users | A-07.1 | high | fail | キー: [].password（値は表示しない）
+unauth-users | A-07.2 | medium | fail | キー: [].internal_notes
+
+## coverage
+H-01 | evaluated | fails=6
+H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
+H-03 | evaluated | fails=3
+H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | evaluated | fails=1
+H-06 | evaluated | fails=5
+H-07 | evaluated | fails=0
+H-08 | evaluated | fails=3
+H-09 | evaluated | fails=6
+H-10 | evaluated | fails=6
+H-11 | evaluated | fails=1
+H-12 | evaluated | fails=0
+H-13 | evaluated | fails=0
+H-14 | evaluated | fails=6
+H-15 | missing-input | fails=0 | 必要なラベル: logout
+H-16 | evaluated | fails=0
+H-17 | evaluated | fails=0
+C-01 | evaluated | fails=0
+C-02 | evaluated | fails=0
+C-03 | evaluated | fails=0
+C-04 | evaluated | fails=0
+C-05 | evaluated | fails=0
+C-06 | evaluated | fails=1
+C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | evaluated | fails=0
+C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
+C-10 | missing-input | fails=0 | 必要なラベル: http
+C-11 | evaluated | fails=0
+C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
+C-13 | evaluated | fails=0
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | missing-input | fails=0 | 必要なラベル: cors-*
+R-02 | missing-input | fails=0 | 必要なラベル: cors-*
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=0
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | missing-input | fails=0 | 必要なラベル: http
+T-05 | missing-input | fails=0 | 必要なラベル: （一般）, http
+T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | missing-input | fails=0 | 必要なラベル: tls
+T-10 | missing-input | fails=0 | 必要なラベル: tls
+T-11 | missing-input | fails=0 | 必要なラベル: tls
+T-12 | evaluated | fails=0
+T-13 | manual | fails=0
+E-01 | evaluated | fails=0
+E-02 | evaluated | fails=0
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | introspection のクエリ（{"query":"{__schema{types{name}}}"}）を POST して採取する
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0
+E-08 | evaluated | fails=0
+E-09 | evaluated | fails=0
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+A-01 | evaluated | fails=2
+A-02 | evaluated | fails=2
+A-03 | evaluated | fails=3
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | evaluated | fails=3
+A-08 | evaluated | fails=1
+A-09 | evaluated | fails=5
+A-10 | evaluated | fails=1
+A-11 | evaluated | fails=1

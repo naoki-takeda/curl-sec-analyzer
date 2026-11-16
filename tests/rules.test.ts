@@ -21,8 +21,9 @@ describe('H-01 HSTS', () => {
 });
 
 describe('H-03 CSP・H-06 クリックジャッキング', () => {
-  it('CSPなし→①、Report-Onlyのみ→②、強制あり→ok', () => {
-    expect(ids(target('https://a.example/', HTML))).toContain('H-03.1');
+  it('CSPなし→①（本文を採取していなければ na）、Report-Onlyのみ→②、強制あり→ok', () => {
+    expect(ids(target('https://a.example/', `${HTML}\n\n<html><body>x</body></html>`))).toContain('H-03.1');
+    expect(ids(target('https://a.example/', HTML))).toContain('H-03.na');   // <meta> の CSP があるかが分からない
     expect(ids(target('https://a.example/', HTML + "content-security-policy-report-only: default-src 'self'"))).toContain('H-03.2');
     expect(ids(target('https://a.example/', HTML + "content-security-policy: default-src 'self'"))).toContain('H-03.ok');
   });

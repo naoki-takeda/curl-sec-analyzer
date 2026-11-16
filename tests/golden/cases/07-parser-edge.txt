@@ -1,0 +1,65 @@
+#TARGET url=https://www.example.com/ label=top
+#META at=2026-11-01T10:00:00 cmd=C1
+HTTP/1.1 200 Connection established
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=63072000; includeSubDomains
+x-content-type-options: nosniff
+
+<html><body>proxied</body></html>
+
+#TARGET url=https://www.example.com/x label=top
+#META at=2026-11-01T10:00:00
+HTTP/1.1 100 Continue
+
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+X-Frame-Options: DENY
+
+<html><body>second top</body></html>
+
+#TARGET url=http://www.example.com/upgrade label=page
+#META at=2026-11-01T10:00:00
+HTTP/1.1 301 Moved Permanently
+Location: https://www.example.com/upgrade
+Set-Cookie: tmp=abc123; Path=/
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=63072000; includeSubDomains
+
+#TARGET url=https://www.example.com/api/status label=json-header
+#META at=2026-11-01T10:00:00
+{"content-type":["application/json"],"cache-control":["no-store"],"x-content-type-options":["nosniff"]}
+#META response_code=200
+
+#TARGET url=https://slow.example.com/ label=slow
+#META at=2026-11-01T10:00:00
+* Connected to slow.example.com (192.0.2.30) port 443
+> GET / HTTP/1.1
+> Host: slow.example.com
+>
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:--  0:00:01 --:--:--     0< HTTP/1.1 200 OK
+< Content-Type: text/html; charset=utf-8
+< Cache-Control: no-store
+<
+
+#TARGET url=https://www.example.com/nobreak label=nobreak
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+
+{"a":1}#TARGET url=https://www.example.com/after label=after
+#META at=2026-11-01T10:00:00
+HTTP/2 404
+content-type: text/html; charset=utf-8
+
+<html>not found</html>
+
+#TARGET url=https://www.example.com/ label=garbage
+#META at=2026-11-01T10:00:00
+this is not curl output
+neither is this line

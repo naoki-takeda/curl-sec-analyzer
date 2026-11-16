@@ -1,7 +1,8 @@
 // rules/transport.ts：第4章 メソッド・転送・ヘッダインジェクション（T-01、T-04〜T-08、T-12。TLSは rules/hostRules.ts）
-import type { Rule } from '../model';
-import { mk } from './util';
-import { baseLabel } from '../parser/target';
+import type { HttpResponse, Rule } from '../model';
+import { NO_BODY_REC, mk } from './util';
+import { baseLabel, sameDocument } from '../parser/target';
+import { LOGIN_PATH } from './html';
 
 export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイレクト', appliesTo: 'any', scope: 'target',
   basis: ['MDN HTTP Observatory'],
@@ -12,6 +13,8 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     if (!first) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
     const rec = '同じホストの https:// へ 301 または 308 で転送する';
     const loc = first.headers.get('location')?.[0];
+    // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、転送したかどうかも分からない（A-01・C-12・E-05 と同じ）
+    if (!first.status) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
     // HTTP を 4xx で断る（CloudFront の「HTTPS のみ」、HTTP を拒否する API）は、HTTP でコンテンツを返していないので①にしない。
     // 5xx はサーバの不調で、HTTP をどう扱う設定かが分からない
     if (first.status >= 400 && first.status < 500) return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', `HTTP ${first.status}（HTTP のリクエストを拒否）`, '')];
@@ -24,7 +27,8 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     const ev = `HTTP ${first.status} → ${to.href}`;
     if (to.protocol !== 'https:') return [mk(httpsRedirect, ctx, 2, 'medium', 'fail', ev, rec, { obsId: 'redirection-not-to-https', score: -20 })];
     if (to.hostname !== from.hostname) return [mk(httpsRedirect, ctx, 3, 'low', 'fail', ev, rec, { obsId: 'redirection-off-host-from-http', score: -5 })];
-    if (first.status === 302 || first.status === 307) return [mk(httpsRedirect, ctx, 4, 'info', 'fail', ev, '恒久的な転送（301 または 308）にする')];
+    // 303 See Other も一時的な転送（ブラウザは覚えない）
+    if (first.status === 302 || first.status === 303 || first.status === 307) return [mk(httpsRedirect, ctx, 4, 'info', 'fail', ev, '恒久的な転送（301 または 308）にする')];
     return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', ev, '')];
   } };
 
@@ -37,11 +41,14 @@ export const redirectChain: Rule = { id: 'T-05', title: 'リダイレクトチ�
     if (!hops.length || !ctx.target.url) return [];
     const out = [];
     let cur = ctx.target.url, sawHttps = /^https:\/\//i.test(cur);
+    // 診断した URL 自身のポート（https://a.example:8443/）への転送は、内部のポートの露出ではない
+    const own = (() => { try { return new URL(ctx.target.url!); } catch { return undefined; } })();
     for (const r of hops) {
       let to: URL;
       try { to = new URL(r.headers.get('location')![0], cur); } catch { continue; }
       if (sawHttps && to.protocol === 'http:') out.push(mk(redirectChain, ctx, 1, 'medium', 'fail', `${cur} → ${to.href}`, 'チェーンの途中で http に戻さない'));
-      if (INTERNAL_HOST.test(to.hostname) || (to.port && !['80', '443'].includes(to.port)))
+      const ownPort = !!own && to.hostname === own.hostname && to.port === own.port;   // 同じホストの同じポートだけ（別のホストの同じポートは対象）
+      if (INTERNAL_HOST.test(to.hostname) || (to.port && !['80', '443'].includes(to.port) && !ownPort))
         out.push(mk(redirectChain, ctx, 2, 'low', 'fail', `Location: ${to.href}`, 'Location に内部ホスト名やポートを出さない（リバースプロキシの設定を確認）'));
       sawHttps ||= to.protocol === 'https:'; cur = to.href;
     }
@@ -54,6 +61,8 @@ export const hostInjection: Rule = { id: 'T-07', title: 'Host・X-Forwarded-Host
   run(ctx) {
     if (!ctx.final) return [mk(hostInjection, ctx, 'na', 'info', 'na', '応答がない', '')];
     const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(l => HOST_INJ_VALUE.test(l));
+    const ok2xx = ctx.final.status >= 200 && ctx.final.status < 300;
+    if (!loc && ok2xx && !ctx.final.body?.trim()) return [mk(hostInjection, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
     const body = ctx.final.body?.match(/https?:\/\/[^\s"'<>]*evil\.example[^\s"'<>]*/i)?.[0];
     if (loc || body) return [mk(hostInjection, ctx, 2, 'medium', 'fail', loc ? `Location: ${loc}` : `本文の絶対URL: ${body}`, '絶対URLは設定値のホスト名から作り、Host・X-Forwarded-Host を信頼しない')];
     return [mk(hostInjection, ctx, 'ok', 'info', 'pass', 'テスト値（evil.example）は応答に現れない', '')];
@@ -76,6 +85,7 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
     const f = ctx.final;
     if (!f) return [mk(methods, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (baseLabel(ctx.target.label) === 'trace') {
+      if (f.status === 200 && !f.body?.trim()) return [mk(methods, ctx, 'na', 'info', 'na', 'HTTP 200（本文を採取していない。反射したかが分からない）', NO_BODY_REC)];
       const reflected = f.status === 200 && /^TRACE \S+ HTTP\//m.test(f.body ?? '');
       return reflected ? [mk(methods, ctx, 1, 'medium', 'fail', `HTTP ${f.status}（リクエストを反射）`, 'TRACE を無効にする（405 か 501 を返す）')]
                        : [mk(methods, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
@@ -87,13 +97,37 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
                         : [mk(methods, ctx, 'ok', 'info', 'pass', `Allow: ${allow}`, '')];
   } };
 
+const OPEN_REDIRECT_REC = 'next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す';
 export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレクト', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Unvalidated Redirects CS', 'IPA'],
   run(ctx) {
     if (!ctx.final) return [mk(openRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(l => /^(?:https?:)?\/\/(?:[^/]*@)?evil\.example\b/i.test(l.trim()));
-    return loc ? [mk(openRedirect, ctx, 1, 'medium', 'fail', `Location: ${loc}`, '転送先は許可リスト（または相対パス）に限る')]
-               : [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')];
+    // 転送先はブラウザと同じ読み方（WHATWG URL）で解釈する。http・https の URL の「\」は「/」と読まれるので、/\evil.example・https:\\evil.example/・
+    // ///evil.example も外部ホストへの転送になる（正規表現の //evil.example だけでは、よく使われる回避の値を合格にした）
+    // ターゲットの URL が絶対 URL でないとき（url=a.example/r?to=…）は、仮の基準で読む（基準を作れずに例外になり、evil.example への転送を合格にした）
+    const base = (() => { try { return new URL(ctx.target.url ?? '').href; } catch { return 'https://x.invalid/'; } })();
+    // 末尾のドット（FQDN の表記 evil.example.）も同じホスト
+    const evil = (l: string) => { try { return /(?:^|\.)evil\.example\.?$/i.test(new URL(l.trim(), base).hostname); } catch { return false; } };
+    const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(evil);
+    // Refresh ヘッダ（Refresh: 0; url=https://evil.example/）による転送も見る
+    const refresh = ctx.target.responses.flatMap(r => r.headers.get('refresh') ?? []).map(v => v.match(/url\s*=\s*['"]?([^'"\s;]+)/i)?.[1] ?? '').find(evil);
+    if (loc || refresh) return [mk(openRedirect, ctx, 1, 'medium', 'fail', loc ? `Location: ${loc}` : `Refresh: url=${refresh}`, '転送先は許可リスト（または相対パス）に限る')];
+    // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）
+    // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面への転送（next= を持ち越した /login?next=…evil.example。ログインのあとで使う）と、
+    // 同じページへの転送（末尾の /）は、転送先の検証を試していないので na
+    const tested = (r: HttpResponse) => {
+      // 試していない転送：ログイン画面・認証の入り口への転送（テスト値を持ち越したかによらない。Spring・Devise・Laravel は保存したリクエストで
+      // ログインのあとに戻る）と、同じページへの転送。/home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、
+      // 転送先を検証して止めたので合格
+      const loc = r.headers.get('location')?.[0] ?? '';
+      let path = ''; try { path = new URL(loc, r.url ?? base).pathname; } catch { /* 解釈できない */ }
+      return !LOGIN_PATH.test(path.length > 1 ? path.replace(/\/+$/, '') : path) && !sameDocument(r, ctx.target.url);
+    };
+    const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location') && tested(r)) || r.headers.has('refresh'));
+    return redirected ? [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')]
+      : [mk(openRedirect, ctx, 'na', 'info', 'na', ctx.target.responses.some(r => r.status >= 300 && r.status < 400)
+        ? `HTTP ${ctx.final.status}（ログイン画面か同じページへの転送。転送先を検証しているかは分からない）`
+        : `HTTP ${ctx.final.status}（転送しなかった。転送先を検証しているかは分からない）`, OPEN_REDIRECT_REC)];
   } };
 
 export const httpVersion: Rule = { id: 'T-12', title: 'HTTP/2・HTTP/3', appliesTo: 'any', scope: 'target',

@@ -1,0 +1,233 @@
+## targets
+top | https://shop.example.com/ | key=top | responses=1
+legacy | https://legacy.example.com/ | key=legacy | responses=1
+docs | https://docs.example.com/ | key=docs | responses=1
+blog | https://blog.example.com/ | key=blog | responses=1
+asset | https://shop.example.com/assets/app-Dk3x9Lq2.js | key=asset | responses=1
+robots | https://shop.example.com/robots.txt | key=robots | responses=1
+
+## warnings
+
+## findings
+apex | H-02.na | info | na | 
+asset | A-02.ok | info | pass | URL・Location・本文にトークンなし
+asset | E-13.2 | low | fail | 参照: app-Dk3x9Lq2.js.map
+asset | H-01.1 | high | fail | (ヘッダなし)
+asset | H-02.na | info | na | HSTSがない（H-01で判定）
+asset | H-08.1 | medium | fail | (ヘッダなし)
+asset | H-11.ok | info | pass | (該当なし)
+asset | H-12.ok | info | pass | public, max-age=31536000, immutable
+asset | H-13.ok | info | pass | application/javascript
+asset | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+asset | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+asset | R-04.3 | info | fail | ACAO: *
+asset | R-08.ok | info | pass | Timing-Allow-Origin: *
+asset | T-12.ok | info | pass | HTTP/2
+blog | A-02.ok | info | pass | URL・Location・本文にトークンなし
+blog | E-01.ok | info | pass | エラーの詳細らしき記述なし
+blog | E-02.ok | info | pass | 一覧表示なし
+blog | E-07.ok | info | pass | http:// の資源なし
+blog | E-08.ok | info | pass | 外部オリジンのscriptなし
+blog | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+blog | E-12.na | info | na | トークンのないPOSTフォーム1件（機密応答かどうか分からない）
+blog | H-01.4 | low | fail | max-age=31536000
+blog | H-02.2 | info | fail | max-age=31536000
+blog | H-03.ok | info | pass | script-src * 'unsafe-inline' 'unsafe-eval'; block-all-mixed-content; report-uri /r / frame-ancestors *
+blog | H-04.1 | high | fail | script-src 'unsafe-inline'（csp_evaluator: SCRIPT_UNSAFE_INLINE）
+blog | H-04.2 | high | fail | script-src *（csp_evaluator: PLAIN_WILDCARD）
+blog | H-04.2 | high | fail | script-src（csp_evaluator: MISSING_DIRECTIVES）
+blog | H-04.3 | medium | fail | script-src 'unsafe-eval'（csp_evaluator: SCRIPT_UNSAFE_EVAL）
+blog | H-05.1 | medium | fail | object-src も default-src もない
+blog | H-05.2 | medium | fail | base-uri がない（default-src にはフォールバックしない）
+blog | H-06.4 | medium | fail | frame-ancestors *
+blog | H-07.1 | low | fail | block-all-mixed-content
+blog | H-07.2 | info | fail | report-uri のみ
+blog | H-08.1 | medium | fail | (ヘッダなし)
+blog | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+blog | H-10.1 | info | fail | (ヘッダなし)
+blog | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+blog | H-12.na | info | na | 機密応答かどうか分からない（public, max-age=60）
+blog | H-13.ok | info | pass | text/html; charset=utf-8
+blog | H-14.1 | low | fail | (ヘッダなし)
+blog | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+blog | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+blog | R-04.ok | info | pass | (ACAOなし)
+blog | T-12.ok | info | pass | HTTP/2
+csp-sample-* | H-04.na | info | na | 
+docs | A-02.ok | info | pass | URL・Location・本文にトークンなし
+docs | E-01.ok | info | pass | エラーの詳細らしき記述なし
+docs | E-02.ok | info | pass | 一覧表示なし
+docs | E-07.ok | info | pass | http:// の資源なし
+docs | E-08.ok | info | pass | 外部オリジンのscriptなし
+docs | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+docs | H-01.1 | high | fail | max-age=0（max-age=0 は HSTS を解除する指定）
+docs | H-02.2 | info | fail | max-age=0
+docs | H-03.ok | info | pass | default-src 'self'; img-src 'self'
+docs | H-04.ok | info | pass | script-src 'self' / script-src 'self'
+docs | H-05.2 | medium | fail | base-uri がない（default-src にはフォールバックしない）
+docs | H-06.1 | medium | fail | X-Frame-Options: SAMEORGIN（不正な値。ブラウザは無視する）
+docs | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし
+docs | H-08.ok | info | pass | nosniff, nosniff
+docs | H-09.ok | info | pass | no-referrer
+docs | H-10.1 | info | fail | (ヘッダなし)
+docs | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+docs | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+docs | H-13.ok | info | pass | text/html; charset=utf-8
+docs | H-14.1 | low | fail | (ヘッダなし)
+docs | H-16.1 | low | fail | x-generator: Drupal 10 (https://www.drupal.org)
+docs | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+docs | R-04.ok | info | pass | (ACAOなし)
+docs | T-12.ok | info | pass | HTTP/2
+error-* | A-10.na | info | na | 
+legacy | A-02.ok | info | pass | URL・Location・本文にトークンなし
+legacy | E-01.ok | info | pass | エラーの詳細らしき記述なし
+legacy | E-02.ok | info | pass | 一覧表示なし
+legacy | E-07.2 | low | fail | <img src="http://legacy.example.com/logo.png">
+legacy | E-08.1 | low | fail | https://cdn.thirdparty.example（integrity なし 1件／1件）。例：<script src="https://cdn.thirdparty.example/lib.js">
+legacy | E-09.2 | low | fail | 内部URL: http://db.prod.internal/admin
+legacy | E-09.2 | low | fail | 開発用コメント（「TODO」を含む。中身は表示しない）
+legacy | E-09.3 | info | fail | <meta name="generator" content="WordPress 6.4.2">
+legacy | H-01.2 | medium | fail | max-age=86400
+legacy | H-02.2 | info | fail | max-age=86400
+legacy | H-03.2 | medium | fail | Report-Onlyのみ: default-src 'self'; report-uri /csp
+legacy | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+legacy | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+legacy | H-06.2 | medium | fail | X-Frame-Options: ALLOW-FROM https://partner.example
+legacy | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+legacy | H-08.1 | medium | fail | (ヘッダなし)
+legacy | H-09.1 | medium | fail | unsafe-url
+legacy | H-10.2 | low | fail | Feature-Policy のみ: camera 'none'
+legacy | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+legacy | H-12.na | info | na | 機密応答かどうか分からない（(Cache-Controlなし、Pragma: no-cache)）
+legacy | H-13.2 | medium | fail | text/html
+legacy | H-14.1 | low | fail | (ヘッダなし)
+legacy | H-16.1 | low | fail | server: Apache/2.4.41 (Ubuntu)
+legacy | H-16.1 | low | fail | x-powered-by: PHP/7.4.3
+legacy | H-16.3 | medium | fail | x-debug-token-link: http…(58 chars)
+legacy | H-16.3 | medium | fail | x-debug-token: a1b2…(21 chars)
+legacy | H-16.4 | low | fail | via: 1.1 app01.prod.internal
+legacy | H-16.5 | low | fail | server-timing: db, app（desc・dur の値は表示しない）
+legacy | H-17.1 | low | fail | x-xss-protection: 1; mode=block
+legacy | H-17.2 | info | fail | feature-policy: camera 'none'
+legacy | H-17.2 | info | fail | pragma: no-cache
+legacy | R-04.ok | info | pass | (ACAOなし)
+legacy | T-12.1 | info | fail | HTTP/1.1
+logout/after-logout | C-12.na | info | na | 
+pre-login/login | C-09.na | info | na | 
+robots | A-02.ok | info | pass | URL・Location・本文にトークンなし
+robots | E-04.1 | low | fail | Disallow: /admin-console/
+robots | H-01.1 | high | fail | (ヘッダなし)
+robots | H-02.na | info | na | HSTSがない（H-01で判定）
+robots | H-08.1 | medium | fail | (ヘッダなし)
+robots | H-11.ok | info | pass | (該当なし)
+robots | H-12.3 | info | fail | (ヘッダなし)
+robots | H-13.ok | info | pass | text/plain
+robots | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+robots | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+robots | R-04.ok | info | pass | (ACAOなし)
+robots | T-12.ok | info | pass | HTTP/2
+session-sample-* | C-07.na | info | na | 
+top | A-02.ok | info | pass | URL・Location・本文にトークンなし
+top | E-01.ok | info | pass | エラーの詳細らしき記述なし
+top | E-02.ok | info | pass | 一覧表示なし
+top | E-07.ok | info | pass | http:// の資源なし
+top | E-08.ok | info | pass | 外部オリジンのscriptなし
+top | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+top | H-01.ok | info | pass | max-age=63072000; includeSubDomains; preload
+top | H-02.ok | info | pass | max-age=63072000; includeSubDomains; preload
+top | H-03.ok | info | pass | default-src 'self'; script-src 'nonce-r4nd…(21 chars)' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp
+top | H-04.ok | info | pass | script-src 'nonce-r4nd…(21 chars)' 'strict-dynamic'
+top | H-05.ok | info | pass | object-src・base-uri あり
+top | H-06.ok | info | pass | frame-ancestors 'none'
+top | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし
+top | H-08.ok | info | pass | nosniff
+top | H-09.ok | info | pass | strict-origin-when-cross-origin
+top | H-10.ok | info | pass | camera=(), microphone=(), geolocation=()
+top | H-11.na | info | na | 機密応答かどうか分からない（CORP なし、COOP あり）
+top | H-12.ok | info | pass | no-store
+top | H-13.ok | info | pass | text/html; charset=utf-8
+top | H-14.ok | info | pass | none
+top | H-16.2 | info | fail | server: nginx
+top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+top | R-04.ok | info | pass | (ACAOなし)
+top | T-12.ok | info | pass | HTTP/2
+
+## coverage
+H-01 | evaluated | fails=5
+H-02 | evaluated | fails=3 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: apex（https://apexドメイン/）
+H-03 | evaluated | fails=1
+H-04 | evaluated | fails=4 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | evaluated | fails=3
+H-06 | evaluated | fails=3
+H-07 | evaluated | fails=2
+H-08 | evaluated | fails=4
+H-09 | evaluated | fails=2
+H-10 | evaluated | fails=3
+H-11 | evaluated | fails=3
+H-12 | evaluated | fails=1
+H-13 | evaluated | fails=1
+H-14 | evaluated | fails=3
+H-15 | missing-input | fails=0 | 必要なラベル: logout
+H-16 | evaluated | fails=8
+H-17 | evaluated | fails=3
+C-01 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-02 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-04 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-05 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-06 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
+C-10 | missing-input | fails=0 | 必要なラベル: http
+C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
+C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | missing-input | fails=0 | 必要なラベル: cors-*
+R-02 | missing-input | fails=0 | 必要なラベル: cors-*
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=1
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | evaluated | fails=0
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | missing-input | fails=0 | 必要なラベル: http
+T-05 | missing-input | fails=0 | 必要なラベル: （一般）, http
+T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | missing-input | fails=0 | 必要なラベル: tls
+T-10 | missing-input | fails=0 | 必要なラベル: tls
+T-11 | missing-input | fails=0 | 必要なラベル: tls
+T-12 | evaluated | fails=1
+T-13 | manual | fails=0
+E-01 | evaluated | fails=0
+E-02 | evaluated | fails=0
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | evaluated | fails=1
+E-05 | missing-input | fails=0 | 必要なラベル: （一般）
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=1
+E-08 | evaluated | fails=1
+E-09 | evaluated | fails=3
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+E-13 | evaluated | fails=1
+A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
+A-02 | evaluated | fails=0
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | missing-input | fails=0 | 必要なラベル: （一般）, unauth-*
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | missing-input | fails=0 | 必要なラベル: （一般）
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 必要なラベル: method-*, old-*

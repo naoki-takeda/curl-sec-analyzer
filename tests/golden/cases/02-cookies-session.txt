@@ -1,0 +1,75 @@
+#TARGET url=https://app.example.com/login label=pre-login
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+set-cookie: JSESSIONID=4f1c9a2bCANARYpre000000000000aa; Path=/; HttpOnly
+cache-control: no-store
+
+<form action="/login" method="post"><input type="hidden" name="_csrf" value="t0kenCANARYcsrf1234567"><input name="u"><input type="password" name="p"></form>
+
+#TARGET url=https://app.example.com/login label=login sensitive=1
+#META at=2026-11-01T10:00:05
+HTTP/2 302
+location: /mypage
+set-cookie: JSESSIONID=4f1c9a2bCANARYpre000000000000aa; Path=/; HttpOnly
+set-cookie: remember_token=9d8c7b6aCANARYremember55555555; Max-Age=; Expires=Wed, 01 Jan 2031 00:00:00 GMT; Path=/; Secure; HttpOnly
+set-cookie: BIGipServerpool_web=1677787402.20480.0000; Path=/; Secure
+set-cookie: __cf_bm=abcdefgh.CANARYcfbm-1700000000; Path=/; Domain=.example.com; Secure; SameSite=None
+
+#TARGET url=https://app.example.com/login label=session-sample-1
+#META at=2026-11-01T10:01:00
+HTTP/2 302
+location: /mypage
+set-cookie: sid=aaaa1111CANARYsess000001; Path=/; Secure; HttpOnly; SameSite=Lax
+
+#TARGET url=https://app.example.com/login label=session-sample-2
+#META at=2026-11-01T10:01:01
+HTTP/2 302
+location: /mypage
+set-cookie: sid=aaaa1111CANARYsess000002; Path=/; Secure; HttpOnly; SameSite=Lax
+
+#TARGET url=https://app.example.com/login label=session-sample-3
+#META at=2026-11-01T10:01:02
+HTTP/2 302
+location: /mypage
+set-cookie: sid=aaaa1111CANARYsess000003; Path=/; Secure; HttpOnly; SameSite=Lax
+
+#TARGET url=https://app.example.com/mypage label=mypage sensitive=1
+#META at=2026-11-01T10:02:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+cache-control: private
+
+<form action="/profile" method="post"><input name="nickname"></form>
+
+#TARGET url=https://app.example.com/logout label=logout
+#META at=2026-11-01T10:03:00
+HTTP/2 302
+location: /login
+set-cookie: JSESSIONID=; Max-Age=0; Path=/
+
+#TARGET url=https://app.example.com/mypage label=after-logout sensitive=1
+#META at=2026-11-01T10:03:05
+HTTP/2 200
+content-type: text/html; charset=utf-8
+cache-control: no-store
+
+#TARGET url=https://www.example.com/ label=cookies
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=63072000; includeSubDomains
+set-cookie: __host-sid=Zx8f9aQ2CANARYhost7sT1vW3yB5c; Secure; HttpOnly; Path=/app
+set-cookie: session_id=6ba7b810-9dad-11d1-80b4-00c04fd430c8; Secure; HttpOnly; SameSite=Lax
+set-cookie: pref=dark; Domain=www.example.com; Secure
+set-cookie: tracking=1; Domain=.example.com
+set-cookie: ARRAffinitySameSite=abcdef0123456789; Secure; SameSite=None
+set-cookie: weird=1; SameSite=Loose; Secure
+set-cookie: PHPSESSID=short1; Secure; HttpOnly; SameSite=Lax
+cache-control: public, s-maxage=600
+
+#TARGET url=http://app.example.com/ label=http
+#META at=2026-11-01T10:00:00
+HTTP/1.1 303 See Other
+Location: https://app.example.com/
+Set-Cookie: JSESSIONID=77aa88bbCANARYhttp0000000000cc; Path=/

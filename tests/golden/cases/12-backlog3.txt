@@ -1,0 +1,67 @@
+#TARGET url=https://www.example.com/ label=tls
+#META at=2026-11-01T10:00:00
+Connecting to 192.0.2.10
+CONNECTED(00000003)
+---
+Certificate chain
+ 0 s:CN=www.example.com
+   i:C=US, O=Example CA, CN=Example Issuing CA
+   a:PKEY: EC, (prime256v1); sigalg: ecdsa-with-SHA1
+   v:NotBefore: Oct  1 00:00:00 2026 GMT; NotAfter: Oct  1 00:00:00 2027 GMT
+ 1 s:C=US, O=Example CA, CN=Example Issuing CA
+   i:C=US, O=Example CA, CN=Example Root CA
+   a:PKEY: rsaEncryption, 2048 (bit); sigalg: sha256WithRSAEncryption
+ 2 s:C=US, O=Example CA, CN=Example Root CA
+   i:C=US, O=Example CA, CN=Example Root CA
+   a:PKEY: rsaEncryption, 4096 (bit); sigalg: sha1WithRSAEncryption
+---
+New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384
+Verify return code: 0 (ok)
+
+#TARGET url=https://www.example.com/ label=tls
+#META at=2026-09-01T10:00:00
+CONNECTED(00000003)
+Verify return code: 0 (ok)
+subject=CN = www.example.com
+notBefore=Oct  1 00:00:00 2025 GMT
+notAfter=Oct  1 00:00:00 2026 GMT
+X509v3 Subject Alternative Name:
+    DNS:www.example.com
+
+#TARGET url=https://www.example.com/ label=top
+#META at=2026-11-01T10:00:00
+* Uses proxy env variable https_proxy == 'http://proxy.example:3128'
+* Connected to proxy.example (192.0.2.1) port 3128
+> GET / HTTP/1.1
+> Host: www.example.com
+>
+< HTTP/1.1 200 OK
+< content-type: text/html; charset=utf-8
+< strict-transport-security: max-age=63072000; includeSubDomains; preload
+< via: 1.1 varnish (Varnish/7.4)
+< content-security-policy: default-src 'self'; script-src 'self' 'sha256-Ab3dEf7GhJ2kLm9NpQ4rStUv/wXyZ0123456789abcd='; frame-ancestors 'none'
+<
+
+#TARGET url=https://www.example.com/docs/GettingStartedV2Guide label=docs
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+via: 1.1 vegur
+
+<html><head><script src="https://cdn.example.net/a.js" integrity="sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy9rx7HNQlGYl1kPzQho1wx4JwY8wC" crossorigin="anonymous"></script></head><body><img src="/img/MyCompanyLogo2026Final.png"><a href="http://intranet.corp/reset//Xk7Qp2CANARYz9Lm4Wv8Rt">reset</a></body></html>
+
+#TARGET url=https://www.example.com/.well-known/security.txt label=sec
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/plain
+
+Contact: mailto:security@example.com
+Expires: 2025-01-01T00:00:00.000Z
+
+#TARGET url=https://www.example.com/logout label=logout
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+set-cookie: remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d=deleted; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+set-cookie: laravel_session=CANARYnew0123456789abcdefABCDEF; path=/; secure; httponly; samesite=lax
+

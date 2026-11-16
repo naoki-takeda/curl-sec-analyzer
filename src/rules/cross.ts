@@ -1,9 +1,10 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, finalResponse, firstStatus, isHttps, logoutFailed, ownChain } from '../parser/target';
-import { isDeletion, looksLikeSession, parseSetCookie } from '../parser/setCookie';
+import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument } from '../parser/target';
+import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp } from './util';
+import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
+import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
@@ -11,32 +12,169 @@ const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Se
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
 const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.now(); return (t?.responses ?? []).flatMap(r => r.headers.get('set-cookie') ?? [])
-  .map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, now) && looksLikeSession(c, now)); };
+  .map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, now) && looksLikeSession(c, now) && !isChunkMarker(c)); };   // 値を比べるので、分割の印は除く
+
+/**
+ * 2xx・3xx でもログインに失敗した応答。Spring Security の失敗時の転送（302 Location: /login?error）、ログイン画面への転送、
+ * パスワード欄のある画面を 200 で返し直すもの（Django、ASP.NET Identity、WordPress）。失敗ならセッションIDを再発行しないのは当然なので C-09① にしない
+ */
+// 失敗とみなす転送先：?error などのクエリ、ログインらしいパス（/login・/signin など）、login の URL のパス、pre-login の URL のパス（トップ（/）を除く）。
+// パスは末尾の / を除いて比べ、クエリは比べない（/login?next=%2Fhome から /login への転送は失敗）。ただし login の URL のパスがトップ（/）の
+// ときは、クエリで画面を切り替えるアプリ（/?_task=login と /?_task=mail）なので、クエリまで比べる。
+// pre-login の URL のパスがトップ（/）のときは比べない（HAR では pre-login がトップになることが多く、成功してトップに転送されたのを失敗とみなした）。
+// パスワード欄は、login 自身の応答と、ログインらしいパスへ転送したときの最後の応答で見る（-L でたどったアカウント画面のパスワード変更の欄で、
+// 成功を失敗とみなさない）
+// ログイン画面・認証の入り口のパス：/login・/signin・Devise の /users/sign_in・WordPress の /wp-login.php・OIDC の …/openid-connect/auth・
+// /authorize・oauth2-proxy の /oauth2/start・SAML の /saml/login
+// 拡張子の付いたログイン画面（ASP.NET の /Account/Login.aspx、/login.php・.jsp・.do）と、Spring Security の /oauth2/authorization/<登録名> も含める
+// IdP の入り口（Google の /o/oauth2/v2/auth、Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls/、SimpleSAMLphp の SSOService.php）も含める。
+// T-06 と共有する（rules/html.ts の LOGIN_PATH。T-06 だけ狭い一覧を持っていて、/login.php・/oauth2/authorization/x への転送を合格にした）
+const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
+/** SPA の画面：ルートの要素（root・app・__next・__nuxt）とスクリプトがあり、スクリプト・スタイル・タグを除いた文字がないか、読み込み中の案内だけの HTML */
+// ページのデータを属性やスクリプトに入れたもの（Inertia の data-page、Next.js の __NEXT_DATA__、__INITIAL_STATE__・__NUXT__・__APOLLO_STATE__）は、
+// サーバが利用者のデータを返しているので殻としない。文字は、ないか「Loading…」「読み込み中」だけのとき（<noscript> の案内を除く）に限る
+// （文字数で見ると、短いサーバ描画のマイページ（マイページ 山田太郎様のご注文）まで殻とみなした）
+const spaShell = (b: string): boolean => /<div\b[^>]{0,200}\bid\s*=\s*["']?(?:root|app|__next|__nuxt|q-app)\b/i.test(b) && /<script\b/i.test(b)
+  // 状態の名前（__NUXT_DATA__・ng-state・window.Laravel・window.__USER__ など）は一覧で追いきれないので、形で見る：インラインのスクリプトに中身が
+  // あり、オブジェクト・配列・JSON を代入・読み込むもの、type="application/json" のスクリプト、ルートの要素の id・class 以外の属性（data-user・
+  // Vue の :user）があれば、データを持つ画面として殻としない
+  && !/\bdata-page\s*=|__NEXT_DATA__|__INITIAL_STATE__|__NUXT|__APOLLO_STATE__|__PRELOADED_STATE__|\bng-state\b/.test(b)
+  && !inlineData(b) && !ROOT_ATTR.test(b)
+  && /^(?:loading|読み込み中|ロード中)?[.…]*$/i.test(visibleText(b.replace(/<noscript\b[\s\S]{0,2000}?<\/noscript>/gi, '')));
+/** ルートの要素（root・app・__next・__nuxt・q-app）の、データを入れる属性（data-user・:user・v-bind:user。data-v-・data-testid・data-reactroot は除く） */
+const ROOT_ATTR = /<div\b(?=[^>]{0,200}\bid\s*=\s*["']?(?:root|app|__next|__nuxt|q-app)\b)[^>]{0,200}\s(?:data-(?!v-|testid\b|reactroot\b)[\w-]+|:[\w-]+|v-bind:[\w-]+)\s*=/i;
+/** 利用者・状態のデータらしい中身（"user":・"email":・"currentUser":、state・store・props の名前への代入）。設定（window.__ENV__ = {"API_URL":…}・dataLayer = []）は除く */
+const STATE_DATA = /["']?\b(?:user(?:name|_?id)?|current_?user|email|account|profile|customer|member|viewer|me|session|auth(?:enticated|_?user)?|props|state|store)\b["']?\s*:|\b\w*(?:state|store|user|props|session)\w*\s*=\s*(?:[{[]|JSON\.parse)/i;
+/**
+ * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64KB で、閉じタグまで）：type="application/json" のスクリプト、
+ * オブジェクト・配列の代入、JSON.parse のうち、中身が STATE_DATA に当てはまるもの。ld+json（構造化データ）と設定だけのものはデータとしない
+ */
+function inlineData(b: string): boolean {
+  const s = b.slice(0, 65536), low = s.toLowerCase();
+  for (let i = low.indexOf('<script'); i >= 0; i = low.indexOf('<script', i + 7)) {
+    const tagEnd = low.indexOf('>', i); if (tagEnd < 0) return false;
+    const tag = low.slice(i, tagEnd);
+    if (/\bsrc\s*=/.test(tag)) continue;
+    const end = low.indexOf('</script', tagEnd); const body = s.slice(tagEnd + 1, end < 0 ? s.length : end);
+    if ((/type\s*=\s*["']?application\/json/.test(tag) || /=\s*[{[]|JSON\.parse\s*\(/.test(body)) && STATE_DATA.test(body)) return true;
+    if (end < 0) return false;
+  }
+  return false;
+}
+/** タグ・スクリプト・スタイルの外の、空白を除いた文字（40 文字まで）。正規表現で除くと、閉じない <script の続く本文で2乗の時間がかかるので、1回の走査で集める */
+function visibleText(b: string): string {
+  const s = b.slice(0, 65536), low = s.toLowerCase(); let out = '';
+  for (let i = 0; i < s.length && out.length < 40;) {
+    if (s[i] === '<') {
+      const close = low.startsWith('<script', i) ? '</script' : low.startsWith('<style', i) ? '</style' : '>';
+      const e = low.indexOf(close, i + 1);
+      if (e < 0) break;
+      // 閉じタグ（</script>・</style>）は、その「>」まで飛ばす
+      const end = close === '>' ? e + 1 : low.indexOf('>', e + close.length) + 1;
+      if (end <= 0) break;
+      i = end; continue;
+    }
+    if (!/\s/.test(s[i])) out += s[i];
+    i++;
+  }
+  return out;
+}
+const MFA_REC = '2段階目（ワンタイムの番号の入力など）まで済ませた応答を login として採取する';
+/** login の最初の応答が、多要素認証の2段階目の画面（/two_factor、/mfa、/otp、/2fa、/webauthn）への転送か。/verify-email のようなメールの確認の案内は、ログインが済んでいるので含めない */
+function mfaStep(login: Target): string | undefined {
+  const first = ownChain(login)[0];
+  const loc = first && first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
+  if (!loc) return undefined;
+  let p: string; try { p = new URL(loc, login.url ?? 'https://x.invalid/').pathname; } catch { return undefined; }
+  // 最後の部分が2段階目の画面の名前（/mfa、/two_factor_authentication、/2fa）か、2段階目の入力の画面（/two_factor/verify、/mfa/challenge）のときだけ。
+  // パスのどこかに mfa・otp があるだけ（/mfa/setup-reminder、/users/otp_settings。ログインが済んだあとの設定の画面）は含めない
+  // 各部分の拡張子は外して見る（/2fa.php・/Account/TwoFactor.aspx・/two_factor.html を見逃し、①（高）の誤検知にした）
+  const segs = p.replace(/\/+$/, '').split('/').map(x => x.replace(/\.[A-Za-z0-9]{1,5}$/, ''));
+  // 2段階目の画面の名前（two-factor-challenge・mfa-otp-challenge のように語が続くものも）。設定の画面の語（setup・settings・reminder・backup・
+  // recovery など）が続くものと、その下の部分（/2fa/backup-codes）は除く（除外の一覧で見る。完全一致にすると、Fortify の /two-factor-challenge・
+  // GitHub の /sessions/two-factor/app・allauth の /accounts/2fa/authenticate/ を見逃した）
+  const settings = /^(?:set-?up|settings?|reminder|recovery|backup|enroll|enable|disable|manage|info|configure|config|preferences)/i;
+  const step = (x: string) => { const m = x.match(/^(?:two[-_]?factor|2fa|mfa|otp|totp|webauthn|second[-_]?factor)(?:[-_](.+))?$/i); return !!m && !(m[1] && settings.test(m[1])); };
+  const at = segs.findIndex(step);
+  return at >= 0 && segs.slice(at + 1).every(x => !settings.test(x)) ? p : undefined;
+}
+const trimSlash = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+function loginRejected(login: Target, pre: Target): string | undefined {
+  const first = ownChain(login)[0];
+  if (!first) return undefined;
+  const loc = first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
+  if (loc) {
+    let to: URL | undefined, self: URL | undefined, before: URL | undefined;
+    try { to = new URL(loc, login.url ?? 'https://x.invalid/'); } catch { /* 解釈できない */ }
+    try { self = login.url ? new URL(login.url) : undefined; } catch { /* なし */ }
+    // pre-login の URL は、そのチェーンの最後の応答（ログインのフォームの画面）の URL。最初の URL（/mypage → 302 /login の /mypage）と比べると、
+    // ログインに成功して元のページ（/mypage）に戻る普通の流れを「戻された」とみなした
+    const preUrl = ownChain(pre).at(-1)?.url ?? pre.url;
+    try { before = preUrl ? new URL(preUrl) : undefined; } catch { /* なし */ }
+    if (to) {
+      const path = trimSlash(to.pathname);
+      const backToSelf = self && (trimSlash(self.pathname) === '/' ? path === '/' && to.search === self.search : path === trimSlash(self.pathname));
+      const backToPre = before && trimSlash(before.pathname) !== '/' && path === trimSlash(before.pathname);
+      // ログインらしいパスは、同じホストで、認可コード・チケットを持たないものだけ（SSO のコールバック /sso/login?code=… はログインの成功）
+      const loginLike = LOGIN_PATH.test(path) && (!self || to.host === self.host) && !/[?&](?:code|ticket|SAMLart|state)=/i.test(to.search);
+      if (/[?&](?:error|failed|fail|login_error|authfailed)(?:[=&]|$)/i.test(to.search) || loginLike || backToSelf || backToPre) {
+        const fin = finalResponse(login);
+        return fin && fin !== first && fin.status >= 200 && fin.status < 300 && PASSWORD_FIELD.test(fin.body ?? '')
+          ? `HTTP ${first.status} でログイン画面に戻され、パスワード欄のある画面を返した` : `HTTP ${first.status} でログイン画面に戻された`;
+      }
+    }
+  }
+  if (first.status >= 200 && first.status < 300 && PASSWORD_FIELD.test(first.body ?? '')) return `HTTP ${first.status} でパスワード欄のある画面を返した`;
+  return undefined;
+}
 
 export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定化', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP Session Mgmt CS'],
   runCross(x) {
     const pre = x.byLabel('pre-login'), login = x.byLabel('login');
     if (!pre || !login) return na(sessionFixation, 'pre-login/login', 'pre-login, login');
-    const before = sessionCookies(pre).map(c => `${c.name}=${c.value}`);
-    const after = sessionCookies(login).map(c => `${c.name}=${c.value}`);
+    const beforeC = sessionCookies(pre), afterC = sessionCookies(login);
+    const before = beforeC.map(c => `${c.name}=${c.value}`);
+    // 新しい値のセッションCookie を1つでも発行し、同じ値で送り直したのが期限付きの Cookie（device_token・remember の類）だけなら、再発行している
+    // （名前の推定でセッションCookie とみなした長期の Cookie を同じ値で送り直しただけで、①（高）にした）
+    const fresh = afterC.some(c => !before.includes(`${c.name}=${c.value}`));
+    // 除くのは、名前がセッションIDらしくないもの（sessionid・JSESSIONID・laravel_session・sid は、期限付きでも主のセッションIDなので比べる。
+    // 除くと、期限付きの sessionid を再発行せずに auth_token を足しただけのログインを合格にした）
+    const after = afterC.filter(c => !(fresh && !/sess|^sid$/i.test(c.name) && before.includes(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age')))).map(c => `${c.name}=${c.value}`);
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
-    if (!before.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'ログイン前にセッションCookieが発行されていない', 'ログイン前にCookieを発行するページで pre-login を採取する')];
+    const rejected = loginRejected(login, pre);
+    if (rejected) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（${rejected}）`, LOGIN_FAILED_REC)];
+    // 多要素認証の途中（2段階目の画面への転送）は、ログインが終わっていない。セッションIDの再発行は、ふつう2段階目のあとに行う
+    const mfa = mfaStep(login);
+    if (mfa) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `多要素認証の途中（${mfa} への転送）。ログインが終わっていない`, MFA_REC)];
+    // ログイン前のセッションIDは、pre-login で発行したものに加え、pre-login で送ったもの（トップページで発行され、ログイン画面では送るだけ。
+    // ブラウザの普通の流れで、HAR ではほぼこの形になる）も数える。送っただけの値は分からないので、login で新しいセッションCookieを発行したかで見る
+    const sent = (pre.sentCookieNames ?? []).filter(looksLikeSessionName);
+    if (!before.length && !sent.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'ログイン前にセッションCookieが発行されていない', 'ログイン前にCookieを発行するページで pre-login を採取する')];
+    // SSO のコールバック（Location に ?code=・?ticket=）へ転送しただけで、その先を採取していない（-L なし）なら、セッションはコールバックで発行される
+    // ので、再発行したかは分からない
+    const lc = ownChain(login);
+    if (!after.length && lc.length === 1 && /[?&](?:code|ticket|SAMLart)=/i.test(lc[0].headers.get('location')?.[0] ?? ''))
+      return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
     if (!after.length || after.some(a => before.includes(a)))
       return [cf(sessionFixation, 'pre-login/login', 1, 'high', 'fail', 'login 応答でセッションIDが再発行されていない', 'ログイン成功時にセッションIDを再発行する')];
     return [cf(sessionFixation, 'pre-login/login', 'ok', 'info', 'pass', 'ログイン時にセッションIDを再発行している', '')];
   } };
 
 /** 2つ以上のセッションIDを比べ、固定部分や連番がないかを見る */
-const JWT_VALUE = /^eyJ[\w-]*\.[\w-]*\.([\w-]*)$/;
+// Flask（itsdangerous）の圧縮したセッション（.eJw… で始まる「.ペイロード.時刻.署名」）も、同じアカウントではペイロードの大部分が共通になる。
+// JWT と同じく署名の部分だけで比べる（全体で比べると「先頭57文字が共通」と C-07②（高）の誤検知になる）
+// Django の署名付きのセッション（django.contrib.sessions.backends.signed_cookies。「ペイロード:時刻:署名」で、圧縮したものは . で始まる）も同じ
+const JWT_VALUE = /^(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.([\w-]*)$|^\.?[\w-]+:[\w-]+:([\w-]+)$/;
 export function predictable(raw: string[]): string | undefined {
   // JWT は、同じアカウントで発行するとヘッダとクレーム（iat・exp まで）の大部分が共通になる。乱数性は署名の部分だけで比べる。
   // 署名がない（alg:none）JWT は A-03① で判定する
   const jwt = raw.every(v => JWT_VALUE.test(v));
-  if (jwt && raw.some(v => !v.match(JWT_VALUE)![1])) return undefined;
-  const ids = jwt ? raw.map(v => v.match(JWT_VALUE)![1]) : raw;
+  const sig = (v: string) => { const m = v.match(JWT_VALUE)!; return m[1] ?? m[2] ?? ''; };
+  if (jwt && raw.some(v => !sig(v))) return undefined;
+  const ids = jwt ? raw.map(sig) : raw;
   if (new Set(ids).size < ids.length) return '同じ値が繰り返し発行された';
   let prefix = 0;
   while (ids.every(v => v[prefix] !== undefined && v[prefix] === ids[0][prefix])) prefix++;
@@ -61,8 +199,9 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
       for (const [name, value] of last) byName.set(name, [...(byName.get(name) ?? []), value]);
     }
     const out: Finding[] = [];
-    for (const [name, vals] of byName) {
+    for (const [rawName, vals] of byName) {
       if (vals.length < 2) continue;
+      const name = rawName || '（名前なし）';   // 値だけの Set-Cookie（rules/cookies.ts の cookieName と同じ表示）
       const why = predictable(vals);
       out.push(why ? cf(sessionPredictable, 'session-sample-*', 2, 'high', 'fail', `${name}：${why}（${vals.map(maskValue).join(' / ')}）`, '暗号論的に安全な乱数でセッションIDを生成する')
                    : cf(sessionPredictable, 'session-sample-*', 'ok', 'info', 'pass', `${name}：${vals.length}件に共通部分・連番なし`, ''));
@@ -82,28 +221,87 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     if (logoutFailed(lo)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(lo)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const mp = x.byLabel('mypage'), ms = mp ? firstStatus(mp) : 0;
     if (ms && !(ms >= 200 && ms < 300)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログイン後のページ（mypage）が HTTP ${ms}（ログインできていない）`, LOGIN_FAILED_REC)];
-    const first = after.responses.find(r => r.kind !== 'informational' && r.kind !== 'connect')!;
+    const first = after.responses.find(isHop)!;
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!first.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
-    return first.status >= 200 && first.status < 300
-      ? [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', `旧Cookieでの認証後ページが HTTP ${first.status}`, 'ログアウト時にサーバ側のセッションを破棄する')]
-      : [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `旧Cookieでの認証後ページが HTTP ${first.status}`, '')];
+    // 同じページ（末尾の / の違いだけ）への転送はたどって、その先で判定する（Django の APPEND_SLASH、Next.js の trailingSlash、Apache の DirectorySlash）。
+    // 最初の応答が 2xx でなければすべて合格にすると、301 のあとに旧Cookieで mypage が 200 になるのを見逃した
+    const chain = after.responses.filter(isHop);
+    let i = 0;
+    while (chain[i]?.kind === 'redirect' && sameDocument(chain[i], after.url)) {
+      if (!chain[i + 1]) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `HTTP ${chain[i].status}（同じページへの転送。転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
+      i++;
+    }
+    const r = chain[i];
+    const ev = `旧Cookieでの認証後ページが HTTP ${r.status}${i ? `（同じページへの転送のあと）` : ''}`;
+    if (r.status >= 200 && r.status < 300) {
+      // 旧Cookieで 200 でも、ログインのフォームを返したなら、セッションは使えていない（転送せずにその場でログイン画面を出すアプリ）。
+      // ログインのフォームは、パスワード欄が1つで、ユーザー名・メールの欄があり、パスワード変更の欄（new_password など）がないもの。
+      // ログイン後のページ（mypage）自身にパスワード欄があるときは、見分けられないので使わない
+      const mpBody = mp ? finalResponse(mp)?.body ?? '' : '';
+      if (loginForm(r.body ?? '') && !PASSWORD_FIELD.test(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
+      // SPA の画面（<div id="root"> とスクリプトだけで、文字のない HTML）は、どのセッションでも同じものを返すので、旧Cookie が使えたかは分からない
+      // （A-01・A-11・E-05 の HTML の画面と同じ考え方）
+      // データのない JSON（{}・{"user":null}）と GraphQL の認証の拒否は、旧Cookie でデータを返していない（A-01 と同じ判定）。SPA の殻の推奨に従って
+      // API の URL を after-logout にすると、未認証の /api/auth/session の {} を①（高）にした
+      const gql = graphqlError(r.body);
+      if (gql === 'denied') return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev}（GraphQL の認証エラー。データは null）`, '')];
+      if (gql || noDataJson(r.body)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（データのない JSON。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
+      if (spaShell(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（SPA の画面。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
+      return [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', ev, 'ログアウト時にサーバ側のセッションを破棄する')];
+    }
+    // 合格にするのは、断られた（401・403）か、ログイン画面へ転送されたときだけ。404・5xx やほかのページへの転送は、セッションが無効かが分からない
+    if (r.status === 401 || r.status === 403) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', ev, '')];
+    if (r.status >= 300 && r.status < 400) {
+      const loginUrl = x.byLabel('login')?.url; let loginPath: string | undefined;
+      try { loginPath = loginUrl ? trimSlash(new URL(loginUrl).pathname) : undefined; } catch { /* なし */ }
+      // ログイン画面・認証の入り口への転送か。トップ（/）への転送はログイン画面とみなさない（トップが利用者の画面を返すアプリ（/dashboard → /）では、
+      // 旧Cookie が使えても / へ転送する。-L でたどった先がログインのフォームか 401・403 なら合格）
+      const loginRedirect = (h: typeof r): string | undefined => {
+        let to: URL | undefined; try { to = new URL(h.headers.get('location')?.[0] ?? '', h.url ?? after.url ?? 'https://x.invalid/'); } catch { return undefined; }
+        const p = trimSlash(to.pathname);
+        return LOGIN_PATH.test(p) || (loginPath && loginPath !== '/' && p === loginPath) ? to.pathname : undefined;
+      };
+      // -L でたどった転送は最後まで見る（/oauth2/authorization/x → IdP の …/openid-connect/auth のように、入り口の転送が続くもの）
+      for (let k = i; k < chain.length; k++) {
+        const h = chain[k];
+        if (h.status >= 300 && h.status < 400) {
+          const to = loginRedirect(h);
+          if (to) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} → ${to}（ログイン画面へ転送）`, '')];
+          continue;
+        }
+        // 転送の先で断られた・ログインのフォームを返したなら合格
+        if (h.status === 401 || h.status === 403 || (h.status >= 200 && h.status < 300 && loginForm(h.body ?? '')))
+          return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} → HTTP ${h.status}（ログイン画面・認証が必要）`, '')];
+        break;
+      }
+      return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（転送先がログイン画面か分からない）`, '転送先まで（-L）採取し直す')];
+    }
+    return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（セッションが無効になったかは分からない）`, '')];
   } };
 
 export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'any', scope: 'cross',
   basis: ['hstspreload.org'],
   runCross(x) {
-    const preload = x.targets.find(t => isHttps(t) && hstsDirective(finalResponse(t)?.headers.get('strict-transport-security')?.[0], 'preload'));
-    if (!preload) return [];                                   // preload を付けていなければ適用外
+    const preloads = x.targets.filter(t => isHttps(t) && hstsDirective(finalResponse(t)?.headers.get('strict-transport-security')?.[0], 'preload'));
+    if (!preloads.length) return [];                           // preload を付けていなければ適用外
     const apex = x.byLabel('apex');
     if (!apex) return na(apexHsts, 'apex', 'apex（https://apexドメイン/）');
+    // preload を付けたのが apex のドメイン（apex 自身かそのサブドメイン）のときだけ比べる。別のサイト（b.example の www）の preload で、
+    // a.example の apex を③にしない
+    const ah = hostOf(apex)?.replace(/:\d+$/, '').toLowerCase();
+    const related = (t: Target) => { const h = hostOf(t)?.replace(/:\d+$/, '').toLowerCase(); return !ah || !h || h === ah || h.endsWith(`.${ah}`); };
+    const preload = preloads.find(related);
+    if (!preload) return [];
     // apex 自身の応答（転送の最初のホップ）で見る。-L や HAR で www への転送をたどった最後の応答は www のもの
+    // max-age=0 は HSTS を解除する指定なので、返していないのと同じ（H-01①と同じ）
     const v = ownChain(apex)[0]?.headers.get('strict-transport-security')?.[0];
-    return v ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
+    return v && parseHsts(v).maxAge > 0 ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };
 
-const nonceOf = (t: Target) => (finalResponse(t)?.headers.get('content-security-policy') ?? [])
+// ヘッダの CSP と、HTML の <head> の <meta> の CSP（H-04 と同じ。meta の CSP の nonce が固定でも⑤）
+const nonceOf = (t: Target) => [...splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? []), ...metaCspFromHtml(finalResponse(t)?.body ?? '')]
   .flatMap(v => [...parseCsp(v).values()].flat()).map(v => v.match(/^'nonce-([^']+)'$/)?.[1]).filter((v): v is string => !!v);
 export const fixedNonce: Rule = { id: 'H-04', title: 'CSP：script-src', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP CSP CS', 'Google csp_evaluator'],

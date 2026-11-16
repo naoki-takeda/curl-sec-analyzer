@@ -10,22 +10,59 @@ export const baseLabel = (label: string) => label.replace(/#\d+$/, '');
  */
 export function uniqueLabels(targets: Target[]): ParseWarning[] {
   const used = new Set(targets.map(t => t.label)); const seen = new Set<string>(); const renamed = new Map<string, string[]>();
+  const next = new Map<string, number>();            // ラベルごとの次の番号（毎回 2 から探すと、同じラベルが多いときに件数の2乗の時間がかかる）
   for (const t of targets) {
     if (!seen.has(t.label)) { seen.add(t.label); continue; }
-    let n = 2; while (used.has(`${t.label}#${n}`)) n++;
+    let n = next.get(t.label) ?? 2; while (used.has(`${t.label}#${n}`)) n++;
+    next.set(t.label, n + 1);
     const to = `${t.label}#${n}`;
-    renamed.set(t.label, [...(renamed.get(t.label) ?? []), to]);
+    const list = renamed.get(t.label); if (list) list.push(to); else renamed.set(t.label, [to]);   // 配列をコピーしない
     used.add(to); seen.add(to); t.label = to;
   }
   return [...renamed].map(([l, tos]) => ({ kind: 'duplicate-label', detail:
     `ラベル「${l}」のターゲットが${tos.length + 1}つあります。2つ目以降は ${tos.join('、')} として別に判定しました（横断の判定には最初のものだけを使います）` }));
 }
 
-export const finalResponse = (t: Target): HttpResponse | undefined =>
-  t.responses.filter(x => x.kind !== 'informational' && x.kind !== 'connect').at(-1);   // -L なら最終ホップ
+/** Location のある 3xx（ブラウザは本文を表示せずに転送先へ移る） */
+export const isRedirectWithLocation = (r?: HttpResponse): boolean => !!r && r.status >= 300 && r.status < 400 && r.headers.has('location');
 
-export const chainOf = (t: Target): HttpResponse[] =>
-  t.responses.filter(x => x.kind !== 'informational' && x.kind !== 'connect');
+/** その URL の応答のホップか（1xx、プロキシの応答（CONNECT・407）、curl が認証し直した 401 を除く） */
+export const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
+
+/**
+ * 判定に使う応答：-L なら、ターゲットの URL と同じホストの最後のホップ。別のホスト（IdP、legacy.example.net）へ転送した先の応答は、
+ * 対象の URL の応答として判定しない（転送先の HSTS のなさで、対象を H-01①（高）にした。HAR の取り込みも別のホストの転送先をつながない）。
+ * 同じホストのホップがない（URL が分からない）ときは最後のホップ
+ */
+export const finalResponse = (t: Target): HttpResponse | undefined => {
+  const c = t.responses.filter(isHop);
+  const host = hostnameOf(t.url);
+  if (!host) return c.at(-1);
+  // 同じサイト（登録ドメイン。apex と www、example.co.jp の下のホスト）への転送はたどる（curl -L で apex から www へ転送する普通の形を、
+  // 301 で判定して H-01①（高）などの誤検知にした）。https のターゲットは https のホップだけ（途中で http に落とした転送の応答は対象の応答ではない）
+  const site = siteOf(host); const https = /^https:/i.test(t.url ?? '');
+  return c.filter(r => { const h = hostnameOf(r.url); return !r.url || (!!h && siteOf(h) === site && (!https || /^https:/i.test(r.url))); }).at(-1) ?? c.at(-1);
+};
+const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowerCase() : undefined; } catch { return undefined; } };
+/**
+ * ターゲットの URL と同じサイトの応答（URL の分からない応答を含む）。-L で別のサイト（IdP の login.microsoftonline.com）へ転送した先の Set-Cookie・
+ * Clear-Site-Data を、対象の Cookie として判定しない（C-01〜C-07・C-11・C-12②・H-15。IdP の Cookie の属性を対象の指摘にし、IdP の Cookie を
+ * 消しただけのログアウトを合格にした）。http の同じサイトのホップは含める（C-10 が見る）
+ */
+export const siteResponses = (t: Target): HttpResponse[] => {
+  const host = hostnameOf(t.url);
+  if (!host) return t.responses;
+  const site = siteOf(host);
+  return t.responses.filter(r => { const h = hostnameOf(r.url); return !r.url || !h || siteOf(h) === site; });
+};
+/** 登録ドメインの近似（最後の2つのラベル。co.jp・com.au のような2段の国別ドメインは3つ）。IP アドレスはそのまま */
+const siteOf = (h: string): string => {
+  if (/^[\d.]+$|:/.test(h)) return h;
+  const l = h.split('.');
+  return l.slice(l.length >= 3 && /^[a-z]{2}$/.test(l.at(-1)!) && /^(?:co|ne|or|ac|go|ed|lg|gr|ad|com|net|org|gov|edu)$/.test(l.at(-2)!) ? -3 : -2).join('.');
+};
+
+export const chainOf = (t: Target): HttpResponse[] => t.responses.filter(isHop);
 
 /**
  * curl の出力の各ホップに、そのリクエストの URL を付ける（HAR は取り込みで付ける）。ターゲットの URL から Location をたどる。
@@ -55,6 +92,26 @@ const upgradedToHttps = (t: Target): boolean => {
  * そのターゲットの URL 自身の応答から始まるチェーン。http から https に転送されたチェーン（HAR はターゲットの URL を https にする。
  * curl は upgradedToHttps）は、最初の https のホップから始める（apex の「自身の応答」や、E-05・E-11 の「そのURLの応答」に http の転送を使わないため）
  */
+const trimPath = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+/** 転送先が同じページ（同じホストで、パスが末尾の / の違いだけ）か。Django の APPEND_SLASH、FastAPI の redirect_slashes、Apache の DirectorySlash など */
+export function sameDocument(r: HttpResponse, base?: string): boolean {
+  try {
+    const from = new URL(r.url ?? base ?? ''), to = new URL(r.headers.get('location')?.[0] ?? '', from);
+    // クエリも同じもの（/login?next=… から /login、/redirect?url=… から /redirect?error=… は別のページへの転送）
+    return to.host === from.host && trimPath(to.pathname) === trimPath(from.pathname) && to.search === from.search;
+  } catch { return false; }
+}
+
+/**
+ * その URL の応答のうち、同じページへの転送をたどった先（A-01・A-08・A-11 のステータス、C-12①）。
+ * 末尾の / への 307 のあとの 200 を、転送の 307 で判定しないため。転送先を採取していない（-L なし）ときは unfollowed
+ */
+export function sameDocumentHop(t: Target): { hop?: HttpResponse; unfollowed: boolean } {
+  const c = ownChain(t); let i = 0;
+  while (c[i]?.kind === 'redirect' && sameDocument(c[i], t.url)) { if (!c[i + 1]) return { hop: c[i], unfollowed: true }; i++; }
+  return { hop: c[i], unfollowed: false };
+}
+
 export function ownChain(t: Target): HttpResponse[] {
   const c = chainOf(t);
   if (!/^https:/i.test(t.url ?? '') && !upgradedToHttps(t)) return c;

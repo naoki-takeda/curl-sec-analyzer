@@ -30,7 +30,8 @@ export function generateScript(o: CommandOptions): string {
   const L: string[] = [];
   // 各ターゲットの前に #TARGET と #META（実施日時と推奨コマンドのID）を出す。CSV（第8章の様式）の「実施日時」「実施コマンド」に使う
   const meta = (cmd: string) => `echo "#META at=$(date +%Y-%m-%dT%H:%M:%S) cmd=${cmd}"`;
-  const t = (label: string, url: string, extra = '') => L.push(`echo ${q(`#TARGET url=${url} label=${label}${extra}`)}`, meta(cmdOf(label)));
+  // #TARGET の前に改行を出す（curl -i の本文が改行で終わらないと、#TARGET が前の本文の行にくっついた）
+  const t = (label: string, url: string, extra = '') => L.push('echo', `echo ${q(`#TARGET url=${url} label=${label}${extra}`)}`, meta(cmdOf(label)));
   L.push('#!/usr/bin/env bash',
     '# curl-sec-analyzer の推奨コマンド（コマンド生成器で作成）。出力を out.txt にまとめ、ツールに貼り付けて判定する',
     '# 実行前に：診断は自社で管理しているか書面で許可を得たシステムだけ。',
@@ -79,6 +80,8 @@ export function generateScript(o: CommandOptions): string {
   t('options', `${H}/`); L.push('curl -sS -i -X OPTIONS "$H/"');
   t('trace', `${H}/`); L.push('curl -sS -i -X TRACE "$H/"');
   t('host-inj', `${H}/`); L.push(`curl -sS -i -H 'X-Forwarded-Host: evil.example' "$H/"`);
+  // T-06 は、転送した応答だけで判定する（ログイン画面が 200 を返すと na）。next= で実際に転送する URL があれば、そちらに置き換えるよう書いておく
+  L.push('# T-06：ログイン画面が 200 を返すと判定できない（na）。next= などで実際に転送する URL（ログアウト、ログイン後の転送先）に置き換える');
   t('open-redirect', `${H}${o.loginPath}`); L.push(`curl -sS -D - -o /dev/null "$H"${q(`${o.loginPath}?next=https://evil.example&returnTo=https://evil.example&url=https://evil.example`)}`);
   t('jsonp', `${H}${o.apiPath}?callback=test123`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(`${o.apiPath}?callback=test123`)}`);
 

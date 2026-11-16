@@ -56,7 +56,10 @@ describe('E-01①：接続文字列・AWSのアクセスキーだけを高とす
   it('接続文字列とアクセスキーは①', () => {
     expect(e01('Server=db01;Database=app;User ID=sa;Password=P@ssw0rd;')).toContain('E-01.1');
     expect(e01('Host=db;Port=5432;Username=app;Password=secret;')).toContain('E-01.1');
-    expect(e01('key: AKIAABCDEFGHIJKLMNOP')).toContain('E-01.1');
+    // 第27回から、HTML の応答の AWS のキーは E-09①（HTML本文の秘密情報）で数える（同じ値を E-01① と2回、高として数えない）
+    expect(e01('key: AKIAABCDEFGHIJKLMNOP')).not.toContain('E-01.1');
+    expect(items(t('t', 'https://www.example.com/', HTML, 'key: AKIAABCDEFGHIJKLMNOP'), 'E-09').map(f => f.ruleId)).toContain('E-09.1');
+    expect(items(t('t', 'https://www.example.com/api/x', 'HTTP/2 500\ncontent-type: application/json', '{"error":"key AKIAABCDEFGHIJKLMNOP"}'), 'E-01').map(f => f.ruleId)).toContain('E-01.1');
   });
 });
 
@@ -87,6 +90,8 @@ describe('T-09・T-10：-v で合意した旧バージョン・暗号', () => {
     expect(ids('TLSv1.2 / RC4-SHA')).toContain('T-10.1 high');
   });
   it('TLS 1.2 の AEAD なら①③にしない', () => {
-    expect(ids('TLSv1.2 / ECDHE-RSA-AES128-GCM-SHA256')).toEqual(['T-09.2 info', 'T-10.ok info']);
+    // 合意した暗号だけでは、弱い暗号を受け入れるか・鍵と署名は分からないので、T-10 は合格にしない（第23回）
+    // T-09 も、プローブがなければ①（旧バージョン）は na として出す（第25回。②だけで判定済みと数えない）
+    expect(ids('TLSv1.2 / ECDHE-RSA-AES128-GCM-SHA256')).toEqual(['T-09.2 info', 'T-09.na info', 'T-10.na info']);
   });
 });

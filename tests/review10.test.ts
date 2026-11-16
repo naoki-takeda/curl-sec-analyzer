@@ -63,7 +63,7 @@ describe('2 CSV：#META の実施コマンド', () => {
   it('コマンドに含まれるトークンを伏せる', () => {
     const r = evaluate(`#TARGET url=https://www.example.com/ label=page\n#META cmd=curl_https://www.example.com/?access_token=SECRETsecret0123456789 at=2026-11-01T00:00:00Z\n${HTML}\n\n<html></html>\n`);
     const csv = toCsv(r.findings, r.targets);
-    expect(csv).toContain('access_token=');
+    expect(csv).toContain('curl https://www.example.com/?access_token,');   // 第31回から、URL は突き合わせのキーの形（クエリは名前だけ）
     expect(csv).not.toContain('SECRETsecret0123456789');
   });
 });

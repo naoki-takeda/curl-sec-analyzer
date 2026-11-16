@@ -1,0 +1,194 @@
+## targets
+top | https://www.example.com/ | key=top | responses=1
+http | http://www.example.com/ | key=http | responses=2
+apex | https://example.com/ | key=apex | responses=1
+pre-login | https://www.example.com/login | key=pre-login | responses=1
+login | https://www.example.com/login | key=login | responses=1
+mypage | https://www.example.com/mypage | key=mypage | responses=1
+cors-reflect | https://api.example.com/v1/me | key=cors-reflect | responses=1
+logout | https://www.example.com/logout | key=logout | responses=1
+after-logout | https://www.example.com/mypage | key=- | responses=1
+probes | https://www.example.com/ | key=- | responses=0
+tls | https://www.example.com/ | key=- | responses=0
+
+## warnings
+
+## findings
+after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200
+apex | H-01.1 | high | fail | (ヘッダなし)
+apex | H-02.3 | low | fail | top は preload を付けているが、apex がHSTSを返さない
+apex | H-02.na | info | na | HSTSがない（H-01で判定）
+cors-reflect | R-01.1 | high | fail | Origin: https://evil.example → ACAO: https://evil.example / ACAC: true
+cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）
+cors-reflect | R-04.ok | info | pass | ACAO: https://evil.example
+cors-reflect | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
+csp-sample-* | H-04.na | info | na | 
+error-* | A-10.na | info | na | 
+http | C-10.ok | info | pass | HTTP応答でCookieを発行していない
+http | T-04.4 | info | fail | HTTP 302 → https://www.example.com/
+http | T-05.ok | info | pass | 1回の転送
+login | A-02.ok | info | pass | URL・Location・本文にトークンなし
+login | C-01.1 | high | fail | SESSIONID=8f3c…(32 chars); Path=/; HttpOnly
+login | C-02.ok | info | pass | SESSIONID
+login | C-03.1 | medium | fail | SESSIONID=8f3c…(32 chars); Path=/; HttpOnly
+login | C-04.ok | info | pass | SESSIONID, __Host-csrf
+login | C-05.ok | info | pass | SESSIONID
+login | C-06.1 | info | fail | SESSIONID=8f3c…(32 chars); Path=/; HttpOnly
+login | C-07.ok | info | pass | SESSIONID
+login | C-08.ok | info | pass | SESSIONID, __Host-csrf
+login | C-09.ok | info | pass | URLにセッションIDなし
+login | C-11.ok | info | pass | SESSIONID, __Host-csrf
+login | C-13.ok | info | pass | 共有キャッシュの指定なし
+login | H-12.ok | info | pass | no-store
+logout | C-12.2 | low | fail | ログアウト応答でCookieを削除していない
+logout | H-15.1 | info | fail | (ヘッダなし)
+mypage | A-02.ok | info | pass | URL・Location・本文にトークンなし
+mypage | E-01.ok | info | pass | エラーの詳細らしき記述なし
+mypage | E-02.ok | info | pass | 一覧表示なし
+mypage | E-07.ok | info | pass | http:// の資源なし
+mypage | E-08.ok | info | pass | 外部オリジンのscriptなし
+mypage | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+mypage | H-01.ok | info | pass | max-age=31536000; includeSubDomains; preload
+mypage | H-02.ok | info | pass | max-age=31536000; includeSubDomains; preload
+mypage | H-03.ok | info | pass | default-src 'self'; script-src 'nonce-R4…(16 chars)' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
+mypage | H-04.ok | info | pass | script-src 'nonce-R4…(16 chars)' 'strict-dynamic'
+mypage | H-05.ok | info | pass | object-src・base-uri あり
+mypage | H-06.ok | info | pass | frame-ancestors 'none'
+mypage | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし
+mypage | H-08.ok | info | pass | nosniff
+mypage | H-09.ok | info | pass | no-referrer
+mypage | H-10.ok | info | pass | camera=(), microphone=(), geolocation=()
+mypage | H-11.ok | info | pass | same-origin / same-origin
+mypage | H-12.2 | medium | fail | private, max-age=0
+mypage | H-13.ok | info | pass | text/html; charset=utf-8
+mypage | H-14.ok | info | pass | none
+mypage | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+mypage | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+mypage | R-04.ok | info | pass | (ACAOなし)
+mypage | T-12.ok | info | pass | HTTP/2
+pre-login | A-02.ok | info | pass | URL・Location・本文にトークンなし
+pre-login | C-01.1 | high | fail | SESSIONID=8f3c…(32 chars); Path=/; HttpOnly
+pre-login | C-02.ok | info | pass | SESSIONID
+pre-login | C-03.1 | medium | fail | SESSIONID=8f3c…(32 chars); Path=/; HttpOnly
+pre-login | C-04.ok | info | pass | SESSIONID
+pre-login | C-05.ok | info | pass | SESSIONID
+pre-login | C-06.1 | info | fail | SESSIONID=8f3c…(32 chars); Path=/; HttpOnly
+pre-login | C-07.ok | info | pass | SESSIONID
+pre-login | C-08.ok | info | pass | SESSIONID
+pre-login | C-09.ok | info | pass | URLにセッションIDなし
+pre-login | C-11.ok | info | pass | SESSIONID
+pre-login | C-13.ok | info | pass | 共有キャッシュの指定なし
+pre-login | H-12.ok | info | pass | no-store
+pre-login/login | C-09.1 | high | fail | login 応答でセッションIDが再発行されていない
+session-sample-* | C-07.na | info | na | 
+top | A-02.ok | info | pass | URL・Location・本文にトークンなし
+top | C-01.3 | low | fail | ui_pref=…(4 chars); Path=/; Max-Age=31536000（ホストはHSTSあり）
+top | C-03.ok | info | pass | ui_pref
+top | C-04.ok | info | pass | ui_pref
+top | C-06.ok | info | pass | ui_pref
+top | C-08.ok | info | pass | ui_pref
+top | C-11.ok | info | pass | ui_pref
+top | C-13.2 | low | fail | Cache-Control: public, max-age=300
+top | H-01.ok | info | pass | max-age=31536000; includeSubDomains; preload
+top | H-02.ok | info | pass | max-age=31536000; includeSubDomains; preload
+top | H-03.ok | info | pass | default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; object-src 'none'
+top | H-04.1 | high | fail | script-src 'unsafe-inline'（csp_evaluator: SCRIPT_UNSAFE_INLINE）
+top | H-04.4 | medium | fail | script-src https://cdnjs.cloudflare.com（csp_evaluator: SCRIPT_ALLOWLIST_BYPASS）
+top | H-05.2 | medium | fail | base-uri がない（default-src にはフォールバックしない）
+top | H-06.3 | info | fail | X-Frame-Options: SAMEORIGIN（frame-ancestors なし）
+top | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし
+top | H-08.ok | info | pass | nosniff
+top | H-09.ok | info | pass | strict-origin-when-cross-origin
+top | H-10.1 | info | fail | (ヘッダなし)
+top | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+top | H-12.na | info | na | 機密応答かどうか分からない（public, max-age=300）
+top | H-13.ok | info | pass | text/html; charset=utf-8
+top | H-14.1 | low | fail | (ヘッダなし)
+top | H-16.1 | low | fail | server: nginx/1.24.0
+top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+top | R-04.ok | info | pass | (ACAOなし)
+top | T-12.ok | info | pass | HTTP/2
+www.example.com | E-03.1 | high | fail | /.git/HEAD（HTTP 200、一致したパターン: git-head）
+www.example.com | E-03.2 | info | fail | /backup.zip（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）
+www.example.com | T-09.1 | high | fail | 接続できた旧バージョン: tls1_1
+www.example.com | T-10.na | info | na | 合意した暗号（TLSv1.3 / TLS_AES_256_GCM_SHA384）だけでは、弱い暗号を受け入れるか・鍵と署名は分からない
+
+## coverage
+H-01 | evaluated | fails=1
+H-02 | evaluated | fails=1
+H-03 | evaluated | fails=0
+H-04 | evaluated | fails=2 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | evaluated | fails=1
+H-06 | evaluated | fails=1
+H-07 | evaluated | fails=0
+H-08 | evaluated | fails=0
+H-09 | evaluated | fails=0
+H-10 | evaluated | fails=1
+H-11 | evaluated | fails=1
+H-12 | evaluated | fails=1
+H-13 | evaluated | fails=0
+H-14 | evaluated | fails=1
+H-15 | evaluated | fails=1
+H-16 | evaluated | fails=1
+H-17 | evaluated | fails=0
+C-01 | evaluated | fails=3
+C-02 | evaluated | fails=0
+C-03 | evaluated | fails=2
+C-04 | evaluated | fails=0
+C-05 | evaluated | fails=0
+C-06 | evaluated | fails=2
+C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | evaluated | fails=0
+C-09 | evaluated | fails=1
+C-10 | evaluated | fails=0
+C-11 | evaluated | fails=0
+C-12 | evaluated | fails=2
+C-13 | evaluated | fails=1
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | evaluated | fails=1
+R-02 | missing-input | fails=0 | C7 のとおり Origin: null を送って採取する
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=0
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | evaluated | fails=1
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | evaluated | fails=1
+T-05 | evaluated | fails=0
+T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | evaluated | fails=1
+T-10 | missing-input | fails=0 | C23（暗号ごとの接続の確認）と C11（証明書の取得）を採取する
+T-11 | missing-input | fails=0 | 必要なラベル: tls
+T-12 | evaluated | fails=0
+T-13 | manual | fails=0
+E-01 | evaluated | fails=0
+E-02 | evaluated | fails=0
+E-03 | evaluated | fails=2
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | 必要なラベル: （一般）
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0
+E-08 | evaluated | fails=0
+E-09 | evaluated | fails=0
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
+A-02 | evaluated | fails=0
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | missing-input | fails=0 | 必要なラベル: （一般）, unauth-*
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | missing-input | fails=0 | 必要なラベル: （一般）
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 必要なラベル: method-*, old-*

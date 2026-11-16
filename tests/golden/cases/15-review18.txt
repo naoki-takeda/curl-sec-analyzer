@@ -1,0 +1,94 @@
+#TARGET url=https://www.example.com/api/me label=unauth-api
+#META at=2026-11-01T10:00:00
+HTTP/2 401
+content-type: text/plain
+
+Unauthorized#TARGET url=https://www.example.com/api/me label=cors-reflect sensitive=1
+#META at=2026-11-01T10:00:00
+* Connected to www.example.com (192.0.2.1) port 443
+> GET /api/me HTTP/1.1
+> Origin: https://evil.example
+> Cookie: sid=AbCdEf0123456789CANARYc0ok1e
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: https://evil.example
+< access-control-allow-credentials: true
+<
+
+#TARGET url=https://www.example.com/about label=about
+* Connected to www.example.com (192.0.2.1) port 443
+> GET /about HTTP/1.1
+> Cookie: ai_session=Ab12C|1700000000|1700000000; ai_user=CANARYaiuser
+>
+< HTTP/2 200
+< content-type: text/html; charset=utf-8
+< cache-control: public, max-age=600
+< strict-transport-security: max-age=31536000, includeSubDomains
+<
+
+#TARGET url=https://www.example.com/api/auth/session label=unauth-session
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+
+{}
+
+#TARGET url=https://www.example.com/api/doc label=unauth-doc
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+{"id":1,"html":"<!DOCTYPE html><p>x</p>","owner":"alice@example.com"}
+
+#TARGET url=https://www.example.com/logout label=logout
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+set-cookie: sid=; Max-Age=0; Path=/
+
+#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<!doctype html><html><head><script src="/assets/index-abc.js"></script></head><body><div id="root"></div></body></html>
+
+#TARGET url=https://www.example.com/actuator/health label=health
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/vnd.spring-boot.actuator.v3+json
+
+{"status":"UP"}
+
+#TARGET url=https://www.example.com/ label=page
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+set-cookie: has_session=1; Path=/; Secure; SameSite=Lax
+
+<html><body><p>Look at /src/app.js:10:5 for the example.</p><!-- Tests pass --><!-- isDebug = true --></body></html>
+
+#TARGET url=https://www.example.com/fonts/icons.eot label=font
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/vnd.ms-fontobject
+
+x
+
+#TARGET url=https://old.example.com/ label=moved
+#META at=2026-11-01T10:00:00
+HTTP/2 301
+location: https://new.example.net/
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<p>new</p>
+
+#TARGET url=https://www.example.com/program?session=12&pass1=CANARYpass1 label=program
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<p>program</p>

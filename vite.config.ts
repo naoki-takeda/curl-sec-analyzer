@@ -54,5 +54,7 @@ export default defineConfig({
         // CSS は Tailwind CSS がビルド時に生成する（preflight などを含む）。JavaScript のバンドルには含まれないため手で記載する
         `tailwindcss（MIT）\n${readFileSync('node_modules/tailwindcss/LICENSE', 'utf8')}`].join('\n\n') } } })],
   build: { target: 'es2022', sourcemap: false },
-  test: { include: ['tests/**/*.test.ts'], environment: 'node' },
+  // タイムゾーンを固定する。#META at= はタイムゾーンを持たず手元の時刻として読むので、CI（UTC）と手元（JST）で期限の時間が変わり、
+  // ゴールデンテストが CI でだけ失敗した。期待結果は JST で作ってある
+  test: { include: ['tests/**/*.test.ts'], environment: 'node', env: { TZ: 'Asia/Tokyo' } },
 });

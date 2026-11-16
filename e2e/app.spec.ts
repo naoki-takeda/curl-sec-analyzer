@@ -146,7 +146,7 @@ test('?lang= に ja・en 以外を指定しても判定できる（en-US は英�
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(`/?lang=${q}`);
     await page.getByRole('button', { name: button }).click();
-    await expect(page.getByText(heading)).toBeVisible();
+    await expect(page.getByRole('heading', { name: heading })).toBeVisible();   // 状態の欄（件数の読み上げ）にも同じ語があるので、見出しで探す
     expect(errors).toEqual([]);
   }
 });
@@ -216,5 +216,35 @@ test('判定の結果は件数だけを読み上げ、結果欄は aria-live に
   const results = page.getByRole('region', { name: '判定結果' });
   await expect(results.getByText('指摘（項目×条件）')).toBeVisible();
   await expect(results).not.toHaveAttribute('aria-live', /.*/);
-  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました。指摘\d+件（うち重要度「高」\d+件）/);
+  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました。指摘（項目×条件）\d+件（うち重要度「高」\d+件）/);
+});
+
+// URL 欄の値はパーサのあとで入るので、-L の各ホップの URL を付け直さないと、http から https に転送された応答の H-・C- が黙って抜ける
+test('URL 欄で補った http の URL でも、-L で https に転送されたら HTTPS の応答として判定する', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill('HTTP/1.1 301 Moved Permanently\nLocation: https://www.example.com/\n\nHTTP/2 200\ncontent-type: text/html\n\n<html></html>\n');
+  await page.getByLabel('#TARGET がない入力のURL（任意）').fill('http://www.example.com/');
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(page.getByRole('region', { name: '判定結果' }).getByRole('cell', { name: 'H-01①' }).first()).toBeVisible();
+});
+
+test('読み上げる件数は画面の件数と同じで、言語を切り替えるとその言語で出し直す', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  const status = page.getByRole('status');
+  await expect(status).toHaveText(/指摘（項目×条件）\d+件/);
+  const n = (await status.innerText()).match(/指摘（項目×条件）(\d+)件/)![1];
+  await expect(page.getByRole('region', { name: '判定結果' }).getByText(new RegExp(`^${n}件`))).toBeVisible();
+  await page.getByRole('button', { name: 'English' }).click();
+  await expect(page.getByRole('status')).toHaveText(new RegExp(`: ${n} findings?, [0-9]+ high`));
+});
+
+test('件数以外の状態のメッセージも、言語を切り替えるとその言語で出し直す', async ({ page }) => {
+  await page.goto('/?lang=ja');
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(page.getByRole('status')).toHaveText('curlの出力を貼り付けてから「判定する」を押してください。');
+  await page.getByRole('button', { name: 'English' }).click();
+  await expect(page.getByRole('status')).toHaveText('Paste curl output, then select Analyze.');
+  await page.getByRole('button', { name: '日本語' }).click();
+  await expect(page.getByRole('status')).toHaveText('curlの出力を貼り付けてから「判定する」を押してください。');
 });
