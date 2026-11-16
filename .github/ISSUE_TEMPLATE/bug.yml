@@ -1,0 +1,25 @@
+name: 不具合の報告 / Bug report
+description: 画面が動かない、読み込めない、エクスポートが壊れているなど
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **生の curl の出力・HAR・Cookie・トークンは貼らないでください。** 再現に入力が必要なら、値をダミーに置き換えた最小の入力にしてください。
+        **Do not paste raw curl output, HAR files, cookies or tokens.**
+  - type: checkboxes
+    id: masked
+    attributes:
+      label: 確認 / Confirmation
+      options:
+        - label: 実在のシステムの秘密情報を含めていない / I have removed all secrets from real systems
+          required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順 / Steps to reproduce
+    validations: { required: true }
+  - type: input
+    id: env
+    attributes:
+      label: ブラウザとツールの版 / Browser and tool version

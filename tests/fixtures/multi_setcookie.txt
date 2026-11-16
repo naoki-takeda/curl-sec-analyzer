@@ -1,0 +1,7 @@
+#TARGET url=https://www.example.com/login label=login
+HTTP/2 200
+content-type: text/html
+set-cookie: sid=abcdefghijklmnopqrstuvwxyz012345; Path=/; Secure; HttpOnly; SameSite=Lax
+set-cookie: tracker=1; Path=/; Max-Age=3600; SameSite=None
+set-cookie: old=; Max-Age=0
+set-cookie: weird=v; Secure; SameSite=Sometimes

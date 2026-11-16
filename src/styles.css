@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* 配色：点検票の青と、重要度ごとの色。ライト・ダークの両方を変数で持つ */
+:root {
+  color-scheme: light;
+  --paper: #eef2f4; --surface: #ffffff; --ink: #16202a; --muted: #5b6875; --line: #cbd5dd;
+  --primary: #1e4f7a; --primary-ink: #ffffff;
+  --sev-high: #b3261e; --sev-medium: #a35407; --sev-low: #2f6db5; --sev-info: #66717d; --ok: #2e7d4f;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --paper: #12181e; --surface: #1a232c; --ink: #e4eaef; --muted: #9aa8b5; --line: #33414d;
+    --primary: #7fb2e0; --primary-ink: #0d1620;
+    --sev-high: #f2867d; --sev-medium: #f0a95a; --sev-low: #8ab8ee; --sev-info: #a3aeb9; --ok: #79c99a;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper); --color-surface: var(--surface); --color-ink: var(--ink); --color-muted: var(--muted);
+  --color-line: var(--line); --color-primary: var(--primary); --color-primary-ink: var(--primary-ink);
+  --color-sev-high: var(--sev-high); --color-sev-medium: var(--sev-medium); --color-sev-low: var(--sev-low);
+  --color-sev-info: var(--sev-info); --color-ok: var(--ok);
+  --font-sans: "BIZ UDPGothic", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  --font-mono: "BIZ UDGothic", ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+}
+
+html { background: var(--paper); color: var(--ink); }
+body { font-family: var(--font-sans); line-height: 1.7; font-feature-settings: "palt" 0; }
+:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* 折りたたみの見出しを横並び（flex）にするとブラウザの三角が消えるため、目印を自前で付ける（ui/dom.ts の disclosure） */
+summary.summary-custom { list-style: none; }
+summary.summary-custom::-webkit-details-marker { display: none; }
+summary .disclosure::before { content: "▸"; }
+details[open] > summary .disclosure::before { content: "▾"; }

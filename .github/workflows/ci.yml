@@ -1,0 +1,19 @@
+# プルリクエスト（Dependabot の更新を含む）を、公開前に検査する
+# 検査の内容は公開（deploy.yml）と共通で、checks.yml にある
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/checks.yml

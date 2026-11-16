@@ -1,0 +1,167 @@
+// rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64KBまで。正規表現による簡易的な走査
+import type { Rule, RuleContext } from '../model';
+import { hostOf } from '../parser/target';
+import { isTrustedOrigin } from '../engine/profile';
+import { mk } from './util';
+
+export interface Tag { name: string; attrs: Map<string, string>; raw: string; index: number; }
+
+/** 開始タグを列挙する（属性名は小文字） */
+export function tags(html: string, names: string[]): Tag[] {
+  // 属性の長さに上限を付ける。上限がないと、> のない本文（<script の繰り返しなど）で毎回末尾まで走査し、時間が本文の長さの2乗になる
+  const re = new RegExp(`<(${names.join('|')})\\b([^>]{0,2000})>`, 'gi');
+  const out: Tag[] = [];
+  for (const m of html.matchAll(re)) {
+    const attrs = new Map<string, string>();
+    for (const a of m[2].matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), a[2] ?? a[3] ?? a[4] ?? '');
+    out.push({ name: m[1].toLowerCase(), attrs, raw: m[0].slice(0, 200), index: m.index ?? 0 });
+  }
+  return out;
+}
+
+/** HTML本文があるか（-i・C2 で取得したもの） */
+export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ctx.final?.body?.trim() ? ctx.final.body : undefined);
+
+/** 混在コンテンツ：①script・iframe・stylesheet、②img など */
+export function mixedContent(html: string): { active: Tag[]; passive: Tag[] } {
+  const ts = tags(html, ['script', 'iframe', 'link', 'img', 'audio', 'video', 'source', 'embed', 'object', 'form']);
+  const isHttp = (v?: string) => !!v && /^http:\/\//i.test(v.trim());
+  const active = ts.filter(t => (t.name === 'script' || t.name === 'iframe' || t.name === 'embed' || t.name === 'object') && isHttp(t.attrs.get('src') ?? t.attrs.get('data'))
+    || (t.name === 'link' && /stylesheet|preload|modulepreload/i.test(t.attrs.get('rel') ?? '') && isHttp(t.attrs.get('href'))));
+  const passive = ts.filter(t => ['img', 'audio', 'video', 'source'].includes(t.name) && isHttp(t.attrs.get('src')));
+  return { active, passive };
+}
+
+export const mixedContentRule: Rule = { id: 'E-07', title: 'HTML本文：混在コンテンツ', appliesTo: 'html', scope: 'target',
+  basis: ['MDN: Mixed content', 'W3C Mixed Content'],
+  run(ctx) {
+    const html = htmlBody(ctx);
+    if (!html || ctx.isHttps === false) return [];
+    const { active, passive } = mixedContent(html);
+    const out = [
+      ...active.map(t => mk(mixedContentRule, ctx, 1, 'medium', 'fail', t.raw, 'https:// で読み込む（CSPの upgrade-insecure-requests も検討）')),
+      ...passive.map(t => mk(mixedContentRule, ctx, 2, 'low', 'fail', t.raw, 'https:// で読み込む')),
+    ];
+    return out.length ? out : [mk(mixedContentRule, ctx, 'ok', 'info', 'pass', 'http:// の資源なし', '')];
+  } };
+
+export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スクリプトのSRI', appliesTo: 'html', scope: 'target',
+  basis: ['MDN: Subresource Integrity', 'OWASP Third Party JavaScript Management CS'],
+  run(ctx) {
+    const html = htmlBody(ctx);
+    if (!html) return [];
+    const host = hostOf(ctx.target);
+    const trusted = ctx.profile?.trustedScriptOrigins ?? [];
+    // 外部オリジンの script を配信元（オリジン）ごとにまとめる。組織プロファイルで自社の配信元とした所は対象外
+    const byOrigin = new Map<string, { total: number; missing: Tag[] }>();
+    let skipped = 0;
+    for (const t of tags(html, ['script'])) {
+      const src = t.attrs.get('src');
+      if (!src || !/^(https?:)?\/\//i.test(src)) continue;
+      let u: URL; try { u = new URL(src, ctx.target.url ?? 'https://invalid.invalid/'); } catch { continue; }
+      if (u.host === host) continue;
+      if (isTrustedOrigin(u, trusted)) { skipped++; continue; }
+      const g = byOrigin.get(u.origin) ?? { total: 0, missing: [] };
+      g.total++; if (!t.attrs.has('integrity')) g.missing.push(t);
+      byOrigin.set(u.origin, g);
+    }
+    const fails = [...byOrigin].filter(([, g]) => g.missing.length).map(([origin, g]) =>
+      mk(sriRule, ctx, 1, 'low', 'fail', `${origin}（integrity なし ${g.missing.length}件／${g.total}件）。例：${g.missing[0].raw}`,
+         'integrity と crossorigin="anonymous" を付ける（自社の配信元なら、組織プロファイルの trustedScriptOrigins に登録して対象外にできる）'));
+    if (fails.length) return fails;
+    const total = [...byOrigin.values()].reduce((a, g) => a + g.total, 0);
+    return [mk(sriRule, ctx, 'ok', 'info', 'pass', total ? `外部スクリプト${total}件にintegrityあり` : skipped ? `外部スクリプトはすべて自社の配信元（${skipped}件）` : '外部オリジンのscriptなし', '')];
+  } };
+
+// 秘密情報は証跡に値を出さず、種類の名前だけを出す
+const SECRETS: [string, RegExp][] = [
+  ['AWSアクセスキー', /\bAKIA[0-9A-Z]{16}\b/],
+  ['Google APIキー', /\bAIza[0-9A-Za-z_-]{35}\b/],
+  ['秘密鍵', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
+  ['Slackトークン', /\bxox[baprs]-[0-9A-Za-z-]{10,}/],
+  ['GitHubトークン', /\bgh[pousr]_[0-9A-Za-z]{36,}\b/],
+  ['JWT', /\beyJ[\w-]{10,}\.eyJ[\w-]{10,}\.[\w-]{10,}/],
+  // 値は ASCII の記号・英数字だけ（日本語の文言「パスワードは8文字以上…」は空白がなくても秘密情報ではない）
+  ['キー・シークレットの代入', /["']?(?:api[_-]?key|client[_-]?secret|secret[_-]?key|access[_-]?token|password)["']?\s*[:=]\s*["'][!#-&(-~]{12,}["']/i],
+];
+const INTERNAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[\w-]+\.(?:internal|local|lan|corp|intra))\b[^\s"'<>]*/i;
+const DEV_WORD = /TODO|FIXME|XXX|HACK|debug|password|パスワード|本番|staging/i;
+/**
+ * 閉じたコメント（<!-- … -->）を1つずつ切り出し、その中だけで開発用の語を探す。一致した語を返す。
+ * 正規表現1つで「コメントの中の語」を探すと、閉じのない <!-- が続く本文でバックトラックが爆発する（64KBで数分）ため、indexOf で線形に走査する。
+ * コメントの外（前後のコメントにはさまれた本文）には一致させない
+ */
+export function devCommentWord(html: string): string | undefined {
+  for (let i = html.indexOf('<!--'); i >= 0;) {
+    const end = html.indexOf('-->', i + 4);
+    if (end < 0) return undefined;
+    const m = html.slice(i + 4, end).match(DEV_WORD);
+    if (m) return m[0];
+    i = html.indexOf('<!--', end + 3);
+  }
+  return undefined;
+}
+export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内部情報', appliesTo: 'html', scope: 'target',
+  basis: ['OWASP WSTG-INFO-05'],
+  run(ctx) {
+    const html = htmlBody(ctx);
+    if (!html) return [];
+    const out = [];
+    for (const [name, re] of SECRETS) if (re.test(html)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
+    const iu = html.match(INTERNAL_URL)?.[0];
+    if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${iu.slice(0, 120)}`, '本番のHTMLに内部URLを残さない'));
+    // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す
+    const dc = devCommentWord(html);
+    if (dc) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `開発用コメント（「${dc}」を含む。中身は表示しない）`, 'ビルド時にコメントを削除する'));
+    const gen = tags(html, ['meta']).find(t => t.attrs.get('name')?.toLowerCase() === 'generator' && /\d+\.\d+/.test(t.attrs.get('content') ?? ''));
+    if (gen) out.push(mk(htmlSecrets, ctx, 3, 'info', 'fail', gen.raw, 'generator のバージョンを出さない'));
+    return out.length ? out : [mk(htmlSecrets, ctx, 'ok', 'info', 'pass', '秘密情報・内部情報らしき記述なし', '')];
+  } };
+
+/** form ごとに、その中の input を集める */
+function forms(html: string): { form: Tag; inputs: Tag[] }[] {
+  const fs = tags(html, ['form']);
+  return fs.map((f, i) => {
+    // 元の文字列で探す（toLowerCase で長さが変わる文字（İ など）があると、位置がずれる）
+    const endRe = /<\/form\s*>/gi; endRe.lastIndex = f.index;
+    const end = endRe.exec(html)?.index ?? -1;
+    const stop = Math.min(end < 0 ? html.length : end, fs[i + 1]?.index ?? html.length);
+    return { form: f, inputs: tags(html.slice(f.index, stop), ['input']) };
+  });
+}
+
+export const passwordForm: Rule = { id: 'E-10', title: 'HTML本文：パスワードフォーム', appliesTo: 'html', scope: 'target',
+  basis: ['IPA', 'OWASP Authentication CS'],
+  run(ctx) {
+    const html = htmlBody(ctx);
+    if (!html) return [];
+    const pw = forms(html).filter(f => f.inputs.some(i => i.attrs.get('type')?.toLowerCase() === 'password'));
+    if (!pw.length) return [];
+    const out = [];
+    for (const { form } of pw) {
+      const action = form.attrs.get('action') ?? '';
+      if (/^http:\/\//i.test(action)) out.push(mk(passwordForm, ctx, 1, 'high', 'fail', form.raw, 'フォームの送信先を https:// にする'));
+      if ((form.attrs.get('method') ?? 'get').toLowerCase() !== 'post') out.push(mk(passwordForm, ctx, 2, 'medium', 'fail', form.raw, 'パスワードは method="post" で送る（URLに残さない）'));
+    }
+    return out.length ? out : [mk(passwordForm, ctx, 'ok', 'info', 'pass', `パスワードフォーム${pw.length}件は https・POST`, '')];
+  } };
+
+const TOKEN_NAME = /csrf|xsrf|token|authenticity|nonce|__RequestVerificationToken|_wpnonce/i;
+export const csrfToken: Rule = { id: 'E-12', title: 'HTML本文：CSRFトークンの有無', appliesTo: 'html', scope: 'target',
+  basis: ['OWASP CSRF Prevention CS'],
+  run(ctx) {
+    const html = htmlBody(ctx);
+    if (!html || ctx.sensitive === false) return [];
+    const posts = forms(html).filter(f => (f.form.attrs.get('method') ?? '').toLowerCase() === 'post');
+    if (!posts.length) return [];
+    const missing = posts.filter(f => !f.inputs.some(i => i.attrs.get('type')?.toLowerCase() === 'hidden' && TOKEN_NAME.test(i.attrs.get('name') ?? '')));
+    if (!missing.length) return [mk(csrfToken, ctx, 'ok', 'info', 'pass', `POSTフォーム${posts.length}件にトークンらしき項目あり`, '')];
+    // ①は「トークンがなく、SameSite も Lax/Strict でない」。認証後ページ（機密応答）が前提なので、機密かどうか分からなければ na（第0章 0.3）
+    if (ctx.sensitive === undefined)
+      return [mk(csrfToken, ctx, 'na', 'info', 'na', `トークンのないPOSTフォーム${missing.length}件（機密応答かどうか分からない）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
+    if (ctx.hostSessionSameSite === true)
+      return [mk(csrfToken, ctx, 'ok', 'info', 'pass', `トークンのないPOSTフォーム${missing.length}件。同じホストのセッションCookieは SameSite=Lax/Strict`, '')];
+    return missing.map(f => mk(csrfToken, ctx, 1, 'info', 'fail', f.form.raw,
+      ctx.hostSessionSameSite === false ? 'POSTフォームにCSRFトークンを入れる（セッションCookieも SameSite=Lax/Strict でない。実効性の確認は範囲外）'
+                                        : 'POSTフォームにCSRFトークンを入れる（セッションCookieが見つからないため SameSite は確認できない。実効性の確認は範囲外）'));
+  } };

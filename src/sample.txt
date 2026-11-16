@@ -1,0 +1,95 @@
+#TARGET url=https://www.example.com/ label=top
+#META at=2026-11-11T10:00:00
+* Host www.example.com:443 was resolved.
+*   Trying 192.0.2.10:443...
+* Connected to www.example.com (192.0.2.10) port 443
+* ALPN: server accepted h2
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / x25519 / RSASSA-PSS
+> GET / HTTP/2
+> Host: www.example.com
+> User-Agent: curl/8.11.1
+> Accept: */*
+>
+< HTTP/2 200
+< content-type: text/html; charset=utf-8
+< server: nginx/1.24.0
+< strict-transport-security: max-age=31536000; includeSubDomains; preload
+< content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; object-src 'none'
+< x-frame-options: SAMEORIGIN
+< x-content-type-options: nosniff
+< referrer-policy: strict-origin-when-cross-origin
+< cache-control: public, max-age=300
+< set-cookie: ui_pref=dark; Path=/; Max-Age=31536000
+<
+#TARGET url=http://www.example.com/ label=http
+HTTP/1.1 302 Found
+Location: https://www.example.com/
+Content-Length: 0
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+#TARGET url=https://example.com/ label=apex
+HTTP/2 301
+location: https://www.example.com/
+
+#TARGET url=https://www.example.com/login label=pre-login
+HTTP/2 200
+content-type: text/html; charset=utf-8
+set-cookie: SESSIONID=8f3c2a91d0b74e6fa1c55d3e9b2f7a40; Path=/; HttpOnly
+cache-control: no-store
+
+#TARGET url=https://www.example.com/login label=login
+HTTP/2 302
+location: /mypage
+set-cookie: SESSIONID=8f3c2a91d0b74e6fa1c55d3e9b2f7a40; Path=/; HttpOnly
+set-cookie: __Host-csrf=Zm9vYmFyYmF6cXV4MTIzNDU2; Path=/; Secure; SameSite=Strict
+cache-control: no-store
+
+#TARGET url=https://www.example.com/mypage label=mypage sensitive=1
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+content-security-policy: default-src 'self'; script-src 'nonce-R4nd0mN0nceValue' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
+x-content-type-options: nosniff
+referrer-policy: no-referrer
+permissions-policy: camera=(), microphone=(), geolocation=()
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+x-permitted-cross-domain-policies: none
+cache-control: private, max-age=0
+
+<!doctype html>
+<html><body><h1>マイページ</h1></body></html>
+#TARGET url=https://api.example.com/v1/me label=cors-reflect sensitive=1
+* Connected to api.example.com (192.0.2.20) port 443
+> GET /v1/me HTTP/2
+> Host: api.example.com
+> Origin: https://evil.example
+> Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: https://evil.example
+< access-control-allow-credentials: true
+< cache-control: no-store
+< x-content-type-options: nosniff
+<
+#TARGET url=https://www.example.com/logout label=logout
+HTTP/2 302
+location: /
+
+#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1
+HTTP/2 200
+content-type: text/html; charset=utf-8
+cache-control: no-store
+
+#TARGET url=https://www.example.com/ label=probes
+#PROBE path=/.git/HEAD code=200 size=21 head=cmVmOiByZWZzL2hlYWRzL21haW4K ct=text/plain
+#PROBE path=/.env code=404 size=0 head= ct=text/html; charset=utf-8
+#PROBE path=/backup.zip code=200 size=1820 head=PCFkb2N0eXBlIGh0bWw+PGh0bWw+PGhlYWQ+PHRpdGxlPkFwcDwvdGl0bGU+ ct=text/html; charset=utf-8
+#TARGET url=https://www.example.com/ label=tls
+#TLSPROBE v=tls1 ok=0
+#TLSPROBE v=tls1_1 ok=1
+#TLSPROBE v=tls1_2 ok=1
+#TLSPROBE v=tls1_3 ok=1

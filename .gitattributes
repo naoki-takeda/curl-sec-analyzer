@@ -1,0 +1,42 @@
+# 改行は LF にそろえる（Windows で取り出しても CRLF にしない）。
+# 拡張子のないファイル（LICENSE など）も、テキストと判定できれば LF にする。
+* text=auto eol=lf
+
+# シェルスクリプトは必ず LF にする（CRLF だと bash が $'\r' で失敗する。run.sh）
+*.sh      text eol=lf
+
+# このリポジトリで使っているテキストのファイル
+*.ts      text eol=lf
+*.mjs     text eol=lf
+*.js      text eol=lf
+*.json    text eol=lf
+*.css     text eol=lf diff=css
+*.html    text eol=lf diff=html
+*.md      text eol=lf diff=markdown
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.svg     text eol=lf
+*.txt     text eol=lf
+
+# テスト用の curl の出力は、採取したままの改行を保つ（変換しない）。
+# サーバの応答ヘッダは CRLF、curl 自身の行は LF で、混在した入力をパーサが扱えるかを検査しているため
+tests/fixtures/*.txt  -text
+# テスト用の HAR（tests/fixtures）。中身は JSON
+*.har     text eol=lf
+
+# 画像・フォントは改行を変換せず、差分も出さない
+*.png     binary
+*.ico     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.woff    binary
+*.woff2   binary
+
+# 生成物は差分を折りたたむ
+package-lock.json  linguist-generated=true
+
+# アーカイブ（git archive）に含めない
+.gitattributes  export-ignore
+.gitignore      export-ignore

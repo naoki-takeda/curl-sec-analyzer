@@ -1,0 +1,38 @@
+# プルリクエストで追加・更新される依存に、既知の脆弱性がないか検査する
+#
+# checks.yml の npm audit はリポジトリ全体の依存（公開物に含まれるもの）を検査する。
+# こちらはプルリクエストで「新しく入る」依存（開発用を含む）を見て、脆弱なものの取り込みを止める。
+#
+# dependency-review-action は公開リポジトリでは無料だが、private では GitHub Advanced Security が必要なため、
+# 公開リポジトリのときだけ実行する（private の間はスキップされ、Actions の無料枠も使わない）。
+# pull_request のイベントには repository.private が含まれるため、API で公開状態を調べる必要はない。
+# 公開後は、リポジトリの設定で Dependency graph を有効にしておく（無効だと失敗する）。
+#
+# セキュリティ方針は checks.yml の先頭と同じ（SHA 固定・最小権限・認証情報を残さない）
+name: Dependency review
+
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: deps-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # 基準は npm run audit:deps（--audit-level=high）にそろえる
+          fail-on-severity: high

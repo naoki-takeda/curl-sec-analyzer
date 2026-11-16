@@ -1,0 +1,724 @@
+#TARGET url=https://www.example.com/ label=top
+* Connecting to hostname: 127.0.0.1
+* Connecting to port: 8443
+*   Trying 127.0.0.1:8443...
+* Connected to 127.0.0.1 (127.0.0.1) port 8443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [6 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [847 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: CN=www.example.com
+*  start date: Nov 11 06:11:57 2026 GMT
+*  expire date: Dec  1 06:11:57 2026 GMT
+*  issuer: CN=www.example.com
+*  SSL certificate verify result: self-signed certificate (18), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> GET / HTTP/1.1
+> Host: www.example.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> 
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* old SSL session ID is stale, removing
+{ [5 bytes data]
+* HTTP 1.0, assume close after body
+< HTTP/1.0 200 ok
+< Content-type: text/plain
+< 
+{ [260 bytes data]
+* TLSv1.3 (IN), TLS alert, close notify (256):
+{ [2 bytes data]
+* Closing connection
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+} [2 bytes data]
+#TARGET url=https://www.example.com/ label=page
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening '' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/assets/app.js label=static
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening 'assets/app.js' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(assets/app.js, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/ label=header-json
+#META response_code=200
+{"content-type":["text/plain"]
+}
+#TARGET url=https://www.example.com/no-such-page-csa404 label=notfound
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening 'no-such-page-csa404' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(no-such-page-csa404, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/ label=csp-sample-1
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+#TARGET url=https://www.example.com/ label=csp-sample-2
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+#TARGET url=http://www.example.com/ label=http
+
+#META response_code=000 num_redirects=0 url_effective=http://www.example.com/ http_version=0
+#TARGET url=https://example.com/ label=apex
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+#TARGET url=https://www.example.com/login label=pre-login
+* WARNING: failed to open cookie file "jar.txt"
+* Connecting to hostname: 127.0.0.1
+* Connecting to port: 8443
+*   Trying 127.0.0.1:8443...
+* Connected to 127.0.0.1 (127.0.0.1) port 8443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [6 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [847 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: CN=www.example.com
+*  start date: Nov 11 06:11:57 2026 GMT
+*  expire date: Dec  1 06:11:57 2026 GMT
+*  issuer: CN=www.example.com
+*  SSL certificate verify result: self-signed certificate (18), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> GET /login HTTP/1.1
+> Host: www.example.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> 
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* old SSL session ID is stale, removing
+{ [5 bytes data]
+* HTTP 1.0, assume close after body
+< HTTP/1.0 200 ok
+< Content-type: text/plain
+< 
+{ [270 bytes data]
+* TLSv1.3 (IN), TLS alert, close notify (256):
+{ [2 bytes data]
+* Closing connection
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+} [2 bytes data]
+#TARGET url=https://www.example.com/login label=login sensitive=1
+* Connecting to hostname: 127.0.0.1
+* Connecting to port: 8443
+*   Trying 127.0.0.1:8443...
+* Connected to 127.0.0.1 (127.0.0.1) port 8443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [6 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [847 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: CN=www.example.com
+*  start date: Nov 11 06:11:57 2026 GMT
+*  expire date: Dec  1 06:11:57 2026 GMT
+*  issuer: CN=www.example.com
+*  SSL certificate verify result: self-signed certificate (18), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> POST /login HTTP/1.1
+> Host: www.example.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> Content-Length: 19
+> Content-Type: application/x-www-form-urlencoded
+> 
+} [19 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* old SSL session ID is stale, removing
+* Operation timed out after 3002 milliseconds with 0 bytes received
+* Closing connection
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+} [2 bytes data]
+* TLSv1.3 (IN), TLS alert, close notify (256):
+{ [2 bytes data]
+curl: (28) Operation timed out after 3002 milliseconds with 0 bytes received
+#TARGET url=https://www.example.com/login label=session-sample-1
+#TARGET url=https://www.example.com/login label=session-sample-2
+#TARGET url=https://www.example.com/login label=session-sample-3
+#TARGET url=https://www.example.com/mypage label=mypage sensitive=1
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening 'mypage' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(mypage, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/api/me label=api sensitive=1
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening 'api/me' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(api/me, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/api/me label=cors-reflect sensitive=1
+* Connecting to hostname: 127.0.0.1
+* Connecting to port: 8443
+*   Trying 127.0.0.1:8443...
+* Connected to 127.0.0.1 (127.0.0.1) port 8443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [6 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [847 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: CN=www.example.com
+*  start date: Nov 11 06:11:57 2026 GMT
+*  expire date: Dec  1 06:11:57 2026 GMT
+*  issuer: CN=www.example.com
+*  SSL certificate verify result: self-signed certificate (18), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> GET /api/me HTTP/1.1
+> Host: www.example.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> Origin: https://evil.example
+> 
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* old SSL session ID is stale, removing
+{ [5 bytes data]
+* HTTP 1.0, assume close after body
+< HTTP/1.0 200 ok
+< Content-type: text/plain
+< 
+{ [272 bytes data]
+* TLSv1.3 (IN), TLS alert, close notify (256):
+{ [2 bytes data]
+* Closing connection
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+} [2 bytes data]
+#TARGET url=https://www.example.com/api/me label=cors-null sensitive=1
+* Connecting to hostname: 127.0.0.1
+* Connecting to port: 8443
+*   Trying 127.0.0.1:8443...
+* Connected to 127.0.0.1 (127.0.0.1) port 8443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [6 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [847 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: CN=www.example.com
+*  start date: Nov 11 06:11:57 2026 GMT
+*  expire date: Dec  1 06:11:57 2026 GMT
+*  issuer: CN=www.example.com
+*  SSL certificate verify result: self-signed certificate (18), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> GET /api/me HTTP/1.1
+> Host: www.example.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> Origin: null
+> 
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* old SSL session ID is stale, removing
+{ [5 bytes data]
+* HTTP 1.0, assume close after body
+< HTTP/1.0 200 ok
+< Content-type: text/plain
+< 
+{ [272 bytes data]
+* TLSv1.3 (IN), TLS alert, close notify (256):
+{ [2 bytes data]
+* Closing connection
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+} [2 bytes data]
+#TARGET url=https://www.example.com/api/me label=cors-partial sensitive=1
+* Connecting to hostname: 127.0.0.1
+* Connecting to port: 8443
+*   Trying 127.0.0.1:8443...
+* Connected to 127.0.0.1 (127.0.0.1) port 8443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [6 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [847 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: CN=www.example.com
+*  start date: Nov 11 06:11:57 2026 GMT
+*  expire date: Dec  1 06:11:57 2026 GMT
+*  issuer: CN=www.example.com
+*  SSL certificate verify result: self-signed certificate (18), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> GET /api/me HTTP/1.1
+> Host: www.example.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> Origin: https://www.example.com.evil.net
+> 
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* old SSL session ID is stale, removing
+{ [5 bytes data]
+* HTTP 1.0, assume close after body
+< HTTP/1.0 200 ok
+< Content-type: text/plain
+< 
+{ [272 bytes data]
+* TLSv1.3 (IN), TLS alert, close notify (256):
+{ [2 bytes data]
+* Closing connection
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+} [2 bytes data]
+#TARGET url=https://www.example.com/api/me label=cors-preflight
+* Connecting to hostname: 127.0.0.1
+* Connecting to port: 8443
+*   Trying 127.0.0.1:8443...
+* Connected to 127.0.0.1 (127.0.0.1) port 8443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [6 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [847 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: CN=www.example.com
+*  start date: Nov 11 06:11:57 2026 GMT
+*  expire date: Dec  1 06:11:57 2026 GMT
+*  issuer: CN=www.example.com
+*  SSL certificate verify result: self-signed certificate (18), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> OPTIONS /api/me HTTP/1.1
+> Host: www.example.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> Origin: https://evil.example
+> Access-Control-Request-Method: PUT
+> Access-Control-Request-Headers: authorization,content-type
+> 
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* old SSL session ID is stale, removing
+* Operation timed out after 3002 milliseconds with 0 bytes received
+* Closing connection
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+} [2 bytes data]
+* TLSv1.3 (IN), TLS alert, close notify (256):
+{ [2 bytes data]
+curl: (28) Operation timed out after 3002 milliseconds with 0 bytes received
+#TARGET url=https://www.example.com/ label=options
+#TARGET url=https://www.example.com/ label=trace
+#TARGET url=https://www.example.com/ label=host-inj
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening '' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/login label=open-redirect
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+#TARGET url=https://www.example.com/api/me?callback=test123 label=jsonp sensitive=1
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening 'api/me?callback=test123' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(api/me?callback=test123, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/%25%25%25 label=error-url
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening '%%%' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(%%%, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/api/me/abc label=error-api
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening 'api/me/abc' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(api/me/abc, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/robots.txt label=robots
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening 'robots.txt' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(robots.txt, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/ label=probes
+#PROBE path=/.git/HEAD head=RXJyb3Igb3BlbmluZyAnLmdpdC9IRUFEJyBtb2RlPSdyJw0KNDAyNzVDNjQ4RjdGMDAwMDplcnJvcjo4MDAwMA== code=200 size=278 ct=text/plain
+#PROBE path=/.env head=RXJyb3Igb3BlbmluZyAnLmVudicgbW9kZT0ncicNCjQwMjc1QzY0OEY3RjAwMDA6ZXJyb3I6ODAwMDAwMDI6cw== code=200 size=268 ct=text/plain
+#PROBE path=/.svn/entries head=RXJyb3Igb3BlbmluZyAnLnN2bi9lbnRyaWVzJyBtb2RlPSdyJw0KNDAyNzVDNjQ4RjdGMDAwMDplcnJvcjo4MA== code=200 size=284 ct=text/plain
+#PROBE path=/.DS_Store head=RXJyb3Igb3BlbmluZyAnLkRTX1N0b3JlJyBtb2RlPSdyJw0KNDAyNzVDNjQ4RjdGMDAwMDplcnJvcjo4MDAwMA== code=200 size=278 ct=text/plain
+#PROBE path=/WEB-INF/web.xml head=RXJyb3Igb3BlbmluZyAnV0VCLUlORi93ZWIueG1sJyBtb2RlPSdyJw0KNDAyNzVDNjQ4RjdGMDAwMDplcnJvcg== code=200 size=290 ct=text/plain
+#PROBE path=/package.json head=RXJyb3Igb3BlbmluZyAncGFja2FnZS5qc29uJyBtb2RlPSdyJw0KNDAyNzVDNjQ4RjdGMDAwMDplcnJvcjo4MA== code=200 size=284 ct=text/plain
+#PROBE path=/composer.json head=RXJyb3Igb3BlbmluZyAnY29tcG9zZXIuanNvbicgbW9kZT0ncicNCjQwMjc1QzY0OEY3RjAwMDA6ZXJyb3I6OA== code=200 size=286 ct=text/plain
+#PROBE path=/backup.zip head=RXJyb3Igb3BlbmluZyAnYmFja3VwLnppcCcgbW9kZT0ncicNCjQwMjc1QzY0OEY3RjAwMDA6ZXJyb3I6ODAwMA== code=200 size=280 ct=text/plain
+#PROBE path=/phpinfo.php head=RXJyb3Igb3BlbmluZyAncGhwaW5mby5waHAnIG1vZGU9J3InDQo0MDI3NUM2NDhGN0YwMDAwOmVycm9yOjgwMA== code=200 size=282 ct=text/plain
+#PROBE path=/server-status head=RXJyb3Igb3BlbmluZyAnc2VydmVyLXN0YXR1cycgbW9kZT0ncicNCjQwMjc1QzY0OEY3RjAwMDA6ZXJyb3I6OA== code=200 size=286 ct=text/plain
+#PROBE path=/robots.txt head=RXJyb3Igb3BlbmluZyAncm9ib3RzLnR4dCcgbW9kZT0ncicNCjQwMjc1QzY0OEY3RjAwMDA6ZXJyb3I6ODAwMA== code=200 size=280 ct=text/plain
+#PROBE path=/.well-known/security.txt head=RXJyb3Igb3BlbmluZyAnLndlbGwta25vd24vc2VjdXJpdHkudHh0JyBtb2RlPSdyJw0KNDAyNzVDNjQ4RjdGMA== code=200 size=308 ct=text/plain
+#PROBE path=/assets/app.js.map head=RXJyb3Igb3BlbmluZyAnYXNzZXRzL2FwcC5qcy5tYXAnIG1vZGU9J3InDQo0MDI3NUM2NDhGN0YwMDAwOmVycg== code=200 size=294 ct=text/plain
+#TARGET url=https://www.example.com/ label=tls
+depth=0 CN = www.example.com
+verify error:num=18:self-signed certificate
+verify return:1
+depth=0 CN = www.example.com
+verify return:1
+CONNECTED(00000003)
+---
+Certificate chain
+ 0 s:CN = www.example.com
+   i:CN = www.example.com
+   a:PKEY: rsaEncryption, 2048 (bit); sigalg: RSA-SHA256
+   v:NotBefore: Nov 11 06:11:57 2026 GMT; NotAfter: Dec  1 06:11:57 2026 GMT
+-----BEGIN CERTIFICATE-----
+MIIDPjCCAiagAwIBAgIUFz7lNKVLeGYB4Wn+dH3ClACbbSIwDQYJKoZIhvcNAQEL
+BQAwGjEYMBYGA1UEAwwPd3d3LmV4YW1wbGUuY29tMB4XDTI2MTExMTA2MTE1N1oX
+DTI2MTIwMTA2MTE1N1owGjEYMBYGA1UEAwwPd3d3LmV4YW1wbGUuY29tMIIBIjAN
+BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7qk/yscQmzV4XTp4zQayYppNGV/I
+JGxtQ2XD4TL7jXkV1OgkctN7PsQeI77BV0M7cFm+nPZNioxxYPBcSjp6J+VAjRxu
+6K+lhdDXF+qb8d8D3ek3Dx4BgB3IytIWgDwKjxf04enwCOU0Lc47D2oIhmdhTkLZ
+oxZuUbFid6fz0PJKcgcIwr0Le8gLSHY5Re4KVPntKT57JaT/rB+DZ69Q20wAL70v
+1L6c6ZLldClxFzsNERv6a6joKeVYtlvNkctthndcW0iLBTVSCZ+aez4jS/u4Qt3c
+2lj0n/r+20KbreekK69/bYZ0eC188Xjpn8M83MCcLAV6PBK6Fsq9T5hplQIDAQAB
+o3wwejAdBgNVHQ4EFgQUzZeA/gEgNpI5mMilxR//Je18T3QwHwYDVR0jBBgwFoAU
+zZeA/gEgNpI5mMilxR//Je18T3QwDwYDVR0TAQH/BAUwAwEB/zAnBgNVHREEIDAe
+gg93d3cuZXhhbXBsZS5jb22CC2V4YW1wbGUuY29tMA0GCSqGSIb3DQEBCwUAA4IB
+AQC8dp8y+OLsFhMASOKOiiYsdiKdkSeCcUWd5OHZxxDNq4TSmpmPIkt3YH4h29mt
+WOQqZgozL1HC5Au8lgEz5yWqrfznXF3t5UvjCPv/vkhHA3ycq3tm8AA//v2oxGRk
+fIfJIgep4ZK91QAsdpUAHgUllYOAHlDCxBuPZMhRpqAJAOY3gMGY5ktHdBl5AEjy
+VOFrJjRY7D2F89q/0jMpEWhwDmixIehdyiXPssItIqKHt3eV0asaC0/3M29+b7X7
+ozrRsKHTERHw5xNs4veH/LcKZRrxgqSSuaRIX/p4caZg9afLNQqSUyYfE7EXbOyg
+JdCVDqilBdzSHNb7bTNXJi34
+-----END CERTIFICATE-----
+---
+Server certificate
+subject=CN = www.example.com
+issuer=CN = www.example.com
+---
+No client certificate CA names sent
+Peer signing digest: SHA256
+Peer signature type: RSA-PSS
+Server Temp Key: X25519, 253 bits
+---
+SSL handshake has read 1390 bytes and written 397 bytes
+Verification error: self-signed certificate
+---
+New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384
+Server public key is 2048 bit
+Secure Renegotiation IS NOT supported
+Compression: NONE
+Expansion: NONE
+No ALPN negotiated
+Early data was not sent
+Verify return code: 18 (self-signed certificate)
+---
+DONE
+---
+Post-Handshake New Session Ticket arrived:
+SSL-Session:
+    Protocol  : TLSv1.3
+    Cipher    : TLS_AES_256_GCM_SHA384
+    Session-ID: 2A5BA9276CB3DD2F2394C913EFD1D96C72484CD4B2DD2E6F6BE3BEA72D28FACF
+    Session-ID-ctx: 
+    Resumption PSK: 9DEE5E9004E9CF49A4EE08F491E87B66DC557299C82CCED6015CCE1841FB974C75654CC0FCEB08C6685E1CAC9A310D6F
+    PSK identity: None
+    PSK identity hint: None
+    SRP username: None
+    TLS session ticket lifetime hint: 7200 (seconds)
+    TLS session ticket:
+    0000 - ef e5 78 8c 10 55 33 f9-eb d2 38 dc 0b 99 85 ea   ..x..U3...8.....
+    0010 - fd 91 e4 85 1e 99 50 ff-e9 e5 a3 05 6d 1d de 0a   ......P.....m...
+    0020 - be 99 72 1f cf 9a 9c 88-3d 69 96 00 87 cf 21 41   ..r.....=i....!A
+    0030 - eb 23 4b c3 db 5d 44 86-49 d6 9b 69 e4 99 56 2f   .#K..]D.I..i..V/
+    0040 - 63 27 90 89 8d a9 45 74-3d 9c 21 9b 7e fa b6 af   c'....Et=.!.~...
+    0050 - 19 75 a7 c7 d2 fb 9b fd-45 7b cf 03 30 56 27 c6   .u......E{..0V'.
+    0060 - 3d cd d0 65 ac f8 de 6d-09 fb 44 aa 08 cf b0 1a   =..e...m..D.....
+    0070 - 33 5f bb a4 ac aa 5a 10-31 45 06 cf 34 c9 5d b4   3_....Z.1E..4.].
+    0080 - 4e f7 d5 16 fb 37 80 8e-3a 55 04 b7 78 08 7b e3   N....7..:U..x.{.
+    0090 - 64 07 1c cc e8 96 10 cb-eb 63 70 7f 93 b2 53 a4   d........cp...S.
+    00a0 - ea 92 45 f7 54 3f 26 a1-53 2d 8d 96 fe de 16 bc   ..E.T?&.S-......
+    00b0 - 7b 1c a9 5e 74 fd ea f2-6c 4b 5f a1 e5 2f 4c f1   {..^t...lK_../L.
+    00c0 - be 52 96 78 49 ee c3 17-2d 9a 0f e8 e6 11 32 18   .R.xI...-.....2.
+
+    Start Time: 1794377767
+    Timeout   : 7200 (sec)
+    Verify return code: 18 (self-signed certificate)
+    Extended master secret: no
+    Max Early Data: 0
+---
+read R BLOCK
+---
+Post-Handshake New Session Ticket arrived:
+SSL-Session:
+    Protocol  : TLSv1.3
+    Cipher    : TLS_AES_256_GCM_SHA384
+    Session-ID: F6B07B3E45E53466ABD78E18200BD2E2E38A9B238172205192944F7B4DB91259
+    Session-ID-ctx: 
+    Resumption PSK: 5E3E68EB9FC220943CE3DCC4826AB1807489D880254FF5010FE1167C7773D26F49481CAC3B0202DA48898858A1ACDB00
+    PSK identity: None
+    PSK identity hint: None
+    SRP username: None
+    TLS session ticket lifetime hint: 7200 (seconds)
+    TLS session ticket:
+    0000 - ef e5 78 8c 10 55 33 f9-eb d2 38 dc 0b 99 85 ea   ..x..U3...8.....
+    0010 - f5 fd 94 2d 81 91 14 a1-1a 8e 06 09 ea 95 be 26   ...-...........&
+    0020 - 27 8f 82 d0 c8 4e 27 ee-98 ff 51 2f 8b fc f1 62   '....N'...Q/...b
+    0030 - b7 12 c2 8d a5 02 1d 02-00 85 f3 ac 3f 7e 58 46   ............?~XF
+    0040 - be 42 bb 32 8b 5b 6e 0d-49 e9 47 ce e3 5f cd 2e   .B.2.[n.I.G.._..
+    0050 - 20 5b d6 fa bd ff 8f 0a-d6 9a 2f c8 91 33 c1 14    [......../..3..
+    0060 - de b3 1b c6 ea f8 fd 03-b4 ad 72 4c 6e 09 07 e2   ..........rLn...
+    0070 - c6 aa 0a dd d3 7c 5d 56-f3 a9 63 ba 2b 47 62 9a   .....|]V..c.+Gb.
+    0080 - ee 25 11 00 8f 3a 3f 48-06 71 85 49 3c a2 c5 5f   .%...:?H.q.I<.._
+    0090 - ab 67 bb 7f 9e 38 db 2e-06 c7 fb 2f f2 e5 f7 76   .g...8...../...v
+    00a0 - b6 42 4c 82 ef 00 c4 83-03 6b c5 22 a8 e9 bc 2d   .BL......k."...-
+    00b0 - da cd 9f 50 1b c4 78 99-ce 27 c8 86 6f 5d 22 79   ...P..x..'..o]"y
+    00c0 - 27 12 cb 71 78 7e 25 4e-d4 d5 8c 25 f3 af 82 49   '..qx~%N...%...I
+
+    Start Time: 1794377767
+    Timeout   : 7200 (sec)
+    Verify return code: 18 (self-signed certificate)
+    Extended master secret: no
+    Max Early Data: 0
+---
+read R BLOCK
+subject=CN = www.example.com
+issuer=CN = www.example.com
+notBefore=Nov 11 06:11:57 2026 GMT
+notAfter=Dec  1 06:11:57 2026 GMT
+X509v3 Subject Alternative Name: 
+    DNS:www.example.com, DNS:example.com
+#TLSPROBE v=tls1 ok=0
+#TLSPROBE v=tls1_1 ok=0
+#TLSPROBE v=tls1_2 ok=1
+#TLSPROBE v=tls1_3 ok=1
+#CIPHERPROBE c=RC4-SHA ok=err
+#CIPHERPROBE c=DES-CBC3-SHA ok=err
+#CIPHERPROBE c=NULL-SHA256 ok=0
+#CIPHERPROBE c=AES128-SHA ok=1
+#CIPHERPROBE c=ECDHE-RSA-AES128-SHA ok=1
+#TARGET url=https://www.example.com/login label=crlf
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+#TARGET url=https://www.example.com/api/me label=method-override
+#TARGET url=https://www.example.com/admin/ label=xff-spoof
+HTTP/1.0 200 ok
+Content-type: text/plain
+
+Error opening 'admin/' mode='r'
+40275C648F7F0000:error:80000002:system library:BIO_new_file:No such file or directory:../crypto/bio/bss_file.c:67:calling fopen(admin/, r)
+40275C648F7F0000:error:10000080:BIO routines:BIO_new_file:no such file:../crypto/bio/bss_file.c:75:
+#TARGET url=https://www.example.com/logout label=logout
+* Connecting to hostname: 127.0.0.1
+* Connecting to port: 8443
+*   Trying 127.0.0.1:8443...
+* Connected to 127.0.0.1 (127.0.0.1) port 8443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [6 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [847 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / X25519 / RSASSA-PSS
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: CN=www.example.com
+*  start date: Nov 11 06:11:57 2026 GMT
+*  expire date: Dec  1 06:11:57 2026 GMT
+*  issuer: CN=www.example.com
+*  SSL certificate verify result: self-signed certificate (18), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> GET /logout HTTP/1.1
+> Host: www.example.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> 
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [233 bytes data]
+* old SSL session ID is stale, removing
+{ [5 bytes data]
+* HTTP 1.0, assume close after body
+< HTTP/1.0 200 ok
+< Content-type: text/plain
+< 
+{ [272 bytes data]
+* TLSv1.3 (IN), TLS alert, close notify (256):
+{ [2 bytes data]
+* Closing connection
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS alert, close notify (256):
+} [2 bytes data]
+#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1
+HTTP/1.0 200 ok
+Content-type: text/plain
+

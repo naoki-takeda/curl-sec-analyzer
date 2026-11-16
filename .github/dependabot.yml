@@ -1,0 +1,63 @@
+# 依存パッケージと GitHub Actions の更新を、自動でプルリクエストにする。
+# 更新は CI（.github/workflows/ci.yml）が通ってからマージする。
+# リファレンス: https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
+#
+# ■ cooldown（待機期間）
+# 公開直後に不具合が見つかったリリースや、乗っ取られた悪意あるリリースを取り込むリスクを下げる。
+# バージョン更新にだけ適用され、セキュリティ更新の PR は待たずに作られる。
+#
+# ■ groups
+# 上から順に判定し、最初に当てはまったグループに入る。update-types を書かないグループはメジャー更新もまとめる
+# （一緒に上げないと壊れる組に使う）。どのグループにも入らないメジャー更新は、依存ごとに個別の PR になる。
+#
+# ■ schedule.time は必ずクォートする（09:00 を YAML 1.1 のパーサーが 60 進数として解釈する事故を防ぐ）
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Asia/Tokyo
+    cooldown:
+      default-days: 7
+      semver-major-days: 28   # 破壊的変更を含みうるため、周辺の対応が出そろうまで長めに待つ
+      semver-minor-days: 14
+      semver-patch-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      # Vite・Vitest・Tailwind CSS のプラグインは互いの対応バージョンに依存するため、メジャーも含めて一緒に上げる
+      npm-build-tools:
+        patterns:
+          - vite
+          - vitest
+          - tailwindcss
+          - '@tailwindcss/vite'
+      # ESLint 本体と設定・プラグインも一緒に上げる
+      npm-eslint:
+        patterns:
+          - eslint
+          - '@eslint/js'
+          - typescript-eslint
+          - globals
+      # 上のどれにも入らない依存の minor/patch をまとめる
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  # GitHub Actions（SHA で固定した Action も、SHA と末尾のバージョンのコメントを更新する）
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Asia/Tokyo
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      # minor/patch はまとめる。メジャーは入力や既定値が変わりうるため個別 PR にする
+      actions-minor-patch:
+        update-types: [minor, patch]
