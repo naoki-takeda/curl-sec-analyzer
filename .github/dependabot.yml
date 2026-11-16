@@ -27,6 +27,16 @@ updates:
       semver-minor-days: 14
       semver-patch-days: 7
     open-pull-requests-limit: 5
+    # CONTRIBUTING.md の「コミットとプルリクエスト」の種類にそろえる（"build(deps): ..."・"build(deps-dev): ..." になる）
+    commit-message:
+      prefix: build
+      prefix-development: build
+      include: scope
+    ignore:
+      # 型定義は、CI で使う Node（.nvmrc）のメジャー版に合わせる。新しい版の API を使っても型チェックを通ってしまうため。
+      # Node を上げるときに、.nvmrc と一緒に手で上げる
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
     groups:
       # Vite・Vitest・Tailwind CSS のプラグインは互いの対応バージョンに依存するため、メジャーも含めて一緒に上げる
       npm-build-tools:
@@ -57,6 +67,9 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+      include: scope
     groups:
       # minor/patch はまとめる。メジャーは入力や既定値が変わりうるため個別 PR にする
       actions-minor-patch:
