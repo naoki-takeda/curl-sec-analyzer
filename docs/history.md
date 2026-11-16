@@ -729,3 +729,42 @@
 | 既存のテストの書き直し | `maskCommand`の出力の形（「_」を残す、`…(N chars)`の印、値の先頭の文字）を確かめていたテスト（`tests/review14`〜`18`、`tests/t7-keys`、`tests/properties`、`tests/review10`の CSV） | 要約の形の期待に書き直した。秘密が出ないことを確かめる部分はそのまま残し、すべて通る | 各テスト |
 | 消えた未対応 | 第28回の「_」で区切ったコマンドで URL のパスやクエリの値が後ろの引数まで続く伏せすぎ、`_-daaaaa`の繰り返しの2乗の時間（どちらも`maskCommand`のもの） | 要約では起きない（線形の時間をテストで確かめる） | — |
 | 未対応 | 手で書いたコマンドの値（ユーザー名、ヘッダの値、クエリの値、`-o`のファイル名、`--max-time`の数値）は CSV で読めなくなった（判断のとおり）。「_」で区切ったパスに`_`を含むプログラム（`D:\tools\curl_8.5\bin\openssl_…`）は、途中の`curl`をプログラムと読む（秘密は出ない）。空白を含まないコマンドでは、パスに「_」を含む URL が切れる（`/api/user ****`）。ホストに「.」のない URL（`http://intranet/`）と、一覧にないクエリの名前は読めない。パスの英字の語（`/users/johnsmith/`）と`X-`で始まるヘッダの名前は残る（突き合わせのキー・CSV の URL 列と同じ。設計のとおり）。base64url のトークンが「_-」のあとに curl のよく使うオプションの文字（`-sSLk`）を4文字まで含むと、そのかけらをオプションとして出しうる。`tests/review10.test.ts`の CSV の性能テストが、テストを並べて動かすと失敗することがある（第29回と同じ。T8） | 次回以降 | — |
+
+### レビュー指摘への対応（第32回、19回目の新鮮な目でのレビュー：独立した3人のレビュアー）
+
+入力とマスク、判定、直近のコミット（第30回・第31回）の副作用を、別々のレビュアーが独立に見た。28件に対応し、ルールセットを`2026.11-v0.4.39`にした。コミットの前に差分だけを見る独立したレビュアーに前後を比べてもらい、そこで見つかった修正の退行12件（高2件）も直した。修正前のソースでは、指摘28件のテストがすべて失敗することを確かめた。再現テストは`tests/review19.test.ts`と、ゴールデンテストのコーパスに加えた`tests/golden/cases/16-review19.txt`。
+
+| 指摘 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 1（性能） | 例外の照合が、指摘ごとにパスの部分を分けて比べ直していたため、指摘5000件×例外300件で画面が固まる | 部分ごとの照合（`segmentMatch`）をやめ、今回のキーの一覧を1回だけ作って使う | ツール設計2「例外登録（抑制）」、`src/engine/suppress.ts` |
+| 2（抑止しすぎ） | 画面で1つのターゲットに登録した例外のキー`HAR GET https://a.example/*`（`*`は伏せたパスの部分）を、ワイルドカードとして読み、同じホストの`/login`・`/`の指摘まで抑止する | 例外の対象が今回のキーと同じ文字列なら、キーの完全一致だけで照合する。今回のキーにない`*`の対象（以前の版のキー、手で書いた`HAR GET *`）は今までどおりワイルドカード | 同上 |
+| 9（例外が外れる） | 「ラベル URL」の形の例外を、マスクした URL から作ったキーと比べていたため、ASP.NET の`(S(…))`のような部分の形が変わって外れる | 生の URL から作った突き合わせのキーの URL（`Finding.keyUrl`）と比べる | 同上、`src/engine/run.ts`、`src/model.ts` |
+| 3（誤検知） | H-12：ASP.NET が既定で付ける`Cache-Control: private`だけの 302・303 を②にする | Location のある 3xx では`private`を鮮度の指定に数えない（na） | 第1章 H-12、`src/rules/headers.ts` |
+| 4（見逃し） | C-12①：データを埋め込んだ画面（`window.Laravel={…}`・`__NUXT_DATA__`・`ng-state`・ルートの要素の`data-user`・`:user`）を、中身のない SPA の画面として na にする | これらの形があれば SPA の画面とみなさない | 第2章 C-12、`src/rules/cross.ts` |
+| 5（誤検知） | C-09：拡張子の付いた多要素認証の2段階目（`/2fa.php`・`/Account/TwoFactor.aspx`）を、ログインの完了として判定する | パスの最後の部分の拡張子を除いて見る | 第2章 C-09、同上 |
+| 6（誤検知・見逃し） | E-09②：`admin/pass123`・`pass admin123`を見逃し、Knockout の`<!-- ko if: showDebug -->`を開発用コメントにする | `pass`のあとに数字か数字を含む語が続くものも見る。`ko`の制御のコメントは除く | 第5章 E-09、`src/rules/html.ts` |
+| 7・21（見逃し） | E-01：小文字の`error at /app/…:10:5`のスタックトレースと、nginx・Apache の既定のエラーページを見逃す | `[Ee]rror`・`[Ee]xception`にする。nginx の`<hr><center>nginx…</center>`、Apache の`<address>Apache… Server at …</address>`を③に加える | 第5章 E-01、`src/rules/exposure.ts` |
+| 8（文書） | CSV の実施コマンドの説明（設計書・コメント）が、第31回の許可リストの要約のあとも「マスクする」のまま | 要約（`src/export/cmdSummary.ts`）の説明に直した | ツール設計4「エクスポートとテスト」、`src/export/csv.ts` |
+| 10（誤検知） | Location のある 3xx の本文（nginx の 301 の HTML）で、H-03①（高）などの HTML の項目を判定する | 3xx の本文では HTML の項目を判定しない（E-09 は見る） | ツール設計1「入力モデル」、`src/engine/run.ts`、`src/parser/target.ts` |
+| 11（誤検知・見逃し） | C-12：ログアウト後のデータのない JSON（`{}`・`{"user":null}`）を①にし、GraphQL の認証の拒否（`UNAUTHENTICATED`）を合格にしない | データのない JSON・GraphQL のエラーは na、GraphQL の認証の拒否は合格 | 第2章 C-12、`src/rules/cross.ts`、`src/rules/util.ts` |
+| 12（誤検知） | E-05：Kubernetes の health（`groups`）と、既定の`/actuator`の一覧を①にする | 既定で公開される応答だけのものは合格 | 第5章 E-05、`src/rules/exposure.ts` |
+| 13（誤検知・見逃し） | `-L`で IdP へ転送した先の Set-Cookie を対象の Cookie として判定し、IdP の Cookie を消しただけのログアウトを C-12②・H-15 の合格にする | Cookie の項目と H-15 は、ターゲットと同じサイトの応答だけを見る（`siteResponses`） | ツール設計1「入力モデル」、`src/parser/target.ts`、`src/rules/cookies.ts`、`src/rules/headers.ts` |
+| 14（誤検知） | E-09①：Algolia の`docsearch`・Bugsnag の`apiKey`（ブラウザで使う前提の公開のキー）を①にする | SDK の呼び出しの中の`apiKey`は除く | 第5章 E-09、`src/rules/html.ts` |
+| 15（見逃し） | E-02：S3・GCS・Azure Blob のオブジェクトの一覧（XML）を見逃す | `<ListBucketResult>`・`<EnumerationResults>`を①にする | 第5章 E-02、`src/rules/exposure.ts` |
+| 16（誤検知） | C-09：新しいセッション ID を発行したのに、期限付きの`device_token`を同じ値で送り直しただけで①にする | 新しい値を発行していれば、ログイン前と同じ値の期限付きの Cookie は比べない | 第2章 C-09、`src/rules/cross.ts` |
+| 17（誤検知） | T-06・C-12：SAML の入り口（Entra の`/saml2`、Okta の`/sso/saml`、Google の`/o/saml2/idp`）への転送をログイン画面への転送としない | ログイン画面のパスに加えた | 第2章 C-12、第4章 T-06、`src/rules/html.ts` |
+| 18（誤検知） | A-01：`{"authenticated":false,"user":null}`を①にする | データのない JSON は na（11と同じ判定） | 第6章 A-01、`src/rules/api.ts` |
+| 19（誤検知） | A-03③：OIDC の ID トークンの`email`・`name`を③にする | `iss`・`aud`と`nonce`などがある ID トークンは③にしない | 第6章 A-03、同上 |
+| 20（誤検知） | E-04：`/robots.txt`に SPA の`index.html`が返ると、HTML を robots.txt として読む | HTML の画面は robots.txt なし（合格） | 第5章 E-04、`src/rules/exposure.ts` |
+| 22（誤検知） | R-06：`-i`だけで、送った Origin が分からない固定の ACAO を①にする | na（`-v`を付けて Origin を送って採取し直す） | 第3章 R-06、`src/rules/cors.ts` |
+| 23（漏えい） | 英小文字だけの乱数のトークン（`/invite/qwrtzxkpmnbvcdfgh`）を伏せない | 16文字以上で、英語でよく現れる2文字の並びにないものが35%以上の語も伏せる。突き合わせのキーも同じ | ツール設計3「マスキングの対象」、`src/tokenShape.ts`、`src/mask.ts`、`src/engine/targetKey.ts` |
+| 24（漏えい） | ワンタイムコードの名前（`authcode`・`otpcode`・`smscode`・`totp`）の値を伏せない | 名前の一覧に加えた（`zipcode`・`errorcode`は残す） | 同上 |
+| 25（異常終了） | `#META cmd=`に`constructor`があると、要約の表を引いて CSV を出せない | 自分の持つキーだけを引く（`hasOwnProperty`） | `src/export/cmdSummary.ts` |
+| 26（読めない） | 要約で、パス・クエリに`@`のある URL を全体`****`にし、`sudo`・`timeout`のあとの curl を読まない | ユーザー情報はホストの前の`@`だけ。前置きのコマンドのあとも読む | ツール設計4「エクスポートとテスト」、同上 |
+| 27（異常終了） | 応答の`headers`が`{}`、本文が数値の壊れた HAR のエントリで、取り込みが止まる | 空として読む | ツール設計1「HAR形式の取り込み」、`src/parser/har.ts` |
+| 28（表示） | CSV：`cmd=-`に数式の対策の`'`を付け、実施日時を文字列で並べて`T`区切りを選ぶ | `-`はそのまま。時刻として比べる | ツール設計4「エクスポートとテスト」、`src/export/csv.ts` |
+| コミット前のレビュー（高） | 26の修正で、パスに`/`が2つ以上・`//`・`\`、クエリ・フラグメントに`@`のあるユーザー情報の URL（`https://alice.smith:2024/p/w@host.example/`）のユーザー名とパスワードの一部を、ホストとパスとして出す。2の修正で、`*login*`・`log*`が`login`・`pre-login`ラベルの指摘を抑止する（第30回で直したものの退行） | パスの`@`は部分の先頭だけ、クエリ・フラグメントの`@`はあとにホストらしい語が続かないものだけを URL の文字とする。ラベルだけのキーにはパターンを当てない | ツール設計4「エクスポートとテスト」、ツール設計2「例外登録（抑制）」、`src/export/cmdSummary.ts`、`src/engine/suppress.ts` |
+| コミット前のレビュー（中） | 16の修正で、期限付きの`sessionid`を再発行せずに`auth_token`を足しただけのログインを合格にする。19の修正で、`azp`のあるアクセストークン（Keycloak）の`email`を見逃す。4の修正で、設定（`window.__ENV__`）・`ld+json`・ルート以外の`data-testid`だけの SPA の画面を C-12①（高）にする。23の修正で、英語の語をつないだパス（`healthcheckstatus`・`nightschoolprograms`）を伏せて突き合わせのキーを変える。25・26の修正で、`time`・`nohup`・`exec`・`stdbuf`のあとの要約が、もう一度かけると変わる。21の修正で、nginx・Apache の既定の 301・302 の本文を E-01③にする。10の修正で、転送の本文の秘密（E-09）を判定しなくなる | 名前がセッションIDらしいものは比べる。ID トークンは`id_token`の欄か`nonce`・`at_hash`で見る。利用者・状態のデータの形だけをデータとし、属性はルートの要素だけで見る。英小文字のトークンは、以前の版の規則か、英語でよく現れる2文字の並びにないものの割合で見る（`src/tokenShape.ts`。マスクとキーで共有）。名前を出した前置きのプログラムのあとだけ次の語をプログラムとして読み、数字は`timeout`のあとだけ出す。既定のエラーページは 4xx・5xx だけ。転送の本文で HTML の項目を外すのはエンジンで行い、E-09 は見る（`responseKind`は元に戻した） | 各章、`src/rules/cross.ts`、`src/rules/api.ts`、`src/tokenShape.ts`、`src/export/cmdSummary.ts`、`src/rules/exposure.ts`、`src/engine/run.ts`、`src/parser/target.ts` |
+| コミット前のレビュー（低） | 20の修正で、text/html で返した robots.txt の中身を見ない。6の修正で、「tests pass 100%」「pass 2 of 3」を E-09②にする。11・18の修正で、`{"isAdmin":false,"mfaEnabled":false,"user":{}}`をデータのない JSON とする | HTML かは本文で見る。`pass`のあとの語は英字で始まり数字を含むものだけ。`false`を空とみなすのはログインの状態の名前だけ | 第5章 E-04・E-09、`src/rules/util.ts` |
+| 既存のテストの書き直し | 上の2の修正のときに書き直した`tests/review18.test.ts`の`log*`の期待（ラベルだけのキーにも効く） | 効かない期待に戻した | `tests/review18.test.ts` |
+| 未対応 | `tests/review10.test.ts`の CSV の性能テストが、テストを並べて動かすと失敗することがある（第29回と同じ。T8） | 次回以降 | — |

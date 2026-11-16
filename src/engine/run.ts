@@ -3,8 +3,8 @@
 // → ⑤条件単位の絞り込み（ターゲット単位の結果）→ ⑥API応答での重要度の引き下げ → ⑦例外の適用
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
 import { maskText } from '../mask';
-import { targetKeys } from './targetKey';
-import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isSensitive, ownChain, responseKind } from '../parser/target';
+import { targetKeys, urlKey } from './targetKey';
+import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isRedirectWithLocation, isSensitive, ownChain, responseKind } from '../parser/target';
 import { looksLikeSession, parseSetCookie, sentAuthOf } from '../parser/setCookie';
 import { parseHsts } from '../rules/util';
 import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../rules/ruleset';
@@ -118,15 +118,18 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   // 文脈の findings は同じ配列を指すので、依存先のルールの結果も見える
   // 差分・例外の突き合わせのキーは、マスクと切り離して engine/targetKey.ts で作る
   const keys = targetKeys(targets);
-  const per = targets.map((t, i) => ({ t, url: t.url ? maskText(t.url) : undefined, targetKey: keys[i], host: hostOf(t), allow: allowedItems(t.label),
+  const per = targets.map((t, i) => ({ t, url: t.url ? maskText(t.url) : undefined, keyUrl: t.url ? urlKey(t.url) : undefined, targetKey: keys[i], host: hostOf(t), allow: allowedItems(t.label),
                                        ctx: contextOf(t, findings, maps, opt.profile) }));
   for (const rule of rules) {                                // ルールごとに全ターゲット（依存先の結果が先にそろう）
-    for (const { t, url, targetKey, host, allow, ctx } of per) {
+    for (const { t, url, keyUrl, targetKey, host, allow, ctx } of per) {
       if (!allow.allowsItem(rule.id)) continue;               // ①
       if (rule.appliesTo === 'html' && ctx.responseKind === 'other') continue;
+      // Location のある 3xx の本文（nginx の 301 の HTML、Rails の「You are being redirected」）は、ブラウザが表示しないので HTML の項目（ヘッダ・描画。
+      // H-03①（高）・H-06①・H-14① など）を判定しない。本文の秘密（E-09）は利用者に届くので判定する（H-08・H-13 も転送を除いている）
+      if (rule.appliesTo === 'html' && rule.id !== 'E-09' && isRedirectWithLocation(ctx.final)) continue;
       if (rule.appliesTo === 'api' && ctx.responseKind !== 'api') continue;
       for (const f of safeRun(rule, () => rule.run?.(ctx), t.label).filter(x => allow.allowsFinding(x))) {   // ②⑤
-        const g: Finding = { ...f, url, host, targetKey, evidence: maskText(f.evidence) };
+        const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: maskText(f.evidence) };
         if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') g.severity = 'info';   // ⑥
         findings.push(g);
       }

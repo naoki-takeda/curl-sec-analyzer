@@ -9,7 +9,8 @@ const BOM = String.fromCharCode(0xfeff);
 const COLS = ['項目ID', '対象（ラベル・URL）', '実施日時', '実施コマンド', '判定', '該当条件', '重要度', '証跡（マスク済み）', '対応方針', '例外理由・期限', '再診断日'];
 const esc = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 // 表計算ソフトが数式として解釈しないようにする（CSVインジェクション対策）
-const noFormula = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
+// コマンドの ID の「-」（コマンド生成器が書く cmd=-）だけのものは、数式にならないのでそのまま出す
+const noFormula = (v: string) => (v !== '-' && /^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
 
 // ホスト単位の判定で、元になるターゲットのラベル（ホストの全ターゲットではなく、そのための採取に絞る）
 const HOST_SOURCES: Record<string, string[]> = { 'T-09': ['tls', 'top'], 'T-10': ['tls'], 'T-11': ['tls'], 'E-03': ['probes'] };
@@ -31,7 +32,7 @@ function indexTargets(targets: Target[]): MetaIndex {
  * 指摘の元になったターゲットの #META（実施日時・実施コマンド）。
  * ターゲット単位の指摘はそのターゲット、ホスト単位はそのホストの tls・probes など、横断（pre-login/login、session-sample-* など）は比べたラベルのターゲット。
  * 複数あれば、コマンドは重複を除いて「・」でつなぎ、日時は最も新しいものにする。
- * #META の値は利用者が書いたもの（コマンドに Authorization や ?access_token= を含むことがある）なので、ほかの列と同じくマスクする
+ * #META の値は利用者が書いたもの（コマンドに Authorization や ?access_token= を含むことがある）なので、残してよい形だけを残す要約にする（export/cmdSummary.ts）
  */
 function sourceMeta(f: Finding, ix: MetaIndex): { at: string; cmd: string } {
   const key = `${f.item}\u0000${f.target}`;
@@ -50,7 +51,8 @@ function sourceMeta(f: Finding, ix: MetaIndex): { at: string; cmd: string } {
     }
   }
   const cmds = [...new Set(src.flatMap(t => (t.meta.cmd ?? '').split('・')).filter(Boolean))];
-  const at = src.map(t => t.meta.at ?? '').filter(Boolean).sort().at(-1) ?? '';
+  // 最も新しい日時は、時刻として比べる（文字列で並べると、T 区切りと空白区切りが混ざったとき、時刻に関係なく T 区切りを選んだ）
+  const at = src.map(t => t.meta.at ?? '').filter(Boolean).sort((a, b) => (Date.parse(a.replace(' ', 'T')) || 0) - (Date.parse(b.replace(' ', 'T')) || 0) || (a < b ? -1 : a > b ? 1 : 0)).at(-1) ?? '';
   // 実施日時と実施コマンドは、残してよい形だけを残す（export/cmdSummary.ts。手で書いた #META の値の秘密を出さない）
   const out = { at: summarizeAt(at), cmd: summarizeCommand(cmds.join('・')) };
   ix.memo.set(key, out);

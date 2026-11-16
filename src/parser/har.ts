@@ -43,8 +43,9 @@ export function normalizeVersion(v?: string): string {
 
 function toResponse(e: HarEntry): HttpResponse {
   const headers = new Map<string, string[]>(); const rawNames: string[] = [];
-  for (const h of e.response.headers ?? []) {
-    if (!h?.name || h.name.startsWith(':')) continue;               // HTTP/2 の疑似ヘッダは除外
+  // 名前のある要素だけ（headers が配列でない {}・null のエントリが1件あるだけで、HAR の取り込み全体が TypeError で失敗した）
+  for (const h of named(e.response.headers)) {
+    if (h.name.startsWith(':')) continue;               // HTTP/2 の疑似ヘッダは除外
     const k = h.name.toLowerCase(); rawNames.push(h.name);
     // 1つのヘッダに複数の Set-Cookie を改行でつないで書き出すものがある。1件ずつに分けないと、2つ目以降の Cookie を判定せず、
     // 証跡（値は先頭の name=value だけをマスクする）に生の値が出てしまう
@@ -56,7 +57,8 @@ function toResponse(e: HarEntry): HttpResponse {
   let body: string | undefined;
   const c = e.response.content;
   // JS も残す（JSONP の E-06、ソースマップの参照の E-13 が本文で判定する。残さないと「反映されない」「参照なし」と合格にしてしまう）
-  if (c?.text && /html|json|javascript|ecmascript/i.test(c.mimeType ?? '')) {
+  // 本文が文字列でないもの（content.text: 12345）は読まない
+  if (typeof c?.text === 'string' && c.text && /html|json|javascript|ecmascript/i.test(String(c.mimeType ?? ''))) {
     try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 2)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
     body = body?.slice(0, BODY_LIMIT);
   }

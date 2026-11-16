@@ -85,7 +85,8 @@ describe('CORS（R-02〜R-07）', () => {
     expect(verbose('https://www.example.com.evil.net', 'access-control-allow-origin: https://www.example.com.evil.net')).not.toContain('R-01.2');
     expect(run('cors-star', 'access-control-allow-origin: *', 'sensitive=1')).toContain('R-04.1');
     expect(run('cors-star', 'access-control-allow-origin: *')).toContain('R-04.3');
-    expect(run('cors-x', 'access-control-allow-origin: https://partner.example')).toContain('R-06.1');
+    // 第31回から、送った Origin の分からない -i の固定の ACAO は na（Origin によって変わる値かが分からない）。-v で Origin を送ったものは①
+    expect(run('cors-x', 'access-control-allow-origin: https://partner.example')).toContain('R-06.na');
     expect(run('cors-x', 'access-control-allow-origin: https://partner.example\nvary: Origin\naccess-control-expose-headers: Authorization')).toEqual(expect.arrayContaining(['R-06.ok', 'R-07.1']));
     expect(run('cors-pre', 'access-control-allow-origin: *\naccess-control-allow-methods: GET, DELETE\naccess-control-max-age: 86400')).toEqual(expect.arrayContaining(['R-05.1', 'R-05.2']));
   });

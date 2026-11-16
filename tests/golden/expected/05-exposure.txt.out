@@ -19,7 +19,7 @@ actuator | A-07.ok | info | pass | キー3種に秘密情報・内部属性ら�
 actuator | A-09.2 | medium | fail | nosniff なし
 actuator | A-09.3 | info | fail | CSPなし
 actuator | E-01.ok | info | pass | エラーの詳細らしき記述なし
-actuator | E-05.1 | high | fail | /actuator（HTTP 200）
+actuator | E-05.ok | info | pass | /actuator（HTTP 200、既定で公開される死活監視の応答・一覧）
 actuator | H-01.1 | high | fail | (ヘッダなし)
 actuator | H-02.na | info | na | HSTSがない（H-01で判定）
 actuator | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
@@ -285,7 +285,7 @@ E-01 | evaluated | fails=3
 E-02 | evaluated | fails=1
 E-03 | evaluated | fails=3
 E-04 | evaluated | fails=0
-E-05 | evaluated | fails=3
+E-05 | evaluated | fails=2
 E-06 | evaluated | fails=1
 E-07 | evaluated | fails=0
 E-08 | evaluated | fails=0

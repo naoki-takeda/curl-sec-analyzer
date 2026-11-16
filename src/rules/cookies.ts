@@ -2,12 +2,12 @@
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
 import { isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
-import { baseLabel, firstStatus, hostOf, logoutFailed } from '../parser/target';
+import { baseLabel, firstStatus, hostOf, logoutFailed, siteResponses } from '../parser/target';
 import { LOGOUT_FAILED_REC, mk } from './util';
 
 /** ターゲットの全応答（-L のホップを含む）から、削除用でない Set-Cookie を取り出す */
 export function cookiesOf(ctx: RuleContext): SetCookie[] {
-  return ctx.target.responses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
+  return siteResponses(ctx.target).flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
 }
 /** 名前のない Cookie（値だけの Set-Cookie）の表示名 */
 export const cookieName = (c: SetCookie) => c.name || '（名前なし）';
@@ -93,7 +93,7 @@ export const cookieDomain: Rule = { id: 'C-04', title: 'Domain・Path', appliesT
     // Domain=www.a.example で発行した Cookie を、ターゲットの URL のホスト（a.example）と比べて①にしないため
     const targetHost = hostOf(ctx.target)?.replace(/:\d+$/, '');
     const hopHost = (u?: string) => { try { return u ? new URL(u).hostname : undefined; } catch { return undefined; } };
-    const cs = ctx.target.responses.flatMap(r => { const host = hopHost(r.url) ?? targetHost;
+    const cs = siteResponses(ctx.target).flatMap(r => { const host = hopHost(r.url) ?? targetHost;
       return (r.headers.get('set-cookie') ?? []).map(raw => ({ c: parseSetCookie(raw), host })); }).filter(x => !isDeletion(x.c, ctx.now));
     if (!cs.length) return [];
     const fails = cs.flatMap(({ c, host }) => {
@@ -203,10 +203,10 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
     if (baseLabel(ctx.target.label) !== 'logout') return [];            // ①は横断ルール（logout と after-logout）
     if (!ctx.final) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (logoutFailed(ctx.target)) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
-    const del = ctx.target.responses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
+    const del = siteResponses(ctx.target).flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
     // 消したのがセッションCookieらしい名前のものか（Spring Security の既定のログアウトは remember-me だけを消し、セッションCookie は残す）
     // Clear-Site-Data: "cookies"（か "*"）で消すログアウトは、名前を挙げずにすべての Cookie を消す（H-15 と同じ扱い）
-    const csd = ctx.target.responses.flatMap(r => r.headers.get('clear-site-data') ?? []).join(',');
+    const csd = siteResponses(ctx.target).flatMap(r => r.headers.get('clear-site-data') ?? []).join(',');
     if (/"(?:cookies|\*)"/i.test(csd)) return [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', `Clear-Site-Data: ${csd}`, '')];
     const sessionDel = del.filter(c => looksLikeSessionName(c.name));
     // セッションを作り直すログアウト（Laravel の invalidate、Rails の reset_session）は、セッションCookie を消さずに新しい値で発行し直す（②にしていた）。
@@ -225,7 +225,7 @@ export const cookieSharedCache: Rule = { id: 'C-13', title: 'Set-Cookieと共有
   basis: ['RFC 9111', 'OWASP HTTP Headers CS'],
   run(ctx) {
     const out: Finding[] = []; let any = false;
-    for (const r of ctx.target.responses) {
+    for (const r of siteResponses(ctx.target)) {
       const cs = (r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
       if (!cs.length) continue;
       any = true;

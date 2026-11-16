@@ -183,6 +183,7 @@ const publicJwt = (payload: string): boolean => {
     return j.role === 'anon';
   } catch { return false; }
 };
+const PUBLIC_SDK = /\b(?:docsearch|algoliasearch|instantsearch|Bugsnag\.start|bugsnag|Sentry\.init|mixpanel\.init|amplitude\.(?:init|getInstance)|posthog\.init|LogRocket\.init|Rollbar\.init|datadogRum\.init)\s*\([^)]{0,300}$/;
 const SECRETS: [string, { test(s: string): boolean }][] = [
   ['AWSアクセスキー', /\bAKIA[0-9A-Z]{16}\b/],
   ['秘密鍵', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
@@ -190,7 +191,8 @@ const SECRETS: [string, { test(s: string): boolean }][] = [
   ['GitHubトークン', /\bgh[pousr]_[0-9A-Za-z]{36,}\b/],
   // ブラウザに渡す前提の JWT（Supabase の anon key。ペイロードの role が anon）は除く（行レベルのセキュリティで守る公開のキー）
   ['JWT', { test: (s: string) => [...s.matchAll(/\beyJ[\w-]{10,}\.(eyJ[\w-]{10,})\.[\w-]{10,}/g)].some(m => !publicJwt(m[1])) }],
-  ['キー・シークレットの代入', { test: (s: string) => [...s.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2])) }],
+  // ブラウザで使う前提の SDK の呼び出しの中の apiKey（Algolia の docsearch・algoliasearch の検索専用のキー、Bugsnag・Sentry などの通知用のキー）は除く
+  ['キー・シークレットの代入', { test: (s: string) => [...s.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2]) && !PUBLIC_SDK.test(s.slice(Math.max(0, (m.index ?? 0) - 300), m.index))) }],
 ];
 // ホスト名の最後で区切る（edge01.local.example-cdn.net の .local. には一致させない）。複数のラベルのホスト名（db.prod.internal）も含める
 const INTERNAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|(?:[\w-]+\.)+(?:internal|local|lan|corp|intra))(?![\w.-])[^\s"'<>]*/gi;
@@ -210,7 +212,8 @@ function internalUrl(html: string, own?: string): string | undefined {
 const DEV_CODE_WORD = /(?<![A-Za-z])(?:TODO|FIXME|XXX|HACK|[Dd]ebug|DEBUG|[Ss]taging|STAGING)(?![a-z])|(?<=[a-z])(?:Debug|Staging)(?![a-z])/;
 // password（複数形を含む）だけを見る（pass だけで見ると「Tests pass」「pass the id」を開発用コメントにした）
 // pass は値の代入（pass: …、pass=…）のときだけ
-const DEV_WORD = /(?<![A-Za-z])pass\s*[:=]|(?<![A-Za-z])passwords?(?![a-z])(?![\s_-]*(?:field|input|label|form|reset|box|placeholder|strength|hint|toggle|visibility|policy)\b)|パスワード(?!欄|入力|を忘れ|の再設定|の変更|変更|リセット)|本番/i;
+// 「admin/pass123」「pass admin123」のように、pass のあとに数字か、英字で始まり数字を含む語が続くものも見る（「tests pass 100%」「pass 2 of 3」は除く）
+const DEV_WORD = /(?<![A-Za-z])pass(?:\s*[:=]|\d|\s+[A-Za-z][^\s<]*\d)|(?<![A-Za-z])passwords?(?![a-z])(?![\s_-]*(?:field|input|label|form|reset|box|placeholder|strength|hint|toggle|visibility|policy)\b)|パスワード(?!欄|入力|を忘れ|の再設定|の変更|変更|リセット)|本番/i;
 /**
  * 閉じたコメント（<!-- … -->）を1つずつ切り出し、その中だけで開発用の語を探す。一致した語を返す。
  * 正規表現1つで「コメントの中の語」を探すと、閉じのない <!-- が続く本文でバックトラックが爆発する（64KBで数分）ため、indexOf で線形に走査する。
@@ -220,7 +223,8 @@ export function devCommentWord(html: string): string | undefined {
   for (let i = html.indexOf('<!--'); i >= 0;) {
     const end = html.indexOf('-->', i + 4);
     if (end < 0) return undefined;
-    const c = html.slice(i + 4, end); const m = c.match(DEV_CODE_WORD) ?? c.match(DEV_WORD);
+    // Knockout の制御のコメント（<!-- ko if: showDebug -->・<!-- /ko -->）は、開発用のコメントではない
+    const c = html.slice(i + 4, end); const m = /^\s*\/?ko\b/.test(c) ? null : c.match(DEV_CODE_WORD) ?? c.match(DEV_WORD);
     if (m) return m[0];
     i = html.indexOf('<!--', end + 3);
   }
@@ -320,9 +324,10 @@ const SETTING_FIELD = /(?:^|[\s_-])(?:new|confirm|confirmation|retype|repeat)(?:
  * ログイン画面・認証の入り口のパス（C-09・C-12・T-06 で共有）：/login・/signin・Devise の /users/sign_in・WordPress の /wp-login.php・
  * OIDC の …/openid-connect/auth・/authorize・oauth2-proxy の /oauth2/start・SAML の /saml/login、拡張子の付いたログイン画面（ASP.NET の
  * /Account/Login.aspx、/login.php・.jsp・.do）、Spring Security の /oauth2/authorization/<登録名>、IdP の入り口（Google の /o/oauth2/v2/auth、
- * Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls、SimpleSAMLphp の SSOService.php）
+ * Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls、SimpleSAMLphp の SSOService.php、Entra ID の /<テナント>/saml2、Okta の /sso/saml、
+ * Google の /o/saml2/idp、Auth0 の /samlp/<クライアント>）
  */
-export const LOGIN_PATH = /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login|authorize|oauth2\/(?:start|auth(?:orize)?)|oauth2\/authorization\/[\w.-]+|o\/oauth2(?:\/v\d)?\/auth|protocol\/openid-connect\/auth|saml2?\/(?:login|sso)|SAML2\/(?:Redirect|POST)\/SSO|adfs\/ls|SSOService)(?:\.(?:php|aspx?|jspx?|do|action|html?|cgi|pl))?\/?$/i;
+export const LOGIN_PATH = /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login|authorize|oauth2\/(?:start|auth(?:orize)?)|oauth2\/authorization\/[\w.-]+|o\/oauth2(?:\/v\d)?\/auth|protocol\/openid-connect\/auth|saml2?\/(?:login|sso)|SAML2\/(?:Redirect|POST)\/SSO|adfs\/ls|SSOService|saml2?|sso\/saml|o\/saml2\/idp|samlp)(?:\.(?:php|aspx?|jspx?|do|action|html?|cgi|pl))?\/?$/i;
 export function loginForm(body: string): boolean {
   const chunks = /<form\b/i.test(body) ? body.split(/<form\b/i).slice(1).map(c => c.split(/<\/form\s*>/i)[0]) : [body];
   return chunks.some(f => {

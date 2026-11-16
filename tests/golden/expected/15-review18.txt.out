@@ -58,7 +58,7 @@ health | A-07.ok | info | pass | キー1種に秘密情報・内部属性らし�
 health | A-09.2 | medium | fail | nosniff なし
 health | A-09.3 | info | fail | CSPなし
 health | E-01.ok | info | pass | エラーの詳細らしき記述なし
-health | E-05.ok | info | pass | /actuator/health（HTTP 200、状態だけの死活監視の応答）
+health | E-05.ok | info | pass | /actuator/health（HTTP 200、既定で公開される死活監視の応答・一覧）
 health | H-01.1 | high | fail | (ヘッダなし)
 health | H-02.na | info | na | HSTSがない（H-01で判定）
 health | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3

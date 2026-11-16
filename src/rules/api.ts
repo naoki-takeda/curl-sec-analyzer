@@ -2,7 +2,7 @@
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
 import { baseLabel, finalResponse, responseKind, sameDocumentHop } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { NO_BODY_REC, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk } from './util';
+import { NO_BODY_REC, graphqlError as graphqlErrorOf, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson } from './util';
 import { loginForm } from './html';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
@@ -59,24 +59,9 @@ const htmlPage = (ctx: RuleContext): 'login' | 'html' | 'unknown' | undefined =>
  * GraphQL の認証エラー（200 で {"errors":[…],"data":null}）。errors があり、data が null か、値がすべて null のもの。
  * エラーの code・message が認証・認可の拒否（UNAUTHENTICATED・FORBIDDEN・not authenticated など）なら 'denied'、それ以外は 'error'
  */
-/** データのない JSON の本文（{}・[]・null、値がすべて null・空のもの） */
-const emptyJson = (ctx: RuleContext): boolean => {
-  const b = ((sameDocumentHop(ctx.target).hop ?? ctx.final)?.body ?? '').trim();
-  if (!/^[{[]|^null$/.test(b)) return false;
-  let j: unknown; try { j = JSON.parse(b); } catch { return false; }
-  const empty = (v: unknown): boolean => v === null || v === '' || (Array.isArray(v) ? v.length === 0 : typeof v === 'object' && Object.values(v as Record<string, unknown>).every(x => x === null));
-  return empty(j);
-};
-const graphqlError = (ctx: RuleContext): 'denied' | 'error' | undefined => {
-  const b = (sameDocumentHop(ctx.target).hop ?? ctx.final)?.body ?? '';
-  if (!/^\s*\{/.test(b) || !/"errors"\s*:/.test(b)) return undefined;
-  let j: { errors?: unknown; data?: unknown };
-  try { j = JSON.parse(b) as typeof j; } catch { return undefined; }
-  if (!Array.isArray(j.errors) || !j.errors.length) return undefined;
-  const d = j.data;
-  if (!(d === null || d === undefined || (typeof d === 'object' && Object.values(d as Record<string, unknown>).every(v => v === null)))) return undefined;
-  return /UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|not authenticated|unauthori[sz]ed|authentication required|access denied|not logged in|login required/i.test(JSON.stringify(j.errors)) ? 'denied' : 'error';
-};
+const hopBody = (ctx: RuleContext) => (sameDocumentHop(ctx.target).hop ?? ctx.final)?.body;
+const emptyJson = (ctx: RuleContext): boolean => noDataJson(hopBody(ctx));
+const graphqlError = (ctx: RuleContext) => graphqlErrorOf(hopBody(ctx));
 
 /**
  * A-01③：HTTP の応答で Basic 認証を求めているか。-L の転送をたどり、URL が http のホップの WWW-Authenticate だけを見る
@@ -161,24 +146,30 @@ export function decodeJwt(token: string): { header: Record<string, unknown>; pay
   const header = h ? b64url(h) : undefined, payload = p ? b64url(p) : undefined;
   return header && payload ? { header, payload } : undefined;
 }
+const ID_TOKEN_FIELD = /["']?\bid_token["']?\s*[:=]\s*["']?(eyJ[\w-]+\.eyJ[\w-]+\.[\w-]*)/g;
 const PII_CLAIMS = /^(email|email_address|name|given_name|family_name|phone|phone_number|address|birthdate|birthday|tel|zip|postal_code)$/i;
 export const jwtClaims: Rule = { id: 'A-03', title: 'JWTの中身', appliesTo: 'any', scope: 'target',
   basis: ['OWASP JWT CS', 'RFC 8725'],
   run(ctx) {
     const found = new Set<string>(ctx.target.sentTokens);
+    const idTokens = new Set<string>();   // id_token の欄・Cookie の値として返した JWT
     for (const r of ctx.target.responses) {
       for (const v of r.headers.get('set-cookie') ?? []) for (const m of v.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) found.add(m);
       for (const m of (r.body ?? '').match(/\beyJ[\w-]+\.eyJ[\w-]+\.[\w-]*/g) ?? []) found.add(m);
+      for (const v of [r.body ?? '', ...(r.headers.get('set-cookie') ?? [])]) for (const m of v.matchAll(ID_TOKEN_FIELD)) idTokens.add(m[1]);
     }
-    const jwts = [...found].map(decodeJwt).filter((x): x is NonNullable<typeof x> => !!x);
+    const jwts = [...found].flatMap(token => { const d = decodeJwt(token); return d ? [{ ...d, token }] : []; });
     if (!jwts.length) return [];
     const out = [];
-    for (const { header, payload } of jwts) {
+    for (const { header, payload, token } of jwts) {
       // alg は文字列のときだけ使う（{"alg":{"toString":1}} のような細工した JWT で String() が例外を投げ、判定全体が止まった）
       const alg = typeof header.alg === 'string' ? header.alg : '';
       if (/^none$/i.test(alg)) out.push(mk(jwtClaims, ctx, 1, 'high', 'fail', 'alg: none', '署名付きのアルゴリズム（RS256・ES256など）を使い、none を受け付けない'));
       if (payload.exp === undefined) out.push(mk(jwtClaims, ctx, 2, 'medium', 'fail', `exp なし（alg: ${alg}）`, '短い有効期限（exp）を付ける'));
-      const pii = Object.keys(payload).filter(k => PII_CLAIMS.test(k));
+      // OpenID Connect の ID トークン（id_token の欄で返したもの、または iss・aud と nonce・at_hash があり typ が Bearer でないもの）は、仕様上ユーザーの
+      // 属性を運ぶものなので③にしない。azp・auth_time はアクセストークン（Keycloak・Entra ID）にもあるので見ない（見ると、アクセストークンの email を見逃した）
+      const idToken = idTokens.has(token) || (payload.iss !== undefined && payload.aud !== undefined && payload.typ !== 'Bearer' && (payload.nonce !== undefined || payload.at_hash !== undefined));
+      const pii = idToken ? [] : Object.keys(payload).filter(k => PII_CLAIMS.test(k));
       if (pii.length) out.push(mk(jwtClaims, ctx, 3, 'medium', 'fail', `個人情報らしきクレーム: ${pii.join(', ')}（値は表示しない）`, 'JWTに個人情報を入れない（JWTは暗号化されず誰でも読める）'));
     }
     return out.length ? out : [mk(jwtClaims, ctx, 'ok', 'info', 'pass', `JWT ${jwts.length}件：alg・exp・クレームに問題なし`, '')];

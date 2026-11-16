@@ -21,7 +21,7 @@ cors-preflight | R-01.2 | medium | fail | Origin: https://evil.example → ACAO:
 cors-preflight | R-02.na | info | na | Origin: (不明)（null では試していない）
 cors-preflight | R-04.ok | info | pass | ACAO: https://evil.example
 cors-preflight | R-05.1 | medium | fail | ACAO: https://evil.example / Allow-Methods: GET, PUT, DELETE
-cors-preflight | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
+cors-preflight | R-06.na | info | na | ACAO: https://evil.example（送った Origin が分からない）
 csp-sample-* | H-04.na | info | na | 
 dl | A-02.ok | info | pass | URL・Location・本文にトークンなし
 dl | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -196,7 +196,7 @@ R-02 | missing-input | fails=0 | C7 のとおり Origin: null を送って採取
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
 R-04 | evaluated | fails=0
 R-05 | evaluated | fails=1
-R-06 | evaluated | fails=1
+R-06 | missing-input | fails=0 | -v を付けて、Origin を送って採取し直す
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-08 | missing-input | fails=0 | 必要なラベル: （一般）
 R-09 | missing-input | fails=0 | C16 のとおり許可外の Origin（https://evil.example）で採取し直す

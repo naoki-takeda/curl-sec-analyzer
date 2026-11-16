@@ -31,7 +31,7 @@ const AWS_KEY = /\bAKIA[0-9A-Z]{16}\b/;
 const path = (ctx: RuleContext) => { try { return new URL(ctx.target.url ?? '').pathname; } catch { return ''; } };
 
 // E-01② のスタックトレース・SQL・絶対パスなど（下の errorDetail の注記を参照）
-const TRACE = /\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?<=(?:^|[\r\n>]|\\n|<br\s*\/?>|[[,]\s*"|"(?:stack|trace|stacktrace|stack_trace|error|err|exception)"\s*:\s*")(?:[ \t]|&nbsp;){0,20}|(?:Error|Exception)\b[^\n"<]{0,200}\s)at (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|\.php<\/b> on line <b>\d+|Stack trace:\s*#0 |(?:(?<=^|[\r\n]|\\n)[ \t]{1,20})at [A-Z]\w*(?:\.[\w<>`|$]+){2,}\(|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/;
+const TRACE = /\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?<=(?:^|[\r\n>]|\\n|<br\s*\/?>|[[,]\s*"|"(?:stack|trace|stacktrace|stack_trace|error|err|exception)"\s*:\s*")(?:[ \t]|&nbsp;){0,20}|(?:[Ee]rror|[Ee]xception)\b[^\n"<]{0,200}\s)at (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|\.php<\/b> on line <b>\d+|Stack trace:\s*#0 |(?:(?<=^|[\r\n]|\\n)[ \t]{1,20})at [A-Z]\w*(?:\.[\w<>`|$]+){2,}\(|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/;
 const matchTrace = (s: string) => s.match(TRACE);
 export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース・デバッグ情報', appliesTo: 'any', scope: 'target',
   basis: ['ISOG-J', 'OWASP Error Handling CS'],
@@ -66,6 +66,8 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る。Rails も同じく、既定のエラーページ
     // （public/404.html・500.html）と開発用の画面の文言で見る（「Ruby on Rails」はブログの記事などにも出る）
     const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Action Controller: Exception caught|<h1>Routing Error<\/h1>|We're sorry, but something went wrong\.|The page you were looking for doesn't exist\.|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|<title>Express<\/title>/i)
+      // nginx・Apache の既定のエラーページは、エラーの応答（4xx・5xx）だけ（同じ署名が既定の 301・302 の本文にもあり、転送のたびに③にした）
+      ?? ((ctx.final?.status ?? 0) >= 400 ? b.match(/<hr><center>nginx(?:\/[\d.]+[^<]{0,40})?<\/center>|<address>Apache(?:\/[\d.]+)?[^<]{0,80} Server at [^<]{0,200}<\/address>/i) : null)
       // Jetty の既定のエラーページ（<title>Error 404 Not Found</title>）は、本文の「HTTP ERROR 404」「Powered by Jetty」と合わせて見る。
       // <title>Error 404 - Page not found | MyShop</title> のような独自のエラーページを既定のページとしない
       ?? (/HTTP ERROR:?\s*\d{3}|Powered by Jetty/i.test(b) ? b.match(/<title>Error \d{3}[^<]*<\/title>/i) : null);
@@ -74,10 +76,27 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     return out.length ? out : [mk(errorDetail, ctx, 'ok', 'info', 'pass', 'エラーの詳細らしき記述なし', '')];
   } };
 
+/**
+ * Spring Boot が既定で公開する actuator の応答：/actuator/health・info の状態だけのもの（{"status":"UP"}、Kubernetes の {"status":"UP","groups":["liveness","readiness"]}、
+ * 空の info の {}）と、/actuator の一覧で、リンクが self・health・health-path・info だけのもの
+ */
+function actuatorDefault(p: string, b: string): boolean {
+  let j: unknown; try { j = JSON.parse(b); } catch { return false; }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) return false;
+  const o = j as Record<string, unknown>;
+  if (/\/actuator\/(?:health|info)\/?$/i.test(p))
+    return Object.entries(o).every(([k, v]) => (k === 'status' && typeof v === 'string' && /^[A-Z_]+$/.test(v)) || (k === 'groups' && Array.isArray(v) && v.every(x => typeof x === 'string')));
+  if (/\/actuator\/?$/i.test(p) && Object.keys(o).length === 1 && o._links && typeof o._links === 'object')
+    return Object.keys(o._links as object).length > 0 && Object.keys(o._links as object).every(k => /^(?:self|health|health-path|info)$/.test(k));
+  return false;
+}
 export const dirListing: Rule = { id: 'E-02', title: 'ディレクトリリスティング', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG-CONF-04'],
   run(ctx) {
     const b = body(ctx);
+    // オブジェクトストレージの一覧（S3・GCS の <ListBucketResult>、Azure Blob の <EnumerationResults>）も一覧表示（XML の応答）
+    const bucket = b && /^\s*(?:<\?xml[^>]*>\s*)?<(?:ListBucketResult|EnumerationResults)\b/.test(b) ? b.match(/<(?:ListBucketResult|EnumerationResults)\b/) : null;
+    if (bucket) return [mk(dirListing, ctx, 1, 'medium', 'fail', `${bucket[0].slice(1)}（オブジェクトストレージの一覧）`, 'バケット・コンテナの一覧の公開を無効にする（S3 のブロックパブリックアクセス、Azure のコンテナのアクセスレベルを private に）')];
     if (!b || ctx.responseKind !== 'html') return [];
     // nginx・Apache の「Index of /」、Python の http.server、IIS の「[To Parent Directory]」、Tomcat の「Directory Listing For [/…]」、
     // Jetty の「<title>Directory: /…」、Express の serve-index の「listing directory /…」
@@ -105,6 +124,10 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     const st = ctx.final?.status ?? 0; const got = !st || (st >= 200 && st < 300);
     if (/\/robots\.txt$/.test(p) && (b || !got)) {
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
+      // どのパスにも index.html を返す SPA の 200 は、robots.txt ではない（security.txt と同じ扱い）
+      // HTML かは本文で見る（robots.txt を text/html で返すサーバの User-agent・Disallow の行を見逃さない。robots.txt は < で始まらない）
+      if (/^\s*</.test(b!))
+        return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}、HTML の画面。SPA の可能性）`, '')];
       const m = b!.match(ROBOTS_SENSITIVE);
       return m ? [mk(robotsSecurityTxt, ctx, 1, 'low', 'fail', `Disallow: ${m[1]}`, 'robots.txt に機密パスを書かない（アクセス制御で守る）')]
                : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', 'robots.txt に機密パスらしき記述なし', '')];
@@ -187,8 +210,8 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
       return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? '' : NO_BODY_REC)];
     // /actuator/health・/actuator/info で、本文が状態だけ（components・details のない {"status":"UP"}、空の {}）のものは、Spring Boot が既定で公開する
     // 死活監視の応答なので対象外（Kubernetes・負荷分散装置が使う。ほぼすべての Spring Boot の製品で高を出していた）
-    if (docSegment(p) === 'actuator' && /\/actuator\/(?:health|info)\/?$/i.test(p) && /^\s*\{\s*(?:"status"\s*:\s*"[A-Z_]+"\s*)?\}\s*$/.test(b))
-      return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `${p}（HTTP ${f.status}、状態だけの死活監視の応答）`, '')];
+    if (docSegment(p) === 'actuator' && actuatorDefault(p, b))
+      return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `${p}（HTTP ${f.status}、既定で公開される死活監視の応答・一覧）`, '')];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
     return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}）`, 'API仕様は本番で無効にするか、認証の内側に置く')];
   } };

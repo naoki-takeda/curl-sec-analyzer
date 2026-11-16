@@ -23,6 +23,9 @@ export function uniqueLabels(targets: Target[]): ParseWarning[] {
     `ラベル「${l}」のターゲットが${tos.length + 1}つあります。2つ目以降は ${tos.join('、')} として別に判定しました（横断の判定には最初のものだけを使います）` }));
 }
 
+/** Location のある 3xx（ブラウザは本文を表示せずに転送先へ移る） */
+export const isRedirectWithLocation = (r?: HttpResponse): boolean => !!r && r.status >= 300 && r.status < 400 && r.headers.has('location');
+
 /** その URL の応答のホップか（1xx、プロキシの応答（CONNECT・407）、curl が認証し直した 401 を除く） */
 export const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
 
@@ -41,6 +44,17 @@ export const finalResponse = (t: Target): HttpResponse | undefined => {
   return c.filter(r => { const h = hostnameOf(r.url); return !r.url || (!!h && siteOf(h) === site && (!https || /^https:/i.test(r.url))); }).at(-1) ?? c.at(-1);
 };
 const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowerCase() : undefined; } catch { return undefined; } };
+/**
+ * ターゲットの URL と同じサイトの応答（URL の分からない応答を含む）。-L で別のサイト（IdP の login.microsoftonline.com）へ転送した先の Set-Cookie・
+ * Clear-Site-Data を、対象の Cookie として判定しない（C-01〜C-07・C-11・C-12②・H-15。IdP の Cookie の属性を対象の指摘にし、IdP の Cookie を
+ * 消しただけのログアウトを合格にした）。http の同じサイトのホップは含める（C-10 が見る）
+ */
+export const siteResponses = (t: Target): HttpResponse[] => {
+  const host = hostnameOf(t.url);
+  if (!host) return t.responses;
+  const site = siteOf(host);
+  return t.responses.filter(r => { const h = hostnameOf(r.url); return !r.url || !h || siteOf(h) === site; });
+};
 /** 登録ドメインの近似（最後の2つのラベル。co.jp・com.au のような2段の国別ドメインは3つ）。IP アドレスはそのまま */
 const siteOf = (h: string): string => {
   if (/^[\d.]+$|:/.test(h)) return h;

@@ -1,7 +1,6 @@
 // engine/suppress.ts：例外登録（suppressions.json）の適用
 import type { Finding, Suppression } from '../model';
 import { baseLabel } from '../parser/target';
-import { urlKey } from './targetKey';
 
 /**
  * URL のパターン照合（* は任意の文字列）。正規表現に変換すると、* の多いパターンでバックトラックが爆発する（ReDoS）ため、
@@ -19,13 +18,15 @@ export function wildcardMatch(pattern: string, text: string): boolean {
   return p === pattern.length;
 }
 const MAX_PATTERN = 500;
-/** 「/」で区切った部分ごとに照合する（部分の数が同じで、各部分が * を含めて一致する）。* が「/」をまたがない */
-function segmentMatch(pattern: string, text: string): boolean {
-  const p = pattern.split('/'), t = text.split('/');
-  return p.length === t.length && p.every((x, i) => wildcardMatch(x, t[i]));
-}
+const LABEL_URL = /^\S+ https?:\/\//;
 
-export function matches(s: Suppression, f: Finding): boolean {
+/**
+ * 例外が指摘に当てはまるか。currentKeys は今回の結果のキーの一覧（applySuppressions が渡す）。
+ * 例外の target が今回のどれかのキーと同じなら、キーの完全一致だけで判定する（画面で1つのターゲットに登録したキー HAR GET https://a.example/* の
+ * *（伏せたパスの部分）が、/login・/admin・/ の指摘まで抑止した）。今回のキーにない target（以前の版のキー、手で書いたパターン）は、
+ * 今までどおり * を任意の文字列として、キーの全体と照合する（1つの部分の中だけにすると、HAR GET * や log* が黙って効かなくなった）
+ */
+export function matches(s: Suppression, f: Finding, currentKeys?: ReadonlySet<string>): boolean {
   const ruleOk = s.ruleId === f.item || s.ruleId === f.ruleId;
   // URL のパターンは、画面に出す（マスクした）URL のほかに、突き合わせのキーの URL（マスクとは別に作る。マスクの一覧を変えても変わらない）とも照合する。
   // マスクした URL とだけ比べると、マスクの一覧を変えるたびに、伏せ方の変わった URL のパターンが黙って外れた
@@ -34,12 +35,12 @@ export function matches(s: Suppression, f: Finding): boolean {
   const pattern = s.target.length <= MAX_PATTERN;
   const targetOk = s.target === f.target || s.target === f.targetKey || (pattern && !!f.url && wildcardMatch(s.target, f.url))
     || (pattern && !!keyUrl && wildcardMatch(s.target, keyUrl))
-    // 以前の版のキー（HAR GET https://www.example.jp/*）も、キーの全体と照合する（キーの形を変えると、例外が黙って外れた）。照合するのは URL を持つキー
-    // だけで、* は「/」で区切った1つの部分の中だけに一致させる（画面で1つのターゲットに登録したキーの *（伏せたパスの部分）が、同じホストの
-    // ほかのページにも効いた。ラベルだけのキーと照合すると、*login* が login ラベルの指摘も抑止した）
-    || (pattern && !!f.targetKey && f.targetKey.includes('://') && s.target.includes('*') && segmentMatch(s.target, f.targetKey))
-    // 同じラベルが1つに減って、キーが「ラベル URL」からラベルだけになったもの（page https://a.example/b で登録した例外が外れた）
-    || (!!f.url && s.target === `${baseLabel(f.target)} ${urlKey(f.url)}`)
+    // 照合するのは URL を持つキーだけ（ラベルだけのキーと照合すると、*login* が login・pre-login ラベルの指摘も抑止した。第30回で直したものの退行）
+    || (pattern && !!f.targetKey && f.targetKey.includes('://') && s.target.includes('*') && !currentKeys?.has(s.target) && wildcardMatch(s.target, f.targetKey))
+    // 同じラベルが1つに減って、キーが「ラベル URL」からラベルだけになったもの（page https://a.example/b で登録した例外が外れた）。URL のキーは、
+    // 生の URL から作ったもの（f.keyUrl）を使う（マスクした URL から作ると、ASP.NET の (S(…)) が * になって外れた）。形が「ラベル 空白 URL」の
+    // ときだけ比べる（組ごとに URL を解析し直すと、例外の照合が33倍遅くなった）
+    || (!!f.keyUrl && LABEL_URL.test(s.target) && s.target === `${baseLabel(f.target)} ${f.keyUrl}`)
     || s.target === '*';   // HAR は「HAR メソッド URL」で照合
   return ruleOk && targetOk;
 }
@@ -53,9 +54,10 @@ export const isActive = (s: Suppression, today = localDate()) => !s.until || s.u
 
 export function applySuppressions(fs: Finding[], list: Suppression[], today?: string): Finding[] {
   const active = list.filter(s => isActive(s, today));
+  const currentKeys = new Set(fs.map(f => f.targetKey).filter((k): k is string => !!k));
   return fs.map(f => {
     if (f.status !== 'fail') return f;
-    const s = active.find(x => matches(x, f));
+    const s = active.find(x => matches(x, f, currentKeys));
     return s ? { ...f, status: 'suppressed', suppressedBy: s } : f;
   });
 }

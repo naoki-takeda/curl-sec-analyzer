@@ -1,0 +1,87 @@
+#TARGET url=https://www.example.com/login label=pre-login
+#META at="2026-11-01 23:00:00" cmd=-
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=31536000
+set-cookie: sessionid=AbCdEf0123456789CANARYpre01234; Path=/; Secure; HttpOnly; SameSite=Lax
+set-cookie: device_token=Zx81Qw7Er2Ty9CANARYdev0Gh8Jk5L; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax
+
+<form method="post"><input name="u"><input type="password" name="p"></form>
+
+#TARGET url=https://www.example.com/ label=top
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=31536000
+content-security-policy: default-src 'self'; frame-ancestors 'none'
+
+<!-- ko if: showDebug --><p>x</p><!-- /ko -->
+<!-- test user admin pass admin123 -->
+<script>docsearch({ appId:'BH4D9OD16A', apiKey:'599cec31baffa4868cae4e79f180729b', indexName:'docs' })</script>
+
+#TARGET url=https://www.example.com/login label=login
+#META at=2026-11-01T10:00:00 cmd=curl_-sS_-i_https://www.example.com/login?authcode=CANARY482913
+HTTP/2 302
+location: /mypage
+strict-transport-security: max-age=31536000
+set-cookie: sessionid=ZyXw9876543210CANARYlog98765; Path=/; Secure; HttpOnly; SameSite=Lax
+set-cookie: device_token=Zx81Qw7Er2Ty9CANARYdev0Gh8Jk5L; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax
+
+#TARGET url=https://www.example.com/logout label=logout
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+strict-transport-security: max-age=31536000
+set-cookie: sessionid=; Max-Age=0; Path=/
+
+#TARGET url=https://www.example.com/api/auth/session label=after-logout sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+strict-transport-security: max-age=31536000
+cache-control: no-store
+
+{"user":null}
+
+#TARGET url=https://www.example.com/r?url=https://evil.example label=open-redirect
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: https://x.okta.com/app/y/sso/saml
+
+#TARGET url=https://www.example.com/actuator label=actuator
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+strict-transport-security: max-age=31536000
+
+{"_links":{"self":{"href":"x"},"health":{"href":"y"},"health-path":{"href":"z"}}}
+
+#TARGET url=https://www.example.com/x label=error-url
+#META at=2026-11-01T10:00:00
+HTTP/1.1 400 Bad Request
+content-type: text/html
+
+<html><head><title>400 Bad Request</title></head><body><center><h1>400 Bad Request</h1></center><hr><center>nginx/1.18.0 (Ubuntu)</center></body></html>
+
+#TARGET url=https://www.example.com/robots.txt label=robots
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<!doctype html><html><div id="root"></div></html>
+
+#TARGET url=https://www.example.com/invite/qwrtzxkpmnbvcdfgh label=invite
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /Account/TwoFactor.aspx
+cache-control: private
+strict-transport-security: max-age=31536000
+
+#TARGET url=https://www.example.com/font.woff2 label=font
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: font/woff2
+strict-transport-security: max-age=31536000
+access-control-allow-origin: https://www.example.com
+
+x

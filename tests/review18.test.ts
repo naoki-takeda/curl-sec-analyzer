@@ -74,12 +74,17 @@ describe('10・15・21・23 maskText', () => {
 });
 
 describe('5・11・22 キーと例外', () => {
-  const f = (key: string, url: string, target = 'har-2') => ({ item: 'H-01', ruleId: 'H-01.1', target, targetKey: key, url } as Finding);
-  it('5 キーの * は1つのパスの部分だけに一致する。ラベルだけのキーとは * で照合しない', () => {
+  const f = (key: string, url: string, target = 'har-2') => ({ item: 'H-01', ruleId: 'H-01.1', target, targetKey: key, url, keyUrl: url } as Finding);
+  it('5 今回のキーと同じ例外は完全一致だけ。今回のキーにない例外（以前の版のキー・手で書いたパターン）は * を任意の文字列として照合する', () => {
+    // 第31回で見直した：今回のキーと同じなら、キーの * はワイルドカードにしない（同じホストのほかのページに効かない）
     const s = { ruleId: 'H-01', target: 'HAR GET https://a.example/*', reason: 'x' } as never;
-    expect(matches(s, f('HAR GET https://a.example/admin/settings', 'https://a.example/admin/settings'))).toBe(false);
-    expect(matches(s, f('HAR GET https://a.example/お知らせ', 'https://a.example/お知らせ'))).toBe(true);
-    expect(matches({ ruleId: 'H-01', target: '*login*', reason: 'x' } as never, f('login', 'https://a.example/x', 'login'))).toBe(false);
+    const current = new Set(['HAR GET https://a.example/*', 'HAR GET https://a.example/admin/settings']);
+    expect(matches(s, f('HAR GET https://a.example/admin/settings', 'https://a.example/admin/settings'), current)).toBe(false);
+    expect(matches(s, f('HAR GET https://a.example/*', 'https://a.example/Xy7Kp2Lm9QaBcDeF'), current)).toBe(true);
+    // 今回のキーにないなら、以前の版のパターンとして広く効く
+    expect(matches(s, f('HAR GET https://a.example/お知らせ', 'https://a.example/お知らせ'), new Set(['HAR GET https://a.example/お知らせ']))).toBe(true);
+    // ラベルだけのキーには、パターンを当てない（第30回の修正。*login* が login ラベルの指摘も抑止した）
+    expect(matches({ ruleId: 'H-01', target: 'log*', reason: 'x' } as never, f('login', 'https://a.example/x', 'login'), new Set(['login']))).toBe(false);
   });
   it('11 長音（ー）を含む語もキーに残す', () => {
     expect(urlKey('https://a.example/ユーザーデータベース')).toBe('https://a.example/ユーザーデータベース');

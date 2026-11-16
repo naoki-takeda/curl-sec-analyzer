@@ -145,8 +145,10 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
     if (noOriginSent(ctx)) return [];
     const vary = (ctx.final.headers.get('vary') ?? []).join(',').toLowerCase();
     // 名前の一部（X-Origin-Id）ではなく、カンマで区切った1つの値として Origin か * があるか
-    return vary.split(',').some(s => ['origin', '*'].includes(s.trim())) ? [mk(corsVary, ctx, 'ok', 'info', 'pass', `Vary: ${vary}`, '')]
-      : [mk(corsVary, ctx, 1, 'low', 'fail', `ACAO: ${acao} / Vary: ${vary || '(なし)'}`, 'Origin によって ACAO を変えるなら Vary: Origin を付ける（キャッシュ汚染の防止）')];
+    if (vary.split(',').some(s => ['origin', '*'].includes(s.trim()))) return [mk(corsVary, ctx, 'ok', 'info', 'pass', `Vary: ${vary}`, '')];
+    // Vary がなく、送った Origin が分からない（-i。送信ヘッダの見えない採取）ときは、ACAO が Origin によって変わる値かが分からないので na
+    if (!ctx.target.verbose && !ctx.target.sentOrigin && ctx.target.meta.source !== 'har') return [mk(corsVary, ctx, 'na', 'info', 'na', `ACAO: ${acao}（送った Origin が分からない）`, '-v を付けて、Origin を送って採取し直す')];
+    return [mk(corsVary, ctx, 1, 'low', 'fail', `ACAO: ${acao} / Vary: ${vary || '(なし)'}`, 'Origin によって ACAO を変えるなら Vary: Origin を付ける（キャッシュ汚染の防止）')];
   } };
 
 const SENSITIVE_EXPOSE = /\b(authorization|set-cookie|x-auth[\w-]*|[\w-]*token[\w-]*|x-internal[\w-]*|x-debug[\w-]*)\b/i;

@@ -20,7 +20,9 @@ const FAMILY: Record<string, Family> = {
   powershell: 'ps', pwsh: 'ps', 'invoke-webrequest': 'ps', iwr: 'ps', 'invoke-restmethod': 'ps', irm: 'ps',
 };
 for (const p of ['nc', 'ncat', 'nmap', 'sslscan', 'testssl', 'testssl.sh', 'grep', 'egrep', 'jq', 'sed', 'awk', 'head', 'tail', 'cat', 'echo', 'printf', 'base64', 'timeout',
-  'sudo', 'env', 'dig', 'nslookup', 'host', 'python', 'python3', 'node', 'bash', 'sh', 'sleep', 'date', 'tee', 'sort', 'uniq', 'wc', 'xargs']) FAMILY[p] = 'other';
+  'sudo', 'env', 'nohup', 'time', 'command', 'exec', 'nice', 'stdbuf', 'dig', 'nslookup', 'host', 'python', 'python3', 'node', 'bash', 'sh', 'sleep', 'date', 'tee', 'sort', 'uniq', 'wc', 'xargs']) FAMILY[p] = 'other';
+/** 次の語をプログラムとして読む、前に置くプログラム（sudo curl …、timeout 10 curl …、env TOKEN=… curl …、xargs curl …） */
+const PREFIX_PROGRAMS = new Set(['sudo', 'timeout', 'env', 'xargs', 'nohup', 'time', 'command', 'exec', 'nice', 'stdbuf']);
 const OPERATOR = /^(?:\|\|?|&&|;|&|>>?|<|2>&1|[12]?>\/dev\/null)$/;
 const METHODS = /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|CONNECT)$/i;
 const SUBCOMMANDS = /^(?:s_client|s_server|s_time|x509|req|ciphers|version|verify|rsa|ec|pkey|dgst)$/;
@@ -162,7 +164,13 @@ const programName = (t: string): string => unquote(t).split(/[\\/]/).pop()!.repl
 const url = (raw: string): string => {
   const rest = raw.replace(/^[A-Za-z][\w+.-]*:\/\//, '');
   const authority = rest.match(/^[^/\\?#]*/)![0];
-  if (rest.includes('@') && !authority.includes('@')) return '****';
+  // ユーザー情報がホストの後ろまで続いたもの（パスワードに / ? # \ があり、@ がホストの前にない）は **** にする。パスの @ は、部分の先頭（/@alice の
+  // ハンドル）だけを URL の文字とする（https://alice.smith:2024/p/w@host.example/ のユーザー名とパスワードの一部を、ホストとパスとして出した）。
+  // クエリ・フラグメントの @ は、あとにホストらしい語と / : ? # \ か終わりが続くもの（?x=y@host.example/）をユーザー情報の続きとする。
+  // ?email=alice@example.com&page=2 は出す（全体を **** にすると、メールアドレスのクエリやハンドルのパスの URL を出さなかった）
+  const after = rest.slice(authority.length);
+  const path = after.match(/^[^?#]*/)![0], tail = after.slice(path.length);
+  if (!authority.includes('@') && (/(?:^|[^/])@/.test(path) || /@[\w-]+(?:\.[\w-]+)+(?:[:/?#\\]|$)/.test(tail) || /:[^\d@]/.test(authority.replace(/^\[[^\]]*\]/, '')))) return '****';
   const q = raw.search(/[?#]/);
   const t = q < 0 ? raw : raw.slice(0, q);
   const names = q >= 0 && raw[q] === '?' ? raw.slice(q + 1).split('#')[0].split('&').map(x => x.split('=')[0]).filter(Boolean) : [];
@@ -219,6 +227,9 @@ function summarizeOne(raw: string): string {
     if (len > MAX) break;
     if (t === '…') { push('…'); continue; }   // 切り詰めの印（もう一度かけても変わらないように残す）
     if (OPERATOR.test(t)) { push(t); atProgram = true; expect = undefined; continue; }
+    // 前に置くプログラム（sudo・timeout・env・xargs など）のあとの秒数（timeout 10）
+    // 数字を出すのは timeout のあとだけ（sudo 12345 curl の 12345 は何か分からない）
+    if (atProgram && /^\d{1,5}[smhd]?$/.test(t) && out.length && programName(out[out.length - 1]) === 'timeout') { push(t, false); continue; }
     if (atProgram) {
       // 環境変数の指定（HTTPS_PROXY=… curl）は、一覧にある名前だけ（「_」で区切った curl_<ユーザー名>=… を環境変数の名前として出さない）
       const env = t.match(/^([A-Za-z][A-Za-z0-9_]{0,40})=/);
@@ -226,8 +237,13 @@ function summarizeOne(raw: string): string {
       if (env) { push(ENV_NAMES.has(env[1].toUpperCase()) ? `${env[1]}=****` : '****=****', false); continue; }
       if (t === '****=****') { push(t, false); continue; }
       // プログラムの位置の語は、前の **** とまとめない（まとめると、もう一度かけたときに次の語をプログラムと読んで結果が変わった）
-      prog = programName(t); const f = FAMILY[prog];
-      push(f ? prog : '****', false); fam = f ?? 'other'; atProgram = false;
+      // 一覧は自分のキーだけを引く（FAMILY['constructor'] がプロトタイプの関数を拾い、CSV のエクスポートが例外で黙って失敗した）
+      prog = programName(t); const f = Object.prototype.hasOwnProperty.call(FAMILY, prog) ? FAMILY[prog] : undefined;
+      // 次の語をプログラムとして読むのは、名前を出した前置きのプログラムのあとだけ（**** と出したあとに読むと、もう一度かけたときに **** のあとの
+      // curl をプログラムと読まず、結果が変わった）
+      push(f ? prog : '****', false); fam = f ?? 'other'; atProgram = !!f && PREFIX_PROGRAMS.has(prog);
+      // timeout の秒数（timeout 10 curl …）はそのまま出す
+      if (prog === 'timeout') expect = undefined;
       continue;
     }
     if (expect) {

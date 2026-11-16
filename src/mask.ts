@@ -1,4 +1,5 @@
 // mask.ts：画面とエクスポートに出す値のマスキング（常に行う。切り替えはない）
+import { lowerToken } from './tokenShape';
 // 生のヘッダ行は画面・エクスポートに出さない（Cookie の値は rules/cookies.ts の cookieEvidence でマスクする）ので、ヘッダ行用の関数は持たない
 // URLのパラメータ：検出（A-02・C-09②）の一覧は、マスクする名前に必ず含まれる（検出したものは必ずマスクされる）。
 // マスクはそれより広く、名前を - _ . で区切った語に token・signature・credential などがあればマスクする（署名付きURLの X-Amz-Security-Token など）
@@ -52,7 +53,8 @@ export const isSecretParamName = (name: string): boolean => {
 const STRIP_DIGIT_WORDS = new Set(['password', 'passwd', 'pass', 'pw', 'pwd', 'otp', 'token', 'secret', 'passcode']);
 const PUBLIC_LAST_WORDS = new Set(['type', 'method', 'methods', 'size', 'length', 'len', 'policy', 'timeout', 'ttl', 'alg', 'algorithm']);
 // pw で終わる名前（userpw・loginpw）と nonce（WordPress の CSRF トークン _wpnonce）も含める
-const SECRET_PART = /token|secret|passw|passphrase|pwd|apikey|authkey|accesskey|privatekey|sessid|sesskey|credential|signature|nonce|[a-z]pw$/;
+// 区切りのない1語のワンタイムコードの名前（authcode・otpcode・smscode・mfacode・vcode・totp）も含める（zipcode・errorcode は含めない）
+const SECRET_PART = /token|secret|passw|passphrase|pwd|apikey|authkey|accesskey|privatekey|sessid|sesskey|credential|signature|nonce|[a-z]pw$|(?:auth|otp|sms|mfa|pin|login|reset|verif\w*|activation|confirm|email|v)code$|^totp$|^otp/;
 /** 値を伏せるパラメータか（名前のほかに、state は値も見る） */
 const secretParam = (name: string, value: string) => isSecretParamName(name) || (STATE_PARAM.test(name) && !plainStateValue(value));
 // パラメータの区切り：? & # ; と、そのエンコード（%3F・%26・%23・%3B と二重エンコードの %253F など、JS のエスケープ（\u0026 の6文字、\x26）、HTML の文字参照（&amp;・&#38;・&#x3D; など））。
@@ -160,11 +162,7 @@ const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
 // 短い語をつないだ API のパスまで伏せた
 const randomLetters = (x: string) => x.length >= 16 && /^[A-Za-z]+$/.test(x) && (x.match(/[a-z]+|[A-Z]+/g) ?? []).length / x.length >= 0.4
   && (x.match(/[aeiou]/gi) ?? []).length / x.length < 0.3;
-/**
- * 英小文字だけの16文字以上で、母音の少ない（4分の1未満）並び（/reset/kqzvwxmplrtbnhjd）。英語の語をつないだもの（internationalization）は
- * 母音が4割ほどあるので残る。英小文字だけのトークンを、画面にもキーにもそのまま出していた
- */
-export const lowerToken = (x: string) => x.length >= 16 && /^[a-z]+$/.test(x) && (x.match(/[aeiouy]/g) ?? []).length / x.length < 0.25;
+// 英小文字だけの16文字以上の乱数のトークン（/reset/kqzvwxmplrtbnhjd）は lowerToken（tokenShape.ts。突き合わせのキーと共有する）
 /** 語として残してよい接頭辞（application・login・AdminDashboard）。トークンの先頭（QwErTyUiOpAsDfGhJk）は残さない */
 const wordPrefix = (w: string) => w.length <= 20 && (w.match(/[a-z]+|[A-Z]+/g) ?? []).length / w.length < 0.3;
 /** 伏せ方：画面・エクスポート用（先頭の数文字と長さを残す）と、突き合わせのキー用（記録し直しても変わらないよう、何も残さない） */

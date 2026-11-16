@@ -113,6 +113,9 @@ const EXACT: Record<string, string> = {
   'API の URL（JSON を返すもの）で採取し直す': 'Capture again with an API URL (one that returns JSON)',
   '認証が必要なクエリ（me など）で採取し直す': 'Capture again with a query that requires authentication (such as me)',
   '認証が必要なデータを返す API の URL で採取し直す': 'Capture again with an API URL that returns data requiring authentication',
+  '-v を付けて、Origin を送って採取し直す': 'Capture again with -v, sending an Origin header',
+  'バケット・コンテナの一覧の公開を無効にする（S3 のブロックパブリックアクセス、Azure のコンテナのアクセスレベルを private に）':
+    'Disable public listing of buckets and containers (S3 Block Public Access; set the Azure container access level to private)',
   'ログイン後のデータを返す API の URL を after-logout として採取し直す': 'Capture as after-logout an API URL that returns data after login',
   '機密データを返す 200 の応答（認証後ページなど）で採取する': 'Capture a 200 response that returns sensitive data (such as a page after login)',
   '転送先の URL を別のターゲットとして採取する': 'Capture the redirect target URL as a separate target',

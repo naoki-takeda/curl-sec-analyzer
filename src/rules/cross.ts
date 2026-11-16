@@ -3,7 +3,7 @@ import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument } from '../parser/target';
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp, parseHsts, splitPolicies } from './util';
+import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
 import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
@@ -35,8 +35,32 @@ const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
 // サーバが利用者のデータを返しているので殻としない。文字は、ないか「Loading…」「読み込み中」だけのとき（<noscript> の案内を除く）に限る
 // （文字数で見ると、短いサーバ描画のマイページ（マイページ 山田太郎様のご注文）まで殻とみなした）
 const spaShell = (b: string): boolean => /<div\b[^>]{0,200}\bid\s*=\s*["']?(?:root|app|__next|__nuxt|q-app)\b/i.test(b) && /<script\b/i.test(b)
-  && !/\bdata-page\s*=|__NEXT_DATA__|__INITIAL_STATE__|__NUXT__|__APOLLO_STATE__|__PRELOADED_STATE__/.test(b)
+  // 状態の名前（__NUXT_DATA__・ng-state・window.Laravel・window.__USER__ など）は一覧で追いきれないので、形で見る：インラインのスクリプトに中身が
+  // あり、オブジェクト・配列・JSON を代入・読み込むもの、type="application/json" のスクリプト、ルートの要素の id・class 以外の属性（data-user・
+  // Vue の :user）があれば、データを持つ画面として殻としない
+  && !/\bdata-page\s*=|__NEXT_DATA__|__INITIAL_STATE__|__NUXT|__APOLLO_STATE__|__PRELOADED_STATE__|\bng-state\b/.test(b)
+  && !inlineData(b) && !ROOT_ATTR.test(b)
   && /^(?:loading|読み込み中|ロード中)?[.…]*$/i.test(visibleText(b.replace(/<noscript\b[\s\S]{0,2000}?<\/noscript>/gi, '')));
+/** ルートの要素（root・app・__next・__nuxt・q-app）の、データを入れる属性（data-user・:user・v-bind:user。data-v-・data-testid・data-reactroot は除く） */
+const ROOT_ATTR = /<div\b(?=[^>]{0,200}\bid\s*=\s*["']?(?:root|app|__next|__nuxt|q-app)\b)[^>]{0,200}\s(?:data-(?!v-|testid\b|reactroot\b)[\w-]+|:[\w-]+|v-bind:[\w-]+)\s*=/i;
+/** 利用者・状態のデータらしい中身（"user":・"email":・"currentUser":、state・store・props の名前への代入）。設定（window.__ENV__ = {"API_URL":…}・dataLayer = []）は除く */
+const STATE_DATA = /["']?\b(?:user(?:name|_?id)?|current_?user|email|account|profile|customer|member|viewer|me|session|auth(?:enticated|_?user)?|props|state|store)\b["']?\s*:|\b\w*(?:state|store|user|props|session)\w*\s*=\s*(?:[{[]|JSON\.parse)/i;
+/**
+ * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64KB で、閉じタグまで）：type="application/json" のスクリプト、
+ * オブジェクト・配列の代入、JSON.parse のうち、中身が STATE_DATA に当てはまるもの。ld+json（構造化データ）と設定だけのものはデータとしない
+ */
+function inlineData(b: string): boolean {
+  const s = b.slice(0, 65536), low = s.toLowerCase();
+  for (let i = low.indexOf('<script'); i >= 0; i = low.indexOf('<script', i + 7)) {
+    const tagEnd = low.indexOf('>', i); if (tagEnd < 0) return false;
+    const tag = low.slice(i, tagEnd);
+    if (/\bsrc\s*=/.test(tag)) continue;
+    const end = low.indexOf('</script', tagEnd); const body = s.slice(tagEnd + 1, end < 0 ? s.length : end);
+    if ((/type\s*=\s*["']?application\/json/.test(tag) || /=\s*[{[]|JSON\.parse\s*\(/.test(body)) && STATE_DATA.test(body)) return true;
+    if (end < 0) return false;
+  }
+  return false;
+}
 /** タグ・スクリプト・スタイルの外の、空白を除いた文字（40 文字まで）。正規表現で除くと、閉じない <script の続く本文で2乗の時間がかかるので、1回の走査で集める */
 function visibleText(b: string): string {
   const s = b.slice(0, 65536), low = s.toLowerCase(); let out = '';
@@ -64,7 +88,8 @@ function mfaStep(login: Target): string | undefined {
   let p: string; try { p = new URL(loc, login.url ?? 'https://x.invalid/').pathname; } catch { return undefined; }
   // 最後の部分が2段階目の画面の名前（/mfa、/two_factor_authentication、/2fa）か、2段階目の入力の画面（/two_factor/verify、/mfa/challenge）のときだけ。
   // パスのどこかに mfa・otp があるだけ（/mfa/setup-reminder、/users/otp_settings。ログインが済んだあとの設定の画面）は含めない
-  const segs = p.replace(/\/+$/, '').split('/');
+  // 各部分の拡張子は外して見る（/2fa.php・/Account/TwoFactor.aspx・/two_factor.html を見逃し、①（高）の誤検知にした）
+  const segs = p.replace(/\/+$/, '').split('/').map(x => x.replace(/\.[A-Za-z0-9]{1,5}$/, ''));
   // 2段階目の画面の名前（two-factor-challenge・mfa-otp-challenge のように語が続くものも）。設定の画面の語（setup・settings・reminder・backup・
   // recovery など）が続くものと、その下の部分（/2fa/backup-codes）は除く（除外の一覧で見る。完全一致にすると、Fortify の /two-factor-challenge・
   // GitHub の /sessions/two-factor/app・allauth の /accounts/2fa/authenticate/ を見逃した）
@@ -108,8 +133,14 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
   runCross(x) {
     const pre = x.byLabel('pre-login'), login = x.byLabel('login');
     if (!pre || !login) return na(sessionFixation, 'pre-login/login', 'pre-login, login');
-    const before = sessionCookies(pre).map(c => `${c.name}=${c.value}`);
-    const after = sessionCookies(login).map(c => `${c.name}=${c.value}`);
+    const beforeC = sessionCookies(pre), afterC = sessionCookies(login);
+    const before = beforeC.map(c => `${c.name}=${c.value}`);
+    // 新しい値のセッションCookie を1つでも発行し、同じ値で送り直したのが期限付きの Cookie（device_token・remember の類）だけなら、再発行している
+    // （名前の推定でセッションCookie とみなした長期の Cookie を同じ値で送り直しただけで、①（高）にした）
+    const fresh = afterC.some(c => !before.includes(`${c.name}=${c.value}`));
+    // 除くのは、名前がセッションIDらしくないもの（sessionid・JSESSIONID・laravel_session・sid は、期限付きでも主のセッションIDなので比べる。
+    // 除くと、期限付きの sessionid を再発行せずに auth_token を足しただけのログインを合格にした）
+    const after = afterC.filter(c => !(fresh && !/sess|^sid$/i.test(c.name) && before.includes(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age')))).map(c => `${c.name}=${c.value}`);
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
@@ -211,6 +242,11 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
       if (loginForm(r.body ?? '') && !PASSWORD_FIELD.test(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
       // SPA の画面（<div id="root"> とスクリプトだけで、文字のない HTML）は、どのセッションでも同じものを返すので、旧Cookie が使えたかは分からない
       // （A-01・A-11・E-05 の HTML の画面と同じ考え方）
+      // データのない JSON（{}・{"user":null}）と GraphQL の認証の拒否は、旧Cookie でデータを返していない（A-01 と同じ判定）。SPA の殻の推奨に従って
+      // API の URL を after-logout にすると、未認証の /api/auth/session の {} を①（高）にした
+      const gql = graphqlError(r.body);
+      if (gql === 'denied') return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev}（GraphQL の認証エラー。データは null）`, '')];
+      if (gql || noDataJson(r.body)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（データのない JSON。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
       if (spaShell(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（SPA の画面。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
       return [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', ev, 'ログアウト時にサーバ側のセッションを破棄する')];
     }

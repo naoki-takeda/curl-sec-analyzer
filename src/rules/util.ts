@@ -94,6 +94,34 @@ export const NO_BODY_REC = '本文も含めて採取し直す（curl は -v で�
 /** プローブ（C13）のコードが 000（接続できなかった）のときの推奨。ファイルがあるかどうかは分からないので、合格にしない（E-03・E-04・E-13） */
 export const PROBE_UNREACHED_REC = 'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）';
 /** 本文の上限（パーサが残す先頭64KB）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
+/**
+ * データのない JSON の本文（{}・[]・null、値がすべて null・false・空のもの。NextAuth の未認証の /api/auth/session の {}、{"authenticated":false,"user":null}）。
+ * 保護データを返していないので、A-01①・C-12①（高）にしない
+ */
+const AUTH_FLAG = /^(?:is_?)?(?:authenticated|authorized|logged_?in|signed_?in|auth|ok|success|valid)$/i;
+export const noDataJson = (body: string | undefined): boolean => {
+  const b = (body ?? '').trim();
+  if (!/^[{[]|^null$/.test(b)) return false;
+  let j: unknown; try { j = JSON.parse(b); } catch { return false; }
+  // false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
+  const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
+    || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+  return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)));
+};
+/**
+ * GraphQL のエラーの応答（200 で {"errors":[…],"data":null}）。errors があり、data が null か値がすべて null のもの。
+ * 認証・認可の拒否（UNAUTHENTICATED・FORBIDDEN・not authenticated など）なら 'denied'、それ以外は 'error'
+ */
+export const graphqlError = (body: string | undefined): 'denied' | 'error' | undefined => {
+  const b = body ?? '';
+  if (!/^\s*\{/.test(b) || !/"errors"\s*:/.test(b)) return undefined;
+  let j: { errors?: unknown; data?: unknown };
+  try { j = JSON.parse(b) as typeof j; } catch { return undefined; }
+  if (!Array.isArray(j.errors) || !j.errors.length) return undefined;
+  const d = j.data;
+  if (!(d === null || d === undefined || (typeof d === 'object' && Object.values(d as Record<string, unknown>).every(v => v === null)))) return undefined;
+  return /UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|not authenticated|unauthori[sz]ed|authentication required|access denied|not logged in|login required/i.test(JSON.stringify(j.errors)) ? 'denied' : 'error';
+};
 export const bodyTruncated = (ctx: RuleContext) => (ctx.final?.body?.length ?? 0) >= 64 * 1024;
 
 /**

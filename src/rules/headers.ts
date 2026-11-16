@@ -2,7 +2,7 @@
 import type { Rule, RuleContext } from '../model';
 import { LOGOUT_FAILED_REC, NO_BODY_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, parseHsts, sensitiveUnlessStatic, splitPolicies } from './util';
 import { clip, maskValue } from '../mask';
-import { baseLabel, firstStatus, logoutFailed, ownChain } from '../parser/target';
+import { baseLabel, firstStatus, logoutFailed, ownChain, siteResponses } from '../parser/target';
 import { htmlBody, metaCspPolicies, mixedContent } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
@@ -112,7 +112,9 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
     // 経験的にキャッシュしてよいステータスではない）。ログイン後の 302 で H-12①（高）を出していた
     // 401・403・500 なども同じ（経験的にキャッシュしてよいのは 200・203・204・206・300・301・308・404・405・410・414・501 だけ）
     // private も保存を許す指定（私的キャッシュは private があれば 201・403 も保存できる）
-    if (!HEURISTIC_CACHEABLE.has(ctx.final.status) && !['max-age', 's-maxage', 'public', 'private'].some(d => dirs.has(d)) && !header(ctx, 'expires').length)
+    // ただし Location のある 3xx では private を数えない（ASP.NET は既定ですべての応答に private を付け、転送のたびに②を出した）
+    const redirect = ctx.final.status >= 300 && ctx.final.status < 400 && ctx.final.headers.has('location');
+    if (!HEURISTIC_CACHEABLE.has(ctx.final.status) && !['max-age', 's-maxage', 'public', ...(redirect ? [] : ['private'])].some(d => dirs.has(d)) && !header(ctx, 'expires').length)
       return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（鮮度の指定がなく、キャッシュされない応答）`, '機密データを返す 200 の応答（認証後ページなど）で採取する')];
     const limited = (f: ReturnType<typeof mk>) => ({ ...f, limited: true });
     // 静的リソース・公開ファイルは、sensitive=1 を明示したときだけ機密応答として扱う（rules/util.ts の sensitiveUnlessStatic）
@@ -320,7 +322,7 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
     if (baseLabel(ctx.target.label) !== 'logout') return [];          // ログアウト応答だけ
     if (!ctx.final) return [mk(clearSiteData, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (logoutFailed(ctx.target)) return [mk(clearSiteData, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
-    const csd = ctx.target.responses.flatMap(r => r.headers.get('clear-site-data') ?? [])[0];
+    const csd = siteResponses(ctx.target).flatMap(r => r.headers.get('clear-site-data') ?? [])[0];
     return csd ? [mk(clearSiteData, ctx, 'ok', 'info', 'pass', csd, '')]
                : [mk(clearSiteData, ctx, 1, 'info', 'fail', '(ヘッダなし)', 'Clear-Site-Data: "cache", "cookies", "storage"')];
   } };
