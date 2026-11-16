@@ -36,7 +36,7 @@ npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build �
 
 - 実在のシステムから採取した値は使いません。ホスト名は `example.com` などに、Cookie・トークンはダミーの値に置き換えます。
 - `tests/fixtures/*.txt` は、採取したままの改行（サーバの応答ヘッダは CRLF、curl 自身の行は LF）を保ちます。`.gitattributes` で改行を変換しない設定にしています。エディタで保存し直して改行を変えないでください。
-- テスト用の HAR は `tests/fixtures/` に置きます。ほかの場所の `*.har` は `.gitignore` で除外しています。
+- テスト用の HAR は `tests/fixtures/` か `tests/golden/cases/` に置きます。ほかの場所の `*.har` は `.gitignore` で除外しています。
 
 ## 回帰テスト（ゴールデン・同値性）
 
