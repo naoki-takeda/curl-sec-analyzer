@@ -1,6 +1,6 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、#META、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
-import { uniqueLabels } from './target';
+import { assignHopUrls, uniqueLabels } from './target';
 import { splitSetCookie } from './setCookie';
 
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
@@ -39,6 +39,7 @@ export function parseInput(input: string): ParseResult {
   let cur: HttpResponse | null = null, inHeaders = false, last = '', inOpenssl = false;
   let unparsed = 0; const emptyTargets: string[] = [];
   let json: string[] | null = null;                   // C10（%{header_json}）の読み取り中
+  let jsonBytes = 0;
   let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
   let connectReq = false;                             // -v で「> CONNECT」を送った（プロキシのトンネル）。その応答のあとは本文がない
   const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; };
@@ -103,13 +104,16 @@ export function parseInput(input: string): ParseResult {
     }
     const sm = line.match(STATUS_RE);
     if (sm && !inBody()) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue; }
-    if (sm && inBody() && /^\s*$/.test(cur!.body?.split('\n').at(-2) ?? '') && (cur!.body === undefined || nextHopAfter(cur!.status))) {   // -L で次のホップが続く場合
+    // 本文の直前の行が空行かは、本文の末尾だけを見る（本文全体を split すると、本文の中のステータス行らしい行ごとに64KBを分けることになり、入力の長さの2乗の時間がかかる）
+    if (sm && inBody() && (cur!.body === undefined || nextHopAfter(cur!.status)) && /^\s*$/.test(lastLine(cur!.body ?? ''))) {   // -L で次のホップが続く場合
       close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue;
     }
     // C10：ヘッダ名が小文字のJSON。-v の本文や、応答のあとの本文（{"items":[...]} など）は対象にしない
     if (!cur && !t.verbose && (json || (!t.responses.length && /^\s*\{\s*"[\w-]+"\s*:\s*\[/.test(line)))) {
-      json = [...(json ?? []), line];
-      const r = headerJson(json.join('\n'), t.meta.response_code);
+      if (!json) { json = []; jsonBytes = 0; }
+      json.push(line); jsonBytes += line.length;
+      // JSON のオブジェクトは } で終わるので、そこまでは読み直さない（行ごとに全体をつないで解析すると、入力の長さの2乗の時間がかかる）
+      const r = /\}\s*$/.test(line) ? headerJson(json.join('\n'), t.meta.response_code) : jsonBytes > BODY_LIMIT ? null : undefined;
       // null：JSON としては読めたが、ヘッダの形ではない（curl -s で出力した API の本文など）。応答にせず、解析できない行として警告する
       if (r) { t.responses.push(r); json = null; } else if (r === null || json.length > 500) { unparsed += json.length; json = null; }
       continue;
@@ -136,6 +140,7 @@ export function parseInput(input: string): ParseResult {
     else if (r.status >= 300 && r.status < 400 && r.headers.has('location')) r.kind = 'redirect';
     if (r.body !== undefined && !r.body.trim()) r.body = undefined;
   });
+  for (const tg of targets) assignHopUrls(tg);
   const dup = uniqueLabels(targets);
   return { targets, warnings: [...dup, ...collectWarnings(targets, unparsed, emptyTargets)] };
 }
@@ -159,6 +164,12 @@ function headerJson(text: string, code?: string): HttpResponse | null | undefine
   for (const [k, v] of entries)
     headers.set(k.toLowerCase(), k.toLowerCase() === 'set-cookie' ? (v as string[]).flatMap(splitSetCookie) : (v as string[]));
   return { httpVersion: '', status: Number(code) || 0, reason: 'header_json', headers, rawNames: [...headers.keys()], kind: 'final' };
+}
+
+/** 本文の最後の行（本文は「行 + 改行」でつなぐので、最後の改行の前の行。body.split('\n').at(-2) と同じ）。改行がなければ空 */
+function lastLine(body: string): string {
+  const e = body.lastIndexOf('\n');
+  return e < 0 ? '' : body.slice(body.lastIndexOf('\n', e - 1) + 1, e);
 }
 
 function collectWarnings(targets: Target[], unparsed: number, emptyTargets: string[]): ParseWarning[] {

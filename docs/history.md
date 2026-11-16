@@ -338,3 +338,29 @@
 | 高-11 | HARで、解析用・同意用のCookie（`visitor_id`など）を送っただけで機密応答と推定し、公開ページや`robots.txt`をH-12①（高）にする | Authorizationか、セッションCookieらしい名前のCookieを送ったときだけ機密と推定する | ツール設計1「HAR形式の取り込み」、`src/parser/har.ts`、`src/parser/setCookie.ts` |
 | テスト | 英訳の検査が、名前が`_REC`で終わる文字列の定数を見ていなかった | 集めるようにした | `tests/i18n.test.ts` |
 | 未対応 | HARでPOSTのログインやログアウトからの転送先のページが、そのページ自身として判定されない、生成スクリプトがログイン画面を一般のラベルで採取しない（ログイン画面のH-04①を見逃し、カバレッジは判定済み・0件と出る）、ログアウトのPOSTの採取、E-05の同じホスト内のSwagger UIへの転送、E-05のステータス不明、複数のCSPポリシーの扱いの非対称（設計の判断）、E-09②の自サイトのURL、T-05②の同じポート、A-07の証跡の動的なキー（秘密値・メールアドレスが出る）、伏せる名前の不足（`passcode`・`pin`・`hash`・`assertion`、値の中のJSON）とマスキングを許可リスト方式にするかの判断、名前のないSet-Cookie、H-07④のnonceの証跡、Server-Timingの値 | 次回以降 | — |
+
+### レビュー指摘への対応（第18回、10回目の新鮮な目でのレビュー：独立した4人のレビュアー）
+
+入力とマスク、判定、画面・エクスポート・CI、リファクタリングを、別々のレビュアーが独立に見た。18件に対応し、ルールセットを`2026.11-v0.4.25`にした。再現テストは`tests/review10.test.ts`と、`e2e/app.spec.ts`の1件（読み上げ）。修正前のソースでは、守りのテスト（直したあとも変わらないことを確かめるもの）を除いて、すべて失敗することを確かめた。
+
+| 指摘 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 1（漏えい） | パスに置いたトークンを伏せるのが、`https://…`で始まる完全なURLだけで、相対パスの`<form action>`（E-12①・E-10②）、相対の`Location`（A-01②）、スキームのない`//cdn…`（E-08①）、`?next=/invite/…`、`%2F`でエンコードしたパス、`#/reset/…`のトークンが証跡とエクスポートに出る。`.pdf`の付いたもの、`:`の後ろ、Base64の`=`の付いたものも伏せない | `/`か`%2F`のあとに続く部分ならどこでも見る。部分を`.`と`:`で分け、末尾の`=`を除いて判定する | ツール設計3「マスキングの対象」、`src/mask.ts` |
+| 2（漏えい） | CSVの「実施コマンド」「実施日時」列が`#META`の値をそのまま出す（`?access_token=…`） | マスクする | ツール設計4「エクスポート」、`src/export/csv.ts` |
+| 3（高） | ASP.NETのCSRF対策のCookie（`.AspNetCore.Antiforgery.*`、`__RequestVerificationToken`）をセッションCookieとみなし、C-01①（高）・C-03①にする | セッションCookieの推定から除く | 第2章、`src/parser/setCookie.ts` |
+| 4（高） | A-07①（高）が、英語の翻訳用JSON（`"password":"Password"`）を秘密情報の露出とする | キーと同じ語か、先頭だけ大文字の語をつないだ値は、画面の文言として除く | 第6章、`src/rules/api.ts` |
+| 5（高） | T-04①（高）が、HTTPを403で断る応答（CloudFrontの「HTTPSのみ」など）も「HTTPでコンテンツを返す」とする | 4xxは合格、5xxはnaにする | 第4章、`src/rules/transport.ts` |
+| 6（高） | A-02①（高）が、`?session=expired`・`?auth=required`のように状態を伝えるだけのパラメータもトークンとする | 値が8文字以上で、英字と`-`・`_`だけの語でないときだけ①にする | 第6章、`src/rules/api.ts` |
+| 7（高） | HARの304（ブラウザのキャッシュの再検証）を通常の応答として判定し、H-01①（高）・H-08①にする | 既定で除外し、件数を解析警告に出す | ツール設計1「HAR形式の取り込み」、`src/parser/har.ts` |
+| 8（高） | HARで`Location`にフラグメント（`/app/#/home`）があると、ブラウザが記録した次のリクエスト（フラグメントなし）とつながらず、302を単独の応答としてH-01①・H-03①（高）にする | フラグメントを除いて比べる | 同上 |
+| 9（高） | E-11①（高）が、`/download/index.php`のようなサーバ側のページも「アップロードしたファイルのinline配信」とする | サーバ側で動くページ（`.php`・`.aspx`・`.jsp`など）とディレクトリの`index.html`を除く | 第5章、`src/rules/exposure.ts` |
+| 10（高） | C-13①（高）が、`no-store, s-maxage=0`も共有キャッシュに残るとする | `no-store`か`private`があれば対象外にする | 第2章、`src/rules/cookies.ts` |
+| 11（見逃し） | `url=`がhttpの一般のターゲットは、`-L`でhttpsに転送されても、H-・C-の項目がすべて黙って適用外になる（HARでは判定するので、curlとHARで結果が食い違う） | curlの各ホップにもURLを持たせ、同じホストのhttpsに転送されたターゲットは、`http`ラベル以外ならHTTPSの応答として判定する | ツール設計1「パース上の注意点」、`src/parser/target.ts`、`src/parser/input.ts` |
+| 12（高） | HARで、外部サービスのCookie（Hotjarの`_hjSession…`、`intercom-session-…`、`__stripe_sid`など）や、匿名のセッションCookieを送っただけで、`robots.txt`などの公開ページを機密応答としH-12①（高）・H-11①にする | 外部サービスのCookieをセッションCookieの推定から除く。公開ファイル（`robots.txt`、`sitemap.xml`、`/.well-known/`など）は、静的リソースと同じく`sensitive=1`の明示がなければ機密としない | 第0章 0.3、第2章、`src/parser/setCookie.ts`、`src/rules/util.ts` |
+| 13 | 静的リソースを機密応答としない扱いがH-12にしかなく、Cookieを送ったJS・フォントの`ACAO: *`をR-04①、R-08①・H-11①にする | 同じ判定（`sensitiveUnlessStatic`）をH-11・H-12・R-04・R-08で使う。JSONP（`?callback=`）は静的リソースとしない | 第0章 0.3、`src/rules/util.ts`、`src/rules/headers.ts`、`src/rules/cors.ts` |
+| 14 | C-03③が、負荷分散のCookie（`AWSALBCORS`・`ARRAffinitySameSite`。仕組み上`SameSite=None`）を「正当な理由のないNone」とする | 負荷分散のCookieでは③にしない | 第2章、`src/rules/cookies.ts` |
+| 15 | R-07①が、`X-CSRF-Token`・`X-Next-Page-Token`のように名前にtokenを含むだけのヘッダを認証トークンの公開とする | CSRF対策・ページ送りのトークンを除く | 第3章、`src/rules/cors.ts` |
+| 16 | E-05が、introspectionを試していない`GET /graphql`の400・405を合格にし、カバレッジを水増しする | introspectionを拒否した応答だけ合格、それ以外はnaにする | 第5章、`src/rules/exposure.ts` |
+| 17（性能） | 本文の中のステータス行らしい行ごとに64KBの本文を分け直す（5MBで9秒）、`%{header_json}`らしい行ごとに全体を解析し直す（5MBで4.5秒）、HTMLのタグを正規表現で読むと`<script`の始まりごとに末尾まで走査する（64KBの本文で1回75ms）、CSVが指摘ごとに全ターゲットを探す（3,000ターゲットで5秒） | 本文の末尾だけを見る、`}`で終わる行でだけ解析する、タグを手で走査し「位置と引用符の状態」ごとに結果を覚える（属性の長さの上限もなくした）、ラベルとホストの索引を作る | `src/parser/input.ts`、`src/rules/html.ts`、`src/export/csv.ts` |
+| 18（アクセシビリティ） | 結果欄全体が`aria-live`で、判定・絞り込み・折りたたみのたびに数百行を読み上げる | 結果欄の`aria-live`をやめ、件数だけを役割`status`の欄で知らせる | ツール設計3「画面設計」、`src/main.ts`、`src/i18n.ts` |
+| 未対応 | 低の指摘（E-01の誤検知（独自の404のタイトル、「Ruby on Rails」、`FLORA-12345`、資格情報のない`jdbc:`）、E-04の語の一部への一致、A-10の付け直したラベル、H-16の`X-Generator`、C-06の小文字の`__host-`、OAuthの`state`・`nonce`とJWE・`Bearer_eyJ…`のマスク、`country_code`などの伏せすぎ、英語の出力の全角の記号、「消去」でURL欄が残る、言語の切り替えでコマンド生成器の入力が消える、設計書の画面設計のずれ、CSPの検査とE2Eの穴）、匿名のセッションCookieを送った公開ページ（`/about`など。第0章 0.3の②のとおり機密と推定する。一覧で`sensitive`を上書きできる）、未確認のもの（ChromeのHSTSによる307 Internal Redirect、FirefoxとSafariでのUTF-16のファイル、Safariでの証明書の日付、Ed25519の鍵のT-10②、IPアドレスだけの証明書のT-11、全角の`＝`で始まるCSVのセル、公開を前提にしたAPIキーのE-09①）、リファクタリングの提案（入力と期待結果の組のテストと形式をまたぐ同値性のテスト、`analyze()`の切り出し、マスクを型で強制する、ホップの型、分類の判断を1か所にまとめる、curlのパーサの分割） | 次回以降 | — |

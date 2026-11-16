@@ -28,20 +28,43 @@ export const chainOf = (t: Target): HttpResponse[] =>
   t.responses.filter(x => x.kind !== 'informational' && x.kind !== 'connect');
 
 /**
- * そのターゲットの URL 自身の応答から始まるチェーン。HAR で http から https に転送されたチェーンは、ターゲットの URL を https にするので、
- * 最初の https のホップから始める（apex の「自身の応答」や、E-05・E-11 の「そのURLの応答」に http の転送を使わないため）。
- * 各ホップの URL が分からない curl の出力では chainOf と同じ
+ * curl の出力の各ホップに、そのリクエストの URL を付ける（HAR は取り込みで付ける）。ターゲットの URL から Location をたどる。
+ * -L で http から同じホストの https に転送されたかを、isHttps と ownChain が判定するのに使う
+ */
+export function assignHopUrls(t: Target): void {
+  let cur = t.url;
+  for (const r of chainOf(t)) {
+    if (!cur) return;
+    r.url ??= cur;
+    if (r.kind !== 'redirect') return;
+    try { const n = new URL(r.headers.get('location')![0], cur); n.hash = ''; cur = n.href; } catch { return; }
+  }
+}
+
+/**
+ * http の URL で採取し、-L で同じホストの https に転送された（最後のホップが https）。http ラベル（T-04）以外は、HTTPS の応答として判定する。
+ * URL が http のままだと、H-・C- の項目がすべて黙って適用外になる（HAR では取り込みでターゲットの URL を https にしている）
+ */
+const upgradedToHttps = (t: Target): boolean => {
+  if (baseLabel(t.label) === 'http' || !/^http:/i.test(t.url ?? '')) return false;
+  const last = chainOf(t).at(-1)?.url;
+  try { return !!last && new URL(last).protocol === 'https:' && new URL(last).hostname === new URL(t.url!).hostname; } catch { return false; }
+};
+
+/**
+ * そのターゲットの URL 自身の応答から始まるチェーン。http から https に転送されたチェーン（HAR はターゲットの URL を https にする。
+ * curl は upgradedToHttps）は、最初の https のホップから始める（apex の「自身の応答」や、E-05・E-11 の「そのURLの応答」に http の転送を使わないため）
  */
 export function ownChain(t: Target): HttpResponse[] {
   const c = chainOf(t);
-  if (!/^https:/i.test(t.url ?? '')) return c;
+  if (!/^https:/i.test(t.url ?? '') && !upgradedToHttps(t)) return c;
   const i = c.findIndex(r => /^https:/i.test(r.url ?? ''));
   return i > 0 ? c.slice(i) : c;
 }
 
 export function isHttps(t: Target): boolean | undefined {
   const u = t.url ?? t.meta.url_effective;
-  if (u) return /^https:\/\//i.test(u);   // スキームは大文字小文字を区別しない（HTTPS://…）
+  if (u) return /^https:\/\//i.test(u) || upgradedToHttps(t);   // スキームは大文字小文字を区別しない（HTTPS://…）
   if (t.info.some(l => /SSL connection using|ALPN:/.test(l))) return true;
   if (t.info.some(l => /^(?:Connected to|Established connection to) .* port 80\b/.test(l))) return false;   // 今の curl は Established connection to とも出す
   return undefined;

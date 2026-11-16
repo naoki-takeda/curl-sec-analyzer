@@ -77,6 +77,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
 const DOC_SEGMENT = /\/(actuator|swagger-ui(?:\.html)?|swagger(?:\.json|\.ya?ml)?|openapi\.(?:json|ya?ml)|api-docs|graphql)(?=\/|$)/i;
 const docSegment = (p: string) => p.match(DOC_SEGMENT)?.[1].toLowerCase();
 
+const GRAPHQL_REC = 'introspection のクエリ（{"query":"{__schema{types{name}}}"}）を POST して採取する';
 export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API8・API9'],
   run(ctx) {
@@ -85,9 +86,13 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     if (!f || !docSegment(p)) return [];
     const ok200 = f.status >= 200 && f.status < 300;
     const b = body(ctx) ?? '';
-    if (docSegment(p) === 'graphql') return ok200 && /"__schema"/.test(b)
-      ? [mk(apiDocsAdmin, ctx, 3, 'medium', 'fail', 'introspection の応答に __schema がある', '本番では introspection を無効にする')]
-      : [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
+    // GraphQL：introspection を試した応答だけで判定する。GET /graphql の 400（Must provide query string）や 405 は、
+    // introspection が無効かどうかを示さないので合格にしない
+    if (docSegment(p) === 'graphql') {
+      if (ok200 && /"__schema"/.test(b)) return [mk(apiDocsAdmin, ctx, 3, 'medium', 'fail', 'introspection の応答に __schema がある', '本番では introspection を無効にする')];
+      if (/introspection/i.test(b)) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}（introspection を拒否）`, '')];
+      return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${f.status}（introspection を試した応答ではない）`, GRAPHQL_REC)];
+    }
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
     return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}）`, 'API仕様は本番で無効にするか、認証の内側に置く')];
@@ -126,7 +131,9 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     // アップロードしたファイルの配信らしいURL：アップロード先らしいディレクトリの下で、最後がファイル名（拡張子付き）のもの。
     // ディレクトリ名だけで判定すると、/media/press-releases/ や /download/ のような普通のHTMLページまで①（高）にしてしまう
     const p = path(ctx);
-    const uploadPath = /\/(uploads?|files?|attachments?|media|download)\//i.test(p) && /\/[^/]+\.[a-z0-9]{1,10}$/i.test(p);
+    // サーバ側で動くページ（/download/index.php、/files/list.aspx）と、ディレクトリの index.html は、アップロードしたファイルではないので除く
+    const uploadPath = /\/(uploads?|files?|attachments?|media|download)\//i.test(p) && /\/[^/]+\.[a-z0-9]{1,10}$/i.test(p)
+      && !/\.(?:php\d?|phtml|aspx?|ashx|jspx?|do|action|cgi|pl|cfm|shtml)$|\/index\.html?$/i.test(p);
     if (!DOWNLOAD_CT.test(ct) && !uploadPath && !cd) return [];   // ファイル配信の応答だけ
     if (uploadPath && ACTIVE_CT.test(ct) && !/attachment/i.test(cd))
       return [mk(downloadResponse, ctx, 1, 'high', 'fail', `Content-Type: ${ct} / Content-Disposition: ${cd || '(なし)'}`, '利用者がアップロードしたファイルは別オリジンから attachment で配信する')];

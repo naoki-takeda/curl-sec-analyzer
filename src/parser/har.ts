@@ -62,6 +62,7 @@ function toResponse(e: HarEntry): HttpResponse {
            kind: status >= 300 && status < 400 && headers.has('location') ? 'redirect' : 'final' };
 }
 
+const withoutHash = (u: string) => { const i = u.indexOf('#'); return i >= 0 ? u.slice(0, i) : u; };
 const hostOfUrl = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
 
 /** HAR の JSON を読み、チェーンにまとめる。request.postData はここで捨てる */
@@ -81,11 +82,12 @@ export function importHar(text: string): HarImport {
       const loc = cur.response.redirectURL || cur.response.headers?.find(h => h.name.toLowerCase() === 'location')?.value;
       if (!loc) break;
       let next: URL; try { next = new URL(loc, cur.request.url); } catch { break; }
+      next.hash = '';   // ブラウザはフラグメントを除いた URL でリクエストを記録する（Location: /app/#/home → GET /app/）
       // 別のホスト（IdP、apex から www など）への転送先はつながない。つなぐと、対象外のホストの応答を、選んだホストのURLの結果として判定してしまう。
       // 同じホストの http から https への転送はつなぐ
       if (next.hostname !== new URL(cur.request.url).hostname) break;
       const from = ci;
-      const j = entries.findIndex((x, k) => k > from && !used.has(k) && x.request.url === next.href);
+      const j = entries.findIndex((x, k) => k > from && !used.has(k) && withoutHash(x.request.url) === next.href);
       if (j < 0) break;
       used.add(j); cur = entries[j]; ci = j; hops.push(cur);
     }
@@ -98,7 +100,9 @@ export function importHar(text: string): HarImport {
     chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(h => ({ ...toResponse(h), url: h.request.url })),
       sentAuth, sentAuthorization, sentCookieNames, at: e.startedDateTime,
-      suggested: '', label: '', sensitive: undefined, excluded: false });
+      // 304（ブラウザのキャッシュの再検証）は、サーバがセキュリティヘッダを付け直さなくてよい応答（RFC 9110 15.4.5）。
+      // 通常の応答として判定すると H-01①（高）などの誤検知になるので、既定で除外する（画面でラベルを選べば判定する）
+      suggested: '', label: '', sensitive: undefined, excluded: cur.response.status === 304 });
   });
   suggestLabels(chains);
   const hosts = [...new Set(chains.map(c => c.host))];
@@ -138,8 +142,9 @@ const sentAuthOf = (authorization: boolean, cookieNames: string[]) => authorizat
 /** 画面で確定したチェーンをターゲットにする */
 export function harTargets(imp: HarImport, selectedHosts: Set<string>): { targets: Target[]; warnings: ParseWarning[] } {
   const targets: Target[] = []; const warnings: ParseWarning[] = [];
-  let excluded = 0;
+  let excluded = 0, revalidated = 0;
   for (const c of imp.chains) {
+    if (c.excluded && c.status === 304 && selectedHosts.has(c.host)) { revalidated++; continue; }
     if (c.excluded || !selectedHosts.has(c.host)) { excluded++; continue; }
     const label = allowedForHar(c.label) ? c.label : `har-${c.id + 1}`;
     // http から https に転送されたチェーンは、最後の https の応答を、その URL で判定する（H-01・Cookie の項目は HTTPS の応答が対象）。
@@ -154,6 +159,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });
+  if (revalidated) warnings.push({ kind: 'har-excluded', detail: `HAR：304（キャッシュの再検証）のエントリが${revalidated}件あり、判定に使いませんでした。開発者ツールで「キャッシュを無効にする」を選んで記録し直すと判定できます` });
   if (excluded) warnings.push({ kind: 'har-excluded', detail: `HAR：${excluded}件のエントリ（対象外のホスト、または除外したもの）を判定に使いませんでした` });
   if (imp.sanitized) warnings.push({ kind: 'har-sanitized', detail: 'HAR：Cookie・Set-Cookie が含まれていません。機密情報を除いた形式で書き出された可能性があります。第2章（Cookie）の項目は判定できません' });
   return { targets, warnings };

@@ -1,7 +1,7 @@
 // rules/cors.ts：第3章 CORS・WebSocket（R-01〜R-09）
 import type { Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
-import { mk } from './util';
+import { mk, sensitiveUnlessStatic } from './util';
 
 const TEST_ORIGINS = ['https://evil.example'];        // 既知のテスト値（ツール設計1）
 const acaoOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-origin')?.[0]?.trim();
@@ -61,9 +61,10 @@ export const corsWildcard: Rule = { id: 'R-04', title: 'ワイルドカード', 
     const acao = acaoOf(ctx);
     if (acao !== '*') return [mk(corsWildcard, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     if (credOf(ctx)) return [mk(corsWildcard, ctx, 2, 'low', 'fail', 'ACAO: * / ACAC: true', '仕様上ブラウザが拒否する組み合わせ。設定を見直す')];
-    if (ctx.sensitive) return [mk(corsWildcard, ctx, 1, 'medium', 'fail', 'ACAO: *（機密応答）', '機密応答には * を使わず、許可リストで返す')];
+    const sensitive = sensitiveUnlessStatic(ctx);    // JS・フォントは CDN から * で配ることが多い。sensitive=1 の明示がなければ機密としない
+    if (sensitive) return [mk(corsWildcard, ctx, 1, 'medium', 'fail', 'ACAO: *（機密応答）', '機密応答には * を使わず、許可リストで返す')];
     // 機密かどうか分からないときは①を判定しない（第0章 0.3）。* が付いていることは確かなので、より弱い③として出す
-    if (ctx.sensitive === undefined) return [mk(corsWildcard, ctx, 3, 'info', 'fail', 'ACAO: *（機密応答かどうか分からない）', '機密応答なら①（中）にあたる。#TARGET に sensitive=1 か sensitive=0 を付ける')];
+    if (sensitive === undefined) return [mk(corsWildcard, ctx, 3, 'info', 'fail', 'ACAO: *（機密応答かどうか分からない）', '機密応答なら①（中）にあたる。#TARGET に sensitive=1 か sensitive=0 を付ける')];
     return [mk(corsWildcard, ctx, 3, 'info', 'fail', 'ACAO: *', '公開データであれば問題ない。意図どおりか確認する')];
   } };
 
@@ -93,13 +94,15 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
   } };
 
 const SENSITIVE_EXPOSE = /\b(authorization|set-cookie|x-auth[\w-]*|[\w-]*token[\w-]*|x-internal[\w-]*|x-debug[\w-]*)\b/i;
+// 名前に token を含んでも、認証のトークンではないヘッダ（CSRF 対策のトークンは SPA が読むために公開する。ページ送りのトークンも秘密ではない）
+const NOT_AUTH_TOKEN = /csrf|xsrf|page|next|continuation|cursor|sync/i;
 export const corsExpose: Rule = { id: 'R-07', title: 'Access-Control-Expose-Headers', appliesTo: 'any', scope: 'target',
   basis: ['MDN'],
   run(ctx) {
     const v = ctx.final?.headers.get('access-control-expose-headers')?.join(',');
     if (!ctx.final || !v) return [];
     if (v.split(',').some(s => s.trim() === '*')) return [mk(corsExpose, ctx, 2, 'low', 'fail', v, '公開するヘッダを明示する')];
-    if (SENSITIVE_EXPOSE.test(v)) return [mk(corsExpose, ctx, 1, 'medium', 'fail', v, '認証トークンや内部ヘッダを公開しない')];
+    if (v.split(',').some(h => SENSITIVE_EXPOSE.test(h) && !NOT_AUTH_TOKEN.test(h))) return [mk(corsExpose, ctx, 1, 'medium', 'fail', v, '認証トークンや内部ヘッダを公開しない')];
     return [mk(corsExpose, ctx, 'ok', 'info', 'pass', v, '')];
   } };
 
@@ -109,9 +112,9 @@ export const timingAllowOrigin: Rule = { id: 'R-08', title: 'Timing-Allow-Origin
   run(ctx) {
     const v = ctx.final?.headers.get('timing-allow-origin')?.join(', ');
     if (!ctx.final || !v) return [];
-    const star = /(^|,)\s*\*\s*(,|$)/.test(v);
-    if (ctx.sensitive && star) return [mk(timingAllowOrigin, ctx, 1, 'low', 'fail', `Timing-Allow-Origin: ${v}（機密応答）`, '機密応答には付けないか、Originを限定する（タイミング情報の漏えい）')];
-    if (ctx.sensitive === undefined && star) return [mk(timingAllowOrigin, ctx, 'na', 'info', 'na', `Timing-Allow-Origin: ${v}（機密応答かどうか分からない）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
+    const star = /(^|,)\s*\*\s*(,|$)/.test(v); const sensitive = sensitiveUnlessStatic(ctx);
+    if (sensitive && star) return [mk(timingAllowOrigin, ctx, 1, 'low', 'fail', `Timing-Allow-Origin: ${v}（機密応答）`, '機密応答には付けないか、Originを限定する（タイミング情報の漏えい）')];
+    if (sensitive === undefined && star) return [mk(timingAllowOrigin, ctx, 'na', 'info', 'na', `Timing-Allow-Origin: ${v}（機密応答かどうか分からない）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
     return [mk(timingAllowOrigin, ctx, 'ok', 'info', 'pass', `Timing-Allow-Origin: ${v}`, '')];
   } };
 

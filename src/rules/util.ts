@@ -9,6 +9,25 @@ export function mk(rule: Rule, ctx: RuleContext, cond: number | 'ok' | 'na', sev
 
 export const header = (ctx: RuleContext, name: string): string[] => ctx.final?.headers.get(name) ?? [];
 
+// 静的リソース（JS・CSS・画像・フォント）と、誰にでも同じ内容を返す公開ファイル（robots.txt、sitemap.xml、/.well-known/ の下など）
+const STATIC_RE = /\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|map)(?:[?#]|$)/i;
+const STATIC_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|image\/|font\/)/i;
+const PUBLIC_FILE = /\/(?:robots\.txt|sitemap[\w-]*\.xml(?:\.gz)?|favicon\.ico|(?:app-)?ads\.txt|humans\.txt|security\.txt|crossdomain\.xml|browserconfig\.xml|manifest\.json|[\w-]+\.webmanifest)$|\/\.well-known\//i;
+const pathOf = (u: string) => { try { return new URL(u).pathname; } catch { return ''; } };
+// JSONP（?callback=）は Content-Type が JS でも、利用者ごとのデータを返す動的な応答なので、静的リソースとしない
+const JSONP_PARAM = /[?&](?:callback|jsonp)=/i;
+export const isStaticResource = (ctx: RuleContext): boolean => {
+  const u = ctx.target.url ?? '';
+  return STATIC_RE.test(u) || PUBLIC_FILE.test(pathOf(u)) || (!JSONP_PARAM.test(u) && STATIC_CT.test(header(ctx, 'content-type')[0] ?? ''));
+};
+/**
+ * 機密応答かどうか（第0章 0.3）。ただし静的リソースと公開ファイルは、sensitive=1 を明示したときだけ機密とする。
+ * ブラウザは JS・フォント・robots.txt にもセッションCookie を送るので、Cookie を送っただけ（推定）で機密とすると、
+ * H-11①・H-12①（高）・R-04①・R-08① がすべての静的リソースに出る。JSONP（E-06）は JS で利用者のデータを返すので、これを使わない
+ */
+export const sensitiveUnlessStatic = (ctx: RuleContext): boolean | undefined =>
+  isStaticResource(ctx) && ctx.target.sensitive !== true ? false : ctx.sensitive;
+
 /** CSP 値をディレクティブ名→値の Map にする（同名の最初の指定が有効） */
 export function parseCsp(v: string): Map<string, string[]> {
   const m = new Map<string, string[]>();

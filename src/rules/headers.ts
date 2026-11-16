@@ -1,6 +1,6 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext } from '../model';
-import { LOGOUT_FAILED_REC, header, hstsDirective, mk, parseCsp } from './util';
+import { LOGOUT_FAILED_REC, header, hstsDirective, isStaticResource, mk, parseCsp, sensitiveUnlessStatic } from './util';
 import { maskValue } from '../mask';
 import { baseLabel, firstStatus, logoutFailed, ownChain } from '../parser/target';
 import { htmlBody, mixedContent } from './html';
@@ -68,8 +68,6 @@ export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appl
     return [mk(nosniff, ctx, 1, 'medium', 'fail', v ?? '(ヘッダなし)', 'X-Content-Type-Options: nosniff')];
   } };
 
-const STATIC_RE = /\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|map)(?:[?#]|$)/i;
-const STATIC_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|image\/|font\/)/i;
 export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS', 'OWASP REST Security CS'],
   run(ctx) {
@@ -77,11 +75,10 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
     const cc = header(ctx, 'cache-control').join(', ').toLowerCase();
     const dirs = new Set(cc.split(',').map(s => s.trim().split('=')[0]).filter(Boolean));
     const ev = cc || (header(ctx, 'pragma').length ? `(Cache-Controlなし、Pragma: ${header(ctx, 'pragma')[0]})` : '(ヘッダなし)');
-    const isStatic = STATIC_RE.test(ctx.target.url ?? '') || STATIC_CT.test(header(ctx, 'content-type')[0] ?? '');
+    const isStatic = isStaticResource(ctx);
     if (dirs.has('no-store')) return [mk(cacheControl, ctx, 'ok', 'info', 'pass', cc, '')];
-    // 静的リソース（JS・CSS・画像・フォント）は、sensitive=1 を明示したときだけ機密応答として扱う。
-    // Cookie を送っただけ（推定）で機密とすると、長くキャッシュさせる静的リソースがすべて①（高）になる
-    const sensitive = isStatic && ctx.target.sensitive !== true ? false : ctx.sensitive;
+    // 静的リソース・公開ファイルは、sensitive=1 を明示したときだけ機密応答として扱う（rules/util.ts の sensitiveUnlessStatic）
+    const sensitive = sensitiveUnlessStatic(ctx);
     if (sensitive === undefined) {
       if (isStatic && !cc) return [mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する')];
       if (isStatic) return [mk(cacheControl, ctx, 'ok', 'info', 'pass', ev, '')];
@@ -229,13 +226,13 @@ export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CO
   basis: ['MDN', 'OWASP Secure Headers'],
   run(ctx) {
     if (!ctx.final) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const out = [];
-    if (ctx.sensitive && !header(ctx, 'cross-origin-resource-policy').length)
+    const out = []; const sensitive = sensitiveUnlessStatic(ctx);
+    if (sensitive && !header(ctx, 'cross-origin-resource-policy').length)
       out.push(mk(crossOriginIsolation, ctx, 1, 'low', 'fail', '機密応答に Cross-Origin-Resource-Policy なし', 'Cross-Origin-Resource-Policy: same-origin'));
     if (ctx.responseKind === 'html' && !header(ctx, 'cross-origin-opener-policy').length)
       out.push(mk(crossOriginIsolation, ctx, 2, 'info', 'fail', 'Cross-Origin-Opener-Policy なし', 'Cross-Origin-Opener-Policy: same-origin'));
     if (out.length) return out;
-    if (ctx.sensitive === undefined && ctx.responseKind !== 'html') return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', '機密応答かどうか分からない', 'sensitive=1 を付ける')];
+    if (sensitive === undefined && ctx.responseKind !== 'html') return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', '機密応答かどうか分からない', 'sensitive=1 を付ける')];
     return [mk(crossOriginIsolation, ctx, 'ok', 'info', 'pass', [...header(ctx, 'cross-origin-opener-policy'), ...header(ctx, 'cross-origin-resource-policy')].join(' / ') || '(該当なし)', '')];
   } };
 

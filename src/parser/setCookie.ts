@@ -50,12 +50,18 @@ export const sessionConfig = { names: [] as string[], maxAgeHours: 24 };
 
 // CSRFトークンや設定用のCookie。csrf・xsrf・consent は名前のどこにあってもよい（csrftoken、CookieConsent）。
 // それ以外は区切り（- _ .）で分けた語として一致させる。部分一致だと sso_gateway_sid（_ga）や golang_session（lang）まで外れてしまう
-const NOT_SESSION = /csrf|xsrf|consent/i;
+// ASP.NET の CSRF 対策（.AspNetCore.Antiforgery.*、__RequestVerificationToken）も同じ。後者は語 Token でセッションらしく見えてしまう
+const NOT_SESSION = /csrf|xsrf|consent|antiforgery|requestverificationtoken/i;
+// 解析・チャット・決済などの外部サービスの Cookie。名前に session・sid・token を含むが、ログインの状態ではない。
+// HAR で機密応答と推定すると、robots.txt などの公開ページまで H-12①（高）になる
+const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_uet|_clck$|_clsk$|__hs|hubspot|ajs_|amplitude|mp_|_fbp$|_gcl_|__cf_bm$|cf_clearance$|_cfuvid$)/i;
 // 負荷分散・WAF の Cookie（転送先のサーバの印）。期限がなく値が長いため推定ではセッションCookieに見えるが、利用者ごとの秘密ではない。
 // セッションCookieとして扱うと、全員に同じ値を返す ARRAffinity などで C-07②（同じ値）や C-01①・C-02①（高）の誤検知になる
 const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB|TS01[0-9a-f]{6}|SERVERID$|ROUTEID$)/i;
 const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*)$/i;
-export const notSessionName = (name: string) => NOT_SESSION.test(name) || LOAD_BALANCER.test(name) || name.split(/[-_.]+/).some(w => NOT_SESSION_WORD.test(w));
+export const notSessionName = (name: string) => NOT_SESSION.test(name) || LOAD_BALANCER.test(name) || THIRD_PARTY.test(name) || name.split(/[-_.]+/).some(w => NOT_SESSION_WORD.test(w));
+/** 負荷分散の Cookie か（AWSALBCORS・ARRAffinitySameSite は、仕組み上 SameSite=None で発行する） */
+export const isLoadBalancerCookie = (name: string) => LOAD_BALANCER.test(name);
 
 /**
  * 名前だけでセッションCookieらしいか（リクエストの Cookie ヘッダには期限も属性もないため、名前で推定する）。

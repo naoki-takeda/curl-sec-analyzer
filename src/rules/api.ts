@@ -69,14 +69,20 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
     return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', `HTTP ${s}${www ? ` / WWW-Authenticate: ${www}` : ''}`, '')];
   } };
 
-const TOKEN_PARAM = paramRegex(TOKEN_PARAM_NAMES);     // マスキングと同じ一覧（mask.ts）
+const TOKEN_PARAM = paramRegex(TOKEN_PARAM_NAMES, 'gi');     // マスキングと同じ一覧（mask.ts）
+/**
+ * 値がトークンらしいか。名前が一致しても、値が普通の語（?session=expired、?auth=required、?token=invalid）や短い値なら、
+ * トークンを URL に入れているのではなく状態を伝えているだけなので、A-02① にしない
+ */
+const tokenLikeValue = (v: string) => v.length >= 8 && !/^[a-z_-]+$/i.test(v);
+const hasTokenParam = (u: string) => [...u.matchAll(TOKEN_PARAM)].some(m => tokenLikeValue(m[2]));
 export const tokenExposure: Rule = { id: 'A-02', title: 'トークンの露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API2', 'RFC 6750 2.3'],
   run(ctx) {
     if (!ctx.final) return [];
     const out = [];
     const urls = [ctx.target.url ?? '', ...ctx.target.responses.flatMap(r => r.headers.get('location') ?? [])];
-    const inUrl = urls.find(u => TOKEN_PARAM.test(u));
+    const inUrl = urls.find(hasTokenParam);
     if (inUrl) out.push(mk(tokenExposure, ctx, 1, 'high', 'fail', inUrl, 'トークンはURLに入れず Authorization ヘッダで送る（ログやRefererに残る）'));
     const body = ctx.final.body ?? '';
     if (!['login', 'pre-login'].includes(baseLabel(ctx.target.label)) && /"refresh_token"\s*:\s*"[^"]{16,}"/.test(body))
@@ -121,6 +127,14 @@ export function jsonKeys(v: unknown, prefix = '', out: string[] = [], depth = 0)
   return out;
 }
 /**
+ * 英語の画面の文言らしい値（{"password":"Password"}、{"apiKey":"ApiKey"}、{"secret":"Secret"}）。値がキーの名前と同じ語か、
+ * 先頭だけ大文字の語をつないだもの（Password、NewPassword）なら、文言とみなす。秘密の値は、数字や記号を含むか、すべて小文字であることが多い
+ */
+const isLabelText = (key: string, v: string): boolean => {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+  return norm(v) === norm(key) || /^(?:[A-Z][a-z]+)+$/.test(v);
+};
+/**
  * 値が「秘密情報らしい文字列」のキー（配列の番号は [] にそろえる）。空白や ASCII 以外の文字を含む文字列は画面の文言（i18n の
  * {"password":"パスワード"} など）とみなし、null・数値・真偽値・オブジェクトも値を露出していないので除く
  */
@@ -129,7 +143,7 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   if (Array.isArray(v)) v.slice(0, 50).forEach(x => secretValuedKeys(x, `${prefix}[]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
     const p = prefix ? `${prefix}.${k}` : k;
-    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x)) out.add(p);
+    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x)) out.add(p);
     secretValuedKeys(x, p, out, depth + 1);
   }
   return out;

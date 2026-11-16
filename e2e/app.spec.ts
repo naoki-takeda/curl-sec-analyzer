@@ -208,3 +208,13 @@ test('Windows の curl の -v（CR CR LF）を入力欄に入れても、受信�
   await page.getByRole('button', { name: '判定する' }).click();
   await expect(page.getByRole('region', { name: '判定結果' }).getByRole('cell', { name: 'R-01①' }).first()).toBeVisible();
 });
+
+// 結果欄全体を aria-live にすると、再描画（判定・絞り込み・折りたたみ）のたびに数百行を読み上げる。件数だけを status で知らせる
+test('判定の結果は件数だけを読み上げ、結果欄は aria-live にしない', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  const results = page.getByRole('region', { name: '判定結果' });
+  await expect(results.getByText('指摘（項目×条件）')).toBeVisible();
+  await expect(results).not.toHaveAttribute('aria-live', /.*/);
+  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました。指摘\d+件（うち重要度「高」\d+件）/);
+});

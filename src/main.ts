@@ -48,7 +48,8 @@ function buildShell() {
   refs.urlInput = el('input', 'w-full rounded-md border border-line bg-surface px-3 py-2 font-mono text-[13px]');
   refs.urlInput.id = 'url'; refs.urlInput.type = 'url'; refs.urlInput.placeholder = 'https://www.example.com/'; refs.urlInput.value = state.draft.url;
   refs.message = el('p', 'min-h-6 text-sm text-sev-medium', state.draft.message); refs.message.setAttribute('role', 'status');
-  refs.results = el('section', 'min-w-0'); refs.results.setAttribute('aria-live', 'polite'); refs.results.setAttribute('aria-label', getLang() === 'en' ? 'Results' : '判定結果');
+  // 結果欄は aria-live にしない（再描画のたびに数百行を読み上げてしまう）。判定の結果は、件数だけを役割 status の欄（refs.message）で知らせる
+  refs.results = el('section', 'min-w-0'); refs.results.setAttribute('aria-label', getLang() === 'en' ? 'Results' : '判定結果');
   refs.harBox = el('div', '');
   refs.settingsStatus = el('ul', 'mt-2 space-y-0.5 text-sm text-muted');
   refs.inputNote = el('div', 'hidden rounded-md border border-line bg-surface p-3 text-sm text-muted');
@@ -178,6 +179,8 @@ function analyzeUnsafe() {
   if (text.trim()) state.view.inputHidden = true;            // 判定できたら、生の出力を隠す
   applyInputVisibility();
   render();
+  const fails = findings.filter(f => f.status === 'fail');
+  say(T.analyzed(targets.length, fails.length, fails.filter(f => f.severity === 'high').length));
   if (matchMedia('(max-width: 1023px)').matches)
     refs.results.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth' });
 }

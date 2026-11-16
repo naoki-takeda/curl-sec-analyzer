@@ -1,7 +1,7 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
-import { isDeletion, looksLikeSession, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
+import { isDeletion, isLoadBalancerCookie, looksLikeSession, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
 import { baseLabel, firstStatus, hostOf, logoutFailed } from '../parser/target';
 import { LOGOUT_FAILED_REC, mk } from './util';
 
@@ -52,6 +52,8 @@ export const cookieSameSite: Rule = { id: 'C-03', title: 'Cookie の SameSite �
       const v = typeof ss === 'string' ? ss.toLowerCase() : '';
       if (!['lax', 'strict', 'none'].includes(v)) return mk(cookieSameSite, ctx, 2, 'medium', 'fail', ev, 'SameSite の値は Lax・Strict・None のいずれか');
       if (v === 'none' && !c.attrs.has('secure')) return mk(cookieSameSite, ctx, 4, 'low', 'fail', ev, 'SameSite=None には Secure が必須（ブラウザが拒否する）');
+      // 負荷分散の Cookie（AWSALBCORS・ARRAffinitySameSite）は、CORS のリクエストでも同じサーバに届けるため、仕組み上 None にしている
+      if (v === 'none' && isLoadBalancerCookie(c.name)) return undefined;
       if (v === 'none') return mk(cookieSameSite, ctx, 3, 'medium', 'fail', ev, 'クロスサイトで送る必要がなければ Lax にする（必要なら理由を記録して例外登録）');
       return undefined;
     });
@@ -164,7 +166,8 @@ export const cookieSharedCache: Rule = { id: 'C-13', title: 'Set-Cookieと共有
       if (!cs.length) continue;
       any = true;
       const cc = (r.headers.get('cache-control') ?? []).join(', ').toLowerCase();
-      const shared = /\bpublic\b|s-maxage/.test(cc);
+      // no-store・private があれば共有キャッシュは保存しない（no-store, s-maxage=0 のような組み合わせも共有キャッシュには残らない）
+      const shared = /\bpublic\b|s-maxage/.test(cc) && !/\bno-store\b|\bprivate\b/.test(cc);
       if (!shared) continue;
       if (cs.some(c => looksLikeSession(c, ctx.now))) out.push(mk(cookieSharedCache, ctx, 1, 'high', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答は Cache-Control: no-store（少なくとも private）にする'));
       else if (/\bpublic\b/.test(cc)) out.push(mk(cookieSharedCache, ctx, 2, 'low', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答を public にしない'));

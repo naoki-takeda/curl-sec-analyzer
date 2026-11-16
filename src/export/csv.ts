@@ -1,6 +1,7 @@
 // export/csv.ts：第8章の記録様式（BOM付きUTF-8）
 import type { Finding, Target } from '../model';
 import { SEVERITY_LABEL, circled } from '../engine/summarize';
+import { maskText } from '../mask';
 import { hostOf } from '../parser/target';
 
 const COLS = ['項目ID', '対象（ラベル・URL）', '実施日時', '実施コマンド', '判定', '該当条件', '重要度', '証跡（マスク済み）', '対応方針', '例外理由・期限', '再診断日'];
@@ -11,34 +12,57 @@ const noFormula = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
 // ホスト単位の判定で、元になるターゲットのラベル（ホストの全ターゲットではなく、そのための採取に絞る）
 const HOST_SOURCES: Record<string, string[]> = { 'T-09': ['tls', 'top'], 'T-10': ['tls'], 'T-11': ['tls'], 'E-03': ['probes'] };
 
+/** ラベルとホストからターゲットを引く索引（指摘ごとに全ターゲットを探すと、指摘の数 × ターゲットの数の時間がかかる） */
+interface MetaIndex { byLabel: Map<string, Target[]>; byHost: Map<string, Target[]>; targets: Target[]; memo: Map<string, { at: string; cmd: string }> }
+function indexTargets(targets: Target[]): MetaIndex {
+  const byLabel = new Map<string, Target[]>(), byHost = new Map<string, Target[]>();
+  const add = (m: Map<string, Target[]>, k: string | undefined, t: Target) => {
+    if (k === undefined) return;
+    const list = m.get(k);
+    if (list) list.push(t); else m.set(k, [t]);
+  };
+  for (const t of targets) { add(byLabel, t.label, t); add(byHost, hostOf(t), t); }
+  return { byLabel, byHost, targets, memo: new Map() };
+}
+
 /**
  * 指摘の元になったターゲットの #META（実施日時・実施コマンド）。
  * ターゲット単位の指摘はそのターゲット、ホスト単位はそのホストの tls・probes など、横断（pre-login/login、session-sample-* など）は比べたラベルのターゲット。
- * 複数あれば、コマンドは重複を除いて「・」でつなぎ、日時は最も新しいものにする
+ * 複数あれば、コマンドは重複を除いて「・」でつなぎ、日時は最も新しいものにする。
+ * #META の値は利用者が書いたもの（コマンドに Authorization や ?access_token= を含むことがある）なので、ほかの列と同じくマスクする
  */
-export function sourceMeta(f: Finding, targets: Target[]): { at: string; cmd: string } {
-  let src = targets.filter(t => t.label === f.target);
+function sourceMeta(f: Finding, ix: MetaIndex): { at: string; cmd: string } {
+  const key = `${f.item}\u0000${f.target}`;
+  const hit = ix.memo.get(key);
+  if (hit) return hit;
+  let src = ix.byLabel.get(f.target) ?? [];
   if (!src.length) {
-    const onHost = targets.filter(t => hostOf(t) === f.target);
+    const onHost = ix.byHost.get(f.target) ?? [];
     if (onHost.length) {
       const want = HOST_SOURCES[f.item];
       const picked = want ? onHost.filter(t => want.includes(t.label)) : [];
       src = picked.length ? picked : onHost;
     } else {
       const parts = f.target.split('/').map(p => p.trim()).filter(Boolean);
-      src = targets.filter(t => parts.some(p => (p.endsWith('*') ? t.label.startsWith(p.slice(0, -1)) : t.label === p)));
+      src = ix.targets.filter(t => parts.some(p => (p.endsWith('*') ? t.label.startsWith(p.slice(0, -1)) : t.label === p)));
     }
   }
   const cmds = [...new Set(src.flatMap(t => (t.meta.cmd ?? '').split('・')).filter(Boolean))];
   const at = src.map(t => t.meta.at ?? '').filter(Boolean).sort().at(-1) ?? '';
-  return { at, cmd: cmds.join('・') };
+  const out = { at: maskText(at), cmd: maskText(cmds.join('・')) };
+  ix.memo.set(key, out);
+  return out;
 }
 
 export function toCsv(fs: Finding[], targets: Target[]): string {
-  const rows = fs.filter(f => f.status === 'fail' || f.status === 'suppressed').map(f => [
-    f.item, f.url ? `${f.target}（${f.url}）` : f.target, sourceMeta(f, targets).at, sourceMeta(f, targets).cmd,
-    f.status === 'suppressed' ? 'suppressed' : 'fail', circled(f.condition), SEVERITY_LABEL[f.severity], f.evidence, f.recommendation,
-    f.suppressedBy ? `${f.suppressedBy.reason}（${f.suppressedBy.until || '期限なし'}）` : '', '',
-  ]);
-  return '\ufeff' + [COLS, ...rows].map(r => r.map(v => esc(noFormula(String(v)))).join(',')).join('\r\n') + '\r\n';
+  const ix = indexTargets(targets);
+  const rows = fs.filter(f => f.status === 'fail' || f.status === 'suppressed').map(f => {
+    const m = sourceMeta(f, ix);
+    return [
+      f.item, f.url ? `${f.target}（${f.url}）` : f.target, m.at, m.cmd,
+      f.status === 'suppressed' ? 'suppressed' : 'fail', circled(f.condition), SEVERITY_LABEL[f.severity], f.evidence, f.recommendation,
+      f.suppressedBy ? `${f.suppressedBy.reason}（${f.suppressedBy.until || '期限なし'}）` : '', '',
+    ];
+  });
+  return '﻿' + [COLS, ...rows].map(r => r.map(v => esc(noFormula(String(v)))).join(',')).join('\r\n') + '\r\n';
 }

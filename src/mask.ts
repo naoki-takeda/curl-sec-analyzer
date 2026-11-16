@@ -58,13 +58,20 @@ const MASKED = /…\(\d+ chars\)$/;
 const maskedParam = (v: string, rest: string) => /…\(\d+$/.test(v) && rest.startsWith(' chars)');
 
 /**
- * URL のパスに置いたトークン（/password/reset/<トークン>、/magic/<トークン>、Webhook の URL など）。
- * パスの1つの部分が、英大文字・小文字・数字をすべて含む16文字以上、24文字以上の16進数（UUID を含む）、または数字を含む32文字以上の
- * [A-Za-z0-9_-] なら伏せる。「2026-annual-report-v2」のような普通の名前は残す。マスク済みの「…(N chars)」は文字種が違うので、もう一度は伏せない
+ * パスに置いたトークン（/password/reset/<トークン>、/magic/<トークン>、Webhook の URL など）。
+ * 完全な URL だけでなく、/ か %2F（二重エンコードを含む）のあとに続く部分なら、どこでも見る。相対パス（<form action="/reset/…">、
+ * 相対の Location）、スキームのない //cdn…、別のパラメータの値（?next=/invite/…、%2Finvite%2F…）、フラグメントのルート（#/reset/…）も含めるため。
+ * 部分を . と : で分け（<トークン>.pdf、bot123:<トークン>）、末尾の = （Base64 の詰め物）を除いたかけらが、英大文字・小文字・数字をすべて含む
+ * 16文字以上、24文字以上の16進数（UUID を含む）、または数字を含む32文字以上の [A-Za-z0-9_-] なら、そのかけらを伏せる。
+ * 「2026-annual-report-v2」のような普通の名前は残す。マスク済みの「…(N chars)」は文字種が違うので、もう一度は伏せない
  */
-const URL_PATH = /\b(https?:\/\/[^\s/?#"'<>]+)(\/[^\s?#"'<>]*)/gi;
-const secretSegment = (seg: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(seg) && (
-  (/[A-Z]/.test(seg) && /[a-z]/.test(seg) && /\d/.test(seg)) || /^[0-9a-f]{24,}$/i.test(seg.replace(/-/g, '')) || (seg.length >= 32 && /\d/.test(seg)));
+const PATH_SEGMENT = /(?<=\/|%(?:25)*2[Ff])[A-Za-z0-9_=.:~+-]{16,}/g;
+const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
+  (/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || (p.length >= 32 && /\d/.test(p)));
+const maskSegment = (seg: string): string => seg.replace(/[^.:~+]+/g, piece => {
+  const body = piece.replace(/=+$/, '');
+  return secretPiece(body) ? maskValue(body) + piece.slice(body.length) : piece;
+});
 
 /** CSP の nonce の値（'nonce-…'）。どの証跡でも同じようにマスクする（H-04⑤ と同じ扱い） */
 const CSP_NONCE = /'nonce-([^']+)'/g;
@@ -80,10 +87,11 @@ function maskParams(s: string, depth = 0): string {
 
 /** ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする。マスク済みの文字列に使っても結果は変わらない */
 export function maskText(s: string): string {
+  // 順序：パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる） → ユーザー情報 → パスの部分
   return maskParams(s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${maskValue(v)}'`)))
-          .replace(URL_PATH, (_, origin: string, path: string) => origin + path.split('/').map(seg => (secretSegment(seg) ? maskValue(seg) : seg)).join('/'))
           .replace(JWT, t => maskValue(t))
-          .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u)}@`);
+          .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u)}@`)
+          .replace(PATH_SEGMENT, maskSegment);
 }
 
 /**

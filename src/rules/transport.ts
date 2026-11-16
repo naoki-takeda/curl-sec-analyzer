@@ -12,6 +12,10 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     if (!first) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
     const rec = '同じホストの https:// へ 301 または 308 で転送する';
     const loc = first.headers.get('location')?.[0];
+    // HTTP を 4xx で断る（CloudFront の「HTTPS のみ」、HTTP を拒否する API）は、HTTP でコンテンツを返していないので①にしない。
+    // 5xx はサーバの不調で、HTTP をどう扱う設定かが分からない
+    if (first.status >= 400 && first.status < 500) return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', `HTTP ${first.status}（HTTP のリクエストを拒否）`, '')];
+    if (first.status >= 500) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `HTTP ${first.status}（サーバエラー）`, '')];
     if (first.status < 300 || first.status >= 400 || !loc)
       return [mk(httpsRedirect, ctx, 1, 'high', 'fail', `HTTP ${first.status}（転送なし）`, rec, { obsId: 'redirection-missing', score: -20 })];
     let to: URL;

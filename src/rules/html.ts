@@ -31,17 +31,45 @@ export const decodeEntities = (v: string) => v.replace(/&(?:#(\d{1,7})|#[xX]([0-
 });
 
 /** 開始タグを列挙する（属性名は小文字、値は文字参照を戻したもの） */
+/**
+ * タグの終わり（引用符の外の >）を探す関数を作る。引用符で囲んだ属性の値の中の > では止めない（onsubmit="… && amt>0"、
+ * data-config='{"min":">100"}'）。止めると、残りの値が属性名として証跡に出てしまう（値は伏せられるが、属性名は出る）。
+ * 「位置と引用符の状態」ごとに結果を覚え、同じところを二度走査しない。> のない本文（<script の繰り返し）や閉じていない引用符でも、
+ * 全体の時間が本文の長さに比例する（正規表現で書くと、タグの始まりごとに末尾まで走査し、本文の長さの2乗の時間がかかる）。長い属性にも上限を付けない
+ */
+function tagEndFinder(html: string): (from: number) => number {
+  const memo = new Int32Array(html.length * 3);    // 0：未走査、-1：閉じない、k+1：位置 k の > で閉じる
+  return (from: number) => {
+    const path: number[] = []; let q = 0; let res = -1;
+    for (let j = from; j < html.length; j++) {
+      const key = j * 3 + q; const m = memo[key];
+      if (m !== 0) { res = m < 0 ? -1 : m - 1; break; }
+      path.push(key);
+      const c = html.charCodeAt(j);
+      if (q === 0) { if (c === 62) { res = j; break; } if (c === 34) q = 1; else if (c === 39) q = 2; }   // > " '
+      else if ((q === 1 && c === 34) || (q === 2 && c === 39)) q = 0;
+    }
+    const v = res < 0 ? -1 : res + 1;
+    for (const k of path) memo[k] = v;
+    return res;
+  };
+}
+
 export function tags(html: string, names: string[]): Tag[] {
-  // 属性の長さに上限を付ける。上限がないと、> のない本文（<script の繰り返しなど）で毎回末尾まで走査し、時間が本文の長さの2乗になる
-  // 引用符で囲んだ属性の値の中の > では止めない（onsubmit="… && amt>0"、data-config='{"min":">100"}'）。止めると、残りの値が属性名として
-  // 証跡に出てしまう（値は伏せられるが、属性名は出る）。引用符の中の長さにも上限を付け、閉じていない引用符でも時間が線形になるようにする
-  const re = new RegExp(`<(${names.join('|')})\\b((?:[^>"']|"[^"]{0,2000}"|'[^']{0,2000}'){0,2000})>`, 'gi');
+  const start = new RegExp(`<(${names.join('|')})\\b`, 'iy');
+  const endOf = tagEndFinder(html);
   const out: Tag[] = [];
-  for (const m of html.matchAll(re)) {
+  for (let i = html.indexOf('<'); i >= 0; i = html.indexOf('<', i + 1)) {
+    start.lastIndex = i;
+    const m = start.exec(html);
+    if (!m) continue;
+    const from = i + m[0].length; const end = endOf(from);
+    if (end < 0) continue;                           // 閉じていないタグ（ブラウザはタグとして扱わない）
     const attrs = new Map<string, string>();
-    for (const a of m[2].matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), decodeEntities(a[2] ?? a[3] ?? a[4] ?? ''));
+    for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), decodeEntities(a[2] ?? a[3] ?? a[4] ?? ''));
     const name = m[1].toLowerCase();
-    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: m.index ?? 0 });
+    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i });
+    i = end;                                         // 属性の中の < をタグの始まりとして読まない（正規表現の matchAll と同じ）
   }
   return out;
 }
