@@ -20,6 +20,7 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
   if (!lines.length) return undefined;
   const info: TlsInfo = { sans: [], sigalgs: [], certs: [], chainDepth: 0, noPeerCert: false };
   let sanNext = false;
+  let cur = -1;                            // 直前の「N s:」の証明書の番号（a: の行をその証明書に対応させる）
   for (const raw of lines) {
     const l = raw.trim();
     if (sanNext) { info.sans.push(...[...l.matchAll(/DNS:([^,\s]+)/g)].map(m => m[1].toLowerCase())); sanNext = false; continue; }
@@ -33,12 +34,15 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
     else if ((m = l.match(/^v:NotBefore: (.+?); NotAfter: (.+)$/)) && info.chainDepth === 1) { info.notBefore ??= date(m[1]); info.notAfter ??= date(m[2]); }
     else if ((m = l.match(/^subject=.*?CN\s*=\s*([^,/]+)/))) info.subjectCN ??= m[1].trim().toLowerCase();
     else if (/^X509v3 Subject Alternative Name:/.test(l)) sanNext = true;
-    else if ((m = l.match(/^(\d+) s:(.*)$/))) { info.chainDepth = Math.max(info.chainDepth, Number(m[1]) + 1); info.certs[Number(m[1])] = { subject: m[2].trim() }; }
+    else if ((m = l.match(/^(\d+) s:(.*)$/))) { cur = Number(m[1]); info.chainDepth = Math.max(info.chainDepth, cur + 1); info.certs[cur] = { subject: m[2].trim() }; }
     else if ((m = l.match(/^i:(.*)$/)) && info.certs.length) info.certs[info.certs.length - 1].issuer = m[1].trim();
     else if (/no peer certificate available/i.test(l)) info.noPeerCert = true;
-    else if ((m = l.match(/^a:PKEY: (\w+), (\d+) \(bit\); sigalg: (\S+)/))) {     // OpenSSL 3 の -showcerts
-      if (info.sigalgs.length === 0) { info.keyType = m[1]; info.keyBits = Number(m[2]); }
-      info.sigalgs.push(m[3]);
+    // OpenSSL 3 の -showcerts。鍵の種類には id-ecPublicKey・RSASSA-PSS のようにハイフンを含むものがある。
+    // 署名は証明書の番号の位置に入れる（読めない行があっても、ルート証明書の判定（T-10②）がずれないように）
+    else if ((m = l.match(/^a:PKEY: ([\w-]+), (\d+) \(bit\); sigalg: (\S+)/))) {
+      const i = cur >= 0 ? cur : info.sigalgs.length;
+      if (i === 0) { info.keyType = m[1]; info.keyBits = Number(m[2]); }
+      info.sigalgs[i] = m[3];
     }
     else if ((m = l.match(/^Server public key is (\d+) bit/))) info.keyBits ??= Number(m[1]);
   }

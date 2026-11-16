@@ -34,13 +34,30 @@ export const API_TOP10: Record<string, string> = {
 
 const status = (ctx: RuleContext) => ctx.chain[0]?.status ?? ctx.final?.status ?? 0;
 
+/**
+ * A-01③：HTTP の応答で Basic 認証を求めているか。-L の転送をたどり、URL が http のホップの WWW-Authenticate だけを見る
+ * （http から https に転送した先の Basic は HTTPS なので対象外）。チャレンジは複数のヘッダ・カンマ区切りのどれにあってもよい
+ */
+function basicOverHttp(ctx: RuleContext): string | undefined {
+  let url = ctx.target.url ?? ctx.target.meta.url_effective;
+  for (const r of ctx.chain) {
+    if (!url || !/^http:/i.test(url)) return undefined;
+    const www = r.headers.get('www-authenticate') ?? [];
+    if (www.some(v => /(?:^|,)\s*basic\b/i.test(v))) return www.join(', ');
+    const loc = r.headers.get('location')?.[0];
+    if (r.kind !== 'redirect' || !loc) return undefined;
+    try { url = new URL(loc, url).href; } catch { return undefined; }
+  }
+  return undefined;
+}
+
 export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API2'],
   run(ctx) {
     const f = ctx.final; if (!f) return [];
     const www = (f.headers.get('www-authenticate') ?? []).join(', ');
-    if (ctx.isHttps === false && /^\s*basic\b/i.test(www))
-      return [mk(unauthAccess, ctx, 3, 'high', 'fail', `HTTPで WWW-Authenticate: ${www}`, 'Basic認証はHTTPSだけで受け付ける')];
+    const basic = ctx.isHttps === false ? basicOverHttp(ctx) : undefined;
+    if (basic) return [mk(unauthAccess, ctx, 3, 'high', 'fail', `HTTPで WWW-Authenticate: ${basic}`, 'Basic認証はHTTPSだけで受け付ける')];
     if (!ctx.target.label.startsWith('unauth-')) return [];   // ①②は認証情報を付けずに送ったターゲット（unauth-*）だけ
     if (ctx.target.sentAuth) return [mk(unauthAccess, ctx, 'na', 'info', 'na', '認証情報（Cookie・Authorization）を送っている', 'unauth-* は認証情報を付けずに採取する')];
     const s = status(ctx);

@@ -112,7 +112,10 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
   run(ctx) {
     const f = ctx.final; if (!f) return [];
     const ct = header(ctx, 'content-type')[0] ?? ''; const cd = header(ctx, 'content-disposition')[0] ?? '';
-    const uploadPath = /\/(uploads?|files?|attachments?|media|download)\//i.test(path(ctx));
+    // アップロードしたファイルの配信らしいURL：アップロード先らしいディレクトリの下で、最後がファイル名（拡張子付き）のもの。
+    // ディレクトリ名だけで判定すると、/media/press-releases/ や /download/ のような普通のHTMLページまで①（高）にしてしまう
+    const p = path(ctx);
+    const uploadPath = /\/(uploads?|files?|attachments?|media|download)\//i.test(p) && /\/[^/]+\.[a-z0-9]{1,10}$/i.test(p);
     if (!DOWNLOAD_CT.test(ct) && !uploadPath && !cd) return [];   // ファイル配信の応答だけ
     if (uploadPath && ACTIVE_CT.test(ct) && !/attachment/i.test(cd))
       return [mk(downloadResponse, ctx, 1, 'high', 'fail', `Content-Type: ${ct} / Content-Disposition: ${cd || '(なし)'}`, '利用者がアップロードしたファイルは別オリジンから attachment で配信する')];

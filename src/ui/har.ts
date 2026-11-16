@@ -26,7 +26,7 @@ export function loadHar(f: File) {
   w.onmessage = (e: MessageEvent<{ ok: boolean; result?: HarImport; error?: string }>) => {
     w.terminate();
     if (gen !== harLoad) return;                     // 古い読み込みの結果
-    if (!e.data.ok || !e.data.result) { say(T.failed(e.data.error ?? '?')); return; }
+    if (!e.data.ok || !e.data.result) { say(T.failed(e.data.error === 'JSON' ? T.invalidJson : e.data.error ?? '?')); return; }
     const imp = e.data.result;
     // Worker の中では組織プロファイルが分からないため、プロファイルがあればセッションCookieの名前を反映して候補を作り直す
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));

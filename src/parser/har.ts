@@ -4,6 +4,7 @@
 import type { HttpResponse, ParseWarning, Target } from '../model';
 import { looksLikeSession, parseSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
+import { baseLabel } from './target';
 
 const BODY_LIMIT = 64 * 1024;
 export const HAR_MAX_BYTES = 50 * 1024 * 1024;
@@ -19,6 +20,7 @@ interface HarEntry {
 /** 取り込み後のチェーン（画面のエントリ一覧の1行）。秘密情報は持たない */
 export interface HarChain {
   id: number; url: string; method: string; host: string; status: number; hops: number;
+  finalUrl?: string;                // 最後のホップのURL（http から https に転送されたチェーンの判定に使う）
   responses: HttpResponse[]; sentAuth: boolean; at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
 }
@@ -40,7 +42,10 @@ function toResponse(e: HarEntry): HttpResponse {
   for (const h of e.response.headers ?? []) {
     if (!h?.name || h.name.startsWith(':')) continue;               // HTTP/2 の疑似ヘッダは除外
     const k = h.name.toLowerCase(); rawNames.push(h.name);
-    (headers.get(k) ?? headers.set(k, []).get(k)!).push(String(h.value ?? ''));
+    // 1つのヘッダに複数の Set-Cookie を改行でつないで書き出すものがある。1件ずつに分けないと、2つ目以降の Cookie を判定せず、
+    // 証跡（値は先頭の name=value だけをマスクする）に生の値が出てしまう
+    const vals = k === 'set-cookie' ? String(h.value ?? '').split(/\r?\n/).filter(v => v.trim()) : [String(h.value ?? '')];
+    (headers.get(k) ?? headers.set(k, []).get(k)!).push(...vals);
   }
   if (e.response.redirectURL && !headers.has('location') && e.response.status >= 300 && e.response.status < 400) headers.set('location', [e.response.redirectURL]);
   let body: string | undefined;
@@ -80,7 +85,7 @@ export function importHar(text: string): HarImport {
     const reqH = (e.request.headers ?? []).map(h => h.name.toLowerCase());
     const sentAuth = reqH.includes('cookie') || reqH.includes('authorization');
     if (sentAuth || hops.some(h => (h.response.headers ?? []).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
-    chains.push({ id: chains.length, url: e.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
+    chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(toResponse), sentAuth, at: e.startedDateTime,
       suggested: '', label: '', sensitive: undefined, excluded: false });
   });
@@ -120,7 +125,11 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
   for (const c of imp.chains) {
     if (c.excluded || !selectedHosts.has(c.host)) { excluded++; continue; }
     const label = allowedForHar(c.label) ? c.label : `har-${c.id + 1}`;
-    targets.push({ label, url: c.url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
+    // http から https に転送されたチェーンは、最後の https の応答を、その URL で判定する（H-01・Cookie の項目は HTTPS の応答が対象）。
+    // 最初の http の URL のままだと、HTTPS の項目がすべて適用外になる。http ラベル（T-04）だけは、転送元の http の URL で判定する
+    const upgraded = /^http:/i.test(c.url) && /^https:/i.test(c.finalUrl ?? '');
+    const url = upgraded && baseLabel(label) !== 'http' ? c.finalUrl! : c.url;
+    targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
       responses: c.responses, sentAuth: c.sentAuth, sentTokens: [], info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }

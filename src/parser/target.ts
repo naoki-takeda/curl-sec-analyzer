@@ -48,11 +48,17 @@ export const isSensitive = (t: Target): boolean | undefined => t.sensitive ?? (t
 
 /**
  * 期限（Cookie の Expires、証明書の notAfter など）を比べる基準の時刻。採取した時刻（#META at、HAR の startedDateTime）があればそれを使う。
- * 判定した時刻を使うと、前に採取した出力を読み直したときに、採取時には有効だった期限を「切れている」と判定してしまうため
+ * 判定した時刻を使うと、前に採取した出力を読み直したときに、採取時には有効だった期限を「切れている」と判定してしまうため。
+ * #META at がなければ、応答の Date ヘッダ（サーバが応答した時刻）を使う。どちらもなければ判定した時刻
  */
 export function capturedAt(t: Target): number {
   const at = t.meta.at ? Date.parse(t.meta.at) : NaN;   // 「2026-11-12T10:00:00」（タイムゾーンなし）は手元の時刻として読む
-  return Number.isNaN(at) ? Date.now() : at;
+  if (!Number.isNaN(at)) return at;
+  for (const r of t.responses) {
+    const d = Date.parse(r.headers.get('date')?.[0] ?? '');
+    if (!Number.isNaN(d)) return d;
+  }
+  return Date.now();
 }
 
 export function hostOf(t: Target): string | undefined {

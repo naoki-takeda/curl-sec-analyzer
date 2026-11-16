@@ -10,7 +10,9 @@ import { covLabel, diffLabel, getLang, itemTitle, sevLabel } from '../i18n';
 import { recommendationEn } from '../recommendationsEn';
 
 // 証跡には診断対象のHTML（<img src=…> など）がそのまま入る。表示側でタグとして描画されないよう < > を実体参照にする
-const cell = (v: unknown) => String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+// 画像・リンクの記法（![…](…)、[…](…)）とコードの記号もエスケープする。診断対象の応答（server ヘッダなど）に書かれた画像が、
+// レポートを開いたときに外部から読み込まれないようにするため。改行も空白にし、見出しなどを差し込めないようにする
+const cell = (v: unknown) => String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[|[\]!`\\]/g, '\\$&').replace(/\r?\n/g, ' ');
 const ORDER = ['high', 'medium', 'low', 'info'];
 
 export interface ReportExtras { profile?: Profile; diff?: { rows: DiffRow[]; baselineAt: string; rulesetWarning?: string }; }
@@ -21,13 +23,13 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
   const L: string[] = [];
   L.push(en ? '# Security self-assessment results' : '# 自主セキュリティ診断の結果', '');
   L.push(`- ${en ? 'Generated' : '生成日時'}：${generatedAt.toISOString()}`, `- ${en ? 'Tool' : 'ツール'}：curl-sec-analyzer ${TOOL_VERSION}（${en ? 'ruleset' : 'ルールセット'} ${RULESET_VERSION}）`);
-  if (extra.profile) L.push(`- ${en ? 'Organization profile' : '組織プロファイル'}：${extra.profile.name || '-'}`);
+  if (extra.profile) L.push(`- ${en ? 'Organization profile' : '組織プロファイル'}：${cell(extra.profile.name) || '-'}`);
   L.push(`- ${en ? 'Findings (check × condition)' : '指摘（項目×条件）'}：${en ? 'High' : '高'} ${c.high}、${en ? 'Medium' : '中'} ${c.medium}、${en ? 'Low' : '低'} ${c.low}、${en ? 'Info' : '情報'} ${c.info}`);
   L.push(`- ${en ? 'Coverage' : '診断カバレッジ'}：${rate.evaluated} / ${rate.denominator}`, '');
   if (extra.diff) {
     const s = diffSummary(extra.diff.rows);
-    L.push(en ? '## Changes since previous results' : '## 前回との差分', '', `${en ? 'Previous' : '前回'}：${extra.diff.baselineAt || '-'}`, '');
-    if (extra.diff.rulesetWarning) L.push(`> ${extra.diff.rulesetWarning}`, '');
+    L.push(en ? '## Changes since previous results' : '## 前回との差分', '', `${en ? 'Previous' : '前回'}：${cell(extra.diff.baselineAt) || '-'}`, '');
+    if (extra.diff.rulesetWarning) L.push(`> ${cell(extra.diff.rulesetWarning)}`, '');
     L.push(`- ${(['new', 'resolved', 'severity-changed', 'suppressed', 'not-rechecked', 'continuing'] as const).map(k => `${diffLabel(k)} ${s[k]}`).join('、')}`, '');
     L.push(`| ${en ? 'Change' : '変化'} | ${en ? 'Severity' : '重要度'} | ${en ? 'Check' : '項目'} | ${en ? 'Target' : 'ターゲット'} |`, '| --- | --- | --- | --- |');
     for (const r of extra.diff.rows.filter(x => x.kind !== 'continuing'))
@@ -41,7 +43,7 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
   const sup = fs.filter(f => f.status === 'suppressed');
   if (sup.length) {
     L.push('', en ? '## Exceptions' : '## 例外として扱った指摘', '', `| ${en ? 'Check' : '項目'} | ${en ? 'Target' : '対象'} | ${en ? 'Reason' : '理由'} | ${en ? 'Approver' : '承認者'} | ${en ? 'Expires' : '期限'} |`, '| --- | --- | --- | --- | --- |');
-    for (const f of sup) L.push(`| ${f.item}${circled(f.condition)} | ${cell(f.target)} | ${cell(f.suppressedBy!.reason)} | ${cell(f.suppressedBy!.approver)} | ${f.suppressedBy!.until || '—'} |`);
+    for (const f of sup) L.push(`| ${f.item}${circled(f.condition)} | ${cell(f.target)} | ${cell(f.suppressedBy!.reason)} | ${cell(f.suppressedBy!.approver)} | ${cell(f.suppressedBy!.until) || '—'} |`);
   }
   L.push('', en ? '## Coverage' : '## 診断カバレッジ', '',
     en ? `ASVS: related requirements of OWASP ASVS ${ASVS_VERSION} (cite as v${ASVS_VERSION}-<ID>; L = level). IPA: ${IPA_EDITION_EN}. These are related requirements, not a verdict on whether they are met.`

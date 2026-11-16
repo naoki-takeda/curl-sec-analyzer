@@ -1,6 +1,7 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext } from '../model';
 import { header, hstsDirective, mk, parseCsp } from './util';
+import { maskValue } from '../mask';
 import { baseLabel } from '../parser/target';
 import { htmlBody, mixedContent } from './html';
 import { type CspIssue, evaluateCsp, issueEvidence } from './csp';
@@ -252,8 +253,9 @@ export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン�
       if (/\d+\.\d+/.test(v)) out.push(mk(productInfo, ctx, 1, 'low', 'fail', `${h}: ${v}`, 'バージョン番号を出さない（可能ならヘッダごと削除）'));
       else if (h === 'server' || h === 'x-powered-by') out.push(mk(productInfo, ctx, 2, 'info', 'fail', `${h}: ${v}`, '製品名も出さないか、汎用的な値にする'));
     }
+    // 値はマスクする（トークンと、記録したリクエスト（Cookie を含む）を見られるプロファイラのURL）
     for (const h of ['x-debug-token', 'x-debug-token-link']) for (const v of header(ctx, h))
-      out.push(mk(productInfo, ctx, 3, 'medium', 'fail', `${h}: ${v}`, '本番でデバッグ用のヘッダ・プロファイラを無効にする'));
+      out.push(mk(productInfo, ctx, 3, 'medium', 'fail', `${h}: ${maskValue(v.trim())}`, '本番でデバッグ用のヘッダ・プロファイラを無効にする'));
     for (const h of ['via', 'x-backend-server', 'x-served-by', 'x-host']) for (const v of header(ctx, h))
       if (INTERNAL.test(v)) out.push(mk(productInfo, ctx, 4, 'low', 'fail', `${h}: ${v}`, '内部ホスト名・IPアドレスを出さない'));
     for (const h of ['server-timing', 'x-runtime']) for (const v of header(ctx, h))

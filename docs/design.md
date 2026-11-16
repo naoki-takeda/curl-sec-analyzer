@@ -275,7 +275,7 @@ rm -f "$probe"
 | E-08 | HTML本文：第三者スクリプトのSRI | C2の本文 | 外部CDNのscriptに`integrity`と`crossorigin` | ①外部オリジンのscriptにintegrityがない（配信元ごとに1件にまとめる。組織プロファイルで自社の配信元とした所は対象外） | CDN侵害時のスクリプト改ざん | ①低 | MDN（Subresource Integrity）、ASVS 5.0.0 3.6.1 |
 | E-09 | HTML本文：機密・内部情報 | C2の本文 | 本番HTMLに秘密情報や開発用コメントがない | ①APIキー・トークン・認証情報（代入の値はASCIIの英数字・記号のものだけ。日本語の文言は対象外） ②内部URLや開発コメント ③`<meta name="generator">`のバージョン | 秘密情報の漏えい、攻撃の手がかり | ①高 ②低 ③情報 | ISOG-J、ASVS 5.0.0 13.4.6 |
 | E-10 | HTML本文：パスワードフォーム | C2の本文 | `action`がhttps、`method="post"` | ①送信先（action）が`http://` ②パスワードをGETで送信 | 平文送信、URL経由の漏えい | ①高 ②中 | OWASP Authentication CS、ASVS 5.0.0 12.2.1, 14.2.1、IPA 2.3-1) |
-| E-11 | ダウンロード応答 | ファイル配信URLをC1で採取 | `Content-Disposition: attachment`、`nosniff`、正しいContent-Type | ①ユーザーがアップロードしたファイルを同一オリジンでinline・`text/html`などスクリプトを実行しうる種類（XHTML、SVG、XML）として配信 ②Content-Dispositionがない（画像・音声・動画、`+json`・`+xml`のAPI応答は対象外） | アップロードファイル経由のXSS | ①高 ②低 | OWASP File Upload CS、ASVS 5.0.0 3.2.1, 5.4.1 |
+| E-11 | ダウンロード応答 | ファイル配信URLをC1で採取。①のアップロードしたファイルは、アップロード先らしいディレクトリ（uploads・files・attachments・media・download）の下で、最後がファイル名（拡張子付き）のURLで判断する（`/media/press-releases/`のような普通のページは対象外） | `Content-Disposition: attachment`、`nosniff`、正しいContent-Type | ①ユーザーがアップロードしたファイルを同一オリジンでinline・`text/html`などスクリプトを実行しうる種類（XHTML、SVG、XML）として配信 ②Content-Dispositionがない（画像・音声・動画、`+json`・`+xml`のAPI応答は対象外） | アップロードファイル経由のXSS | ①高 ②低 | OWASP File Upload CS、ASVS 5.0.0 3.2.1, 5.4.1 |
 | E-12 | HTML本文：CSRFトークンの有無 | C2の本文（認証後ページ） | 状態を変える`<form method="post">`に隠しトークンがある（実効性の確認は第7章の範囲外） | ①POSTフォームにトークンらしき項目がなく、SameSiteもLax/Strictでない（同じホストで見えたセッションCookieがすべてLax/Strictなら合格。セッションCookieが見えなければ①とする。機密応答かどうか分からなければna） | CSRFの可能性の兆候 | ①情報 | OWASP CSRF Prevention CS、ASVS 5.0.0 3.5.1、IPA 6-(i)-a |
 | E-13 | ソースマップの露出 | 本番JSの応答ヘッダ（SourceMap、X-SourceMap）と本文末尾の //# sourceMappingURL= を確認し、示された .map のパスをC13のパス一覧に追加して実行する | 本番では .map を配信しないか、認証の内側に置く | ① .map を取得できる（HTTP 2xxで、中身がソースマップの形。元のソースコード（sourcesContent）を含むかは手動で確認） ② .map への参照（ヘッダ・コメント）がある | ソースコードや内部APIの露出 | ①中 ②低 | OWASP WSTG、ASVS 5.0.0 13.4.7 |
 
@@ -285,7 +285,7 @@ APIでは、未認証アクセス、トークンの露出、過剰なデータ�
 
 | ID | 項目 | 確認方法 | 推奨値・期待状態 | NG判定基準 | リスク・影響 | 重要度 | 参考文献 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| A-01 | 未認証アクセス | `curl -sS -i https://HOST/api/me`（Authorizationなし。`label=unauth-*`。③はHTTPの応答のWWW-Authenticate） | 401＋`WWW-Authenticate`（例：`Bearer realm="api"`） | ①200で保護データが返る ②302でログイン画面へ転送（APIとして不適切） ③HTTPでBasic認証を受け付ける | なりすまし、情報漏えい | ①高 ②低 ③高 | API2（Broken Authentication）、ASVS 5.0.0 8.2.1, 12.2.1、IPA 11-(i) |
+| A-01 | 未認証アクセス | `curl -sS -i https://HOST/api/me`（Authorizationなし。`label=unauth-*`。③はHTTPの応答のWWW-Authenticate。`-L`で転送をたどった場合は、URLがhttpのホップだけを見る（httpsに転送した先のBasicは対象外）。複数のチャレンジのどれにBasicがあってもよい） | 401＋`WWW-Authenticate`（例：`Bearer realm="api"`） | ①200で保護データが返る ②302でログイン画面へ転送（APIとして不適切） ③HTTPでBasic認証を受け付ける | なりすまし、情報漏えい | ①高 ②低 ③高 | API2（Broken Authentication）、ASVS 5.0.0 8.2.1, 12.2.1、IPA 11-(i) |
 | A-02 | トークンの露出 | URLのクエリ、本文、`Location`ヘッダ | トークンはAuthorizationヘッダだけで扱う | ①URLにトークン（`?access_token=`など） ②Locationや本文に長期トークン・他者のトークン | ログやRefererからの漏えい | ①高 ②中 | API2、API8、ASVS 5.0.0 14.2.1、IPA 4-(ii) |
 | A-03 | JWTの中身 | headerとpayloadをツール内でBase64デコード | `alg`が`none`でない。`exp`が短い。PIIを含まない | ①`alg: none` ②`exp`がない ③個人情報を含む | トークン偽造、無期限の再利用、情報漏えい | ①高 ②中 ③中 | API2、ASVS 5.0.0 9.1.2, 9.2.1 |
 | A-04 | レート制限 | 同じリクエストを少数回連続で送る（検証環境） | 429＋`Retry-After`。`RateLimit`/`RateLimit-Policy`（IETF draft）か`X-RateLimit-*` | ①ログイン・OTPなど認証系で制限の兆候がない ②その他のエンドポイントで兆候がない | 総当たり、リソース枯渇 | ①中 ②情報 | API4、ASVS 5.0.0 2.4.1 |
@@ -333,7 +333,7 @@ APIでは、未認証アクセス、トークンの露出、過剰なデータ�
 - 対象環境（本番・検証）、実施者、許可範囲は、表の上にまとめて記載します。
 - 「該当条件」列には条件番号（①②…）を書きます。ツールのルールID（例：H-01.1）の末尾の数字と一致します。
 - 「実施日時」と「実施コマンド」は、各ターゲットに`#META at=2026-10-13T10:00 cmd=C1`のように付けるとツールが転記します。付けない場合は空欄で出力します。
-- `#META at`（HARは`startedDateTime`）は、期限の判定（証明書のnotAfter、CookieのExpires、security.txtのExpires）の基準にも使います。前に採取した出力を読み直しても、採取時の状態で判定するためです。ない場合は判定した時刻を使います。例外の期限（until）は手元の日付で比べます。
+- `#META at`（HARは`startedDateTime`）は、期限の判定（証明書のnotAfter、CookieのExpires、security.txtのExpires）の基準にも使います。前に採取した出力を読み直しても、採取時の状態で判定するためです。ない場合は応答の`Date`ヘッダ（サーバが応答した時刻）を、それもなければ判定した時刻を使います。例外の期限（until）は手元の日付で比べます。
 - 再診断では同じコマンドを実行し、前回の結果と比べます（ツールの差分表示はv0.4）。
 
 ## ツール設計1：入力モデル・推奨コマンド・パース
@@ -525,16 +525,16 @@ t mypage "$H/mypage"     1  -v -o /dev/null -b jar.txt >> out.txt
 ブラウザの開発者ツールで書き出したHAR（HTTP Archive）ファイルを、curlの出力と同じターゲットの集まりに変換して評価します。ログイン前後・API・ログアウトの一連の通信をブラウザの操作だけで採取でき、横断ルール（C-09、C-12など）を手早く適用できます。
 
 - **判別と結合**：HARはファイル読込で受け、JSONとして解釈できて`log.entries`を持てばHARとして扱う。テキストエリアの入力はこれまでどおり`#TARGET`形式で解析し、両方から作ったターゲットを結合して評価する。
-- **変換**：`log.entries`の1件を1ターゲットにする。URLは`request.url`、応答は`response.status`、`response.httpVersion`、`response.headers`（nameとvalueの配列）から作る。HTTPバージョンは、ブラウザごとの表記（h2、HTTP/2.0など）を1.1・2・3に正規化する。名前が`:`で始まるHTTP/2の疑似ヘッダ（`:status`など）は除外する。本文は`response.content.text`のうちHTMLとJSONだけを先頭64KBまで残す（`encoding: base64`ならデコード）。リクエスト側は、CookieとAuthorizationの有無（`sentAuth`）だけを取り出す。
+- **変換**：`log.entries`の1件を1ターゲットにする。URLは`request.url`、応答は`response.status`、`response.httpVersion`、`response.headers`（nameとvalueの配列）から作る。HTTPバージョンは、ブラウザごとの表記（h2、HTTP/2.0など）を1.1・2・3に正規化する。名前が`:`で始まるHTTP/2の疑似ヘッダ（`:status`など）は除外する。1つのヘッダに複数の`Set-Cookie`を改行でつないで書き出すものがあるため、`Set-Cookie`は改行で1件ずつに分ける（分けないと2つ目以降のCookieを判定せず、証跡に生の値が出る）。本文は`response.content.text`のうちHTMLとJSONだけを先頭64KBまで残す（`encoding: base64`ならデコード）。リクエスト側は、CookieとAuthorizationの有無（`sentAuth`）だけを取り出す。
 - **由来の記録**：HAR由来のターゲットには`meta.source = 'har'`と`meta.cmd = 'HAR'`を設定する。診断カバレッジの理由（HARに機密情報が含まれないなど）と、第8章の「実施コマンド」列に使う。除外したエントリの数（har-excluded）と、機密情報が除かれたHARの検出（har-sanitized）は、解析警告としても表示する。
-- **リダイレクト**：HARではリダイレクトの各ホップが別のエントリになる。`response.redirectURL`と次のエントリのURLでつなぎ、1つのターゲットの応答チェーンに組み直す。
+- **リダイレクト**：HARではリダイレクトの各ホップが別のエントリになる。`response.redirectURL`と次のエントリのURLでつなぎ、1つのターゲットの応答チェーンに組み直す。httpからhttpsに転送されたチェーンは、最後のhttpsのURLをターゲットのURLにする（HTTPSの応答が対象のH-01やCookieの項目を判定するため）。`http`ラベルを付けたチェーンだけは、T-04のために転送元のhttpのURLのままにする。
 - **対象ホストの選択**：解析の前に対象ホストを選ばせ、それ以外（解析タグ、CDN、外部APIなど）のエントリは既定で除外する。
 - **ラベルの付与**：HARにはラベルがないため、取り込んだ後にエントリ一覧で付ける。一覧はリダイレクトを組み直した後のチェーン単位で表示し、ラベルはチェーン（1つのターゲット）に付ける。ツールは候補を示し、診断者が確定する。候補の例：パスワード入力欄のあるページのGET→`pre-login`、新しいセッションCookieを発行したPOST→`login`、パスにlogoutを含む→`logout`。`sensitive`は送信側のCookie・Authorizationの有無で自動で決め、一覧で上書きできる。次の制約を設ける。
   - 予約ラベルは1つのエントリにだけ付けられる（横断ルールが比べる対象を一意にするため）。
   - `cors-*`ラベルは付けられない（ブラウザが送る正規のOriginを、R-01が「反射」と誤判定するため）。ほかにも、細工したリクエストを前提とするラベル（websocket、options、trace、method-override、open-redirect、host-inj、crlf、xff-spoof、probes、tls）は付けられない。テスト値を送っていないのに、ルールが「確認して問題なし」（.ok）を返してしまうため。HARで付けられるのは、一般、error-\*、http、apex、pre-login、login、logout、csp-sample-\* だけで、この許可リストはlabels.jsonに「HARで使えるか」の属性として持たせる。同じ理由で`sentOrigin`も設定しない。
   - `after-logout`（旧Cookieでのアクセス）と`session-sample-*`はブラウザの通常の操作では生じないため、curl（C18）で採取する。
 - **HARでは判定できない項目**：TLS（T-09〜T-11）、既知ファイル（E-03）、偽装OriginによるCORS確認（R-01〜R-03）、メソッド確認（T-01）、ヘッダインジェクション（T-07、T-08）など、細工したリクエストが必要な項目はHARには含まれない。これらは診断カバレッジで「入力不足」として示し、推奨コマンドで別に採取するよう案内する。
-- **秘密情報の扱い**：HARには、ログイン時のパスワード（`request.postData`）、すべてのCookie、トークン、応答本文が入る。読み込みはWeb Worker内で行い、`request.postData`と不要な本文は読み込んだ直後に破棄し、残す値にもマスキングを適用する。HARファイルは使用後に削除するよう画面で案内する（第0章 0.5と同じ扱い）。テスト用アカウントで採取する。
+- **秘密情報の扱い**：HARには、ログイン時のパスワード（`request.postData`）、すべてのCookie、トークン、応答本文が入る。読み込みはWeb Worker内で行い、`request.postData`と不要な本文は読み込んだ直後に破棄し、残す値にもマスキングを適用する。JSONとして読めないときも、エラーの文言（誤りの前後の入力を含む）は画面に出さず、種類だけを示す。HARファイルは使用後に削除するよう画面で案内する（第0章 0.5と同じ扱い）。テスト用アカウントで採取する。
 - **ブラウザによる違い**：ブラウザによっては、既定の書き出しでCookieやSet-Cookieなどの機密情報を除く（要確認事項）。CookieやSet-CookieがないHARでは、第2章の項目を「入力不足」とし、機密情報を含める書き出し方を画面で案内する。
 - **サイズ**：HARは数十MBになることがあるため上限を50MBとし、必要な項目を取り出したら元のJSONは破棄する。
 
@@ -684,7 +684,7 @@ t mypage "$H/mypage"     1  -v -o /dev/null -b jar.txt >> out.txt
 | 論点 | 方針 |
 | --- | --- |
 | 外部送信の禁止 | `fetch`、`XMLHttpRequest`、`WebSocket`、`sendBeacon`は使わない。分析タグやCDNもなし（すべて同梱）。メタCSPの`connect-src 'none'`で技術的にも止める |
-| マスキングの対象 | 常に行う（切り替えはない）。生のヘッダ行（Authorization、Cookie、Set-Cookieなど）は画面にもエクスポートにも出さない。証跡に出すSet-Cookieは値だけ伏せ、属性は残す。URL（ターゲット、Location、証跡）のパラメータは、検出（A-02・C-09②）に使う名前に加え、名前を`-`・`_`・`.`・角かっこ（`user[password]`）・キャメルケースの境目（`accessToken`）で区切った語に`token`・`secret`・`signature`・`credential`・`password`・`key`・`session`・`sid`・`code`などがあるものを伏せる（署名付きURLの`X-Amz-Security-Token`など）。ほかにJWT、CSPのnonce、URLのユーザー情報（`user:pass@`はパスワードを、ユーザー名だけの`<トークン>@`はユーザー名を伏せる。パスワードに`@`を含む場合も残さない）。HTML本文のタグを証跡に出すとき（E-07〜E-10・E-12）は、判定に使う属性（`src`・`href`・`action`・`data`・`rel`・`method`・`type`・`name`・`content`・`integrity`・`crossorigin`・`as`）の値だけを出し、ほかの属性（`data-api-key`・`nonce`など）は値を「…」にする。一覧の正本は`src/mask.ts`と`src/rules/html.ts` |
+| マスキングの対象 | 常に行う（切り替えはない）。生のヘッダ行（Authorization、Cookie、Set-Cookieなど）は画面にもエクスポートにも出さない。証跡に出すSet-Cookieは値だけ伏せ、属性は残す。URL（ターゲット、Location、証跡）のパラメータは、検出（A-02・C-09②）に使う名前に加え、名前を`-`・`_`・`.`・角かっこ（`user[password]`）・キャメルケースの境目（`accessToken`）で区切った語に`token`・`secret`・`signature`・`credential`・`password`・`key`・`session`・`sid`・`code`などがあるものを伏せる（署名付きURLの`X-Amz-Security-Token`など）。ほかにJWT、CSPのnonce、デバッグ用のヘッダ（`x-debug-token`・`x-debug-token-link`。H-16③）の値、URLのユーザー情報（`user:pass@`はパスワードを、ユーザー名だけの`<トークン>@`はユーザー名を伏せる。パスワードに`@`を含む場合も残さない）。HTML本文のタグを証跡に出すとき（E-07〜E-10・E-12）は、判定に使う属性（`src`・`href`・`action`・`data`・`rel`・`method`・`type`・`name`・`content`・`integrity`・`crossorigin`・`as`）の値だけを出し、ほかの属性（`data-api-key`・`nonce`など）は値を「…」にする。一覧の正本は`src/mask.ts`と`src/rules/html.ts`。Markdownのエクスポートでは、証跡などの値の`<`・`>`を実体参照にし、`|`・`[`・`]`・`!`・`` ` ``・`\`をエスケープし、改行を空白にする（診断対象の応答に書かれた画像の記法が、レポートを開いたときに外部から読み込まれないように。読み込んだ組織プロファイルの名前や前回の結果の日時も同じ扱い） |
 | マスキングの方法 | 値の長さで残す文字数を変える：8文字以下はすべて伏せる、9〜20文字は先頭2文字、21文字以上は先頭4文字。いずれも文字数を付記（例：`abcd…(64 chars)`）。Set-Cookieは値だけ伏せて属性は残す。エントロピー評価はマスク前の値でメモリ内だけで行う |
 | プローブの中身 | `#PROBE`の`head`（先頭64バイト）は.envなどの秘密を含み得る。判定にだけ使い、画面とエクスポートには「一致したパターン名」（例：`git-head`、`dotenv`、`phpinfo`）だけを出す |
 | 生データのエクスポート | 提供しない。エクスポートは常にマスク済み。生の出力は診断者の手元のファイルを社内の保管場所に置く（第8章） |

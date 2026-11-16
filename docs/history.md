@@ -256,3 +256,20 @@
 | 高-4 | default-src をいつもスクリプトのディレクティブとして扱い、`default-src *; script-src 'self'`をH-04②（高）にする。object-src のフォールバックの問題（H-05①）は見逃す | default-src の指摘は、script-src がなければH-04、object-src がなければH-05①に振り分ける | ツール設計2（csp_evaluator の振り分け）、`src/rules/csp.ts` |
 | 高-5 | C4（-v）でTLS 1.1・1.0を合意してもT-09②（情報）だけで、①にしない。OpenSSL の`TLSv1`（1.0）の表記を読まない。合意した暗号はTLS 1.2のときだけ見ていて、旧バージョンのCBCやRC4が合格になる | 旧バージョンを合意したら①。合意した暗号はTLS 1.3以外で、弱い暗号を①、CBC・静的RSAを③にする | 第4章、`src/rules/hostRules.ts` |
 | 未対応 | 中の指摘（E-01②がURLのパスを絶対パスとする、A-07②の`__typename`・`__v`、A-07の証跡の動的なキー、E-06のExpressのJSONP、A-01③の2つ目のWWW-Authenticate、R-06のVaryの部分一致、R-05の`Allow-Methods: *`、E-09の複数ラベルの内部ホスト名、C-07のUUID、T-04の303）、設計の判断が要るもの（期限・承認者のない例外、C-03の③と④、E-11、E-05の`/actuator/health`、R-09の機密区分）、低の指摘（HARの読み込みの失敗の扱い、リダイレクトをつなぐ処理の計算量、テストの分け方） | 次回以降 | — |
+
+### レビュー指摘への対応（第14回、6回目の新鮮な目でのレビュー：独立した3人のレビュアー）
+
+判定ルールとパーサ、プライバシーと画面、CI・ドキュメント・テストを、別々のレビュアーが独立に見た。秘密情報が出る経路4件と、重要度「高」の判定の誤り5件に対応し、ルールセットを`2026.11-v0.4.21`にした。再現テストは`tests/review6.test.ts`。
+
+| 指摘 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 高-1 | HARで1つのヘッダに改行でつないだ`Set-Cookie`を1件として読み、2つ目以降のCookieを判定しない。1つ目の証跡（値は先頭の`name=value`だけマスク）に、2つ目以降のCookieの生の値がつながって出る | `Set-Cookie`を改行で1件ずつに分ける | ツール設計1「HAR形式の取り込み」、`src/parser/har.ts` |
+| 高-2 | Markdownのエクスポートで、組織プロファイルの名前・前回の結果の日時・ルールセットの警告をエスケープせず、見出しやHTMLを差し込める。証跡の`![…](…)`も通し、診断対象の応答に書かれた画像がレポートを開いたときに外部から読み込まれる | すべての値を同じ関数でエスケープし、`[`・`]`・`!`・`` ` ``・`\`もエスケープする | ツール設計3「マスキングの対象」、`src/export/markdown.ts` |
+| 高-3 | 壊れたHARの読み込みエラーで、JSON.parseの文言（誤りの前後の入力。Cookie・トークンを含みうる）を画面に出す | Workerはエラーの種類だけを返す | ツール設計1「HAR形式の取り込み」、`src/worker.ts`、`src/ui/har.ts`、`src/i18n.ts` |
+| 高-4 | H-16③の証跡に、`x-debug-token`・`x-debug-token-link`の値（記録したリクエストを見られるプロファイラのURL）をそのまま出す | 値をマスクする | ツール設計3「マスキングの対象」、`src/rules/headers.ts` |
+| 高-5 | HARでhttpからhttpsに転送されたチェーンのURLが転送元のhttpのままで、H-01とCookieの項目（C-01〜C-07）がすべて適用外になる | 最後のhttpsのURLで判定する（`http`ラベルのチェーンは除く） | ツール設計1「HAR形式の取り込み」、`src/parser/har.ts` |
+| 高-6 | `#META at`がないと判定した時刻で期限を比べ、前に採取したセッションCookieを削除用とみなして、Cookieの項目をすべて見逃す | 応答の`Date`ヘッダを、判定した時刻より先に使う | 第8章、`src/parser/target.ts` |
+| 高-7 | A-01③（高）が、`-L`でhttpsに転送した先の`WWW-Authenticate: Basic`を「HTTPでBasic」と判定する。2つ目のチャレンジのBasicは見逃す | 転送をたどり、URLがhttpのホップの各チャレンジを見る | 第6章、`src/rules/api.ts` |
+| 高-8 | OpenSSL 3の`a:PKEY: id-ecPublicKey`（ハイフンを含む鍵の種類）の行を読まず、署名と証明書の対応がずれて、自己署名のルート証明書のSHA-1をT-10②（高）にする。鍵の種類と長さも中間証明書のものになる | ハイフンを含む鍵の種類を読み、署名を証明書の番号の位置に入れる | `src/parser/openssl.ts` |
+| 高-9 | E-11①（高）が、`/media/press-releases/`や`/download/`の普通のHTMLページを、アップロードしたファイルの配信とする | アップロード先らしいディレクトリの下で、最後がファイル名（拡張子付き）のURLだけを対象にする | 第5章、`src/rules/exposure.ts` |
+| 未対応 | 中の判定の誤り（H-01の`max-age=0`、X-Frame-Optionsの不正な値、カンマでつないだnosniff・CSP、E-05の認証付きリクエスト、R-09の自サイトのOrigin）、CSVの`#META cmd=`、画面（形式違いの例外ファイルで登録済みの例外が消える、`request.url`が文字列でないHARで画面が止まる、フォーカスが失われる、ダイアログの名前）、性能（64KBの本文での正規表現、5MBの貼り付け、HARのリダイレクトをつなぐ処理）、CI・ドキュメント（`tests/workflows.test.ts`の`--ignore-scripts`の検査、Node 22.12の記載とESLintの要件、`deploy.yml`のconcurrency、古い画像、設計書のファイル構成、テストの穴）、生成器の`run.sh`の保存名、`.gitignore`の`profile.json`・`suppressions.json` | 次回以降 | — |
