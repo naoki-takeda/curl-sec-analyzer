@@ -9,8 +9,29 @@ import { LOGOUT_FAILED_REC, mk } from './util';
 export function cookiesOf(ctx: RuleContext): SetCookie[] {
   return ctx.target.responses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
 }
-/** 証跡：値はマスクし、属性はそのまま出す */
-export const cookieEvidence = (c: SetCookie) => c.raw.trim().replace(/^([^=;]*=)([^;]*)/, (_, k: string, v: string) => k + maskValue(v.trim()));
+/** 名前のない Cookie（値だけの Set-Cookie）の表示名 */
+export const cookieName = (c: SetCookie) => c.name || '（名前なし）';
+const KNOWN_ATTRS = new Set(['expires', 'max-age', 'domain', 'path', 'samesite', 'priority', 'secure', 'httponly', 'partitioned', 'version', 'comment']);
+/**
+ * 属性の証跡。既知の属性はそのまま出すが、値の中のカンマのあと（1行にまとめた Set-Cookie で分けられなかった、名前のない2つ目の Cookie。
+ * 「Path=/, <値>」）と、未知の属性・名前だけのかけらの値は伏せる。Expires の日付のカンマ（Wed, 21 Oct …）はそのまま
+ */
+const attrEvidence = (part: string): string => {
+  const p = part.trim(); if (!p) return part;
+  const i = p.indexOf('='); const name = (i >= 0 ? p.slice(0, i) : p).trim(); const lower = name.toLowerCase();
+  if (!KNOWN_ATTRS.has(lower)) return i >= 0 ? ` ${name}=${maskValue(p.slice(i + 1).trim())}` : ` ${maskValue(p)}`;
+  if (i < 0) return ` ${p}`;
+  const v = p.slice(i + 1);
+  // Expires の日付は曜日のあとに1つだけカンマを含む（Wed, 21 Oct 2026 07:28:00 GMT）。2つ目のカンマのあとは別の Cookie
+  const comma = lower === 'expires' ? v.indexOf(',', v.indexOf(',') + 1) : v.indexOf(',');
+  return comma < 0 ? ` ${p}` : ` ${name}=${v.slice(0, comma)}, ${maskValue(v.slice(comma + 1).trim())}`;
+};
+/** 証跡：値はマスクし、属性は既知のものだけそのまま出す。名前のない Cookie は「（名前なし）=」に続けて値を伏せる */
+export const cookieEvidence = (c: SetCookie) => {
+  const raw = c.raw.trim(); const semi = raw.indexOf(';');
+  const attrs = semi >= 0 ? raw.slice(semi + 1).split(';').map(a => `;${attrEvidence(a)}`).join('') : '';
+  return `${cookieName(c)}=${maskValue(c.value)}${attrs}`;
+};
 
 /** Cookie ごとの判定を集める。指摘が1件もなければ .ok を1件返す。Set-Cookie がなければ適用外（空配列） */
 function perCookie(rule: Rule, ctx: RuleContext, judge: (c: SetCookie) => Finding | undefined, subset = (_: SetCookie) => true): Finding[] {
@@ -18,7 +39,7 @@ function perCookie(rule: Rule, ctx: RuleContext, judge: (c: SetCookie) => Findin
   const cs = cookiesOf(ctx).filter(subset);
   if (!cs.length) return [];
   const fails = cs.map(judge).filter((f): f is Finding => !!f);
-  return fails.length ? fails : [mk(rule, ctx, 'ok', 'info', 'pass', cs.map(c => c.name).join(', '), '')];
+  return fails.length ? fails : [mk(rule, ctx, 'ok', 'info', 'pass', cs.map(cookieName).join(', '), '')];
 }
 
 export const cookieSecure: Rule = { id: 'C-01', title: 'Cookie の Secure 属性', appliesTo: 'any', scope: 'target', dependsOn: ['H-01'],

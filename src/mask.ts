@@ -8,15 +8,29 @@ export const TOKEN_PARAM_NAMES = ['access_token', 'id_token', 'refresh_token', '
 /** セッションIDとして扱うパラメータ名（C-09② の検出に使う。;jsessionid= のパス引数も含む） */
 export const SESSION_PARAM_NAMES = ['PHPSESSID', 'JSESSIONID', 'sid', 'sessionid', 'session_id'];
 /** マスクするパラメータ名：上の2つに、OAuthの認可コードやパスワード、CAS のチケット、SAML の応答などを加えたもの */
+// OAuth・OpenID Connect の nonce、ワンタイムの番号（passcode・pin）、ハッシュ（パスワードの再設定やログインの検証に使う）、
+// JWT のクライアント認証（client_assertion）と SAML のアサーション
 const MASK_PARAM_NAMES = [...TOKEN_PARAM_NAMES, ...SESSION_PARAM_NAMES, 'code', 'password', 'passwd', 'pass', 'pw', 'secret', 'key', 'signature', 'sig',
-  'ticket', 'oauth_verifier', 'SAMLResponse', 'SAMLart', 'accesskey'];
+  'ticket', 'oauth_verifier', 'SAMLResponse', 'SAMLart', 'SAMLAssertion', 'accesskey', 'nonce', 'passcode', 'pin', 'hash', 'client_assertion'];
 const alt = (names: string[]) => names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 /** クエリ（?・&）、フラグメント（#）、パス引数（;）のどれに置かれても一致する */
 export const paramRegex = (names: string[], flags = 'i') => new RegExp(`([?&#;](?:${alt(names)})=)([^&\\s#;"'<>]+)`, flags);
 const MASK_EXACT = new Set(MASK_PARAM_NAMES.map(n => n.toLowerCase()));
 /** 区切った語にこれがあればマスクする（x-amz-security-token、x-goog-signature、private_token、x-api-key、access-token など） */
 const MASK_WORDS = new Set(['token', 'secret', 'signature', 'sig', 'credential', 'credentials', 'password', 'passwd', 'pwd', 'pass', 'pw', 'key', 'apikey',
-  'accesskey', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp', 'ticket', 'verifier', 'samlresponse', 'samlart']);
+  'accesskey', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp', 'ticket', 'verifier', 'samlresponse', 'samlart', 'samlassertion',
+  'assertion', 'nonce', 'passcode', 'hash']);   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
+/**
+ * 語 code と組み合わせても秘密ではない語（country_code、zip_code、error_code、currency_code）。名前の語が code とこれらだけなら伏せない。
+ * code だけの名前と、auth_code・verification_code・otp_code・device_code のように秘密の語と組み合わせたものは伏せる
+ */
+const PLAIN_CODE_WORDS = new Set(['country', 'zip', 'postal', 'post', 'promo', 'coupon', 'discount', 'campaign', 'error', 'err', 'status', 'response',
+  'result', 'reason', 'exit', 'return', 'http', 'currency', 'lang', 'language', 'locale', 'region', 'area', 'city', 'product', 'item', 'sku', 'color',
+  'colour', 'iso', 'tax', 'airport', 'station', 'branch', 'bank', 'store', 'shop', 'dept', 'category', 'class', 'type']);
+/** 値が短い状態の語なら伏せない名前（OAuth の state は乱数だが、?state=open・?state=CA のような一覧の絞り込みにも使う） */
+// 伏せないのは、8文字未満か、16文字未満で英字の語（- _ 空白でつないだもの）の値（?state=open・?state=California・in_progress）。長い値は英字だけでも乱数とみなす
+const STATE_PARAM = /^(?:oauth[_-]?)?state$/i;
+const plainStateValue = (v: string) => v.length < 8 || (v.length < 16 && /^[A-Za-z]+(?:[-_ ][A-Za-z]+)*$/.test(v));
 /** マスクするパラメータ名か（検出用の一覧を含み、それより広い） */
 // 語の区切り：- _ . と角かっこ（user[password]、%5B・%5D）、キャメルケースの境目（accessToken、clientSecret）。
 // 名前がパーセントエンコードされていても（api%5Fkey）、デコードしてから照合する
@@ -24,11 +38,16 @@ export const isSecretParamName = (name: string): boolean => {
   let n: string;
   try { n = decodeURIComponent(name); } catch { n = name.replace(/%5[bd]/gi, '_'); }   // 不正なエンコードを含む名前は、角かっこだけ区切りにする
   if (MASK_EXACT.has(n.toLowerCase())) return true;
-  const words = n.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[-_.[\]]+/);
+  const words = n.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[-_.[\]]+/).filter(Boolean);
+  // 最後の語が type の名前は、種類を表す公開の値（client_assertion_type=urn:…、token_type=Bearer、grant_type）
+  if (words.length > 1 && words[words.length - 1] === 'type') return false;
+  if (words.includes('code') && words.every(w => w === 'code' || PLAIN_CODE_WORDS.has(w))) return false;
   // 区切りのない1語の名前（authtoken、apitoken、secretkey、cftoken、sesskey、passphrase など）は、部分一致でも見る（伏せすぎるほうが安全）
   return words.some(w => MASK_WORDS.has(w)) || SECRET_PART.test(n.toLowerCase());
 };
 const SECRET_PART = /token|secret|passw|passphrase|pwd|apikey|authkey|accesskey|privatekey|sessid|sesskey|credential|signature/;
+/** 値を伏せるパラメータか（名前のほかに、state は値も見る） */
+const secretParam = (name: string, value: string) => isSecretParamName(name) || (STATE_PARAM.test(name) && !plainStateValue(value));
 // パラメータの区切り：? & # ; と、そのエンコード（%3F・%26・%23・%3B と二重エンコードの %253F など、JS のエスケープ（\u0026 の6文字、\x26）、HTML の文字参照（&amp;・&#38;・&#x3D; など））。
 // エンコードした URL を別のパラメータの値に入れたもの（?next=%2Fcb%3Ftoken%3D…）や、スクリプトの中の URL でも見つけるため
 const SEP = String.raw`[?&#;]|%(?:25)*(?:3[Ff]|26|23|3[Bb])|\\u00(?:26)|\\x26|&amp;|&#0*(?:63|38);|&#[xX]0*(?:3[Ff]|26);|&quest;`;
@@ -36,8 +55,10 @@ const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];
 // 値はエンコードした区切りの前まで（長さの上限は付けない。上限で切ると、6KB の JWT などの残りが伏せられずに残る。繰り返しは入れ子でないので時間は線形）。
 // 名前は最短一致（エンコードした = を名前に含めない）
 const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)(${EQ})((?:(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\])+)`, 'g');
-// JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる
-const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-]))eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
+// JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる。
+// 「Bearer_eyJ…」「access_token_eyJ…」のように語と _ でつないだものも含める（直前の語は _ を含めて40文字までで、その前が語の外のときだけ。
+// 「_eyJ」の繰り返しで2乗の時間にしない）。JWE（5つの部分。鍵の部分が空の dir 形式「eyJ….. iv.暗号文.タグ」を含む）は5つ目まで、JWS は3つ目まで伏せる
+const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-])|(?<=(?:^|[^\w-])[A-Za-z0-9_]{1,40}_))eyJ[\w-]+\.[\w-]*\.[\w-]*(?:\.[\w-]*\.[\w-]*)?/g;
 // URL のユーザー情報（スキーム://ユーザー情報@ホスト）。スキームは語の先頭から32文字まで（\w+ だと長い英数字の並びで、入力の長さの2乗の時間がかかる）。
 // ユーザー情報はホストの前の最後の @ まで（パスワードに @ を含む場合も残さない）。パス・クエリ・フラグメントの @ には一致させない。
 // スキームのない「//ユーザー情報@ホスト」（<script src="//user:pass@cdn…">）も含める
@@ -90,21 +111,53 @@ const maskSegment = (seg: string, h: Hider = SHOW): string => seg.replace(/[^.:~
  */
 const ASPNET_COOKIELESS = /\/\(((?:[A-Z]\([^()\s/]+\))+)\)/g;
 
-/** CSP の nonce の値（'nonce-…'）。どの証跡でも同じようにマスクする（H-04⑤ と同じ扱い） */
-const CSP_NONCE = /'nonce-([^']+)'/g;
+/**
+ * CSP の nonce の値（'nonce-…'）。どの証跡でも同じようにマスクする（H-04⑤ と同じ扱い）。値は空白を含まないが、マスク済みの「…(N chars)」は
+ * 空白を含むので、その形だけは空白を認める（認めないと、閉じ引用符を次の nonce の開き引用符と読み、2回目のマスクで結果が変わる）
+ */
+const CSP_NONCE = /'nonce-([^'\s]*…\(\d+ chars\)|[^'\s]+)'/g;
+/**
+ * 閉じ引用符のない 'nonce-…（長さを問わず伏せる）と、引用符のない nonce-…（script-src nonce-…。ブラウザは nonce として扱わないが、値はサーバの nonce）。
+ * 引用符のないものは、値が6文字以上で英大文字か数字を含むときだけ（/posts/nonce-reuse-attacks-explained、class="nonce-container" は普通の語）。
+ * マスク済みの「…」の直前で止まった値は伏せない（先読みで値を取り切ってから見るので、短く区切り直して一致させない）
+ */
+const BARE_NONCE = /(?<![\w-])(')?nonce-(?=([A-Za-z0-9+/_=-]+))\2(?!…)/g;
+const bareNonce = (all: string, q: string | undefined, v: string, h: Hider) =>
+  q ? `'nonce-${h.value(v)}` : v.length >= 6 && /[A-Z0-9]/.test(v) ? `nonce-${h.value(v)}` : all;
+/**
+ * JSON の組（"password":"…"）。そのまま、エスケープ（\"…\"、JS の文字列やログの中）、パーセントエンコード（%22…%22%3A%22…%22。二重エンコード
+ * と、コロンをエンコードしていないものを含む）の3つと、数値の値（"pin":123456）。名前がパラメータと同じ基準（secretParam）で秘密なら値を伏せる。
+ * 値は閉じの引用符まで（長さの上限は付けない。繰り返しは入れ子でないので線形）。グループは「値の前・名前・値・値の後」
+ */
+const Q = '%(?:25)*22', SP = '(?:%(?:25)*20|\\+)*';
+const JSON_PAIRS: RegExp[] = [
+  /("([\w.$-]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
+  /(\\"([\w.$-]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
+  new RegExp(`(${Q}([\\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}${Q})((?:(?!${Q})[^&\\s"'<>#])*)(${Q})`, 'g'),
+];
+// 数値の値は、ワンタイムの番号・パスワードらしい名前だけ（"code":404・"status":500 のようなエラーの番号は残す）
+const JSON_NUMBER = /("([\w.$-]{1,64})"\s*:\s*)(\d{4,})(?![\d.])()/g;
+const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token/i;
+const maskJsonPairs = (s: string, h: Hider) => {
+  const rep = (all: string, pre: string, k: string, v: string, close: string) => (v && secretParam(k, v) && !/…\(\d+/.test(v) ? `${pre}${h.value(v)}${close}` : all);
+  return JSON_PAIRS.reduce((acc, re) => acc.replace(re, rep), s)
+    .replace(JSON_NUMBER, (all, pre: string, k: string, v: string) => (NUMERIC_SECRET.test(k) ? rep(all, pre, k, v, '') : all));
+};
 
 /** パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る（深さ3まで） */
 function maskParams(s: string, h: Hider, depth = 0): string {
   return s.replace(ANY_PARAM, (all: string, sep: string, k: string, eq: string, v: string, offset: number) => {
     if (maskedParam(v, s.slice(offset + all.length, offset + all.length + 7))) return all;
-    if (isSecretParamName(k)) return `${sep}${k}${eq}${h.value(v)}`;
+    if (secretParam(k, v)) return `${sep}${k}${eq}${h.value(v)}`;
     return depth < 3 ? `${sep}${k}${eq}${maskParams(v, h, depth + 1)}` : all;
   });
 }
 
 function mask(s: string, h: Hider): string {
-  // 順序：パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる） → ユーザー情報 → ASP.NET のセッション → パスの部分
-  return maskParams(s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${h.value(v)}'`)), h)
+  // 順序：nonce → JSON の組（値の中の JSON を、パラメータの区切りで分ける前に見る） → パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる）
+  // → ユーザー情報 → ASP.NET のセッション → パスの部分
+  const nonce = s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${h.value(v)}'`)).replace(BARE_NONCE, (all, q: string | undefined, v: string) => bareNonce(all, q, v, h));
+  return maskParams(maskJsonPairs(nonce, h), h)
           .replace(JWT, t => h.value(t))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
           .replace(ASPNET_COOKIELESS, (_, inner: string) => `/(${inner.replace(/([A-Z])\(([^()]+)\)/g, (__, k: string, v: string) => `${k}(${h.value(v)})`)})`)

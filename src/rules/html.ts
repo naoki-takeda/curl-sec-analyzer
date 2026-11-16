@@ -2,7 +2,7 @@
 import type { Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
-import { isLabelText, mk } from './util';
+import { isLabelText, isPublicClientValue, mk } from './util';
 import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
@@ -137,10 +137,11 @@ const ASSIGNED = /(?<![\w-])["']?(api[_-]?key|client[_-]?secret|secret[_-]?key|a
  * 英語の画面の文言（A-07 と同じ isLabelText）
  */
 const notSecretValue = (key: string, v: string): boolean =>
-  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v);
+  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v) || isPublicClientValue(v);
+// Google の API キー（AIza…）は、Maps・Firebase などブラウザから使う前提のキー（HTTP リファラーや API の制限で守る）なので、HTML にあっても①にしない。
+// Stripe の公開キー（pk_live_…）、PaymentIntent の client_secret も同じ（A-07 と同じ isPublicClientValue）
 const SECRETS: [string, { test(s: string): boolean }][] = [
   ['AWSアクセスキー', /\bAKIA[0-9A-Z]{16}\b/],
-  ['Google APIキー', /\bAIza[0-9A-Za-z_-]{35}\b/],
   ['秘密鍵', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
   ['Slackトークン', /\bxox[baprs]-[0-9A-Za-z-]{10,}/],
   ['GitHubトークン', /\bgh[pousr]_[0-9A-Za-z]{36,}\b/],

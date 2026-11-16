@@ -1,7 +1,7 @@
 // rules/exposure.ts：第5章 エラー・情報露出（E-01、E-02、E-04〜E-06、E-11、E-13）
-import type { Rule, RuleContext } from '../model';
+import type { HttpResponse, Rule, RuleContext } from '../model';
 import { clip, probePattern } from '../mask';
-import { NO_BODY_REC, bodyTruncated, header, isStaticResource, mk } from './util';
+import { NO_BODY_REC, PROBE_UNREACHED_REC, bodyTruncated, header, isStaticResource, mk } from './util';
 import { ownChain } from '../parser/target';
 
 const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : undefined);
@@ -11,9 +11,15 @@ const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : u
  * - Server=…;…;Password=…; の形は、キーを大文字小文字を区別して照合し、Password は「;」の直後のキーとする。
  *   小文字の JS（var host = location.host; var password = form.value;）には一致させない（区別しないと、圧縮した JS の多くで高の誤検知になる）
  * - AWS のアクセスキーは大文字だけで、語の境目で区切る（base64 の途中の …zakia… に一致させない。rules/html.ts の SECRETS と同じ）
+ * - jdbc: は資格情報を含むものだけ（//ユーザー:パスワード@、?password=・;password=、Oracle の thin:ユーザー/パスワード@）。
+ *   資格情報のない jdbc:mysql://db/app は内部のホスト名の露出で、②（中）にする（①は高で、漏れた値の変更を求めるため）
  */
 const CREDENTIALS: RegExp[] = [
-  /jdbc:\w+:/i,
+  // 繰り返しには上限を付ける（上限がないと「jdbc:」を繰り返した本文で、出てくるたびに末尾まで調べて2乗の時間になる）。
+  // ユーザー名とパスワードに ; ? & を含めない（jdbc:sqlserver://db;user=svc@corp を「ユーザー:パスワード@」とみなさない）。パスワードの / は認める
+  /\bjdbc:\w{1,32}:(?:\w{1,32}:){0,3}\/\/[^\s/:@;?&"'<>]{1,256}:[^\s@;?&"'<>]{1,256}@/i,
+  /\bjdbc:\w+:[^\s"'<>]{0,300}?[?;&](?:password|pwd)=[^&;\s"'<>]+/i,
+  /\bjdbc:oracle:\w+:[^\s/@:"'<>]+\/[^\s@"'<>]+@/i,
   /mongodb(?:\+srv)?:\/\/[^\s:]+:[^\s@]+@/i,
   /\b(?:Server|Data Source|Host|User ID|Uid|Database|Initial Catalog)\s*=[^;\n]{0,200};(?:[^;\n]{0,200};){0,10}?\s*(?:Password|PWD|Pwd)\s*=\s*[^;\s]+/,
   /\bAKIA[0-9A-Z]{16}\b/,
@@ -29,8 +35,9 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     const out = [];
     if (CREDENTIALS.some(re => re.test(b)))
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
-    const trace = b.match(/Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|ORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/);
-    if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・絶対パスを応答に含めない'));
+    // 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする
+    const trace = b.match(/\bjdbc:\w+:(?=\S)|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|ORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/);
+    if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る
     const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Ruby on Rails|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|Express<\/title>|<title>Error \d{3}[^<]*<\/title>/i);
     // <title>Error 401 …</title>（Jetty など）の「…」は自由な文言で、アプリが「Invalid API key sk_live_…」のように秘密を入れうるので出さない
@@ -55,6 +62,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     const p = path(ctx); const b = body(ctx);
     const probe = ctx.target.probes.find(x => /\/security\.txt$/.test(x.path));
     if (probe) {                                              // C13 の存在確認（probes ラベル）
+      if (!probe.code) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP 000、接続できなかった）`, PROBE_UNREACHED_REC)];
       const hit = probePattern(probe.path, probe.headB64, probe.code);
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
         : [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `${probe.path}（HTTP ${probe.code}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
@@ -77,14 +85,35 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
 // ような普通のページまで E-05（①は高）にしてしまう
 const DOC_SEGMENT = /\/(actuator|swagger-ui(?:\.html)?|swagger(?:\.json|\.ya?ml)?|openapi\.(?:json|ya?ml)|api-docs|graphql)(?=\/|$)/i;
 const docSegment = (p: string) => p.match(DOC_SEGMENT)?.[1].toLowerCase();
+/**
+ * 転送先が、同じホストで同じ機能のページ（転送元のパスに「/」か「/index.html」を足しただけ。springdoc の /swagger-ui.html → /swagger-ui/index.html
+ * を含む）なら、そのパスを返す。/actuator → /actuator/login のようなログイン画面への転送は undefined（転送先の 200 で①にしない）
+ */
+function docRedirect(r: HttpResponse, targetUrl: string | undefined): string | undefined {
+  const loc = r.headers.get('location')?.[0]; const base = r.url ?? targetUrl;
+  if (!loc || !base) return undefined;
+  try {
+    const from = new URL(base), to = new URL(loc.trim(), from);
+    if (to.host !== from.host || !docSegment(to.pathname)) return undefined;
+    const stem = from.pathname.replace(/\.html?$/i, '').replace(/\/+$/, '');
+    return to.pathname.startsWith(stem) && /^\/?(?:index\.html?)?$/i.test(to.pathname.slice(stem.length)) && to.pathname !== from.pathname ? to.pathname : undefined;
+  } catch { return undefined; }
+}
 
 const GRAPHQL_REC = 'introspection のクエリ（{"query":"{__schema{types{name}}}"}）を POST して採取する';
 export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API8・API9'],
   run(ctx) {
-    // ステータスは、そのURL自身の応答（転送の最初のホップ）で見る。/actuator からログイン画面に転送した先の 200 で①（高）にしないため
-    const p = path(ctx); const f = ownChain(ctx.target)[0];
-    if (!f || !docSegment(p)) return [];
+    // ステータスは、そのURL自身の応答（転送の最初のホップ）で見る。/actuator からログイン画面に転送した先の 200 で①（高）にしないため。
+    // ただし、同じホストの仕様・管理機能のパスへの転送（/swagger-ui → /swagger-ui/index.html）は、同じ機能のページなので転送先で見る
+    const p = path(ctx); const chain = ownChain(ctx.target);
+    if (!chain[0] || !docSegment(p)) return [];
+    let i = 0;
+    while (chain[i].kind === 'redirect' && docRedirect(chain[i], ctx.target.url)) {
+      if (!chain[i + 1]) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${chain[i].status}（同じホストの ${docRedirect(chain[i], ctx.target.url)} への転送。転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
+      i++;
+    }
+    const f = chain[i];
     const ok200 = f.status >= 200 && f.status < 300;
     const b = body(ctx) ?? '';
     // GraphQL：introspection を試した応答だけで判定する。GET /graphql の 400（Must provide query string）や 405 は、
@@ -94,7 +123,11 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
       if (/introspection/i.test(b)) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}（introspection を拒否）`, '')];
       return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${f.status}（introspection を試した応答ではない）`, GRAPHQL_REC)];
     }
+    // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、拒否されたかどうかも分からない
+    if (!f.status) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
+    // ①②は「未認証で使える・公開されている」。Cookie・Authorization を送った応答の 200 では、未認証で使えるかは分からない
+    if (ctx.target.sentAuth) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。Cookie・Authorization を送った応答で、未認証で使えるかは分からない）`, 'Cookie・Authorization を付けずに採取し直す')];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
     return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}）`, 'API仕様は本番で無効にするか、認証の内側に置く')];
   } };
@@ -153,8 +186,10 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     const maps = ctx.target.probes.filter(p => /\.map$/.test(p.path));
     if (maps.length) {                                         // ① probes ラベル：.map を取得できるか
       const got = maps.filter(p => probePattern(p.path, p.headB64, p.code)?.name === 'source-map');
+      const unreached = maps.filter(p => !p.code).length;
       return got.length ? got.map(p => mk(sourceMap, ctx, 1, 'medium', 'fail', `${p.path}（HTTP ${p.code}、一致したパターン: source-map）`, '本番では .map を配信しない（sourcesContent に元のソースがあるかは手動で確認）'))
-                        : [mk(sourceMap, ctx, 'ok', 'info', 'pass', `${maps.length}件の .map は取得できなかった`, '')];
+        : unreached ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC)]
+        : [mk(sourceMap, ctx, 'ok', 'info', 'pass', `${maps.length}件の .map は取得できなかった`, '')];
     }
     const f = ctx.final; if (!f) return [];
     const ref = header(ctx, 'sourcemap')[0] ?? header(ctx, 'x-sourcemap')[0] ?? body(ctx)?.match(/\/[/*]#\s*sourceMappingURL=(\S+)/)?.[1];

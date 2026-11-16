@@ -1,11 +1,15 @@
 // parser/setCookie.ts：Set-Cookie の解析とセッションCookieの推定
 export interface SetCookie { name: string; value: string; attrs: Map<string, string | true>; raw: string; }
 
+/**
+ * 「=」のない Set-Cookie（set-cookie: <値>; Path=/）は、名前が空で値だけを持つ Cookie（RFC 6265bis 5.6、Chrome・Firefox もこう扱う）。
+ * 名前として読むと値が空になり、削除用とみなして C-01・C-02 の判定から外れ、C-12 の証跡に生の値が出る
+ */
 export function parseSetCookie(raw: string): SetCookie {
   const [nv = '', ...rest] = raw.split(';');
   const i = nv.indexOf('=');
-  const name = (i >= 0 ? nv.slice(0, i) : nv).trim();
-  const value = i >= 0 ? nv.slice(i + 1).trim() : '';
+  const name = i >= 0 ? nv.slice(0, i).trim() : '';
+  const value = (i >= 0 ? nv.slice(i + 1) : nv).trim();
   const attrs = new Map<string, string | true>();
   for (const a of rest) {
     const j = a.indexOf('=');
@@ -57,7 +61,8 @@ const NOT_SESSION = /csrf|xsrf|consent|antiforgery|requestverificationtoken/i;
 const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_uet|_clck$|_clsk$|__hs|hubspot|ajs_|amplitude|mp_|_fbp$|_gcl_)/i;
 // 負荷分散・WAF の Cookie（転送先のサーバの印）。期限がなく値が長いため推定ではセッションCookieに見えるが、利用者ごとの秘密ではない。
 // セッションCookieとして扱うと、全員に同じ値を返す ARRAffinity などで C-07②（同じ値）や C-01①・C-02①（高）の誤検知になる
-const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB|TS01[0-9a-f]{6}|SERVERID$|ROUTEID$)/i;
+// Kubernetes の ingress-nginx のスティッキーセッション（INGRESSCOOKIE）と、Google Cloud の負荷分散（GCLB）も同じ
+const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB|TS01[0-9a-f]{6}|SERVERID$|ROUTEID$|INGRESSCOOKIE$|GCLB$)/i;
 const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*)$/i;
 // WAF・CDN・ボット対策の Cookie（Cloudflare、Imperva、Akamai）。CDN が発行し、属性（Domain・SameSite・Secure）は運営者が変えられない。
 // 期限がなく値が長いものは、推定ではセッションCookieに見える（Imperva の incap_ses_* で C-01①・C-02①（高）の誤検知になる）

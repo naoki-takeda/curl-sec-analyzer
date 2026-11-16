@@ -123,11 +123,29 @@ export const jwtClaims: Rule = { id: 'A-03', title: 'JWTの中身', appliesTo: '
     return out.length ? out : [mk(jwtClaims, ctx, 'ok', 'info', 'pass', `JWT ${jwts.length}件：alg・exp・クレームに問題なし`, '')];
   } };
 
+/**
+ * 証跡に出すキーの名前。データの値をキーにしたもの（{"users":{"alice@example.com":{…}}}、{"keys":{"sk_live_…":{…}}}、ID）は「*」にする。
+ * 識別子らしい名前（英数字か _ で始まる128文字までの英数字・_・-・.・$。Spring の spring.datasource.password のようにドットを含むものも残す）で、
+ * 秘密の値・IDらしくない（数字だけ、数字を含む区切りのない16文字以上の英数字、24文字以上の16進数、AWS のアクセスキー、sk_live_・ghp_ などの接頭辞）
+ * ものだけを残す。判定（SECRET_KEY・INTERNAL_KEY）は元のキーで行い、これは証跡を作るときだけ使う
+ */
+const SECRET_KEY_NAME = /^(?:[spr]k_(?:live|test)_|whsec_|gh[pousr]_|xox[abprs]-)|^[0-9a-f-]{24,}$|^(?:AKIA|ASIA)[0-9A-Z]{16}$|^\d+$|^(?=[A-Za-z0-9]{16,}$)(?=.*\d)/i;
+export const safeKey = (k: string) => (/^[A-Za-z0-9_$][\w$.-]{0,127}$/.test(k) && !SECRET_KEY_NAME.test(k) ? k : '*');
 /** JSONのキーを「a.b[0].c」の形で列挙する */
 export function jsonKeys(v: unknown, prefix = '', out: string[] = [], depth = 0): string[] {
   if (depth > 20 || out.length > 2000) return out;
   if (Array.isArray(v)) v.slice(0, 50).forEach((x, i) => jsonKeys(x, `${prefix}[${i}]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) { const p = prefix ? `${prefix}.${k}` : k; out.push(p); jsonKeys(x, p, out, depth + 1); }
+  return out;
+}
+/** 証跡に出すキーの経路（配列の番号は [] にそろえる）。元の経路（jsonKeys と同じ形で [] にそろえたもの）から、safeKey を通した経路への対応 */
+function shownPaths(v: unknown, raw = '', shown = '', out = new Map<string, string>(), depth = 0): Map<string, string> {
+  if (depth > 20 || out.size > 2000) return out;
+  if (Array.isArray(v)) v.slice(0, 50).forEach(x => shownPaths(x, `${raw}[]`, `${shown}[]`, out, depth + 1));
+  else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
+    const r = raw ? `${raw}.${k}` : k, s = shown ? `${shown}.${safeKey(k)}` : safeKey(k);
+    out.set(r, s); shownPaths(x, r, s, out, depth + 1);
+  }
   return out;
 }
 /**
@@ -158,8 +176,11 @@ export const excessiveData: Rule = { id: 'A-07', title: '過剰なデータ露�
     const valued = secretValuedKeys(data);
     const secret = uniq.filter(k => SECRET_KEY.test(k) && valued.has(k)), internal = uniq.filter(k => INTERNAL_KEY.test(k));
     const out = [];
-    if (secret.length) out.push(mk(excessiveData, ctx, 1, 'high', 'fail', `キー: ${secret.slice(0, 8).join(', ')}（値は表示しない）`, 'パスワードやシークレットを応答に含めない（応答用のDTOで必要な項目だけ返す）'));
-    if (internal.length) out.push(mk(excessiveData, ctx, 2, 'medium', 'fail', `キー: ${internal.slice(0, 8).join(', ')}`, '内部属性を応答に含めない'));
+    // 証跡のキーの経路は、データの値をキーにした部分（メールアドレス・秘密の値・ID）を「*」にしたもの
+    const paths = shownPaths(data);
+    const show = (ks: string[]) => [...new Set(ks.map(k => paths.get(k) ?? '*'))].slice(0, 8).join(', ');
+    if (secret.length) out.push(mk(excessiveData, ctx, 1, 'high', 'fail', `キー: ${show(secret)}（値は表示しない）`, 'パスワードやシークレットを応答に含めない（応答用のDTOで必要な項目だけ返す）'));
+    if (internal.length) out.push(mk(excessiveData, ctx, 2, 'medium', 'fail', `キー: ${show(internal)}`, '内部属性を応答に含めない'));
     return out.length ? out : [mk(excessiveData, ctx, 'ok', 'info', 'pass', `キー${uniq.length}種に秘密情報・内部属性らしきものなし`, '')];
   } };
 

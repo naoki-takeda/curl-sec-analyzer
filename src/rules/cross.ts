@@ -64,8 +64,9 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
       for (const [name, value] of last) byName.set(name, [...(byName.get(name) ?? []), value]);
     }
     const out: Finding[] = [];
-    for (const [name, vals] of byName) {
+    for (const [rawName, vals] of byName) {
       if (vals.length < 2) continue;
+      const name = rawName || '（名前なし）';   // 値だけの Set-Cookie（rules/cookies.ts の cookieName と同じ表示）
       const why = predictable(vals);
       out.push(why ? cf(sessionPredictable, 'session-sample-*', 2, 'high', 'fail', `${name}：${why}（${vals.map(maskValue).join(' / ')}）`, '暗号論的に安全な乱数でセッションIDを生成する')
                    : cf(sessionPredictable, 'session-sample-*', 'ok', 'info', 'pass', `${name}：${vals.length}件に共通部分・連番なし`, ''));

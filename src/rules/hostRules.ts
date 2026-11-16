@@ -3,6 +3,7 @@ import type { Finding, Rule, Severity, Status } from '../model';
 import { probePattern } from '../mask';
 import { hasCertificate, nameMatches, parseOpenssl } from '../parser/openssl';
 import { capturedAt } from '../parser/target';
+import { PROBE_UNREACHED_REC } from './util';
 
 const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
@@ -47,7 +48,10 @@ export const knownFiles: Rule = { id: 'E-03', title: '既知ファイル（/.git
         if (hit?.item === 'E-03') { fails++; out.push(hf(knownFiles, host, 1, 'high', 'fail', `${p.path}（HTTP ${p.code}、一致したパターン: ${hit.name}）`, 'Webサーバの公開ディレクトリから削除するか、アクセスを拒否する')); }
         else if (p.code === 200) { fails++; out.push(hf(knownFiles, host, 2, 'info', 'fail', `${p.path}（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）`, '中身を手動で確認する')); }
       }
-      if (!fails && own.length) out.push(hf(knownFiles, host, 'ok', 'info', 'pass', `${own.length}件のパスはいずれも取得できなかった`, ''));
+      // コード 000 は接続できなかった（タイムアウト・名前解決の失敗など）ことを示し、ファイルがないことは分からない。1件でもあれば合格にしない
+      const unreached = own.filter(p => !p.code).length;
+      if (!fails && unreached) out.push(hf(knownFiles, host, 'na', 'info', 'na', `${own.length}件のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC));
+      else if (!fails && own.length) out.push(hf(knownFiles, host, 'ok', 'info', 'pass', `${own.length}件のパスはいずれも取得できなかった`, ''));
     }
     return out;
   } };
@@ -75,8 +79,9 @@ export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵
         if (WEAK.test(c)) out.push(hf(cipherSuites, host, 1, 'high', 'fail', `合意した弱い暗号: ${ver} / ${c}`, 'RC4・3DES・NULL・EXPORT などを無効にする'));
         else if (!AEAD.test(c)) out.push(hf(cipherSuites, host, 3, 'medium', 'fail', `合意した暗号: ${ver} / ${c}`, 'ECDHE＋AEAD の暗号を優先する'));
       }
-      // ②鍵：OpenSSL 1.1・LibreSSL は「Server public key is N bit」だけで種類を出さない。256・384・521bit は楕円曲線、それ以外は RSA とみなす
-      const ec = info?.keyType ? /^id-ec|^EC|ED25519|ED448/i.test(info.keyType) : [256, 384, 521].includes(info?.keyBits ?? 0);
+      // ②鍵：OpenSSL 1.1・LibreSSL は「Server public key is N bit」だけで種類を出さない。256・384・521bit は楕円曲線、
+      // 224bit は P-224、253bit は Ed25519、456bit は Ed448、それ以外は RSA とみなす（512bit は brainpoolP512r1 と RSA 512bit を区別できないので RSA とする）
+      const ec = info?.keyType ? /^id-ec|^EC|ED25519|ED448/i.test(info.keyType) : [224, 253, 256, 384, 456, 521].includes(info?.keyBits ?? 0);
       if (info?.keyBits && !ec && info.keyBits < 2048) out.push(hf(cipherSuites, host, 2, 'high', 'fail', `RSA ${info.keyBits}bit${info.keyType ? '' : '（鍵の種類は長さから推定）'}`, 'RSA 2048bit 以上か ECDSA P-256 の鍵にする'));
       // ②署名：自己署名の証明書（ルート）の署名は対象外。チェーンの subject・issuer がなければ、従来どおり2つ目以降の最後の証明書をルートとみなす
       const isRoot = (i: number) => (info?.certs[i]?.issuer ? info.certs[i].issuer === info.certs[i].subject : i > 0 && i === (info?.sigalgs.length ?? 0) - 1);

@@ -1,7 +1,7 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext } from '../model';
 import { LOGOUT_FAILED_REC, header, hstsDirective, isStaticResource, mk, parseCsp, sensitiveUnlessStatic } from './util';
-import { maskValue } from '../mask';
+import { clip, maskValue } from '../mask';
 import { baseLabel, firstStatus, logoutFailed, ownChain } from '../parser/target';
 import { htmlBody, mixedContent } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
@@ -290,8 +290,10 @@ export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン�
       out.push(mk(productInfo, ctx, 3, 'medium', 'fail', `${h}: ${maskValue(v.trim())}`, '本番でデバッグ用のヘッダ・プロファイラを無効にする'));
     for (const h of ['via', 'x-backend-server', 'x-served-by', 'x-host']) for (const v of header(ctx, h))
       if (INTERNAL.test(v)) out.push(mk(productInfo, ctx, 4, 'low', 'fail', `${h}: ${v}`, '内部ホスト名・IPアドレスを出さない'));
-    for (const h of ['server-timing', 'x-runtime']) for (const v of header(ctx, h))
-      if (h !== 'server-timing' || appTimings(v).length) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `${h}: ${v}`, '本番では内部処理の名前や時間を外部に返さない'));
+    // Server-Timing の証跡は項目の名前だけにする（desc に SQL・メールアドレス・キーを入れる実装がある）
+    for (const v of header(ctx, 'server-timing')) { const names = appTimings(v);
+      if (names.length) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `server-timing: ${names.map(n => clip(n, 40)).join(', ')}（desc・dur の値は表示しない）`, '本番では内部処理の名前や時間を外部に返さない')); }
+    for (const v of header(ctx, 'x-runtime')) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `x-runtime: ${clip(v, 40)}`, '本番では内部処理の名前や時間を外部に返さない'));
     return out.length ? out : [mk(productInfo, ctx, 'ok', 'info', 'pass', '製品・デバッグ情報のヘッダなし', '')];
   } };
 

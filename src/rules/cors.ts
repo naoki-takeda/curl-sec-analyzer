@@ -4,6 +4,12 @@ import { hostOf } from '../parser/target';
 import { mk, sensitiveUnlessStatic } from './util';
 
 const TEST_ORIGINS = ['https://evil.example'];        // 既知のテスト値（ツール設計1）
+/** 送った Origin のホスト（ポートを含む）が、対象の URL のホストと同じか（ws・wss と http・https の違いは問わない） */
+const sameHostOrigin = (ctx: RuleContext): boolean => {
+  const o = ctx.target.sentOrigin; const host = hostOf(ctx.target);
+  if (!o || !host) return false;
+  try { return new URL(o).host.toLowerCase() === host.toLowerCase(); } catch { return false; }
+};
 const acaoOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-origin')?.[0]?.trim();
 const credOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-credentials')?.[0]?.trim().toLowerCase() === 'true';
 
@@ -127,6 +133,8 @@ export const websocketOrigin: Rule = { id: 'R-09', title: 'WebSocketのOrigin検
     // 合格にするのは、拒否を示す応答（401・403）だけ。200・404・426 などは、WebSocket のエンドポイントではない可能性がある（パスの誤りなど）
     if (s === 401 || s === 403) return [mk(websocketOrigin, ctx, 'ok', 'info', 'pass', `許可外Originのハンドシェイクが HTTP ${s}（拒否）`, '')];
     if (s !== 101) return [mk(websocketOrigin, ctx, 'na', 'info', 'na', `HTTP ${s}（WebSocket のエンドポイントではない可能性）`, 'C16 の URL が WebSocket のエンドポイントか確認して採取し直す（拒否なら 401 か 403、受け入れなら 101 が返る）')];
+    // 送った Origin が対象と同じホスト（自サイト）なら、101 は正しい動作で、許可外の Origin を拒否するかは分からない
+    if (sameHostOrigin(ctx)) return [mk(websocketOrigin, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin} で 101 Switching Protocols（自サイトの Origin。許可外の Origin では試していない）`, 'C16 のとおり許可外の Origin（https://evil.example）で採取し直す')];
     return ctx.target.sentAuth || ctx.sensitive
       ? [mk(websocketOrigin, ctx, 1, 'high', 'fail', `Origin: ${ctx.target.sentOrigin ?? '(不明)'} で 101 Switching Protocols（Cookie認証）`, 'ハンドシェイクで Origin を許可リストと照合し、許可外は 403 で拒否する')]
       : [mk(websocketOrigin, ctx, 2, 'info', 'fail', `Origin: ${ctx.target.sentOrigin ?? '(不明)'} で 101 Switching Protocols（認証なし）`, '公開用のWebSocketなら問題ない。意図どおりか確認する')];
