@@ -271,7 +271,11 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
   } };
 
 const PRODUCT_HEADERS = ['server', 'x-powered-by', 'x-aspnet-version', 'x-aspnetmvc-version', 'x-generator'];
-const INTERNAL = /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|127\.0\.0\.1|localhost|[\w-]+\.(?:internal|local|lan|corp|intra))\b/i;
+// 内部のホスト名は、ホスト名の最後が internal・local などのもの（edge01.local.example-cdn.net の .local. は公開のホスト名）
+const INTERNAL = /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|127\.0\.0\.1|localhost)\b|\b[\w-]+\.(?:internal|local|lan|corp|intra)(?![\w.-])/i;
+// CDN が付ける Server-Timing の項目（Cloudflare の cfL4・cfExtPri、CloudFront の cdn-*、Akamai の edge・origin・ak_p、Fastly）。アプリの内部処理ではない
+const CDN_TIMING = /^(?:cf[A-Z]\w*|cdn-[\w-]+|cdn|edge|origin|ak_p|fastly[\w-]*|x-cache|cache)$/;
+const appTimings = (v: string) => v.split(',').map(m => m.split(';')[0].trim()).filter(n => n && !CDN_TIMING.test(n));
 export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン・デバッグ情報の露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG-INFO-02', 'IPA'],
   run(ctx) {
@@ -287,7 +291,7 @@ export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン�
     for (const h of ['via', 'x-backend-server', 'x-served-by', 'x-host']) for (const v of header(ctx, h))
       if (INTERNAL.test(v)) out.push(mk(productInfo, ctx, 4, 'low', 'fail', `${h}: ${v}`, '内部ホスト名・IPアドレスを出さない'));
     for (const h of ['server-timing', 'x-runtime']) for (const v of header(ctx, h))
-      out.push(mk(productInfo, ctx, 5, 'low', 'fail', `${h}: ${v}`, '本番では内部処理の名前や時間を外部に返さない'));
+      if (h !== 'server-timing' || appTimings(v).length) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `${h}: ${v}`, '本番では内部処理の名前や時間を外部に返さない'));
     return out.length ? out : [mk(productInfo, ctx, 'ok', 'info', 'pass', '製品・デバッグ情報のヘッダなし', '')];
   } };
 

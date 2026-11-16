@@ -1,6 +1,6 @@
 // rules/transport.ts：第4章 メソッド・転送・ヘッダインジェクション（T-01、T-04〜T-08、T-12。TLSは rules/hostRules.ts）
 import type { Rule } from '../model';
-import { mk } from './util';
+import { NO_BODY_REC, mk } from './util';
 import { baseLabel } from '../parser/target';
 
 export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイレクト', appliesTo: 'any', scope: 'target',
@@ -54,6 +54,8 @@ export const hostInjection: Rule = { id: 'T-07', title: 'Host・X-Forwarded-Host
   run(ctx) {
     if (!ctx.final) return [mk(hostInjection, ctx, 'na', 'info', 'na', '応答がない', '')];
     const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(l => HOST_INJ_VALUE.test(l));
+    const ok2xx = ctx.final.status >= 200 && ctx.final.status < 300;
+    if (!loc && ok2xx && !ctx.final.body?.trim()) return [mk(hostInjection, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
     const body = ctx.final.body?.match(/https?:\/\/[^\s"'<>]*evil\.example[^\s"'<>]*/i)?.[0];
     if (loc || body) return [mk(hostInjection, ctx, 2, 'medium', 'fail', loc ? `Location: ${loc}` : `本文の絶対URL: ${body}`, '絶対URLは設定値のホスト名から作り、Host・X-Forwarded-Host を信頼しない')];
     return [mk(hostInjection, ctx, 'ok', 'info', 'pass', 'テスト値（evil.example）は応答に現れない', '')];
@@ -76,6 +78,7 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
     const f = ctx.final;
     if (!f) return [mk(methods, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (baseLabel(ctx.target.label) === 'trace') {
+      if (f.status === 200 && !f.body?.trim()) return [mk(methods, ctx, 'na', 'info', 'na', 'HTTP 200（本文を採取していない。反射したかが分からない）', NO_BODY_REC)];
       const reflected = f.status === 200 && /^TRACE \S+ HTTP\//m.test(f.body ?? '');
       return reflected ? [mk(methods, ctx, 1, 'medium', 'fail', `HTTP ${f.status}（リクエストを反射）`, 'TRACE を無効にする（405 か 501 を返す）')]
                        : [mk(methods, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];

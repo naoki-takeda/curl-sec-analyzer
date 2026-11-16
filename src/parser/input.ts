@@ -1,7 +1,7 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、#META、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
 import { assignHopUrls, uniqueLabels } from './target';
-import { splitSetCookie } from './setCookie';
+import { cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
 
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
 const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
@@ -9,6 +9,15 @@ const OPENSSL_START = /^(CONNECTED\(|depth=|Certificate chain|subject=|issuer=|n
 // -v の出力の手がかり。今の curl は「*   Trying」（空白が3つ）や「* Established connection to」とも出すので、空白の数を問わない
 const VERBOSE_HINT = /^\*\s+(Connected to|Established connection to|Trying|SSL connection|ALPN|Host )/;
 const BODY_LIMIT = 64 * 1024;
+// 改行のない本文（手で書いた curl -i の JSON・HTML）の直後にくっついたマーカー（{"id":1}#TARGET url=…）。分けないと、次のターゲットが
+// 前の本文に吸い込まれて黙って消える。本文がたまたま「}#TARGET url=」を含むことはまずないので、JSON・HTML の閉じの直後だけを分ける
+const STUCK_MARKER = /([}\]>])(#(?:TARGET|META)[ \t]+(?:url|label|at|cmd|response_code)=)/g;
+// curl の進捗表示（-s を付けない実行で 2>&1 にしたもの）。見出しの行と数字の行は読み飛ばし、応答の行の前にくっついた部分は取り除く
+// （遅い応答では、進捗表示とステータス行が同じ行に出て、ターゲットごと失われる）。時刻の欄（--:--:-- か 0:00:01）を手がかりにする
+// 数字の行は欄が12個（% Total % Received % Xferd Dload Upload Total Spent Left Speed）。8個以上の数字の欄と時刻の欄を条件にし、
+// 本文の日時の行（2026-11-01 12:00:00）を読み飛ばさないようにする
+const METER_LINE = /^\s*(?:% Total\s+% Received|Dload\s+Upload\s+Total)|^\s*(?:[\d.]+[kMGTP]?\s+){5,}(?:(?:--:--:--|\d+:\d\d:\d\d)\s+){2,3}[\d.]+[kMGTP]?\s*$/;
+const METER_PREFIX = /^\s*(?:[\d.]+[kMGTP]?\s+){5,}(?:(?:--:--:--|\d+:\d\d:\d\d)\s+){2,3}[\d.]+[kMGTP]?\s*(?=(?:< )?HTTP\/[\d.]+ \d{3}|[<>*] )/;
 
 // key=value を解析。ct= 以降は行末まで1つの値（空白を含むContent-Type対策）
 export function attrs(s: string): Record<string, string> {
@@ -48,7 +57,9 @@ export function parseInput(input: string): ParseResult {
 
   // 改行をそろえる。Windows の curl の -v（2>&1）は受信ヘッダの行を CR CR LF で終えるため、CR がいくつ続いても1つの改行にする
   // （CR CR LF を CR LF と CR に分けて読むと、受信ヘッダの各行のあとに空行ができ、ヘッダがすべて失われる）
-  for (let line of input.replace(/\r+\n|\r/g, '\n').split('\n')) {
+  for (let line of input.replace(/\r+\n|\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').split('\n')) {
+    if (METER_LINE.test(line)) continue;
+    line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
     if (mk) {                                          // マーカー行は必ず応答を閉じる
       close(); inOpenssl = false; vBody = false; if (json) { unparsed += json.length; json = null; }
@@ -86,7 +97,10 @@ export function parseInput(input: string): ParseResult {
         const h = line.slice(2);
         if (/^CONNECT /i.test(h)) connectReq = true;
         const o = h.match(/^origin:\s*(.*)$/i); if (o) t.sentOrigin = o[1].trim();
-        if (/^(cookie|authorization):/i.test(h)) { t.sentAuth = true; t.sentTokens.push(...(h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? [])); }
+        const ck = h.match(/^cookie:\s*(.*)$/i), au = /^authorization:/i.test(h);
+        if (ck) t.sentCookieNames = [...new Set([...(t.sentCookieNames ?? []), ...cookieNames(ck[1])])];
+        if (au) t.sentAuthorization = true;
+        if (ck || au) { t.sentAuth = sentAuthOf(!!t.sentAuthorization, t.sentCookieNames ?? []); t.sentTokens.push(...(h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? [])); }
         continue;
       }
       if (/^>\s*$/.test(line)) continue;               // 送信ヘッダの終端
@@ -135,8 +149,12 @@ export function parseInput(input: string): ParseResult {
   for (const tg of targets) tg.responses.forEach((r, i) => {
     // CONNECT（プロキシ）の応答：理由句が「Connection established」のもの。理由句が違っても、本文のない 2xx のあとに応答が続くなら、それはプロキシの応答
     const proxyReply = r.status >= 200 && r.status < 300 && i < tg.responses.length - 1 && !r.body?.trim() && r.reason !== 'header_json';
+    // プロキシの認証要求（407）と、curl が認証し直した 401 のあとには、同じリクエストの応答が続く。その URL 自身の応答ではないので、
+    // 最初の応答（T-04・A-01・C-09・C-12 などが見るステータス）にしない。プロキシの 407 を最初の応答にすると、T-04 が「HTTP を拒否」と合格にする
+    const retried = i < tg.responses.length - 1;
     if (r.status > 0 && r.status < 200) r.kind = 'informational';
-    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '')) || proxyReply) r.kind = 'connect';
+    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '')) || proxyReply || (r.status === 407 && retried)) r.kind = 'connect';
+    else if (r.status === 401 && retried) r.kind = 'challenge';
     else if (r.status >= 300 && r.status < 400 && r.headers.has('location')) r.kind = 'redirect';
     if (r.body !== undefined && !r.body.trim()) r.body = undefined;
   });

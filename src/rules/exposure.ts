@@ -1,7 +1,7 @@
 // rules/exposure.ts：第5章 エラー・情報露出（E-01、E-02、E-04〜E-06、E-11、E-13）
 import type { Rule, RuleContext } from '../model';
 import { clip, probePattern } from '../mask';
-import { header, mk } from './util';
+import { NO_BODY_REC, bodyTruncated, header, isStaticResource, mk } from './util';
 import { ownChain } from '../parser/target';
 
 const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : undefined);
@@ -23,7 +23,8 @@ const path = (ctx: RuleContext) => { try { return new URL(ctx.target.url ?? '').
 export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース・デバッグ情報', appliesTo: 'any', scope: 'target',
   basis: ['ISOG-J', 'OWASP Error Handling CS'],
   run(ctx) {
-    const b = body(ctx);
+    // JS・CSS などの静的リソースは、エラーの応答ではない（圧縮した JS の文字列に ORA- や例外の名前が含まれていても、エラーの詳細ではない）
+    const b = isStaticResource(ctx) ? undefined : body(ctx);
     if (!b) return [];
     const out = [];
     if (CREDENTIALS.some(re => re.test(b)))
@@ -104,6 +105,7 @@ export const jsonp: Rule = { id: 'E-06', title: 'JSONP', appliesTo: 'any', scope
     let cb: string | null = null;
     try { cb = new URL(ctx.target.url ?? '').searchParams.get('callback') ?? new URL(ctx.target.url ?? '').searchParams.get('jsonp'); } catch { /* URLなし */ }
     if (!cb || !ctx.final) return [];
+    if (!body(ctx) && ctx.final.status >= 200 && ctx.final.status < 300) return [mk(jsonp, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
     const b = (body(ctx) ?? '').trimStart();
     const hit = b.startsWith(`${cb}(`) || b.startsWith(`/**/${cb}(`) || b.startsWith(`/**/ ${cb}(`);
     if (!hit) return [mk(jsonp, ctx, 'ok', 'info', 'pass', `callback=${cb} は本文に反映されない`, '')];
@@ -120,6 +122,7 @@ const DOWNLOAD_CT = /^(application\/(octet-stream|pdf|zip|x-zip|vnd\.(?![\w.-]*\
 const ACTIVE_CT = /^\s*(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml)\b/i;
 // その場で表示するのが普通の種類（画像・音声・動画）。Content-Disposition がなくても②にしない
 const INLINE_MEDIA_CT = /^\s*(?:image\/(?!svg)|audio\/|video\/)/i;
+const BUILD_ASSET_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|font\/|application\/(?:x-)?font)/i;
 export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード応答', appliesTo: 'any', scope: 'target',
   basis: ['OWASP File Upload CS'],
   run(ctx) {
@@ -137,6 +140,8 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     if (!DOWNLOAD_CT.test(ct) && !uploadPath && !cd) return [];   // ファイル配信の応答だけ
     if (uploadPath && ACTIVE_CT.test(ct) && !/attachment/i.test(cd))
       return [mk(downloadResponse, ctx, 1, 'high', 'fail', `Content-Type: ${ct} / Content-Disposition: ${cd || '(なし)'}`, '利用者がアップロードしたファイルは別オリジンから attachment で配信する')];
+    // ビルドした CSS・JS・フォント（Drupal の /sites/default/files/css/…、Next.js の /_next/static/media/…）は、ページが読み込むもので、ダウンロードではない
+    if (!cd && BUILD_ASSET_CT.test(ct)) return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Type: ${ct}（CSS・JS・フォント）`, '')];
     if (!cd && INLINE_MEDIA_CT.test(ct)) return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Type: ${ct}（画像・音声・動画はその場で表示）`, '')];
     if (!cd) return [mk(downloadResponse, ctx, 2, 'low', 'fail', `Content-Type: ${ct}（Content-Dispositionなし）`, 'Content-Disposition: attachment; filename="…" を付ける')];
     return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Disposition: ${cd}`, '')];
@@ -155,6 +160,7 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     const ref = header(ctx, 'sourcemap')[0] ?? header(ctx, 'x-sourcemap')[0] ?? body(ctx)?.match(/\/[/*]#\s*sourceMappingURL=(\S+)/)?.[1];
     const isJs = /javascript|ecmascript/i.test(header(ctx, 'content-type')[0] ?? '') || /\.m?js(?:[?#]|$)/.test(ctx.target.url ?? '');
     if (!isJs && !ref) return [];
+    if (!ref && (!body(ctx) || bodyTruncated(ctx))) return [mk(sourceMap, ctx, 'na', 'info', 'na', body(ctx) ? '本文の先頭64KBに参照なし（参照は末尾にあることが多い）' : '本文を採取していない', NO_BODY_REC)];
     return ref ? [mk(sourceMap, ctx, 2, 'low', 'fail', `参照: ${clip(ref, 120)}`, '本番ビルドでは sourceMappingURL を出さない。.map を C13 のパス一覧に追加して取得できるか確認する')]
                : [mk(sourceMap, ctx, 'ok', 'info', 'pass', 'ソースマップへの参照なし', '')];
   } };

@@ -2,7 +2,7 @@
 import type { Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
-import { mk } from './util';
+import { isLabelText, mk } from './util';
 import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
@@ -129,17 +129,25 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
   } };
 
 // 秘密情報は証跡に値を出さず、種類の名前だけを出す
-const SECRETS: [string, RegExp][] = [
+// キー・シークレットの代入。値は ASCII の記号・英数字だけ（日本語の文言「パスワードは8文字以上…」は空白がなくても秘密情報ではない）。
+// 名前の前は語の境目（forgot_password: の password には一致させない）
+const ASSIGNED = /(?<![\w-])["']?(api[_-]?key|client[_-]?secret|secret[_-]?key|access[_-]?token|password)["']?\s*[:=]\s*["']([!#-&(-~]{12,})["']/gi;
+/**
+ * 秘密ではない値：パス（password:"/users/password/new"）、URL、ドットでつないだ翻訳キー（"auth.password.label"）、テンプレート（{{…}}、${…}）、
+ * 英語の画面の文言（A-07 と同じ isLabelText）
+ */
+const notSecretValue = (key: string, v: string): boolean =>
+  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v);
+const SECRETS: [string, { test(s: string): boolean }][] = [
   ['AWSアクセスキー', /\bAKIA[0-9A-Z]{16}\b/],
   ['Google APIキー', /\bAIza[0-9A-Za-z_-]{35}\b/],
   ['秘密鍵', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
   ['Slackトークン', /\bxox[baprs]-[0-9A-Za-z-]{10,}/],
   ['GitHubトークン', /\bgh[pousr]_[0-9A-Za-z]{36,}\b/],
   ['JWT', /\beyJ[\w-]{10,}\.eyJ[\w-]{10,}\.[\w-]{10,}/],
-  // 値は ASCII の記号・英数字だけ（日本語の文言「パスワードは8文字以上…」は空白がなくても秘密情報ではない）
-  ['キー・シークレットの代入', /["']?(?:api[_-]?key|client[_-]?secret|secret[_-]?key|access[_-]?token|password)["']?\s*[:=]\s*["'][!#-&(-~]{12,}["']/i],
+  ['キー・シークレットの代入', { test: (s: string) => [...s.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2])) }],
 ];
-const INTERNAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[\w-]+\.(?:internal|local|lan|corp|intra))\b[^\s"'<>]*/i;
+const INTERNAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[\w-]+\.(?:internal|local|lan|corp|intra))(?![\w.-])[^\s"'<>]*/i;   // ホスト名の最後で区切る（edge01.local.example-cdn.net の .local. には一致させない）
 const DEV_WORD = /TODO|FIXME|XXX|HACK|debug|password|パスワード|本番|staging/i;
 /**
  * 閉じたコメント（<!-- … -->）を1つずつ切り出し、その中だけで開発用の語を探す。一致した語を返す。

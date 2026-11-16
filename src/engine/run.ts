@@ -2,9 +2,9 @@
 // ①ラベル対応表で項目を絞る → ②ターゲット単位 → ③ホスト単位 → ④横断（各スコープ内は dependsOn の順に並べてある）
 // → ⑤条件単位の絞り込み（ターゲット単位の結果）→ ⑥API応答での重要度の引き下げ → ⑦例外の適用
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
-import { maskText } from '../mask';
+import { maskKey, maskText } from '../mask';
 import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isSensitive, ownChain, responseKind } from '../parser/target';
-import { looksLikeSession, parseSetCookie } from '../parser/setCookie';
+import { looksLikeSession, parseSetCookie, sentAuthOf } from '../parser/setCookie';
 import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../rules/ruleset';
 import { allowedItems } from './labels';
 import { applySuppressions } from './suppress';
@@ -79,7 +79,7 @@ export function crossContext(targets: Target[], findings: Finding[]): CrossConte
     withPrefix: p => targets.filter(t => t.label.startsWith(p) && !/#\d+$/.test(t.label)),
     byHost: () => {
       const m = new Map<string, Target[]>();
-      for (const t of targets) { const h = hostOf(t); if (h) m.set(h, [...(m.get(h) ?? []), t]); }
+      for (const t of targets) { const h = hostOf(t); if (!h) continue; const list = m.get(h); if (list) list.push(t); else m.set(h, [t]); }   // 配列をコピーしない（ターゲット数の2乗の時間になる）
       return m;
     },
   };
@@ -90,27 +90,44 @@ export interface RunOptions { rules?: Rule[]; hostRules?: Rule[]; crossRules?: R
 export function runAll(targets: Target[], opt: RunOptions = {}): Finding[] {
   // ⑦ プロファイルの除外 → 二重減点の除去 → 重要度の上書き → 例外
   return withProfile(opt.profile, () => {
+    // 機密応答の推定（送ったセッションCookie）は、組織プロファイルのセッションCookieの名前で作り直す（パーサはプロファイルを知らない）
+    for (const t of targets) if (t.sentCookieNames || t.sentAuthorization) t.sentAuth = sentAuthOf(!!t.sentAuthorization, t.sentCookieNames ?? []);
     const kept = excludeItems(evaluate(targets, opt), opt.profile);
     return applySuppressions(overrideSeverity(dedupe(kept), opt.profile), opt.suppressions ?? [], opt.today);
   });
+}
+
+/**
+ * ルールを1つ実行する。診断対象の応答（細工した JWT のヘッダなど）でルールが例外を投げても、判定全体を止めずに、
+ * そのルールだけを na にする（止めると、ほかのすべての結果が消える）
+ */
+function safeRun(rule: Rule, run: () => Finding[] | undefined, target: string): Finding[] {
+  try { return run() ?? []; } catch {
+    return [{ ruleId: `${rule.id}.na`, item: rule.id, title: rule.title, severity: 'info', status: 'na', target,
+              evidence: 'ルールの実行中にエラーが発生した（入力の形式が想定外）', recommendation: '', references: rule.basis, score: 0 }];
+  }
 }
 
 function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   const { rules = TARGET_RULES, hostRules = HOST_RULES, crossRules = ALL_CROSS_RULES } = opt;
   const findings: Finding[] = [];
   const maps: HostMaps = { hsts: hostHstsMap(targets), sameSite: hostSameSiteMap(targets) };
+  // ターゲットごとの文脈・許可・URL・キーは一度だけ作る（ルールごとに作り直すと、ルール数 × ターゲット数の時間がかかる）。
+  // 文脈の findings は同じ配列を指すので、依存先のルールの結果も見える
+  const per = targets.map(t => {
+    const url = t.url ? maskText(t.url) : undefined;
+    // 差分・例外の突き合わせ：HAR のラベル（har-4 など）は記録し直すと番号が変わるため、メソッドとURLで突き合わせる。
+    // URL は、伏せた値を「…」だけにしたもの（maskKey）。伏せた値の先頭の文字や長さは、記録し直すと変わる
+    const targetKey = t.meta.source === 'har' ? `HAR ${t.meta.method ?? 'GET'} ${t.url ? maskKey(t.url) : t.label}` : t.label;
+    return { t, url, targetKey, host: hostOf(t), allow: allowedItems(t.label), ctx: contextOf(t, findings, maps, opt.profile) };
+  });
   for (const rule of rules) {                                // ルールごとに全ターゲット（依存先の結果が先にそろう）
-    for (const t of targets) {
-      const allow = allowedItems(t.label);
+    for (const { t, url, targetKey, host, allow, ctx } of per) {
       if (!allow.allowsItem(rule.id)) continue;               // ①
-      const ctx = contextOf(t, findings, maps, opt.profile);
       if (rule.appliesTo === 'html' && ctx.responseKind === 'other') continue;
       if (rule.appliesTo === 'api' && ctx.responseKind !== 'api') continue;
-      for (const f of (rule.run?.(ctx) ?? []).filter(x => allow.allowsFinding(x))) {   // ②⑤
-        const url = t.url ? maskText(t.url) : undefined;
-        // 差分の突き合わせ：HAR のラベル（har-4 など）は記録し直すと番号が変わるため、メソッドとURLで突き合わせる
-        const targetKey = t.meta.source === 'har' ? `HAR ${t.meta.method ?? 'GET'} ${url ?? t.label}` : t.label;
-        const g: Finding = { ...f, url, host: hostOf(t), targetKey, evidence: maskText(f.evidence) };
+      for (const f of safeRun(rule, () => rule.run?.(ctx), t.label).filter(x => allow.allowsFinding(x))) {   // ②⑤
+        const g: Finding = { ...f, url, host, targetKey, evidence: maskText(f.evidence) };
         if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') g.severity = 'info';   // ⑥
         findings.push(g);
       }
@@ -118,6 +135,6 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   }
   const x = crossContext(targets, findings);
   for (const rule of [...hostRules, ...crossRules])           // ③④
-    for (const f of rule.runCross?.(x) ?? []) findings.push({ ...f, evidence: maskText(f.evidence) });
+    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: maskText(f.evidence) });
   return findings;
 }

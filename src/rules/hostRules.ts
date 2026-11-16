@@ -26,7 +26,9 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
         'TLS 1.2 と 1.3 だけを有効にする'));
       else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected')) out.push(hf(tlsVersion, host, 'ok', 'info', 'pass', '旧バージョンは拒否された', ''));
       else if (probes.length) out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（手元のOpenSSLが非対応）', '旧バージョンに対応した環境で C12 を実行する'));
-      if (negotiated.length && !negotiated.includes('TLSv1.3')) out.push(hf(tlsVersion, host, 2, 'info', 'fail', `合意したバージョン: ${[...new Set(negotiated)].join(', ')}`, 'TLS 1.3 を有効にする（curl 側が 1.3 に対応しているかも確認）'));
+      // TLS 1.3 のプローブ（#TLSPROBE v=tls1_3）で接続できたなら、合意が 1.2 なのは curl 側の事情（古い OpenSSL など）。②にしない
+      const tls13 = probes.some(p => p.result === 'accepted' && /1[._]?3$/.test(p.version.replace(/\s/g, '')));
+      if (negotiated.length && !negotiated.includes('TLSv1.3') && !tls13) out.push(hf(tlsVersion, host, 2, 'info', 'fail', `合意したバージョン: ${[...new Set(negotiated)].join(', ')}`, 'TLS 1.3 を有効にする（curl 側が 1.3 に対応しているかも確認）'));
     }
     return out;
   } };

@@ -1,7 +1,7 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, finalResponse, firstStatus, isHttps, logoutFailed, ownChain } from '../parser/target';
-import { isDeletion, looksLikeSession, parseSetCookie } from '../parser/setCookie';
+import { capturedAt, finalResponse, firstStatus, isHop, isHttps, logoutFailed, ownChain } from '../parser/target';
+import { isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp } from './util';
 
@@ -23,7 +23,10 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
-    if (!before.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'ログイン前にセッションCookieが発行されていない', 'ログイン前にCookieを発行するページで pre-login を採取する')];
+    // ログイン前のセッションIDは、pre-login で発行したものに加え、pre-login で送ったもの（トップページで発行され、ログイン画面では送るだけ。
+    // ブラウザの普通の流れで、HAR ではほぼこの形になる）も数える。送っただけの値は分からないので、login で新しいセッションCookieを発行したかで見る
+    const sent = (pre.sentCookieNames ?? []).filter(looksLikeSessionName);
+    if (!before.length && !sent.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'ログイン前にセッションCookieが発行されていない', 'ログイン前にCookieを発行するページで pre-login を採取する')];
     if (!after.length || after.some(a => before.includes(a)))
       return [cf(sessionFixation, 'pre-login/login', 1, 'high', 'fail', 'login 応答でセッションIDが再発行されていない', 'ログイン成功時にセッションIDを再発行する')];
     return [cf(sessionFixation, 'pre-login/login', 'ok', 'info', 'pass', 'ログイン時にセッションIDを再発行している', '')];
@@ -82,7 +85,7 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     if (logoutFailed(lo)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(lo)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const mp = x.byLabel('mypage'), ms = mp ? firstStatus(mp) : 0;
     if (ms && !(ms >= 200 && ms < 300)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログイン後のページ（mypage）が HTTP ${ms}（ログインできていない）`, LOGIN_FAILED_REC)];
-    const first = after.responses.find(r => r.kind !== 'informational' && r.kind !== 'connect')!;
+    const first = after.responses.find(isHop)!;
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!first.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     return first.status >= 200 && first.status < 300

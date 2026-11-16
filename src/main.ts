@@ -2,8 +2,9 @@
 import './styles.css';
 import { parseInput } from './parser/input';
 import { harTargets, isHar, suggestLabels } from './parser/har';
-import { uniqueLabels } from './parser/target';
+import { assignHopUrls, uniqueLabels } from './parser/target';
 import { runAll } from './engine/run';
+import { countBySeverity, overall } from './engine/summarize';
 import { coverage, ITEMS } from './engine/coverage';
 import { isActive, parseSuppressions } from './engine/suppress';
 import { parseProfile, profileTemplate, withProfile } from './engine/profile';
@@ -79,7 +80,7 @@ function buildShell() {
         el('div', 'flex flex-wrap items-baseline gap-x-4',
           el('h1', 'text-2xl font-bold tracking-tight', 'curl-sec-analyzer'),
           el('span', 'num text-sm text-muted', T.versions(TOOL_VERSION, RULESET_VERSION)),
-          button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); })),
+          button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const s = summary; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); if (s) saySummary(s); })),
         el('p', 'mt-1 text-muted', T.tagline),
         el('ul', 'mt-2 list-disc pl-5 text-sm text-muted', el('li', '', T.notice1), el('li', '', T.notice2), el('li', '', T.notice3),
           T.englishNote ? el('li', '', T.englishNote) : null),
@@ -113,7 +114,10 @@ function buildShell() {
   if (state.last) render(); else renderEmpty();
 }
 function keepDraft() { state.draft = { input: refs.input.value, url: refs.urlInput.value, message: refs.message.textContent ?? '' }; }
-function say(m: string) { refs.message.textContent = m; }
+// 判定のあとの件数。言語を切り替えたら、その言語で出し直す（文字列のまま残すと、英語の画面に日本語の件数が残る）
+let summary: [number, number, number] | undefined;
+function say(m: string) { refs.message.textContent = m; summary = undefined; }
+function saySummary(s: [number, number, number]) { say(tr().analyzed(...s)); summary = s; }
 /** 設定を読み込んだあとに判定し直す。読み込みのエラーは判定のあとに表示する（analyze は最初に表示を消すため、先に出すと消えてしまう） */
 function refresh(msg = '') {
   renderSettings();
@@ -171,7 +175,8 @@ function analyzeUnsafe() {
   const targets = [...parsed.targets, ...fromHar.targets];
   const merged = uniqueLabels(targets);                       // 貼り付けと HAR で同じラベル（login など）を付けた場合
   const u = refs.urlInput.value.trim();
-  if (u) for (const t of targets) if (!t.url && t.label === 'default') t.url = u;
+  // URL 欄で補ったターゲットにも、各ホップの URL を付け直す（-L で http から https に転送されたかを判定するため。parseInput の中では URL が分からない）
+  if (u) for (const t of targets) if (!t.url && t.label === 'default') { t.url = u; assignHopUrls(t); }
   if (!targets.length) { say(T.noResponse); state.last = null; renderEmpty(); return; }
   const warnings = [...parsed.warnings, ...fromHar.warnings, ...merged].filter(w => !(u && w.kind === 'unknown-url' && w.label === 'default'));   // URL欄で補ったのは default だけ
   const findings = runAll(targets, { suppressions: state.suppressions, profile: state.profile });
@@ -179,8 +184,9 @@ function analyzeUnsafe() {
   if (text.trim()) state.view.inputHidden = true;            // 判定できたら、生の出力を隠す
   applyInputVisibility();
   render();
-  const fails = findings.filter(f => f.status === 'fail');
-  say(T.analyzed(targets.length, fails.length, fails.filter(f => f.severity === 'high').length));
+  // 件数は画面の集計（項目×条件で一意に数える。ui/results.ts と同じ）に合わせる。ターゲットごとの指摘を数えると、画面と違う数を読み上げる
+  const rows = overall(findings);
+  saySummary([targets.length, rows.length, countBySeverity(rows).high]);
   if (matchMedia('(max-width: 1023px)').matches)
     refs.results.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth' });
 }

@@ -43,7 +43,7 @@ const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-]))eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 // スキームのない「//ユーザー情報@ホスト」（<script src="//user:pass@cdn…">）も含める
 const URL_CRED = /(\b[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)([^/\s?#<>"']{1,512})@/g;
 /** パスワードがあればユーザー名を残してパスワードを伏せる。ユーザー名だけ（https://<トークン>@host/ の形）なら、それをトークンとしてマスクする */
-const maskUserinfo = (u: string) => { const i = u.indexOf(':'); return i >= 0 ? `${u.slice(0, i)}:****` : maskValue(u); };
+const maskUserinfo = (u: string, h: Hider) => { const i = u.indexOf(':'); return i >= 0 ? `${u.slice(0, i)}:****` : h.value(u); };
 
 export function maskValue(v: string): string {
   const keep = v.length <= 8 ? 0 : v.length <= 20 ? 2 : 4;
@@ -65,34 +65,61 @@ const maskedParam = (v: string, rest: string) => /…\(\d+$/.test(v) && rest.sta
  * 16文字以上、24文字以上の16進数（UUID を含む）、または数字を含む32文字以上の [A-Za-z0-9_-] なら、そのかけらを伏せる。
  * 「2026-annual-report-v2」のような普通の名前は残す。マスク済みの「…(N chars)」は文字種が違うので、もう一度は伏せない
  */
-const PATH_SEGMENT = /(?<=\/|%(?:25)*2[Ff])[A-Za-z0-9_=.:~+-]{16,}/g;
+// 「//」「%2F%2F」の直後はホスト名（オーソリティ）なので見ない。見ると、長いホスト名（staging-customer-portal-frontend-01.example.com、
+// ELB の名前）まで伏せ、URL で登録した例外が一致しなくなり、CORS の証跡の Origin も読めなくなる
+const PATH_SEGMENT = /(?<=(?<!\/)\/|(?<!%(?:25)*2[Ff])%(?:25)*2[Ff])[A-Za-z0-9_=.:~+-]{16,}/g;
 const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
   (/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || (p.length >= 32 && /\d/.test(p)));
-const maskSegment = (seg: string): string => seg.replace(/[^.:~+]+/g, piece => {
-  const body = piece.replace(/=+$/, '');
-  return secretPiece(body) ? maskValue(body) + piece.slice(body.length) : piece;
+/** 伏せ方：画面・エクスポート用（先頭の数文字と長さを残す）と、突き合わせのキー用（記録し直しても変わらないよう、何も残さない） */
+interface Hider { value: (v: string) => string; bare: (v: string) => string }
+const SHOW: Hider = { value: v => maskValue(v), bare: v => `…(${v.length} chars)` };
+const KEY: Hider = { value: () => '…', bare: () => '…' };
+/**
+ * かけらを伏せる。英字だけの短い語と - か _ で始まるもの（application-<ダイジェスト>.js、vendor-<ダイジェスト>.js）は、その語を残して
+ * 残りだけを伏せる（別のファイルを区別できるように。残りは先頭の文字を残さず、もう一度マスクしても変わらないようにする）
+ */
+const maskSegment = (seg: string, h: Hider = SHOW): string => seg.replace(/[^.:~+]+/g, piece => {
+  const body = piece.replace(/=+$/, ''); const pad = piece.slice(body.length);
+  if (!secretPiece(body)) return piece;
+  const m = body.match(/^([A-Za-z]{3,20}[-_])(.+)$/);
+  return m && secretPiece(m[2]) ? m[1] + h.bare(m[2]) + pad : h.value(body) + pad;
 });
+/**
+ * ASP.NET の Cookie を使わないセッション（/(S(<セッションID>))/、フォーム認証のチケット /(F(<チケット>))/、匿名ID の A(…)）。
+ * パスの部分が「(」で始まるので、PATH_SEGMENT では見つからない
+ */
+const ASPNET_COOKIELESS = /\/\(((?:[A-Z]\([^()\s/]+\))+)\)/g;
 
 /** CSP の nonce の値（'nonce-…'）。どの証跡でも同じようにマスクする（H-04⑤ と同じ扱い） */
 const CSP_NONCE = /'nonce-([^']+)'/g;
 
 /** パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る（深さ3まで） */
-function maskParams(s: string, depth = 0): string {
+function maskParams(s: string, h: Hider, depth = 0): string {
   return s.replace(ANY_PARAM, (all: string, sep: string, k: string, eq: string, v: string, offset: number) => {
     if (maskedParam(v, s.slice(offset + all.length, offset + all.length + 7))) return all;
-    if (isSecretParamName(k)) return `${sep}${k}${eq}${maskValue(v)}`;
-    return depth < 3 ? `${sep}${k}${eq}${maskParams(v, depth + 1)}` : all;
+    if (isSecretParamName(k)) return `${sep}${k}${eq}${h.value(v)}`;
+    return depth < 3 ? `${sep}${k}${eq}${maskParams(v, h, depth + 1)}` : all;
   });
 }
 
-/** ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする。マスク済みの文字列に使っても結果は変わらない */
-export function maskText(s: string): string {
-  // 順序：パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる） → ユーザー情報 → パスの部分
-  return maskParams(s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${maskValue(v)}'`)))
-          .replace(JWT, t => maskValue(t))
-          .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u)}@`)
-          .replace(PATH_SEGMENT, maskSegment);
+function mask(s: string, h: Hider): string {
+  // 順序：パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる） → ユーザー情報 → ASP.NET のセッション → パスの部分
+  return maskParams(s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${h.value(v)}'`)), h)
+          .replace(JWT, t => h.value(t))
+          .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
+          .replace(ASPNET_COOKIELESS, (_, inner: string) => `/(${inner.replace(/([A-Z])\(([^()]+)\)/g, (__, k: string, v: string) => `${k}(${h.value(v)})`)})`)
+          .replace(PATH_SEGMENT, seg => maskSegment(seg, h));
 }
+
+/** ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする。マスク済みの文字列に使っても結果は変わらない */
+export const maskText = (s: string): string => mask(s, SHOW);
+
+/**
+ * 例外と前回の結果の突き合わせに使う URL（HAR の targetKey）。伏せる場所は maskText と同じだが、伏せた値を「…」だけにする。
+ * maskText の出力（先頭の数文字と長さを残す）をキーにすると、同じページを記録し直したときに ?code= などの値でキーが変わり、
+ * 例外が効かず、差分ではすべて「新規」になる
+ */
+export const maskKey = (s: string): string => mask(s, KEY);
 
 /**
  * 証跡の抜粋：マスクしてから切り詰める。切り詰めてからマスクすると、途中で切れた JWT（ドットが足りない）や

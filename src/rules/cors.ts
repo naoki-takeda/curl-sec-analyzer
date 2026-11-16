@@ -94,7 +94,8 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
   } };
 
 const SENSITIVE_EXPOSE = /\b(authorization|set-cookie|x-auth[\w-]*|[\w-]*token[\w-]*|x-internal[\w-]*|x-debug[\w-]*)\b/i;
-// 名前に token を含んでも、認証のトークンではないヘッダ（CSRF 対策のトークンは SPA が読むために公開する。ページ送りのトークンも秘密ではない）
+// 名前に token を含んでも、認証のトークンではないヘッダ（CSRF 対策のトークンは SPA が読むために公開する。ページ送りのトークンも秘密ではない）。
+// token を含む名前だけに使う（X-Debug-Async-Trace、X-Internal-Pagecache-Node のような内部ヘッダまで除かないため）
 const NOT_AUTH_TOKEN = /csrf|xsrf|page|next|continuation|cursor|sync/i;
 export const corsExpose: Rule = { id: 'R-07', title: 'Access-Control-Expose-Headers', appliesTo: 'any', scope: 'target',
   basis: ['MDN'],
@@ -102,7 +103,7 @@ export const corsExpose: Rule = { id: 'R-07', title: 'Access-Control-Expose-Head
     const v = ctx.final?.headers.get('access-control-expose-headers')?.join(',');
     if (!ctx.final || !v) return [];
     if (v.split(',').some(s => s.trim() === '*')) return [mk(corsExpose, ctx, 2, 'low', 'fail', v, '公開するヘッダを明示する')];
-    if (v.split(',').some(h => SENSITIVE_EXPOSE.test(h) && !NOT_AUTH_TOKEN.test(h))) return [mk(corsExpose, ctx, 1, 'medium', 'fail', v, '認証トークンや内部ヘッダを公開しない')];
+    if (v.split(',').some(h => SENSITIVE_EXPOSE.test(h) && !(/token/i.test(h) && NOT_AUTH_TOKEN.test(h)))) return [mk(corsExpose, ctx, 1, 'medium', 'fail', v, '認証トークンや内部ヘッダを公開しない')];
     return [mk(corsExpose, ctx, 'ok', 'info', 'pass', v, '')];
   } };
 

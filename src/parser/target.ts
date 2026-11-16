@@ -10,22 +10,25 @@ export const baseLabel = (label: string) => label.replace(/#\d+$/, '');
  */
 export function uniqueLabels(targets: Target[]): ParseWarning[] {
   const used = new Set(targets.map(t => t.label)); const seen = new Set<string>(); const renamed = new Map<string, string[]>();
+  const next = new Map<string, number>();            // ラベルごとの次の番号（毎回 2 から探すと、同じラベルが多いときに件数の2乗の時間がかかる）
   for (const t of targets) {
     if (!seen.has(t.label)) { seen.add(t.label); continue; }
-    let n = 2; while (used.has(`${t.label}#${n}`)) n++;
+    let n = next.get(t.label) ?? 2; while (used.has(`${t.label}#${n}`)) n++;
+    next.set(t.label, n + 1);
     const to = `${t.label}#${n}`;
-    renamed.set(t.label, [...(renamed.get(t.label) ?? []), to]);
+    const list = renamed.get(t.label); if (list) list.push(to); else renamed.set(t.label, [to]);   // 配列をコピーしない
     used.add(to); seen.add(to); t.label = to;
   }
   return [...renamed].map(([l, tos]) => ({ kind: 'duplicate-label', detail:
     `ラベル「${l}」のターゲットが${tos.length + 1}つあります。2つ目以降は ${tos.join('、')} として別に判定しました（横断の判定には最初のものだけを使います）` }));
 }
 
-export const finalResponse = (t: Target): HttpResponse | undefined =>
-  t.responses.filter(x => x.kind !== 'informational' && x.kind !== 'connect').at(-1);   // -L なら最終ホップ
+/** その URL の応答のホップか（1xx、プロキシの応答（CONNECT・407）、curl が認証し直した 401 を除く） */
+export const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
 
-export const chainOf = (t: Target): HttpResponse[] =>
-  t.responses.filter(x => x.kind !== 'informational' && x.kind !== 'connect');
+export const finalResponse = (t: Target): HttpResponse | undefined => t.responses.filter(isHop).at(-1);   // -L なら最終ホップ
+
+export const chainOf = (t: Target): HttpResponse[] => t.responses.filter(isHop);
 
 /**
  * curl の出力の各ホップに、そのリクエストの URL を付ける（HAR は取り込みで付ける）。ターゲットの URL から Location をたどる。

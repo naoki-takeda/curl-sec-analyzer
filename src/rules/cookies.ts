@@ -1,7 +1,7 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
-import { isDeletion, isLoadBalancerCookie, looksLikeSession, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
+import { isDeletion, isInfraCookie, looksLikeSession, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
 import { baseLabel, firstStatus, hostOf, logoutFailed } from '../parser/target';
 import { LOGOUT_FAILED_REC, mk } from './util';
 
@@ -52,8 +52,8 @@ export const cookieSameSite: Rule = { id: 'C-03', title: 'Cookie の SameSite �
       const v = typeof ss === 'string' ? ss.toLowerCase() : '';
       if (!['lax', 'strict', 'none'].includes(v)) return mk(cookieSameSite, ctx, 2, 'medium', 'fail', ev, 'SameSite の値は Lax・Strict・None のいずれか');
       if (v === 'none' && !c.attrs.has('secure')) return mk(cookieSameSite, ctx, 4, 'low', 'fail', ev, 'SameSite=None には Secure が必須（ブラウザが拒否する）');
-      // 負荷分散の Cookie（AWSALBCORS・ARRAffinitySameSite）は、CORS のリクエストでも同じサーバに届けるため、仕組み上 None にしている
-      if (v === 'none' && isLoadBalancerCookie(c.name)) return undefined;
+      // 負荷分散・WAF・CDN の Cookie（AWSALBCORS・ARRAffinitySameSite・__cf_bm）は、CORS のリクエストでも同じサーバに届けるため、仕組み上 None にしている
+      if (v === 'none' && isInfraCookie(c.name)) return undefined;
       if (v === 'none') return mk(cookieSameSite, ctx, 3, 'medium', 'fail', ev, 'クロスサイトで送る必要がなければ Lax にする（必要なら理由を記録して例外登録）');
       return undefined;
     });
@@ -67,7 +67,7 @@ export const cookieDomain: Rule = { id: 'C-04', title: 'Domain・Path', appliesT
     const host = hostOf(ctx.target)?.replace(/:\d+$/, '');
     return perCookie(cookieDomain, ctx, c => {
       const d = c.attrs.get('domain');
-      if (typeof d !== 'string' || !host) return undefined;
+      if (typeof d !== 'string' || !host || isInfraCookie(c.name)) return undefined;   // CDN の Cookie（__cf_bm など）は CDN が Domain を決める
       const dom = d.replace(/^\./, '').toLowerCase();
       return dom !== host.toLowerCase()
         ? mk(cookieDomain, ctx, 1, 'medium', 'fail', `${cookieEvidence(c)}（ホスト ${host}）`, 'Domain 属性を付けない（発行したホストだけに送られる）')

@@ -4,6 +4,8 @@ import { SEVERITY_LABEL, circled } from '../engine/summarize';
 import { maskText } from '../mask';
 import { hostOf } from '../parser/target';
 
+// BOM はエスケープで書かない（見えない文字のまま書くと、エディタや整形で消えても気づかない）
+const BOM = String.fromCharCode(0xfeff);
 const COLS = ['項目ID', '対象（ラベル・URL）', '実施日時', '実施コマンド', '判定', '該当条件', '重要度', '証跡（マスク済み）', '対応方針', '例外理由・期限', '再診断日'];
 const esc = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 // 表計算ソフトが数式として解釈しないようにする（CSVインジェクション対策）
@@ -64,5 +66,5 @@ export function toCsv(fs: Finding[], targets: Target[]): string {
       f.suppressedBy ? `${f.suppressedBy.reason}（${f.suppressedBy.until || '期限なし'}）` : '', '',
     ];
   });
-  return '﻿' + [COLS, ...rows].map(r => r.map(v => esc(noFormula(String(v)))).join(',')).join('\r\n') + '\r\n';
+  return BOM + [COLS, ...rows].map(r => r.map(v => esc(noFormula(String(v)))).join(',')).join('\r\n') + '\r\n';
 }

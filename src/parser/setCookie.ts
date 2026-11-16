@@ -54,14 +54,20 @@ export const sessionConfig = { names: [] as string[], maxAgeHours: 24 };
 const NOT_SESSION = /csrf|xsrf|consent|antiforgery|requestverificationtoken/i;
 // 解析・チャット・決済などの外部サービスの Cookie。名前に session・sid・token を含むが、ログインの状態ではない。
 // HAR で機密応答と推定すると、robots.txt などの公開ページまで H-12①（高）になる
-const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_uet|_clck$|_clsk$|__hs|hubspot|ajs_|amplitude|mp_|_fbp$|_gcl_|__cf_bm$|cf_clearance$|_cfuvid$)/i;
+const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_uet|_clck$|_clsk$|__hs|hubspot|ajs_|amplitude|mp_|_fbp$|_gcl_)/i;
 // 負荷分散・WAF の Cookie（転送先のサーバの印）。期限がなく値が長いため推定ではセッションCookieに見えるが、利用者ごとの秘密ではない。
 // セッションCookieとして扱うと、全員に同じ値を返す ARRAffinity などで C-07②（同じ値）や C-01①・C-02①（高）の誤検知になる
 const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB|TS01[0-9a-f]{6}|SERVERID$|ROUTEID$)/i;
 const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*)$/i;
-export const notSessionName = (name: string) => NOT_SESSION.test(name) || LOAD_BALANCER.test(name) || THIRD_PARTY.test(name) || name.split(/[-_.]+/).some(w => NOT_SESSION_WORD.test(w));
-/** 負荷分散の Cookie か（AWSALBCORS・ARRAffinitySameSite は、仕組み上 SameSite=None で発行する） */
-export const isLoadBalancerCookie = (name: string) => LOAD_BALANCER.test(name);
+// WAF・CDN・ボット対策の Cookie（Cloudflare、Imperva、Akamai）。CDN が発行し、属性（Domain・SameSite・Secure）は運営者が変えられない。
+// 期限がなく値が長いものは、推定ではセッションCookieに見える（Imperva の incap_ses_* で C-01①・C-02①（高）の誤検知になる）
+const WAF_CDN = /^(?:__cf_bm$|cf_clearance$|_cfuvid$|__cflb$|incap_ses_|nlbi_|visid_incap_|ak_bmsc$|bm_sv$|bm_sz$|bm_mi$|_abck$)/i;
+export const notSessionName = (name: string) => NOT_SESSION.test(name) || LOAD_BALANCER.test(name) || WAF_CDN.test(name) || THIRD_PARTY.test(name) || name.split(/[-_.]+/).some(w => NOT_SESSION_WORD.test(w));
+/**
+ * 負荷分散・WAF・CDN の Cookie か。AWSALBCORS・ARRAffinitySameSite・__cf_bm は仕組み上 SameSite=None で、__cf_bm などは Domain を親ドメインにする。
+ * 運営者が属性を選べないので、C-03③・C-04① にしない
+ */
+export const isInfraCookie = (name: string) => LOAD_BALANCER.test(name) || WAF_CDN.test(name);
 
 /**
  * 名前だけでセッションCookieらしいか（リクエストの Cookie ヘッダには期限も属性もないため、名前で推定する）。
@@ -69,6 +75,14 @@ export const isLoadBalancerCookie = (name: string) => LOAD_BALANCER.test(name);
  */
 export const looksLikeSessionName = (name: string): boolean =>
   sessionConfig.names.length ? sessionConfig.names.some(n => n.toLowerCase() === name.toLowerCase()) : !notSessionName(name) && SESSION_NAME.test(name);
+
+/**
+ * Cookie・Authorization を送ったか（機密応答の推定、第0章 0.3②）。ブラウザや curl の Cookie ジャーは解析用・同意用の Cookie（_ga、theme）も送るので、
+ * Authorization か、セッションCookieらしい名前（組織プロファイルの指定があればそれ）の Cookie を送ったときだけ数える。curl と HAR で同じ判定にする
+ */
+export const sentAuthOf = (authorization: boolean, cookieNames: string[]) => authorization || cookieNames.some(looksLikeSessionName);
+/** リクエストの Cookie ヘッダの値から名前だけを取り出す */
+export const cookieNames = (v: string) => v.split(';').map(c => c.split('=')[0].trim()).filter(Boolean);
 
 /** now：削除用かどうか（過去の Expires）を判定する時刻。ルールからは採取時刻（RuleContext.now）を渡す */
 export function looksLikeSession(c: SetCookie, now = Date.now()): boolean {

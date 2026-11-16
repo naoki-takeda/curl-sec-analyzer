@@ -45,3 +45,25 @@ export const hstsDirective = (v: string | undefined, name: 'includesubdomains' |
 /** ログイン・ログアウトに失敗した採取での判定不能（na）の推奨対応（C-09・C-12・H-15） */
 export const LOGOUT_FAILED_REC = 'ログアウトの方法（POST など）に合わせて logout を採取し直す';
 export const LOGIN_FAILED_REC = 'テスト用アカウントでログインできることを確かめて、login を採取し直す';
+/**
+ * 本文を見て判定するルールで、本文を採取していないとき（-v、-D - -o /dev/null、HAR の本文なし）の推奨。
+ * 本文がないのに「反映されない」「参照なし」と合格にすると、見逃しになり、カバレッジも水増しになる
+ */
+export const NO_BODY_REC = '本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）';
+/** 本文の上限（パーサが残す先頭64KB）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
+export const bodyTruncated = (ctx: RuleContext) => (ctx.final?.body?.length ?? 0) >= 64 * 1024;
+
+/**
+ * 英語の画面の文言らしい値（{"password":"Password"}、{"apiKey":"ApiKey"}、{"secret":"Secret"}）。値がキーの名前と同じ語か、
+ * 先頭だけ大文字の語をつないだもの（Password、NewPassword）なら、文言とみなす。秘密の値は、数字や記号を含むか、すべて小文字であることが多い
+ */
+export const isLabelText = (key: string, v: string): boolean => {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+  return norm(v) === norm(key) || /^(?:[A-Z][a-z]+)+$/.test(v);
+};
+/**
+ * 公開を前提にした値（ブラウザに渡すために API が返す）。Stripe の PaymentIntent・SetupIntent の client_secret（pi_…_secret_…。Stripe.js に渡す）、
+ * Stripe の公開キー（pk_live_・pk_test_）、Firebase の設定の Google API キー（AIza…。権限はセキュリティルールで絞る）。A-07①（高）にしない
+ */
+export const isPublicClientValue = (v: string): boolean =>
+  /^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(v) || /^pk_(?:live|test)_[A-Za-z0-9]+$/.test(v) || /^AIza[0-9A-Za-z_-]{35}$/.test(v);

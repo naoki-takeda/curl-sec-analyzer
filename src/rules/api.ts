@@ -2,7 +2,7 @@
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
 import { baseLabel, finalResponse, ownChain, responseKind } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { header, mk } from './util';
+import { header, isLabelText, isPublicClientValue, mk } from './util';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
   basis: ['OWASP REST Security CS', 'OWASP Secure Headers'],
@@ -71,10 +71,11 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
 
 const TOKEN_PARAM = paramRegex(TOKEN_PARAM_NAMES, 'gi');     // マスキングと同じ一覧（mask.ts）
 /**
- * 値がトークンらしいか。名前が一致しても、値が普通の語（?session=expired、?auth=required、?token=invalid）や短い値なら、
- * トークンを URL に入れているのではなく状態を伝えているだけなので、A-02① にしない
+ * 値がトークンらしいか。名前が一致しても、値が状態を伝える短い語（?session=expired、?auth=required、?token=invalid）や
+ * 真偽値なら、トークンを URL に入れているのではないので、A-02① にしない。除くのは「小文字の英字（- _ でつないだもの）で16文字以下」と
+ * 真偽値だけ。大文字を含む英字だけの値（QxZrTbWmPnLk…）、長い値、数字だけの値（ワンタイムの番号）はトークンとして扱う
  */
-const tokenLikeValue = (v: string) => v.length >= 8 && !/^[a-z_-]+$/i.test(v);
+const tokenLikeValue = (v: string) => !/^(?:true|false|yes|no|on|off|[01]|none|null)$/i.test(v) && !(/^[a-z]+(?:[-_][a-z]+)*$/.test(v) && v.length <= 16);
 const hasTokenParam = (u: string) => [...u.matchAll(TOKEN_PARAM)].some(m => tokenLikeValue(m[2]));
 export const tokenExposure: Rule = { id: 'A-02', title: 'トークンの露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API2', 'RFC 6750 2.3'],
@@ -85,7 +86,9 @@ export const tokenExposure: Rule = { id: 'A-02', title: 'トークンの露出',
     const inUrl = urls.find(hasTokenParam);
     if (inUrl) out.push(mk(tokenExposure, ctx, 1, 'high', 'fail', inUrl, 'トークンはURLに入れず Authorization ヘッダで送る（ログやRefererに残る）'));
     const body = ctx.final.body ?? '';
-    if (!['login', 'pre-login'].includes(baseLabel(ctx.target.label)) && /"refresh_token"\s*:\s*"[^"]{16,}"/.test(body))
+    // トークンを発行するエンドポイント（/oauth/token、/connect/token、Keycloak の …/openid-connect/token）は、refresh_token を返すのが仕事
+    const tokenEndpoint = (() => { try { return /\/token\/?$/i.test(new URL(ctx.target.url ?? '').pathname); } catch { return false; } })();
+    if (!['login', 'pre-login'].includes(baseLabel(ctx.target.label)) && !tokenEndpoint && /"refresh_token"\s*:\s*"[^"]{16,}"/.test(body))
       out.push(mk(tokenExposure, ctx, 2, 'medium', 'fail', '本文に refresh_token（値は表示しない）', 'ログイン・トークン発行以外の応答で長期トークンを返さない'));
     return out.length ? out : [mk(tokenExposure, ctx, 'ok', 'info', 'pass', 'URL・Location・本文にトークンなし', '')];
   } };
@@ -110,7 +113,8 @@ export const jwtClaims: Rule = { id: 'A-03', title: 'JWTの中身', appliesTo: '
     if (!jwts.length) return [];
     const out = [];
     for (const { header, payload } of jwts) {
-      const alg = String(header.alg ?? '');
+      // alg は文字列のときだけ使う（{"alg":{"toString":1}} のような細工した JWT で String() が例外を投げ、判定全体が止まった）
+      const alg = typeof header.alg === 'string' ? header.alg : '';
       if (/^none$/i.test(alg)) out.push(mk(jwtClaims, ctx, 1, 'high', 'fail', 'alg: none', '署名付きのアルゴリズム（RS256・ES256など）を使い、none を受け付けない'));
       if (payload.exp === undefined) out.push(mk(jwtClaims, ctx, 2, 'medium', 'fail', `exp なし（alg: ${alg}）`, '短い有効期限（exp）を付ける'));
       const pii = Object.keys(payload).filter(k => PII_CLAIMS.test(k));
@@ -127,14 +131,6 @@ export function jsonKeys(v: unknown, prefix = '', out: string[] = [], depth = 0)
   return out;
 }
 /**
- * 英語の画面の文言らしい値（{"password":"Password"}、{"apiKey":"ApiKey"}、{"secret":"Secret"}）。値がキーの名前と同じ語か、
- * 先頭だけ大文字の語をつないだもの（Password、NewPassword）なら、文言とみなす。秘密の値は、数字や記号を含むか、すべて小文字であることが多い
- */
-const isLabelText = (key: string, v: string): boolean => {
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
-  return norm(v) === norm(key) || /^(?:[A-Z][a-z]+)+$/.test(v);
-};
-/**
  * 値が「秘密情報らしい文字列」のキー（配列の番号は [] にそろえる）。空白や ASCII 以外の文字を含む文字列は画面の文言（i18n の
  * {"password":"パスワード"} など）とみなし、null・数値・真偽値・オブジェクトも値を露出していないので除く
  */
@@ -143,7 +139,7 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   if (Array.isArray(v)) v.slice(0, 50).forEach(x => secretValuedKeys(x, `${prefix}[]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
     const p = prefix ? `${prefix}.${k}` : k;
-    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x)) out.add(p);
+    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x)) out.add(p);
     secretValuedKeys(x, p, out, depth + 1);
   }
   return out;

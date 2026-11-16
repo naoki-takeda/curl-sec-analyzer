@@ -2,7 +2,7 @@
 // - request.postData（ログインのパスワードなど）は読まない。本文は HTML と JSON の先頭64KBだけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
-import { looksLikeSession, looksLikeSessionName, parseSetCookie, splitSetCookie } from './setCookie';
+import { cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
 import { baseLabel } from './target';
 
@@ -53,7 +53,8 @@ function toResponse(e: HarEntry): HttpResponse {
   if (e.response.redirectURL && !headers.has('location') && e.response.status >= 300 && e.response.status < 400) headers.set('location', [e.response.redirectURL]);
   let body: string | undefined;
   const c = e.response.content;
-  if (c?.text && /html|json/i.test(c.mimeType ?? '')) {
+  // JS も残す（JSONP の E-06、ソースマップの参照の E-13 が本文で判定する。残さないと「反映されない」「参照なし」と合格にしてしまう）
+  if (c?.text && /html|json|javascript|ecmascript/i.test(c.mimeType ?? '')) {
     try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 2)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
     body = body?.slice(0, BODY_LIMIT);
   }
@@ -94,7 +95,7 @@ export function importHar(text: string): HarImport {
     // 送った認証情報は全ホップのリクエストから見る。Secure の Cookie は https のホップでしか送らないため、最初の http のリクエストだけでは分からない
     const reqHeaders = hops.flatMap(h => h.request.headers ?? []);
     const sentAuthorization = reqHeaders.some(h => h.name.toLowerCase() === 'authorization');
-    const sentCookieNames = [...new Set(reqHeaders.filter(h => h.name.toLowerCase() === 'cookie').flatMap(h => String(h.value ?? '').split(';')).map(c => c.split('=')[0].trim()).filter(Boolean))];
+    const sentCookieNames = [...new Set(reqHeaders.filter(h => h.name.toLowerCase() === 'cookie').flatMap(h => cookieNames(String(h.value ?? ''))))];
     const sentAuth = sentAuthOf(sentAuthorization, sentCookieNames);
     if (sentAuthorization || sentCookieNames.length || hops.some(h => (h.response.headers ?? []).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
     chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
@@ -125,7 +126,8 @@ export function suggestLabels(chains: HarChain[], keepUserLabels = false): void 
     const at = c.at ? Date.parse(c.at) : NaN; const now = Number.isNaN(at) ? Date.now() : at;   // 期限は記録した時刻で比べる
     const setsSession = c.responses.some(r => (r.headers.get('set-cookie') ?? []).map(v => parseSetCookie(v)).some(x => looksLikeSession(x, now)));
     if (/logout|signout|sign-out|log-out/i.test(path)) take(c, 'logout');
-    else if (c.method === 'POST' && setsSession) take(c, 'login');
+    // セッションIDを再発行しない（C-09①の）ログインは新しいCookieを発行しないので、パスが login・signin の POST も login の候補にする
+    else if (c.method === 'POST' && (setsSession || /log-?in|sign-?in/i.test(path))) take(c, 'login');
     else if (c.method === 'GET' && /type\s*=\s*["']?password/i.test(c.responses.at(-1)?.body ?? '')) take(c, 'pre-login');
     else if (first && first.status >= 400) c.suggested = `error-${c.id + 1}`;
     if (!c.suggested) c.suggested = `har-${c.id + 1}`;
@@ -133,11 +135,6 @@ export function suggestLabels(chains: HarChain[], keepUserLabels = false): void 
   }
 }
 
-/**
- * Cookie・Authorization を送ったか（機密応答の推定、第0章 0.3）。HAR では、ブラウザが解析用・同意用の Cookie もすべて送るため、
- * Cookie を送っただけでは機密とみなさない。Authorization か、セッションCookieらしい名前の Cookie（組織プロファイルの指定があればそれ）を送ったときだけ
- */
-const sentAuthOf = (authorization: boolean, cookieNames: string[]) => authorization || cookieNames.some(looksLikeSessionName);
 
 /** 画面で確定したチェーンをターゲットにする */
 export function harTargets(imp: HarImport, selectedHosts: Set<string>): { targets: Target[]; warnings: ParseWarning[] } {
@@ -155,7 +152,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ（parser/target.ts の ownChain）
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
       // 送った認証情報の推定は、組織プロファイルのセッションCookieの名前で作り直す（Worker の中ではプロファイルが分からない）
-      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentTokens: [], info: [],
+      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentCookieNames: c.sentCookieNames, sentTokens: [], info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });
