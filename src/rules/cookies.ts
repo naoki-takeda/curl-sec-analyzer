@@ -141,7 +141,8 @@ export const cookiePrefix: Rule = { id: 'C-06', title: '__Host-・__Secure-プ�
 
 /** 値の文字種から推定したエントロピー（ビット）。実際の乱数性は分からないため目安 */
 export function estimateBits(v: string): number {
-  const size = /^[0-9]+$/.test(v) ? 10 : /^[0-9a-f]+$/i.test(v) ? 16 : /^[0-9A-Za-z]+$/.test(v) ? 62 : 64;
+  // 小文字と数字だけ（ASP.NET_SessionId の base32 など）・大文字と数字だけは36種で数える（62種で数えると、24文字の約120bitを約142bitとして見逃した）
+  const size = /^[0-9]+$/.test(v) ? 10 : /^[0-9a-f]+$/i.test(v) ? 16 : /^[0-9a-z]+$/.test(v) || /^[0-9A-Z]+$/.test(v) ? 36 : /^[0-9A-Za-z]+$/.test(v) ? 62 : 64;
   return Math.floor(v.length * Math.log2(size));
 }
 /**

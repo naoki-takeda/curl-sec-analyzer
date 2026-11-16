@@ -16,9 +16,10 @@ tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応してい�
 chain | A-02.ok | info | pass | URL・Location・本文にトークンなし
 chain | H-01.1 | high | fail | (ヘッダなし)
 chain | H-02.na | info | na | HSTSがない（H-01で判定）
-chain | H-08.1 | medium | fail | (ヘッダなし)
+chain | H-08.na | info | na | HTTP 302（本文のない応答）
 chain | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-chain | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+chain | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
+chain | H-13.na | info | na | HTTP 302（別のサイトへの転送で終わる。転送先の応答は判定しない）
 chain | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 chain | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 chain | R-04.ok | info | pass | (ACAOなし)
@@ -73,11 +74,11 @@ H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定�
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=1
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-08 | evaluated | fails=2
+H-08 | evaluated | fails=1
 H-09 | evaluated | fails=1
 H-10 | evaluated | fails=1
 H-11 | evaluated | fails=1
-H-12 | missing-input | fails=0 | 転送先の本文のある応答（認証後ページなど）で採取する / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-12 | missing-input | fails=0 | 機密データを返す 200 の応答（認証後ページなど）で採取する / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=1
 H-15 | missing-input | fails=0 | 必要なラベル: logout

@@ -1,6 +1,6 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext } from '../model';
-import { LOGOUT_FAILED_REC, NO_BODY_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, sensitiveUnlessStatic, splitPolicies } from './util';
+import { LOGOUT_FAILED_REC, NO_BODY_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, parseHsts, sensitiveUnlessStatic, splitPolicies } from './util';
 import { clip, maskValue } from '../mask';
 import { baseLabel, firstStatus, logoutFailed, ownChain } from '../parser/target';
 import { htmlBody, metaCspPolicies, mixedContent } from './html';
@@ -20,8 +20,8 @@ export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appl
     const v = hstsOf(ctx);
     const rec = 'Strict-Transport-Security: max-age=63072000; includeSubDomains';
     if (!v) return [mk(hsts, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec, { obsId: 'hsts-not-implemented', score: -20 })];
-    const age = Number(v.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? NaN);
-    if (Number.isNaN(age)) return [mk(hsts, ctx, 3, 'high', 'fail', v, rec, { obsId: 'hsts-header-invalid', score: -20 })];
+    const parsed = parseHsts(v); const age = parsed.maxAge;
+    if (!parsed.valid) return [mk(hsts, ctx, 3, 'high', 'fail', `${v}（構文の誤り・ディレクティブの重複。ブラウザはこのヘッダを無視する）`, rec, { obsId: 'hsts-header-invalid', score: -20 })];
     // max-age=0 は、ブラウザに HSTS の記録を消させる指定（RFC 6797 6.1.1）。ヘッダがないのと同じなので①にする（②の「短い」ではない）
     if (age === 0) return [mk(hsts, ctx, 1, 'high', 'fail', `${v}（max-age=0 は HSTS を解除する指定）`, rec, { obsId: 'hsts-not-implemented', score: -20 })];
     // ②の基準は ASVS 5.0.0 3.4.1 に合わせて1年（31536000秒）。obsId は Observatory の区切り（6か月）のまま付ける
@@ -84,11 +84,15 @@ export const clickjacking: Rule = { id: 'H-06', title: 'クリックジャッキ
 // （ログインした HAR では、ビーコンや XHR の 204 のたびに H-12①（高）が出た。H-13 も同じ応答を除いている）
 const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（204・304 は対象外）';
 const NO_CONTENT = (ctx: RuleContext) => ctx.final?.status === 204 || ctx.final?.status === 304;
+/** 経験的にキャッシュしてよいステータス（RFC 9110 15.1。これ以外は、鮮度の指定がなければキャッシュに保存されない） */
+const HEURISTIC_CACHEABLE = new Set([200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501]);
 export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS'],
   run(ctx) {
     if (!ctx.final) return [mk(nosniff, ctx, 'na', 'info', 'na', '応答がない', '')];
-    if (NO_CONTENT(ctx)) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
+    // 本文のない転送（Location のある 3xx）と Content-Length: 0 の応答も、スニッフィングする本文がない（ブラウザは 3xx の本文を表示しない）
+    const empty = NO_CONTENT(ctx) || (ctx.final.status >= 300 && ctx.final.status < 400 && ctx.final.headers.has('location')) || header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
+    if (empty) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const v = header(ctx, 'x-content-type-options').join(', ');
     if (isNosniff(ctx)) return [mk(nosniff, ctx, 'ok', 'info', 'pass', v, '')];
     return [mk(nosniff, ctx, 1, 'medium', 'fail', v || '(ヘッダなし)', 'X-Content-Type-Options: nosniff')];
@@ -104,10 +108,12 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
     const ev = cc || (header(ctx, 'pragma').length ? `(Cache-Controlなし、Pragma: ${header(ctx, 'pragma')[0]})` : '(ヘッダなし)');
     const isStatic = isStaticResource(ctx);
     if (dirs.has('no-store')) return [mk(cacheControl, ctx, 'ok', 'info', 'pass', cc, '')];
-    // 本文のない転送（302・303・307）は、鮮度の指定（max-age・s-maxage・public・Expires）がなければキャッシュに保存されない（RFC 9111 4.2.2。
+    // 経験的にキャッシュしてよいステータスでないもの（302・303・307 などの転送、401・403・500）は、鮮度の指定（max-age・s-maxage・public・Expires）がなければキャッシュに保存されない（RFC 9111 4.2.2。
     // 経験的にキャッシュしてよいステータスではない）。ログイン後の 302 で H-12①（高）を出していた
-    if ([302, 303, 307].includes(ctx.final.status) && !['max-age', 's-maxage', 'public'].some(d => dirs.has(d)) && !header(ctx, 'expires').length)
-      return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（鮮度の指定のない転送はキャッシュされない）`, '転送先の本文のある応答（認証後ページなど）で採取する')];
+    // 401・403・500 なども同じ（経験的にキャッシュしてよいのは 200・203・204・206・300・301・308・404・405・410・414・501 だけ）
+    // private も保存を許す指定（私的キャッシュは private があれば 201・403 も保存できる）
+    if (!HEURISTIC_CACHEABLE.has(ctx.final.status) && !['max-age', 's-maxage', 'public', 'private'].some(d => dirs.has(d)) && !header(ctx, 'expires').length)
+      return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（鮮度の指定がなく、キャッシュされない応答）`, '機密データを返す 200 の応答（認証後ページなど）で採取する')];
     const limited = (f: ReturnType<typeof mk>) => ({ ...f, limited: true });
     // 静的リソース・公開ファイルは、sensitive=1 を明示したときだけ機密応答として扱う（rules/util.ts の sensitiveUnlessStatic）
     const sensitive = sensitiveUnlessStatic(ctx);
@@ -135,7 +141,7 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
     if (ctx.isHttps === false) return [];
     const v = hstsOf(ctx);
     if (!ctx.final || !v) return [mk(hstsPreload, ctx, 'na', 'info', 'na', 'HSTSがない（H-01で判定）', '')];
-    const age = Number(v.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? 0);
+    const age = parseHsts(v).maxAge;
     if (!hstsDirective(v, 'preload')) return [mk(hstsPreload, ctx, 2, 'info', 'fail', v, 'preload リストへの登録を検討する（max-age 31536000 以上＋includeSubDomains＋preload）')];
     if (age < 31536000 || !hstsDirective(v, 'includesubdomains')) return [mk(hstsPreload, ctx, 1, 'low', 'fail', v, 'preload には max-age 31536000 以上と includeSubDomains が必要')];
     return [mk(hstsPreload, ctx, 'ok', 'info', 'pass', v, '')];
@@ -282,6 +288,10 @@ export const contentType: Rule = { id: 'H-13', title: 'Content-Typeとcharset', 
   run(ctx) {
     const f = ctx.final;
     if (!f) return [mk(contentType, ctx, 'na', 'info', 'na', '応答がない', '')];
+    // 別のサイトへの転送で終わったターゲット（-L で転送先を採取していても、転送先は対象の応答として判定しない）は、ヘッダの項目を判定できないことを示す
+    // （何も出さないと、H-03・H-13 が黙って消えた）
+    if (f.status >= 300 && f.status < 400 && ctx.target.responses.filter(r => r.kind === 'redirect' || r.kind === 'final').at(-1) !== f)
+      return [mk(contentType, ctx, 'na', 'info', 'na', `HTTP ${f.status}（別のサイトへの転送で終わる。転送先の応答は判定しない）`, '転送先の URL を別のターゲットとして採取する')];
     if (f.status === 204 || f.status === 304 || (f.status >= 300 && f.status < 400)) return [];   // 本文のない応答は適用外
     const ct = header(ctx, 'content-type')[0];
     // 本文が空の応答（Content-Length: 0 の 401・201 など。Spring Security の API の 401）は、型を示す本文がないので①の対象外

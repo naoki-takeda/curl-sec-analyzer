@@ -61,6 +61,25 @@ export function parseCsp(v: string): Map<string, string[]> {
 }
 
 /** HSTS のディレクティブ（includesubdomains・preload）があるか。H-01・H-02・横断ルール・画面の案内で同じ読み方にする（部分一致にしない） */
+/**
+ * HSTS のヘッダを RFC 6797 6.1 のとおりに読む。「;」で分けた各ディレクティブが「名前」か「名前=値」（値はトークンか引用符の文字列）で、
+ * 同じディレクティブが2回なく、max-age が数字であるときだけ有効（ブラウザは無効なヘッダを無視する（8.1））。
+ * max-age を正規表現で拾うだけでは、カンマ区切り（max-age=31536000, includeSubDomains）・「;」のないもの・max-age の重複を有効とみなした
+ */
+export function parseHsts(v: string | undefined): { valid: boolean; maxAge: number } {
+  if (!v) return { valid: false, maxAge: 0 };
+  const seen = new Set<string>(); let maxAge: number | undefined;
+  for (const raw of v.split(';')) {
+    const d = raw.trim(); if (!d) continue;
+    const m = d.match(/^([!#$%&'*+.^_`|~0-9A-Za-z-]+)(?:\s*=\s*(?:"([^"]*)"|([!#$%&'*+.^_`|~0-9A-Za-z-]+)))?$/);
+    if (!m) return { valid: false, maxAge: 0 };
+    const name = m[1].toLowerCase();
+    if (seen.has(name)) return { valid: false, maxAge: 0 };
+    seen.add(name);
+    if (name === 'max-age') { const val = m[2] ?? m[3] ?? ''; if (!/^\d+$/.test(val)) return { valid: false, maxAge: 0 }; maxAge = Number(val); }
+  }
+  return maxAge === undefined ? { valid: false, maxAge: 0 } : { valid: true, maxAge };
+}
 export const hstsDirective = (v: string | undefined, name: 'includesubdomains' | 'preload'): boolean =>
   (v ?? '').split(';').some(d => d.trim().toLowerCase() === name);
 

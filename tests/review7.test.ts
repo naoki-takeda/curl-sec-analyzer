@@ -168,7 +168,9 @@ describe('E-05：パスの区切りごとに照合する', () => {
   it('actuator・swagger-ui・api-docs は指摘する', () => {
     // 第24回から、HTML の 200 はその機能の画面と分かるときだけ①②にする（SPA の誤検知を防ぐ）。本物の actuator と API 仕様は JSON、Swagger UI の画面は swagger-ui を含む
     const json = (url: string) => evaluate(t('t', url, 'HTTP/2 200\ncontent-type: application/json', '{"status":"UP"}')).findings.filter(f => f.item === 'E-05').map(f => f.ruleId);
-    expect(json('https://a.example/actuator/health')).toEqual(['E-05.1']);
+    // 第30回から、/actuator/health・info の状態だけの応答（{"status":"UP"}）は、死活監視の既定の公開なので対象外（合格）。ほかの actuator は①
+    expect(json('https://a.example/actuator/health')).toEqual(['E-05.ok']);
+    expect(json('https://a.example/actuator/env')).toEqual(['E-05.1']);
     expect(evaluate(t('t', 'https://a.example/swagger-ui/index.html', 'HTTP/2 200\ncontent-type: text/html', '<div id="swagger-ui"></div>')).findings.filter(f => f.item === 'E-05').map(f => f.ruleId)).toEqual(['E-05.2']);
     expect(json('https://a.example/v3/api-docs')).toEqual(['E-05.2']);
     expect(e05('https://a.example/actuator/health')).toEqual(['E-05.na']);   // HTML の 200（SPA の可能性）

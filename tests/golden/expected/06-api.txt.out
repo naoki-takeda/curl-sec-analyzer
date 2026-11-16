@@ -30,7 +30,7 @@ error-api | H-08.1 | medium | fail | (ヘッダなし)
 error-api | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
 error-api | H-10.1 | info | fail | (ヘッダなし)
 error-api | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-error-api | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-api | H-12.na | info | na | HTTP 400（鮮度の指定がなく、キャッシュされない応答）
 error-api | H-13.ok | info | pass | application/json
 error-api | H-14.1 | info | fail | (ヘッダなし)
 error-api | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし

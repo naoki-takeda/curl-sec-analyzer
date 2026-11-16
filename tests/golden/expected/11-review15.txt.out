@@ -53,7 +53,7 @@ error-trace | H-01.1 | high | fail | (ヘッダなし)
 error-trace | H-02.na | info | na | HSTSがない（H-01で判定）
 error-trace | H-08.1 | medium | fail | (ヘッダなし)
 error-trace | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-error-trace | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-trace | H-12.na | info | na | HTTP 500（鮮度の指定がなく、キャッシュされない応答）
 error-trace | H-13.ok | info | pass | text/plain
 error-trace | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 error-trace | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
@@ -82,7 +82,7 @@ login | C-08.ok | info | pass | .AspNetCore.Identity.ApplicationC1
 login | C-09.ok | info | pass | URLにセッションIDなし
 login | C-11.ok | info | pass | .AspNetCore.Identity.ApplicationC1
 login | C-13.ok | info | pass | 共有キャッシュの指定なし
-login | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+login | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 logout | C-12.ok | info | pass | wordpress_logged_in_0123456789abcdef0123456789abcdef=…(1 chars); expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
 logout | H-15.1 | info | fail | (ヘッダなし)
 mypage | A-02.ok | info | pass | URL・Location・本文にトークンなし

@@ -30,7 +30,8 @@ export function generateScript(o: CommandOptions): string {
   const L: string[] = [];
   // 各ターゲットの前に #TARGET と #META（実施日時と推奨コマンドのID）を出す。CSV（第8章の様式）の「実施日時」「実施コマンド」に使う
   const meta = (cmd: string) => `echo "#META at=$(date +%Y-%m-%dT%H:%M:%S) cmd=${cmd}"`;
-  const t = (label: string, url: string, extra = '') => L.push(`echo ${q(`#TARGET url=${url} label=${label}${extra}`)}`, meta(cmdOf(label)));
+  // #TARGET の前に改行を出す（curl -i の本文が改行で終わらないと、#TARGET が前の本文の行にくっついた）
+  const t = (label: string, url: string, extra = '') => L.push('echo', `echo ${q(`#TARGET url=${url} label=${label}${extra}`)}`, meta(cmdOf(label)));
   L.push('#!/usr/bin/env bash',
     '# curl-sec-analyzer の推奨コマンド（コマンド生成器で作成）。出力を out.txt にまとめ、ツールに貼り付けて判定する',
     '# 実行前に：診断は自社で管理しているか書面で許可を得たシステムだけ。',

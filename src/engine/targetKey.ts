@@ -59,8 +59,12 @@ export function urlKey(raw: string): string {
 // 数字は6桁まで（7〜8桁にすると、パスに置いたワンタイムの番号がキーに入り、JSON と例外ファイルに出た）
 const keyPiece = (p: string): boolean => {
   if (p === '*' || /^\d{1,6}$/.test(p) || /^[A-Za-z]{1,2}\d{1,2}$/.test(p)) return true;
-  if (/[^\p{ASCII}]/u.test(p)) return /^[\p{L}\p{M}]{1,24}$/u.test(p) && (p.match(/\p{Lu}+|[\p{Ll}\p{Lo}\p{M}]+/gu) ?? []).length <= 4;
+  // 長音（ー）・踊り字（々）など（\p{Lm}）も語の一部として数える（数えないと、ユーザーデータベースを語が5つとみなして * にした）
+  if (/[^\p{ASCII}]/u.test(p)) return /^[\p{L}\p{M}]{1,24}$/u.test(p) && (p.match(/\p{Lu}+|[\p{Ll}\p{Lo}\p{Lm}\p{M}]+/gu) ?? []).length <= 4;
   if (!/^[A-Za-z]{1,24}$/.test(p)) return false;
+  // 英小文字だけの16文字以上で、母音（y を含む）の少ない（4分の1未満）もの（kqzvwxmplrtb…）はトークンとして * にする（12文字にすると、cryptography・
+  // strengthening のような実在の語まで * にした）
+  if (/^[a-z]{16,}$/.test(p) && (p.match(/[aeiouy]/g) ?? []).length / p.length < 0.25) return false;
   if (/^[A-Z]+$/.test(p)) return p.length <= 10;
   return (p.match(/[a-z]+|[A-Z]+/g) ?? []).length <= 4;
 };

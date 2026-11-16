@@ -31,7 +31,7 @@ const AWS_KEY = /\bAKIA[0-9A-Z]{16}\b/;
 const path = (ctx: RuleContext) => { try { return new URL(ctx.target.url ?? '').pathname; } catch { return ''; } };
 
 // E-01② のスタックトレース・SQL・絶対パスなど（下の errorDetail の注記を参照）
-const TRACE = /\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?:(?<!["'`]\s{0,20})|(?<=(?:[[,]\s*|"(?:stack|trace|stacktrace|stack_trace|error|err|message|exception)"\s*:\s*)"\s{0,20}))\bat (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|\.php<\/b> on line <b>\d+|Stack trace:\s*#0 |(?:(?<=^|[\r\n]|\\n)[ \t]{1,20})at [A-Z]\w*(?:\.[\w<>`|$]+){2,}\(|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/;
+const TRACE = /\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?<=(?:^|[\r\n>]|\\n|<br\s*\/?>|[[,]\s*"|"(?:stack|trace|stacktrace|stack_trace|error|err|exception)"\s*:\s*")(?:[ \t]|&nbsp;){0,20}|(?:Error|Exception)\b[^\n"<]{0,200}\s)at (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|\.php<\/b> on line <b>\d+|Stack trace:\s*#0 |(?:(?<=^|[\r\n]|\\n)[ \t]{1,20})at [A-Z]\w*(?:\.[\w<>`|$]+){2,}\(|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/;
 const matchTrace = (s: string) => s.match(TRACE);
 export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース・デバッグ情報', appliesTo: 'any', scope: 'target',
   basis: ['ISOG-J', 'OWASP Error Handling CS'],
@@ -185,6 +185,10 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     const ui = /<title>[^<]{0,100}(?:swagger[- ]ui|redoc|rapidoc|scalar)|\bid\s*=\s*["']?(?:swagger-ui|api-reference)\b|swagger-ui(?:-bundle|-standalone-preset)?(?:\.min)?\.(?:js|css)\b|SwaggerUIBundle|<redoc\b|redoc\.standalone|<rapi-doc\b|@scalar\/api-reference/i.test(b);
     if (isHtml && !(docSegment(p) !== 'actuator' && ui))
       return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? '' : NO_BODY_REC)];
+    // /actuator/health・/actuator/info で、本文が状態だけ（components・details のない {"status":"UP"}、空の {}）のものは、Spring Boot が既定で公開する
+    // 死活監視の応答なので対象外（Kubernetes・負荷分散装置が使う。ほぼすべての Spring Boot の製品で高を出していた）
+    if (docSegment(p) === 'actuator' && /\/actuator\/(?:health|info)\/?$/i.test(p) && /^\s*\{\s*(?:"status"\s*:\s*"[A-Z_]+"\s*)?\}\s*$/.test(b))
+      return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `${p}（HTTP ${f.status}、状態だけの死活監視の応答）`, '')];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
     return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}）`, 'API仕様は本番で無効にするか、認証の内側に置く')];
   } };
@@ -213,8 +217,10 @@ const DOWNLOAD_CT = /^(application\/(octet-stream|pdf|zip|x-zip|vnd\.(?![\w.-]*\
 // ブラウザがその場でスクリプトを実行しうる種類（アップロード先で inline に配信すると①）
 const ACTIVE_CT = /^\s*(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml)\b/i;
 // その場で表示するのが普通の種類（画像・音声・動画）。Content-Disposition がなくても②にしない
-const INLINE_MEDIA_CT = /^\s*(?:image\/(?!svg)|audio\/|video\/)/i;
-const BUILD_ASSET_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|font\/|application\/(?:x-)?font)/i;
+// HLS・DASH のプレイリスト（application/vnd.apple.mpegurl・x-mpegurl・dash+xml）も、プレイヤーが読み込むもので、ダウンロードではない
+const INLINE_MEDIA_CT = /^\s*(?:image\/(?!svg)|audio\/|video\/|application\/(?:vnd\.apple\.mpegurl|x-mpegurl|dash\+xml)\b)/i;
+// 旧式のフォント（application/vnd.ms-fontobject。.eot）も含める
+const BUILD_ASSET_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|font\/|application\/(?:x-)?font|application\/vnd\.ms-fontobject\b)/i;
 export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード応答', appliesTo: 'any', scope: 'target',
   basis: ['OWASP File Upload CS'],
   run(ctx) {

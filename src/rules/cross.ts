@@ -3,7 +3,7 @@ import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument } from '../parser/target';
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp, splitPolicies } from './util';
+import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp, parseHsts, splitPolicies } from './util';
 import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
@@ -30,6 +30,31 @@ const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.no
 // IdP の入り口（Google の /o/oauth2/v2/auth、Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls/、SimpleSAMLphp の SSOService.php）も含める。
 // T-06 と共有する（rules/html.ts の LOGIN_PATH。T-06 だけ狭い一覧を持っていて、/login.php・/oauth2/authorization/x への転送を合格にした）
 const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
+/** SPA の画面：ルートの要素（root・app・__next・__nuxt）とスクリプトがあり、スクリプト・スタイル・タグを除いた文字がないか、読み込み中の案内だけの HTML */
+// ページのデータを属性やスクリプトに入れたもの（Inertia の data-page、Next.js の __NEXT_DATA__、__INITIAL_STATE__・__NUXT__・__APOLLO_STATE__）は、
+// サーバが利用者のデータを返しているので殻としない。文字は、ないか「Loading…」「読み込み中」だけのとき（<noscript> の案内を除く）に限る
+// （文字数で見ると、短いサーバ描画のマイページ（マイページ 山田太郎様のご注文）まで殻とみなした）
+const spaShell = (b: string): boolean => /<div\b[^>]{0,200}\bid\s*=\s*["']?(?:root|app|__next|__nuxt|q-app)\b/i.test(b) && /<script\b/i.test(b)
+  && !/\bdata-page\s*=|__NEXT_DATA__|__INITIAL_STATE__|__NUXT__|__APOLLO_STATE__|__PRELOADED_STATE__/.test(b)
+  && /^(?:loading|読み込み中|ロード中)?[.…]*$/i.test(visibleText(b.replace(/<noscript\b[\s\S]{0,2000}?<\/noscript>/gi, '')));
+/** タグ・スクリプト・スタイルの外の、空白を除いた文字（40 文字まで）。正規表現で除くと、閉じない <script の続く本文で2乗の時間がかかるので、1回の走査で集める */
+function visibleText(b: string): string {
+  const s = b.slice(0, 65536), low = s.toLowerCase(); let out = '';
+  for (let i = 0; i < s.length && out.length < 40;) {
+    if (s[i] === '<') {
+      const close = low.startsWith('<script', i) ? '</script' : low.startsWith('<style', i) ? '</style' : '>';
+      const e = low.indexOf(close, i + 1);
+      if (e < 0) break;
+      // 閉じタグ（</script>・</style>）は、その「>」まで飛ばす
+      const end = close === '>' ? e + 1 : low.indexOf('>', e + close.length) + 1;
+      if (end <= 0) break;
+      i = end; continue;
+    }
+    if (!/\s/.test(s[i])) out += s[i];
+    i++;
+  }
+  return out;
+}
 const MFA_REC = '2段階目（ワンタイムの番号の入力など）まで済ませた応答を login として採取する';
 /** login の最初の応答が、多要素認証の2段階目の画面（/two_factor、/mfa、/otp、/2fa、/webauthn）への転送か。/verify-email のようなメールの確認の案内は、ログインが済んでいるので含めない */
 function mfaStep(login: Target): string | undefined {
@@ -37,7 +62,16 @@ function mfaStep(login: Target): string | undefined {
   const loc = first && first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
   if (!loc) return undefined;
   let p: string; try { p = new URL(loc, login.url ?? 'https://x.invalid/').pathname; } catch { return undefined; }
-  return /(?:^|\/)(?:two[-_]?factor|2fa|mfa|otp|totp|webauthn|second[-_]?factor)(?:[/._-]|$)/i.test(p) ? p : undefined;
+  // 最後の部分が2段階目の画面の名前（/mfa、/two_factor_authentication、/2fa）か、2段階目の入力の画面（/two_factor/verify、/mfa/challenge）のときだけ。
+  // パスのどこかに mfa・otp があるだけ（/mfa/setup-reminder、/users/otp_settings。ログインが済んだあとの設定の画面）は含めない
+  const segs = p.replace(/\/+$/, '').split('/');
+  // 2段階目の画面の名前（two-factor-challenge・mfa-otp-challenge のように語が続くものも）。設定の画面の語（setup・settings・reminder・backup・
+  // recovery など）が続くものと、その下の部分（/2fa/backup-codes）は除く（除外の一覧で見る。完全一致にすると、Fortify の /two-factor-challenge・
+  // GitHub の /sessions/two-factor/app・allauth の /accounts/2fa/authenticate/ を見逃した）
+  const settings = /^(?:set-?up|settings?|reminder|recovery|backup|enroll|enable|disable|manage|info|configure|config|preferences)/i;
+  const step = (x: string) => { const m = x.match(/^(?:two[-_]?factor|2fa|mfa|otp|totp|webauthn|second[-_]?factor)(?:[-_](.+))?$/i); return !!m && !(m[1] && settings.test(m[1])); };
+  const at = segs.findIndex(step);
+  return at >= 0 && segs.slice(at + 1).every(x => !settings.test(x)) ? p : undefined;
 }
 const trimSlash = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
 function loginRejected(login: Target, pre: Target): string | undefined {
@@ -175,6 +209,9 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
       // ログイン後のページ（mypage）自身にパスワード欄があるときは、見分けられないので使わない
       const mpBody = mp ? finalResponse(mp)?.body ?? '' : '';
       if (loginForm(r.body ?? '') && !PASSWORD_FIELD.test(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
+      // SPA の画面（<div id="root"> とスクリプトだけで、文字のない HTML）は、どのセッションでも同じものを返すので、旧Cookie が使えたかは分からない
+      // （A-01・A-11・E-05 の HTML の画面と同じ考え方）
+      if (spaShell(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（SPA の画面。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
       return [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', ev, 'ログアウト時にサーバ側のセッションを破棄する')];
     }
     // 合格にするのは、断られた（401・403）か、ログイン画面へ転送されたときだけ。404・5xx やほかのページへの転送は、セッションが無効かが分からない
@@ -223,7 +260,7 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
     // apex 自身の応答（転送の最初のホップ）で見る。-L や HAR で www への転送をたどった最後の応答は www のもの
     // max-age=0 は HSTS を解除する指定なので、返していないのと同じ（H-01①と同じ）
     const v = ownChain(apex)[0]?.headers.get('strict-transport-security')?.[0];
-    return v && Number(v.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? 0) > 0 ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
+    return v && parseHsts(v).maxAge > 0 ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };
 

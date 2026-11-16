@@ -65,7 +65,7 @@ login | C-08.1 | info | fail | JSESSIONID
 login | C-09.ok | info | pass | URLにセッションIDなし
 login | C-11.1 | info | fail | __cf_bm=abcd…(30 chars); Path=/; Domain=.example.com; Secure; SameSite=None
 login | C-13.ok | info | pass | 共有キャッシュの指定なし
-login | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+login | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 logout | C-12.ok | info | pass | JSESSIONID=…(0 chars); Max-Age=0; Path=/
 logout | H-15.1 | info | fail | (ヘッダなし)
 mypage | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -120,7 +120,7 @@ session-sample-1 | C-08.ok | info | pass | sid
 session-sample-1 | C-09.ok | info | pass | URLにセッションIDなし
 session-sample-1 | C-11.ok | info | pass | sid
 session-sample-1 | C-13.ok | info | pass | 共有キャッシュの指定なし
-session-sample-1 | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+session-sample-1 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 session-sample-2 | C-01.ok | info | pass | sid
 session-sample-2 | C-02.ok | info | pass | sid
 session-sample-2 | C-03.ok | info | pass | sid
@@ -132,7 +132,7 @@ session-sample-2 | C-08.ok | info | pass | sid
 session-sample-2 | C-09.ok | info | pass | URLにセッションIDなし
 session-sample-2 | C-11.ok | info | pass | sid
 session-sample-2 | C-13.ok | info | pass | 共有キャッシュの指定なし
-session-sample-2 | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+session-sample-2 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 session-sample-3 | C-01.ok | info | pass | sid
 session-sample-3 | C-02.ok | info | pass | sid
 session-sample-3 | C-03.ok | info | pass | sid
@@ -144,7 +144,7 @@ session-sample-3 | C-08.ok | info | pass | sid
 session-sample-3 | C-09.ok | info | pass | URLにセッションIDなし
 session-sample-3 | C-11.ok | info | pass | sid
 session-sample-3 | C-13.ok | info | pass | 共有キャッシュの指定なし
-session-sample-3 | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+session-sample-3 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 
 ## coverage
 H-01 | evaluated | fails=1

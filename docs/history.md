@@ -688,3 +688,28 @@
 | コミット前のレビュー | 修正の途中で入った退行：同じホストに限ったため apex から www への普通の転送を 301 で判定する（H-01①（高）など）、前の語に付けた「;」（`sleep 2; curl -u …`）で区切らず値を伏せない、伏せなかった`-d`の値をまるごと読み飛ばしてまとめ書きの`-sSLfu`を伏せない、キーに7〜8桁の数字（ワンタイムの番号）が入る・以前の`*`のキーの例外が外れる・非 ASCII の大文字・小文字の入れ替わるトークンが入る、本文を採取していない text/html を A-01①（高）にする、開発用コメントの`password is`・`debug_mode`を見逃す、メールの確認の案内を多要素認証とみなす、`id="currentPassword"`のログイン画面を外す、引用符の中の「;」で区切る、`utm_*`などの公開の値を伏せる、httpie の`==`を`=`にする | それぞれ直した | 同上 |
 | 既存のテストの書き直し | `tests/backlog2.test.ts`の、緩いポリシーと厳しいポリシーを並べた CSP の期待を、①②を出さないものにした | 仕様の変更に合わせた | — |
 | 未対応 | `tests/review10.test.ts`の CSV の性能テスト（1000ms）が、テストを並べて動かすと、この版の前から1.4秒ほどかかって失敗することがある（単独では0.4秒）。未確認のもの（form_post の hidden の欄の AWS のキー、値の変わらないセッションらしい Cookie を発行し直す C-09①、Bearer トークンのログインの C-09①、64KB の末尾の閉じ引用符のない JSON の値、英小文字だけ・6桁の数字のパスのワンタイムの番号、`:443`付きの HAR の転送、`/actuator/health`の高、`CDN-Cache-Control`、robots.txt の 301） | 次回以降 | — |
+
+### レビュー指摘への対応（第30回、18回目の新鮮な目でのレビュー：独立した3人のレビュアー）
+
+入力とマスク、判定、直前のコミット（第29回）の副作用を、別々のレビュアーが独立に見た。第29回の修正（コミット前のレビューを受けて書き換えたコマンドの区切りを含む）が、`#META cmd=`の引数の中の`;`でコマンドを分けて Cookie の値を出す漏れなど13件の退行を入れていた。36件に対応し、ルールセットを`2026.11-v0.4.37`にした。コミットの前に差分だけを見る独立したレビュアーに前後を比べてもらい、そこで見つかった修正の退行12件（高4件）も直した。修正前のソースでは、指摘36件のテストがすべて失敗することを確かめた。再現テストは`tests/review18.test.ts`と、ゴールデンテストのコーパスに加えた`tests/golden/cases/15-review18.txt`。
+
+| 指摘 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 1（漏えい・第29回の退行） | `#META cmd=`で、引用符の外の`;`をすべてコマンドの区切りにしたため、Cookie の`lang=ja;_remember=…`・パスワードの`p;ss`の後ろを出し、`;jsessionid=`の伏せ方が冪等でなく、後ろの URL・オプションが消える | 引用符の外の区切りで分けたかけらのうち、既知のほかのツールで始まるものだけを伏せずに残し、それ以外はつなぎ直して1つとして伏せる。伏せ済みの値は伏せ直さない | ツール設計3「マスキングの対象」、`src/mask.ts` |
+| 2・3（漏えい・第29回の退行） | パスを付けた curl（`./curl`、`C:\tools\curl.exe`）をクライアントと認識しない。`-d`の値のあとに続けて書いた`-dpassword=`・`-Fpassword=`を読み飛ばす | パスを付けた名前も見る。値を続けて書いた本文のオプションの前で値を止める | 同上 |
+| 4（第29回の退行） | A-01①（高）が、JSON の文字列に HTML を入れた API を HTML の画面として na にする | 本文が JSON なら HTML の画面としない | 第6章、`src/rules/api.ts` |
+| 5・22（第29回の退行） | 画面で1つのターゲットに登録した例外のキーの`*`が、同じホストのほかのページにも効く。`*login*`が`login`ラベルの指摘も抑止する。同じラベルが1つに減ると、「ラベル URL」の例外が外れる | キーとの照合は URL を持つキーだけで、`*`は1つのパスの部分の中だけ。「ラベル URL」の形とも照合する | ツール設計2「突き合わせ」、`src/engine/suppress.ts` |
+| 6・7・8・12（第29回の退行） | C-09 がログインのあとの設定の画面（`/mfa/setup-reminder`）を多要素認証の途中とみなす。E-01②が文章の「Look at /src/app.js:10:5」に出る。E-09②が「Tests pass」に出て、`passwords:`・`isDebug`を見逃す。`id="old-password"`の再認証の画面をログイン画面とする | 最後の部分で見る。行の始め・タグの直後か、前に Error があるものだけ。password（複数形も）とキャメルケースの途中を見る。id の old-password も除く | 第2章・第5章、`src/rules/cross.ts`、`src/rules/exposure.ts`、`src/rules/html.ts` |
+| 9・10・11・13（第29回の退行） | カバレッジの「機密応答では判定していない」に英訳がない。エンコードしたユーザー情報を伏せるとき、ポートから`%40`までまとめて伏せる。長音「ー」を含む語をキーで`*`にする。別のサイトへの転送で終わるターゲットで、H-03・H-13 が na も出さずに消える | 英訳を加える。`%2F`・`%3F`をまたがない。長音を語に含める。H-13 を na にして示す | `src/recommendationsEn.ts`、`src/mask.ts`、`src/engine/targetKey.ts`、`src/rules/headers.ts` |
+| 14（高） | 改行のない本文（`Unauthorized`）の直後の`#TARGET`を取りこぼし、次のターゲットが警告なしで消える | どの文字の直後でも`#TARGET url=`・`label=`で分ける。生成スクリプトも`#TARGET`の前に改行を出す | パース上の注意点、`src/parser/input.ts`、`src/commands.ts` |
+| 15〜20・23（漏えい） | `pass1`・`otp1`・`userpw`・`_wpnonce`、`export`・`env`・`set`・`$env:`の代入、wget の`--post-data`、引用符の中の空白のある値、httpie の`Authorization:"Bearer …"`、`echo`・`<<<`で渡した本文を伏せない | それぞれ伏せる | ツール設計3「マスキングの対象」、`src/mask.ts` |
+| 21 | 英小文字だけのトークン（`/reset/kqzvwxmplrtbnhjd`）が、キーにも画面にも残る | 母音の少ない英小文字の並びを、画面では伏せ、キーでは`*`にする | 同上、`src/engine/targetKey.ts` |
+| 24（高） | H-12①（高）・H-11①が、分析ツールの Cookie（`ai_session`・`s_sess`・`ab.storage.*`）を送っただけの公開ページを機密応答とみなす | 解析用の Cookie に加える | 第2章、`src/parser/setCookie.ts` |
+| 25・26・33 | H-12①（高）がキャッシュされない 401・500 に出る。H-01③が無効な HSTS（カンマ区切り・`;`のないもの・重複）を見逃す。H-08①が本文のない 3xx に出る | 経験的にキャッシュしてよいステータス以外は na。RFC 6797 のとおりに読む。本文のない 3xx は na | 第1章、`src/rules/headers.ts`、`src/rules/util.ts`、`src/engine/run.ts` |
+| 27・28・30 | A-01①（高）がデータのない`{}`に出る。C-12①（高）がログアウトのあとの SPA の画面に出る。E-05①（高）が`/actuator/health`の`{"status":"UP"}`に出る | na にする。na にする。合格にする | 第6章・第2章・第5章、`src/rules/api.ts`、`src/rules/cross.ts`、`src/rules/exposure.ts` |
+| 29 | HAR のブラウザ内部の転送（`307 Internal Redirect`）を、サーバの応答として T-04・C-10 で判定する | 取り込まない | `src/parser/har.ts` |
+| 31・32 | フラグの Cookie（`has_session=1`）をセッションCookie とみなす。小文字と数字だけの24文字のセッションID を約142bit と過大に推定する | 値が真偽値・短い数字ならセッションCookie としない。36種で数える | 第2章、`src/parser/setCookie.ts`、`src/rules/cookies.ts` |
+| 34・35・36 | E-11②がフォント（`.eot`）・HLS のプレイリストに出る。A-02①（高）が`?session=12`に出る。R-07①が`X-Tokens-Used`に出る | 対象外にする。数字は6桁以上だけトークンとする。利用量の項目を除く | 第5章・第6章・第3章、`src/rules/exposure.ts`、`src/rules/api.ts`、`src/rules/cors.ts` |
+| コミット前のレビュー | 修正の途中で入った退行：区切りのあとがコマンドの名前のときだけ区切ったため、一覧にない名前（`sleep_2;curl8_-u_…`）の前の sleep を見て値を出す、`-u`・`-b`の値の中の`_-dW0rd…=`で値を切って後ろを出す、C-09 が Fortify・GitHub・Auth0・allauth の2段階目の画面を見逃す、C-12 が Inertia の`data-page`と短いサーバ描画の画面を SPA の殻とみなす、`-H "Authorization:"`のあとの -H・URL を値として消す、引数のパスの`/tmp/curl_out.txt`をクライアントとみなす、`SESSIONID=1234`をセッションCookie とみなさない、開発用コメントの`pass:`を見逃す、`X-Account-Token`を除く、`private`の付いた 403 を na にする、`key1`・`code128`・`cryptography`を伏せる・`*`にする、本文の文中の`#TARGET url=`で本文を切る | それぞれ直した | 同上 |
+| 既存のテストの書き直し | `tests/review7.test.ts`の`/actuator/health`の期待を、状態だけの応答は合格、`/actuator/env`は①にした | 仕様の変更に合わせた | — |
+| 未対応 | `tests/review10.test.ts`の CSV の性能テストが、テストを並べて動かすと失敗することがある（第29回と同じ）。「_」で区切った`#META cmd=`で、クエリの値が後ろの引数まで続く伏せすぎ（第28回と同じ）。未確認のもの（`--socks5 user:pw@`、PowerShell の`curl`の`-Headers`、Keycloak の`AUTH_SESSION_ID`の C-09①、HSTS の無効なヘッダを実際のブラウザで試していない） | 次回以降 | — |

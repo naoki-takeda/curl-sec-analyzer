@@ -6,6 +6,7 @@ import { maskText } from '../mask';
 import { targetKeys } from './targetKey';
 import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isSensitive, ownChain, responseKind } from '../parser/target';
 import { looksLikeSession, parseSetCookie, sentAuthOf } from '../parser/setCookie';
+import { parseHsts } from '../rules/util';
 import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../rules/ruleset';
 import { allowedItems } from './labels';
 import { applySuppressions } from './suppress';
@@ -38,7 +39,7 @@ export function hostHstsMap(targets: Target[]): Map<string, boolean> {
     // apex は、apex 自身の応答（転送の最初のホップ）で見る（rules/headers.ts の H-01 と同じ）
     const host = hostOf(t); const f = baseLabel(t.label) === 'apex' ? ownChain(t)[0] : finalResponse(t);
     if (!host || isHttps(t) !== true || !f) continue;
-    const age = Number(f.headers.get('strict-transport-security')?.[0]?.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? 0);
+    const age = parseHsts(f.headers.get('strict-transport-security')?.[0]).maxAge;   // H-01 と同じ読み方（無効なヘッダは HSTS なし）
     m.set(host, (m.get(host) ?? false) || age > 0);
   }
   return m;

@@ -78,7 +78,10 @@ export function importHar(text: string): HarImport {
   const har = JSON.parse(text) as { log?: { entries?: HarEntry[] } };
   const all = (har.log?.entries ?? []).filter(e => e?.request?.url && e.response && /^https?:/i.test(e.request.url));
   // status 0 は、ブロック・キャンセル・CORSの失敗などで応答がなかったエントリ。ヘッダがないので判定に使うと誤検知になる
-  const entries = all.filter(e => Number(e.response.status) > 0);
+  // ブラウザが内部で作った転送（HSTS・HTTPS-Upgrades の 307 Internal Redirect。Non-Authoritative-Reason ヘッダが付く）も、サーバの応答では
+  // ないので除く（http のラベルで T-04・C-10 を、http で接続していないのに判定した）
+  const internal = (e: HarEntry) => /internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name));
+  const entries = all.filter(e => Number(e.response.status) > 0 && !internal(e));
   const used = new Set<number>(); const chains: HarChain[] = [];
   // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）
   const byUrl = new Map<string, number[]>();

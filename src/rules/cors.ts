@@ -153,7 +153,9 @@ const SENSITIVE_EXPOSE = /\b(authorization|set-cookie|x-auth[\w-]*|[\w-]*token[\
 // 名前に token を含んでも、認証のトークンではないヘッダ（CSRF 対策のトークンは SPA が読むために公開する。ページ送りのトークンも秘密ではない）。
 // token を含む名前だけに使う（X-Debug-Async-Trace、X-Internal-Pagecache-Node のような内部ヘッダまで除かないため）
 // レート制限の項目（x-ratelimit-remaining-tokens など。LLM の API は消費したトークン数を返す）も認証のトークンではない
-const NOT_AUTH_TOKEN = /csrf|xsrf|page|next|continuation|cursor|sync|rate-?limit|remaining|usage/i;
+// 利用量の項目（X-Tokens-Used、X-Total-Count）も
+// used・count・limit は語として（X-Account-Token の account の count に一致させない）
+const NOT_AUTH_TOKEN = /csrf|xsrf|page|next|continuation|cursor|sync|rate-?limit|remaining|usage|(?:^|[-_])(?:used|count|limit)(?:[-_]|$)/i;
 export const corsExpose: Rule = { id: 'R-07', title: 'Access-Control-Expose-Headers', appliesTo: 'any', scope: 'target',
   basis: ['MDN'],
   run(ctx) {

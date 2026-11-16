@@ -48,9 +48,9 @@ csp-sample-* | H-04.na | info | na |
 empty-401 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 empty-401 | H-01.1 | high | fail | (ヘッダなし)
 empty-401 | H-02.na | info | na | HSTSがない（H-01で判定）
-empty-401 | H-08.1 | medium | fail | (ヘッダなし)
+empty-401 | H-08.na | info | na | HTTP 401（本文のない応答）
 empty-401 | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-empty-401 | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+empty-401 | H-12.na | info | na | HTTP 401（鮮度の指定がなく、キャッシュされない応答）
 empty-401 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 empty-401 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 empty-401 | R-04.ok | info | pass | (ACAOなし)
@@ -227,7 +227,7 @@ H-04 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条
 H-05 | evaluated | fails=2
 H-06 | evaluated | fails=4
 H-07 | evaluated | fails=0
-H-08 | evaluated | fails=8
+H-08 | evaluated | fails=7
 H-09 | evaluated | fails=4
 H-10 | evaluated | fails=4
 H-11 | evaluated | fails=4

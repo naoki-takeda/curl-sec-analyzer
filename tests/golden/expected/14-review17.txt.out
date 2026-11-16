@@ -34,14 +34,14 @@ error-500 | H-08.1 | medium | fail | (ヘッダなし)
 error-500 | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
 error-500 | H-10.1 | info | fail | (ヘッダなし)
 error-500 | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-error-500 | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-500 | H-12.na | info | na | HTTP 500（鮮度の指定がなく、キャッシュされない応答）
 error-500 | H-13.ok | info | pass | application/json
 error-500 | H-14.1 | info | fail | (ヘッダなし)
 error-500 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 error-500 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 login | A-02.ok | info | pass | URL・Location・本文にトークンなし
 login | C-09.ok | info | pass | URLにセッションIDなし
-login | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+login | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 logout | C-12.ok | info | pass | sid=…(0 chars); Max-Age=0; Path=/
 logout | H-15.1 | info | fail | (ヘッダなし)
 me | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -135,7 +135,7 @@ quoted label | H-01.1 | high | fail | (ヘッダなし)
 quoted label | H-02.na | info | na | HSTSがない（H-01で判定）
 quoted label | H-08.1 | medium | fail | (ヘッダなし)
 quoted label | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-quoted label | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+quoted label | H-12.na | info | na | HTTP 401（鮮度の指定がなく、キャッシュされない応答）
 quoted label | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 quoted label | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 quoted label | R-04.ok | info | pass | (ACAOなし)
@@ -144,9 +144,10 @@ session-sample-* | C-07.na | info | na |
 top | A-02.ok | info | pass | URL・Location・本文にトークンなし
 top | H-01.ok | info | pass | max-age=31536000; includeSubDomains
 top | H-02.2 | info | fail | max-age=31536000; includeSubDomains
-top | H-08.1 | medium | fail | (ヘッダなし)
+top | H-08.na | info | na | HTTP 302（本文のない応答）
 top | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-top | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+top | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
+top | H-13.na | info | na | HTTP 302（別のサイトへの転送で終わる。転送先の応答は判定しない）
 top | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 top | R-04.ok | info | pass | (ACAOなし)
@@ -193,7 +194,7 @@ H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条
 H-05 | evaluated | fails=0
 H-06 | evaluated | fails=5
 H-07 | evaluated | fails=0
-H-08 | evaluated | fails=6
+H-08 | evaluated | fails=5
 H-09 | evaluated | fails=5
 H-10 | evaluated | fails=5
 H-11 | evaluated | fails=4

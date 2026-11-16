@@ -83,7 +83,7 @@ error-url | H-08.1 | medium | fail | (ヘッダなし)
 error-url | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
 error-url | H-10.1 | info | fail | (ヘッダなし)
 error-url | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
-error-url | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-url | H-12.na | info | na | HTTP 500（鮮度の指定がなく、キャッシュされない応答）
 error-url | H-13.ok | info | pass | text/html; charset=utf-8
 error-url | H-14.1 | low | fail | (ヘッダなし)
 error-url | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし

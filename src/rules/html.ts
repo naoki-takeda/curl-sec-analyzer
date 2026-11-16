@@ -206,8 +206,11 @@ function internalUrl(html: string, own?: string): string | undefined {
 // 画面の部品の説明（<!-- Password field -->、パスワード欄）を除く
 // 開発用の語は大文字・小文字を区別して、後ろに小文字が続かないもの（debugMode・debug_mode は見る。/i で照合すると debugMode の M も
 // 小文字の扱いになって見逃した）
-const DEV_CODE_WORD = /(?<![A-Za-z])(?:TODO|FIXME|XXX|HACK|[Dd]ebug|DEBUG|[Ss]taging|STAGING)(?![a-z])/;
-const DEV_WORD = /(?<![A-Za-z])pass(?:word)?(?![a-z])(?![\s_-]*(?:field|input|label|form|reset|box|placeholder|strength|hint|toggle|visibility|policy)\b)|パスワード(?!欄|入力|を忘れ|の再設定|の変更|変更|リセット)|本番/i;
+// キャメルケースの途中（isDebug・useStaging）も見る
+const DEV_CODE_WORD = /(?<![A-Za-z])(?:TODO|FIXME|XXX|HACK|[Dd]ebug|DEBUG|[Ss]taging|STAGING)(?![a-z])|(?<=[a-z])(?:Debug|Staging)(?![a-z])/;
+// password（複数形を含む）だけを見る（pass だけで見ると「Tests pass」「pass the id」を開発用コメントにした）
+// pass は値の代入（pass: …、pass=…）のときだけ
+const DEV_WORD = /(?<![A-Za-z])pass\s*[:=]|(?<![A-Za-z])passwords?(?![a-z])(?![\s_-]*(?:field|input|label|form|reset|box|placeholder|strength|hint|toggle|visibility|policy)\b)|パスワード(?!欄|入力|を忘れ|の再設定|の変更|変更|リセット)|本番/i;
 /**
  * 閉じたコメント（<!-- … -->）を1つずつ切り出し、その中だけで開発用の語を探す。一致した語を返す。
  * 正規表現1つで「コメントの中の語」を探すと、閉じのない <!-- が続く本文でバックトラックが爆発する（64KBで数分）ため、indexOf で線形に走査する。
@@ -334,7 +337,8 @@ export function loginForm(body: string): boolean {
     // name に current_password・old_password があるもの（Devise の user[current_password]、メールアドレスの変更の old_password）だけを除く。
     // id だけで見ると、id="currentPassword" のログインのフォームまで外した
     const pwName = attr(pw[0], 'name');
-    if (/(?:current|old)[-_]?pass/i.test(pwName) && !(currentPassword && /^current-password$/i.test(pwName))) return false;
+    // id の old-password・old_password も再認証の欄（id の current-password・currentPassword は、web.dev が勧めるログイン画面にもあるので除かない）
+    if ((/(?:current|old)[-_]?pass/i.test(pwName) && !(currentPassword && /^current-password$/i.test(pwName))) || /old[-_]?pass/i.test(attr(pw[0], 'id'))) return false;
     const user = inputs.some(t => !NON_TEXT_INPUT.test(attr(t, 'type')))
       || inputs.some(t => /^hidden$/i.test(attr(t, 'type')) && /^(?:user(?:name)?|email|login|identifier|j_username)$/i.test(attr(t, 'name')));
     if (user) return true;

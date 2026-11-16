@@ -91,7 +91,7 @@ session-sample-1 | C-08.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-09.ok | info | pass | URLにセッションIDなし
 session-sample-1 | C-11.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-13.ok | info | pass | 共有キャッシュの指定なし
-session-sample-1 | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+session-sample-1 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 session-sample-2 | C-01.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-02.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-03.ok | info | pass | .AspNetCore.CookiesC1
@@ -103,7 +103,7 @@ session-sample-2 | C-08.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-09.ok | info | pass | URLにセッションIDなし
 session-sample-2 | C-11.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-13.ok | info | pass | 共有キャッシュの指定なし
-session-sample-2 | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+session-sample-2 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 spa-actuator | A-02.ok | info | pass | URL・Location・本文にトークンなし
 spa-actuator | E-01.ok | info | pass | エラーの詳細らしき記述なし
 spa-actuator | E-02.ok | info | pass | 一覧表示なし

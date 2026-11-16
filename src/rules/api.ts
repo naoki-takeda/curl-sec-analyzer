@@ -48,6 +48,8 @@ const htmlPage = (ctx: RuleContext): 'login' | 'html' | 'unknown' | undefined =>
   const htmlCt = /^\s*(?:text\/html|application\/xhtml\+xml)/i.test(ct);
   // 本文を採取していない text/html（curl -I、-o /dev/null）は、SPA の画面かデータかが分からない
   if (!b.trim()) return htmlCt ? 'unknown' : undefined;
+  // 本文が JSON（{・[ で始まる）なら HTML の画面ではない（JSON の文字列に入れた "<!DOCTYPE html>…" を HTML の画面とみなした）
+  if (/^\s*[{[]/.test(b)) return undefined;
   // 先頭の 1KB に <!doctype html>・<html があるもの（PHP の Notice の行のあとに続く HTML も）か、タグで始まるもの
   const head = b.slice(0, 1024);
   if (!/<!doctype html|<html\b/i.test(head) && !(htmlCt && /^\s*<(?!\?xml\b)/i.test(b))) return undefined;
@@ -57,6 +59,14 @@ const htmlPage = (ctx: RuleContext): 'login' | 'html' | 'unknown' | undefined =>
  * GraphQL の認証エラー（200 で {"errors":[…],"data":null}）。errors があり、data が null か、値がすべて null のもの。
  * エラーの code・message が認証・認可の拒否（UNAUTHENTICATED・FORBIDDEN・not authenticated など）なら 'denied'、それ以外は 'error'
  */
+/** データのない JSON の本文（{}・[]・null、値がすべて null・空のもの） */
+const emptyJson = (ctx: RuleContext): boolean => {
+  const b = ((sameDocumentHop(ctx.target).hop ?? ctx.final)?.body ?? '').trim();
+  if (!/^[{[]|^null$/.test(b)) return false;
+  let j: unknown; try { j = JSON.parse(b); } catch { return false; }
+  const empty = (v: unknown): boolean => v === null || v === '' || (Array.isArray(v) ? v.length === 0 : typeof v === 'object' && Object.values(v as Record<string, unknown>).every(x => x === null));
+  return empty(j);
+};
 const graphqlError = (ctx: RuleContext): 'denied' | 'error' | undefined => {
   const b = (sameDocumentHop(ctx.target).hop ?? ctx.final)?.body ?? '';
   if (!/^\s*\{/.test(b) || !/"errors"\s*:/.test(b)) return undefined;
@@ -107,6 +117,8 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
       const gql = graphqlError(ctx);
       if (gql === 'denied') return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', `HTTP ${s}（GraphQL の認証エラー。データは null）`, '')];
       if (gql) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（GraphQL のエラー。データは null で、認証で断られたかは分からない）`, '認証が必要なクエリ（me など）で採取し直す')];
+      // データのない JSON（{}・[]・null・値がすべて null のもの。NextAuth の未認証の /api/auth/session は {} を返す）は、保護データを返していない
+      if (emptyJson(ctx)) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（データのない JSON。保護データを返したかは分からない）`, '認証が必要なデータを返す API の URL で採取し直す')];
       return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
     }
     if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${sameDocumentHop(ctx.target).hop?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
@@ -123,7 +135,8 @@ const TOKEN_PARAM = paramRegex(TOKEN_PARAM_NAMES, 'gi');     // マスキング�
  * 真偽値なら、トークンを URL に入れているのではないので、A-02① にしない。除くのは「小文字の英字（- _ でつないだもの）で16文字以下」と
  * 真偽値だけ。大文字を含む英字だけの値（QxZrTbWmPnLk…）、長い値、数字だけの値（ワンタイムの番号）はトークンとして扱う
  */
-const tokenLikeValue = (v: string) => !/^(?:true|false|yes|no|on|off|[01]|none|null)$/i.test(v) && !(/^[a-z]+(?:[-_][a-z]+)*$/.test(v) && v.length <= 16);
+// 数字だけの値は6桁以上のときだけトークンとする（講演のセッション番号の ?session=12 を高にした。ワンタイムの番号はふつう6桁以上）
+const tokenLikeValue = (v: string) => !/^(?:true|false|yes|no|on|off|[01]|none|null)$/i.test(v) && !(/^[a-z]+(?:[-_][a-z]+)*$/.test(v) && v.length <= 16) && !/^\d{1,5}$/.test(v);
 const hasTokenParam = (u: string) => [...u.matchAll(TOKEN_PARAM)].some(m => tokenLikeValue(m[2]));
 export const tokenExposure: Rule = { id: 'A-02', title: 'トークンの露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API2', 'RFC 6750 2.3'],

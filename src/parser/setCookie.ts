@@ -67,7 +67,9 @@ export const sessionConfig = { names: [] as string[], maxAgeHours: 24 };
 const NOT_SESSION = /csrf|xsrf|consent|antiforgery|requestverificationtoken|^idsrv\.session$|^KEYCLOAK_SESSION(?:_LEGACY)?$/i;
 // 解析・チャット・決済などの外部サービスの Cookie。名前に session・sid・token を含むが、ログインの状態ではない。
 // HAR で機密応答と推定すると、robots.txt などの公開ページまで H-12①（高）になる
-const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_uet|_clck$|_clsk$|__hs|hubspot|ajs_|amplitude|mp_|_fbp$|_gcl_)/i;
+// Azure Application Insights の ai_session・ai_user、Adobe Analytics の s_sess、Braze の ab.storage.* も解析用（ASP.NET のサイトで、送っただけで
+// 機密応答と推定して H-12①（高）を出していた）
+const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_uet|_clck$|_clsk$|__hs|hubspot|ajs_|amplitude|mp_|_fbp$|_gcl_|ai_(?:session|user|authUser)$|s_sess$|s_pers$|ab\.storage\.)/i;
 // 負荷分散・WAF の Cookie（転送先のサーバの印）。期限がなく値が長いため推定ではセッションCookieに見えるが、利用者ごとの秘密ではない。
 // セッションCookieとして扱うと、全員に同じ値を返す ARRAffinity などで C-07②（同じ値）や C-01①・C-02①（高）の誤検知になる
 // Kubernetes の ingress-nginx のスティッキーセッション（INGRESSCOOKIE）と、Google Cloud の負荷分散（GCLB）も同じ
@@ -119,5 +121,8 @@ export function looksLikeSession(c: SetCookie, now = Date.now()): boolean {
   if (sessionConfig.names.length) return sessionConfig.names.some(n => n.toLowerCase() === c.name.toLowerCase());   // 指定があれば推定しない
   if (notSessionName(c.name)) return false;
   const persistent = c.attrs.has('expires') || c.attrs.has('max-age');
-  return SESSION_NAME.test(c.name) || (!persistent && c.value.length >= 20);
+  // 名前で推定しても、値が真偽値・0・1 のもの（has_session=1、session_active=true）はフラグで、セッションIDではない（ほかの数字の値（SESSIONID=1234）は
+  // セッションIDとして C-07 で判定する）
+  if (SESSION_NAME.test(c.name)) return !/^(?:true|false|yes|no|on|off|[01])$/i.test(c.value);
+  return !persistent && c.value.length >= 20;
 }

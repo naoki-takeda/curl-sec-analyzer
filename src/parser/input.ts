@@ -15,6 +15,10 @@ const BODY_LIMIT = 64 * 1024;
 // 改行のない本文（手で書いた curl -i の JSON・HTML）の直後にくっついたマーカー（{"id":1}#TARGET url=…）。分けないと、次のターゲットが
 // 前の本文に吸い込まれて黙って消える。本文がたまたま「}#TARGET url=」を含むことはまずないので、JSON・HTML の閉じの直後だけを分ける
 const STUCK_MARKER = /([}\]>])(#(?:TARGET|META)[ \t]+(?:url|label|at|cmd|response_code)=)/g;
+// #TARGET は、どの文字の直後でも分ける（Express の res.sendStatus(401) の「Unauthorized」、text/plain の 404 の本文のように、改行のない本文が
+// } ] > 以外で終わると、生成スクリプトの直後の #TARGET を前の本文に吸い込み、次のターゲットが警告なしで消えた）
+// ただし、直前が空白・引用符のもの（本文の文中の「… #TARGET url=」、set -x の「+ echo '#TARGET …'」）は分けない
+const STUCK_TARGET = /([^\n\s'"`])(#TARGET[ \t]+(?:url|label)=)/g;
 // curl の進捗表示（-s を付けない実行で 2>&1 にしたもの）。見出しの行と数字の行は読み飛ばし、応答の行の前にくっついた部分は取り除く
 // （遅い応答では、進捗表示とステータス行が同じ行に出て、ターゲットごと失われる）。時刻の欄（--:--:-- か 0:00:01）を手がかりにする
 // 数字の行は欄が12個（% Total % Received % Xferd Dload Upload Total Spent Left Speed）。8個以上の数字の欄と時刻の欄を条件にし、
@@ -75,7 +79,7 @@ export function parseInput(input: string): ParseResult {
   // （CR CR LF を CR LF と CR に分けて読むと、受信ヘッダの各行のあとに空行ができ、ヘッダがすべて失われる）
   // CR の並びの先頭でだけ LF を探す（/\r+\n|\r/ は、LF の付かない長い CR の並びで、位置ごとに並びの終わりまで読み直し、入力の長さの2乗の時間がかかった）。
   // LF の付かない CR は1つずつ改行にする（古い Mac の改行。CR CR は空行）。結果は /\r+\n|\r/ と同じ
-  const lines = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').split('\n');
+  const lines = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
   for (let li = 0; li < lines.length; li++) {
     let line = lines[li];
     if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;

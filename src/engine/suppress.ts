@@ -1,5 +1,7 @@
 // engine/suppress.ts：例外登録（suppressions.json）の適用
 import type { Finding, Suppression } from '../model';
+import { baseLabel } from '../parser/target';
+import { urlKey } from './targetKey';
 
 /**
  * URL のパターン照合（* は任意の文字列）。正規表現に変換すると、* の多いパターンでバックトラックが爆発する（ReDoS）ため、
@@ -17,6 +19,11 @@ export function wildcardMatch(pattern: string, text: string): boolean {
   return p === pattern.length;
 }
 const MAX_PATTERN = 500;
+/** 「/」で区切った部分ごとに照合する（部分の数が同じで、各部分が * を含めて一致する）。* が「/」をまたがない */
+function segmentMatch(pattern: string, text: string): boolean {
+  const p = pattern.split('/'), t = text.split('/');
+  return p.length === t.length && p.every((x, i) => wildcardMatch(x, t[i]));
+}
 
 export function matches(s: Suppression, f: Finding): boolean {
   const ruleOk = s.ruleId === f.item || s.ruleId === f.ruleId;
@@ -27,8 +34,13 @@ export function matches(s: Suppression, f: Finding): boolean {
   const pattern = s.target.length <= MAX_PATTERN;
   const targetOk = s.target === f.target || s.target === f.targetKey || (pattern && !!f.url && wildcardMatch(s.target, f.url))
     || (pattern && !!keyUrl && wildcardMatch(s.target, keyUrl))
-    // 以前の版のキー（HAR GET https://www.example.jp/*）も、キーの全体と * で照合する（キーの形を変えると、例外が黙って外れた）
-    || (pattern && !!f.targetKey && s.target.includes('*') && wildcardMatch(s.target, f.targetKey)) || s.target === '*';   // HAR は「HAR メソッド URL」で照合
+    // 以前の版のキー（HAR GET https://www.example.jp/*）も、キーの全体と照合する（キーの形を変えると、例外が黙って外れた）。照合するのは URL を持つキー
+    // だけで、* は「/」で区切った1つの部分の中だけに一致させる（画面で1つのターゲットに登録したキーの *（伏せたパスの部分）が、同じホストの
+    // ほかのページにも効いた。ラベルだけのキーと照合すると、*login* が login ラベルの指摘も抑止した）
+    || (pattern && !!f.targetKey && f.targetKey.includes('://') && s.target.includes('*') && segmentMatch(s.target, f.targetKey))
+    // 同じラベルが1つに減って、キーが「ラベル URL」からラベルだけになったもの（page https://a.example/b で登録した例外が外れた）
+    || (!!f.url && s.target === `${baseLabel(f.target)} ${urlKey(f.url)}`)
+    || s.target === '*';   // HAR は「HAR メソッド URL」で照合
   return ruleOk && targetOk;
 }
 
