@@ -25,8 +25,11 @@ export const isSecretParamName = (name: string): boolean => {
 };
 const ANY_PARAM = /([?&#;])([\w.%[\]-]{1,100})=([^&\s#;"'<>]+)/g;
 const JWT = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
-// スキームは語の先頭から32文字まで（\w+ だと長い英数字の並びで、入力の長さの2乗の時間がかかる）
-const URL_CRED = /\b([A-Za-z][\w+.-]{0,31}:\/\/)([^/\s:@]{1,256}):([^/\s@]{1,256})@/g;
+// URL のユーザー情報（スキーム://ユーザー情報@ホスト）。スキームは語の先頭から32文字まで（\w+ だと長い英数字の並びで、入力の長さの2乗の時間がかかる）。
+// ユーザー情報はホストの前の最後の @ まで（パスワードに @ を含む場合も残さない）。パス・クエリ・フラグメントの @ には一致させない
+const URL_CRED = /\b([A-Za-z][\w+.-]{0,31}:\/\/)([^/\s?#<>"']{1,512})@/g;
+/** パスワードがあればユーザー名を残してパスワードを伏せる。ユーザー名だけ（https://<トークン>@host/ の形）なら、それをトークンとしてマスクする */
+const maskUserinfo = (u: string) => { const i = u.indexOf(':'); return i >= 0 ? `${u.slice(0, i)}:****` : maskValue(u); };
 
 export function maskValue(v: string): string {
   const keep = v.length <= 8 ? 0 : v.length <= 20 ? 2 : 4;
@@ -41,7 +44,7 @@ export function maskText(s: string): string {
   return s.replace(CSP_NONCE, (_, v) => `'nonce-${maskValue(v)}'`)
           .replace(ANY_PARAM, (all, sep: string, k: string, v: string) => (isSecretParamName(k) ? `${sep}${k}=${maskValue(v)}` : all))
           .replace(JWT, t => maskValue(t))
-          .replace(URL_CRED, (_, sc, u) => `${sc}${u}:****@`);
+          .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u)}@`);
 }
 
 // #PROBE の head は判定にだけ使い、表示・エクスポートにはパターン名だけを出す。

@@ -4,6 +4,19 @@ import { probePattern } from '../mask';
 import { header, mk } from './util';
 
 const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : undefined);
+
+/**
+ * E-01①：接続文字列・認証情報らしき値。
+ * - Server=…;…;Password=…; の形は、キーを大文字小文字を区別して照合し、Password は「;」の直後のキーとする。
+ *   小文字の JS（var host = location.host; var password = form.value;）には一致させない（区別しないと、圧縮した JS の多くで高の誤検知になる）
+ * - AWS のアクセスキーは大文字だけで、語の境目で区切る（base64 の途中の …zakia… に一致させない。rules/html.ts の SECRETS と同じ）
+ */
+const CREDENTIALS: RegExp[] = [
+  /jdbc:\w+:/i,
+  /mongodb(?:\+srv)?:\/\/[^\s:]+:[^\s@]+@/i,
+  /\b(?:Server|Data Source|Host|User ID|Uid|Database|Initial Catalog)\s*=[^;\n]{0,200};(?:[^;\n]{0,200};){0,10}?\s*(?:Password|PWD|Pwd)\s*=\s*[^;\s]+/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+];
 const path = (ctx: RuleContext) => { try { return new URL(ctx.target.url ?? '').pathname; } catch { return ''; } };
 
 export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース・デバッグ情報', appliesTo: 'any', scope: 'target',
@@ -12,8 +25,7 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     const b = body(ctx);
     if (!b) return [];
     const out = [];
-    // ①の Password=…; は接続文字列（Server=…;…;Password=…;）の形のときだけ。JS の「var password = …;」には一致させない
-    if (/jdbc:\w+:|mongodb(?:\+srv)?:\/\/[^\s:]+:[^\s@]+@|(?:Server|Data Source|Host|User ID|Uid|Database|Initial Catalog)\s*=[^;\n]{0,200};[^\n]{0,200}?(?:Password|Pwd)\s*=\s*[^;\s]+;?|AKIA[0-9A-Z]{16}/i.test(b))
+    if (CREDENTIALS.some(re => re.test(b)))
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
     const trace = b.match(/Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|ORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/);
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', trace[0].slice(0, 120), 'スタックトレース・SQL文・絶対パスを応答に含めない'));

@@ -4,7 +4,19 @@ import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
 import { mk } from './util';
 
-export interface Tag { name: string; attrs: Map<string, string>; raw: string; index: number; }
+/** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
+export interface Tag { name: string; attrs: Map<string, string>; evidence: string; index: number; }
+
+/**
+ * 証跡に値を出す属性。判定に使う属性（読み込み先・送信先・種類）だけにする。
+ * それ以外（data-api-key、data-auth-token、nonce、value など）は、名前の付け方によらず秘密情報を含みうるので、値を「…」にする。
+ * URL のパラメータのトークンは、このあと engine/run.ts の maskText でマスクする
+ */
+const SHOWN_ATTRS = new Set(['src', 'href', 'action', 'data', 'rel', 'method', 'type', 'name', 'content', 'integrity', 'crossorigin', 'as']);
+export function tagEvidence(name: string, attrs: Map<string, string>): string {
+  const parts = [...attrs].map(([k, v]) => (SHOWN_ATTRS.has(k) ? `${k}="${v}"` : v === '' ? k : `${k}="…"`));
+  return `<${[name, ...parts].join(' ')}>`.slice(0, 200);
+}
 
 /** 開始タグを列挙する（属性名は小文字） */
 export function tags(html: string, names: string[]): Tag[] {
@@ -14,7 +26,8 @@ export function tags(html: string, names: string[]): Tag[] {
   for (const m of html.matchAll(re)) {
     const attrs = new Map<string, string>();
     for (const a of m[2].matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), a[2] ?? a[3] ?? a[4] ?? '');
-    out.push({ name: m[1].toLowerCase(), attrs, raw: m[0].slice(0, 200), index: m.index ?? 0 });
+    const name = m[1].toLowerCase();
+    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: m.index ?? 0 });
   }
   return out;
 }
@@ -39,8 +52,8 @@ export const mixedContentRule: Rule = { id: 'E-07', title: 'HTML本文：混在�
     if (!html || ctx.isHttps === false) return [];
     const { active, passive } = mixedContent(html);
     const out = [
-      ...active.map(t => mk(mixedContentRule, ctx, 1, 'medium', 'fail', t.raw, 'https:// で読み込む（CSPの upgrade-insecure-requests も検討）')),
-      ...passive.map(t => mk(mixedContentRule, ctx, 2, 'low', 'fail', t.raw, 'https:// で読み込む')),
+      ...active.map(t => mk(mixedContentRule, ctx, 1, 'medium', 'fail', t.evidence, 'https:// で読み込む（CSPの upgrade-insecure-requests も検討）')),
+      ...passive.map(t => mk(mixedContentRule, ctx, 2, 'low', 'fail', t.evidence, 'https:// で読み込む')),
     ];
     return out.length ? out : [mk(mixedContentRule, ctx, 'ok', 'info', 'pass', 'http:// の資源なし', '')];
   } };
@@ -66,7 +79,7 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
       byOrigin.set(u.origin, g);
     }
     const fails = [...byOrigin].filter(([, g]) => g.missing.length).map(([origin, g]) =>
-      mk(sriRule, ctx, 1, 'low', 'fail', `${origin}（integrity なし ${g.missing.length}件／${g.total}件）。例：${g.missing[0].raw}`,
+      mk(sriRule, ctx, 1, 'low', 'fail', `${origin}（integrity なし ${g.missing.length}件／${g.total}件）。例：${g.missing[0].evidence}`,
          'integrity と crossorigin="anonymous" を付ける（自社の配信元なら、組織プロファイルの trustedScriptOrigins に登録して対象外にできる）'));
     if (fails.length) return fails;
     const total = [...byOrigin.values()].reduce((a, g) => a + g.total, 0);
@@ -114,7 +127,7 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     const dc = devCommentWord(html);
     if (dc) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `開発用コメント（「${dc}」を含む。中身は表示しない）`, 'ビルド時にコメントを削除する'));
     const gen = tags(html, ['meta']).find(t => t.attrs.get('name')?.toLowerCase() === 'generator' && /\d+\.\d+/.test(t.attrs.get('content') ?? ''));
-    if (gen) out.push(mk(htmlSecrets, ctx, 3, 'info', 'fail', gen.raw, 'generator のバージョンを出さない'));
+    if (gen) out.push(mk(htmlSecrets, ctx, 3, 'info', 'fail', gen.evidence, 'generator のバージョンを出さない'));
     return out.length ? out : [mk(htmlSecrets, ctx, 'ok', 'info', 'pass', '秘密情報・内部情報らしき記述なし', '')];
   } };
 
@@ -140,8 +153,8 @@ export const passwordForm: Rule = { id: 'E-10', title: 'HTML本文：パスワ�
     const out = [];
     for (const { form } of pw) {
       const action = form.attrs.get('action') ?? '';
-      if (/^http:\/\//i.test(action)) out.push(mk(passwordForm, ctx, 1, 'high', 'fail', form.raw, 'フォームの送信先を https:// にする'));
-      if ((form.attrs.get('method') ?? 'get').toLowerCase() !== 'post') out.push(mk(passwordForm, ctx, 2, 'medium', 'fail', form.raw, 'パスワードは method="post" で送る（URLに残さない）'));
+      if (/^http:\/\//i.test(action)) out.push(mk(passwordForm, ctx, 1, 'high', 'fail', form.evidence, 'フォームの送信先を https:// にする'));
+      if ((form.attrs.get('method') ?? 'get').toLowerCase() !== 'post') out.push(mk(passwordForm, ctx, 2, 'medium', 'fail', form.evidence, 'パスワードは method="post" で送る（URLに残さない）'));
     }
     return out.length ? out : [mk(passwordForm, ctx, 'ok', 'info', 'pass', `パスワードフォーム${pw.length}件は https・POST`, '')];
   } };
@@ -161,7 +174,7 @@ export const csrfToken: Rule = { id: 'E-12', title: 'HTML本文：CSRFトーク�
       return [mk(csrfToken, ctx, 'na', 'info', 'na', `トークンのないPOSTフォーム${missing.length}件（機密応答かどうか分からない）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
     if (ctx.hostSessionSameSite === true)
       return [mk(csrfToken, ctx, 'ok', 'info', 'pass', `トークンのないPOSTフォーム${missing.length}件。同じホストのセッションCookieは SameSite=Lax/Strict`, '')];
-    return missing.map(f => mk(csrfToken, ctx, 1, 'info', 'fail', f.form.raw,
+    return missing.map(f => mk(csrfToken, ctx, 1, 'info', 'fail', f.form.evidence,
       ctx.hostSessionSameSite === false ? 'POSTフォームにCSRFトークンを入れる（セッションCookieも SameSite=Lax/Strict でない。実効性の確認は範囲外）'
                                         : 'POSTフォームにCSRFトークンを入れる（セッションCookieが見つからないため SameSite は確認できない。実効性の確認は範囲外）'));
   } };
