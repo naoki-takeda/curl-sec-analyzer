@@ -54,12 +54,12 @@ v1.0 の範囲として、各項目を **OWASP ASVS 5.0.0** の要件と **IPA�
 
 ## 開発
 
-Node.js 22 以降。
+Node.js は `.nvmrc` の版（24）を使います（22.12 以降なら動きます）。開発の決まり（コミットの書き方、テスト用の入力の扱い、AI エージェントに許す操作など）は [CONTRIBUTING.md](CONTRIBUTING.md) にあります。
 
 ```sh
 npm ci
 npm run dev          # 開発サーバ（メタCSPは本番ビルドだけに入る）
-npm test -- --run    # 単体テスト（Vitest。--run を付けないと変更を監視し続ける）
+npm test             # 単体テスト（Vitest。変更を監視するときは npm run test:watch）
 npm run lint         # 型チェック（tsc）と ESLint（innerHTML・eval の禁止を含む）
 npm run audit        # 依存の署名の検証と、公開物に含まれる依存の既知の脆弱性（high 以上）の検査（CI と同じ）
 npm run build        # 型チェック＋本番ビルド（dist/）
@@ -85,7 +85,8 @@ npm run screenshot   # README の画像（docs/screenshot.png）と共有用の�
 
 専用の組織アカウントのリポジトリで管理し、`https://<組織名>.github.io/curl-sec-analyzer/` で公開します。個人アカウントの他の GitHub Pages とはオリジンが分かれます。
 
-- `main` への push で GitHub Actions が型チェック・テスト・ビルド・E2E を実行し、GitHub Pages に公開します。リポジトリの Settings → Pages で Source を「GitHub Actions」にしてください。
+- プルリクエストごとに、GitHub Actions（`ci.yml`）が依存の検査・型チェック・テスト・ビルド・E2E を実行します。`main` への push では同じ検査（`deploy.yml`）に通ったビルドだけを GitHub Pages に公開します。リポジトリの Settings → Pages で Source を「GitHub Actions」にしてください。
+- 公開リポジトリでは、CodeQL（コードとワークフローの脆弱性）と dependency-review（プルリクエストで新しく入る依存）も実行します。dependency-review のために、Settings → Code security で Dependency graph を有効にしてください。
 - `vite.config.ts` は `base: './'` なので、サブパス（`/curl-sec-analyzer/`）でも独自ドメインでも動きます。 独自ドメインで公開する場合は、共有用の画像のURLのために、リポジトリの変数 `SITE_URL`（Settings → Secrets and variables → Actions → Variables）に公開URLを設定してください。
 - 同じ組織の他の Pages とはオリジンを共有します。ツールはブラウザに何も保存せず、他のページへの埋め込みも拒否しますが、同じ組織の Pages に信頼できないコードや外部のスクリプトを読み込むページを置かないでください（理由は `docs/design.md` の「公開先とオリジン」）。
 - 個人のプロフィールに実績として表示するには、このリポジトリをピン留めし、組織のメンバーシップを公開にします。
@@ -100,4 +101,4 @@ MIT License（`LICENSE`）。公開したページの「第三者のライセン
 
 ## 設計書
 
-`docs/design.md` が設計書の正本です。仕様を変えるときは、実装と同じプルリクエストで設計書も更新してください。
+`docs/design.md` が設計書の正本です。仕様を変えるときは、実装と同じプルリクエストで設計書も更新してください（[CONTRIBUTING.md](CONTRIBUTING.md)）。

@@ -752,7 +752,7 @@ curl-sec-analyzer/
 ├─ e2e/                       # Playwright の E2E と axe-core のアクセシビリティ検査（本番ビルドに対して実行）
 ├─ docs/design.md             # 設計書（正本）。docs/history.md はレビューの経緯、docs/screenshot.png は README の画像
 ├─ .github/                   # workflows/（checks・ci・deploy・codeql・dependency-review）、dependabot.yml、ISSUE_TEMPLATE/、pull_request_template.md
-├─ SECURITY.md LICENSE README.md
+├─ SECURITY.md LICENSE README.md CONTRIBUTING.md
 ├─ csp.config.ts             # このツール自身の CSP（vite.config.ts が本番ビルドに埋め込む）
 └─ vite.config.ts eslint.config.js playwright.config.ts tsconfig.json .gitattributes .editorconfig .nvmrc
 ```
