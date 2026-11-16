@@ -16,7 +16,7 @@ tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応してい�
 chain | A-02.ok | info | pass | URL・Location・本文にトークンなし
 chain | H-01.1 | high | fail | (ヘッダなし)
 chain | H-02.na | info | na | HSTSがない（H-01で判定）
-chain | H-03.1 | high | fail | (ヘッダなし)
+chain | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 chain | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 chain | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 chain | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
@@ -46,7 +46,7 @@ options | T-01.2 | low | fail | Allow: GET, HEAD, OPTIONS, PUT, DELETE, PROPFIND
 own-port | A-02.ok | info | pass | URL・Location・本文にトークンなし
 own-port | H-01.1 | high | fail | (ヘッダなし)
 own-port | H-02.na | info | na | HSTSがない（H-01で判定）
-own-port | H-03.1 | high | fail | (ヘッダなし)
+own-port | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 own-port | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 own-port | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 own-port | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
@@ -77,7 +77,7 @@ www.example.com | T-11.2 | medium | fail | 期限まで19日（notAfter: 2026-11
 ## coverage
 H-01 | evaluated | fails=2
 H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
-H-03 | evaluated | fails=2
+H-03 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=2

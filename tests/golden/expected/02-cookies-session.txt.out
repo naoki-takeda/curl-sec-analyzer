@@ -30,7 +30,7 @@ cookies | C-11.1 | info | fail | ARRAffinitySameSite=ab…(16 chars); Secure; Sa
 cookies | C-13.1 | high | fail | Cache-Control: public, s-maxage=600
 cookies | H-01.ok | info | pass | max-age=63072000; includeSubDomains
 cookies | H-02.2 | info | fail | max-age=63072000; includeSubDomains
-cookies | H-03.1 | high | fail | (ヘッダなし)
+cookies | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 cookies | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 cookies | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 cookies | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
@@ -149,7 +149,7 @@ session-sample-3 | H-12.na | info | na | 機密応答かどうか分からない
 ## coverage
 H-01 | evaluated | fails=1
 H-02 | evaluated | fails=1
-H-03 | evaluated | fails=2
+H-03 | evaluated | fails=1
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=2

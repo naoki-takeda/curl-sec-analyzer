@@ -48,7 +48,10 @@ export function isDeletion(c: SetCookie, now = Date.now()): boolean {
 // 名前を語（- _ . とキャメルケースの境目）に分けて照合する。部分一致だと sidebar_collapsed（sid）・considered・oauth_state（auth）まで含めてしまう。
 // sess で始まる語（session、sessionid、PHPSESSID、JSESSIONID、Drupal の SSESS…）と、sid・token・auth などの語
 const SESSION_WORD = /^(?:(?:j|php|s)?sess\w*|sid|token|auth|jwt|login|aspxauth)$/i;
-const SESSION_NAME = { test: (name: string) => name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).some(w => SESSION_WORD.test(w)) };
+// ASP.NET の認証の Cookie。名前の語（AspNetCore・Identity・Application）にはセッションらしい語がなく、「ログインしたままにする」では期限付きで
+// 発行するので、推定ではセッションCookieに見えない（C-01① が②になり、C-02 を見逃した）
+const AUTH_COOKIE = /^\.(?:AspNetCore\.(?:Identity\.Application|Cookies|Session|Antiforgery(?!\.))|ASPXAUTH|AspNet\.ApplicationCookie)$/i;
+const SESSION_NAME = { test: (name: string) => (AUTH_COOKIE.test(name) && !/antiforgery/i.test(name)) || name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).some(w => SESSION_WORD.test(w)) };
 /** 組織プロファイルで変えられる設定（engine/profile.ts の withProfile が実行中だけ差し替える） */
 export const sessionConfig = { names: [] as string[], maxAgeHours: 24 };
 
@@ -68,7 +71,8 @@ const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB(?!Auth)|TS01[0-
 const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*)$/i;
 // WAF・CDN・ボット対策の Cookie（Cloudflare、Imperva、Akamai）。CDN が発行し、属性（Domain・SameSite・Secure）は運営者が変えられない。
 // 期限がなく値が長いものは、推定ではセッションCookieに見える（Imperva の incap_ses_* で C-01①・C-02①（高）の誤検知になる）
-const WAF_CDN = /^(?:__cf_bm$|cf_clearance$|_cfuvid$|__cflb$|incap_ses_|nlbi_|visid_incap_|ak_bmsc$|bm_sv$|bm_sz$|bm_mi$|_abck$)/i;
+// Cloudflare は __cf で始まる名前（__cf_bm、__cflb、__cfruid、__cfwaitingroom）と cf_clearance・cf_ob_info・cf_use_ob・cf_chl_…・_cfuvid
+const WAF_CDN = /^(?:__cf|cf_(?:clearance|ob_info|use_ob|chl_)|_cfuvid$|incap_ses_|nlbi_|visid_incap_|ak_bmsc$|bm_sv$|bm_sz$|bm_mi$|_abck$)/i;
 export const notSessionName = (name: string) => NOT_SESSION.test(name) || LOAD_BALANCER.test(name) || WAF_CDN.test(name) || THIRD_PARTY.test(name) || name.split(/[-_.]+/).some(w => NOT_SESSION_WORD.test(w));
 /**
  * 負荷分散・WAF・CDN の Cookie か。AWSALBCORS・ARRAffinitySameSite・__cf_bm は仕組み上 SameSite=None で、__cf_bm などは Domain を親ドメインにする。

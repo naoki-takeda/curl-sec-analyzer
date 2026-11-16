@@ -111,7 +111,7 @@ top | T-12.ok | info | pass | HTTP/2
 www.example.com | E-03.1 | high | fail | /.git/HEAD（HTTP 200、一致したパターン: git-head）
 www.example.com | E-03.2 | info | fail | /backup.zip（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）
 www.example.com | T-09.1 | high | fail | 接続できた旧バージョン: tls1_1
-www.example.com | T-10.ok | info | pass | 問題なし
+www.example.com | T-10.na | info | na | 合意した暗号（TLSv1.3 / TLS_AES_256_GCM_SHA384）だけでは、弱い暗号を受け入れるか・鍵と署名は分からない
 
 ## coverage
 H-01 | evaluated | fails=1
@@ -164,7 +164,7 @@ T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
 T-07 | missing-input | fails=0 | 必要なラベル: host-inj
 T-08 | missing-input | fails=0 | 必要なラベル: crlf
 T-09 | evaluated | fails=1
-T-10 | evaluated | fails=0
+T-10 | missing-input | fails=0 | C23（暗号ごとの接続の確認）と C11（証明書の取得）を採取する
 T-11 | missing-input | fails=0 | 必要なラベル: tls
 T-12 | evaluated | fails=0
 T-13 | manual | fails=0

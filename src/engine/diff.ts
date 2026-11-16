@@ -1,6 +1,7 @@
 // engine/diff.ts：前回の結果（JSONエクスポート）との差分（v0.4）
 import type { Finding, Profile, Severity } from '../model';
 import { parseProfile } from './profile';
+import { KEY_VALUE_NAMES } from '../mask';
 
 export type DiffKind = 'new' | 'resolved' | 'continuing' | 'severity-changed' | 'not-rechecked' | 'suppressed';
 export interface DiffRow { kind: DiffKind; ruleId: string; item: string; condition?: number; title: string; target: string; severity: Severity; before?: Severity; }
@@ -49,10 +50,19 @@ const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
  * - 前回の指摘が今回ない場合、同じターゲットで同じ項目を判定していれば「解消」、判定していなければ「再診断していない」とする
  */
 /**
- * v0.4.27 までの形式の HAR のキー（マスクの出力から作ったもの。値を伏せた「…」や、クエリの値「=」を含む）。v0.4.28 からはキーを URL の形だけで
- * 作る（mask.ts の maskKey）ので、以前の例外ファイル・前回の結果の HAR のキーは突き合わない。黙って突き合わなくならないよう、読み込んだときに件数を知らせる
+ * v0.4.29 までの形式のキー（v0.4.26〜v0.4.28：マスクの出力から作り、伏せた値の「…」やクエリの値「=」を含む。v0.4.29：パラメータの名前を並べ替えず、
+ * パス引数（;jsessionid=…）の値を含む）。v0.4.30 からはキーを決まった形で作る（mask.ts の maskKey）ので、以前の例外ファイル・前回の結果の
+ * キーは突き合わない。黙って突き合わなくならないよう、読み込んだときに件数を知らせる
  */
-export const legacyHarKey = (k?: string): boolean => !!k && /(?:^HAR \S+ |^\S+ )(?:https?:\/\/|\/)\S*(?:…|\?[^ ]*=)/.test(k);
+export function legacyHarKey(k?: string): boolean {
+  const m = k?.match(/^(?:HAR \S+|\S+) ((?:https?:\/\/|\/)\S*)/);
+  if (!m) return false;
+  const url = m[1];
+  if (url.includes('…') || /;[^/?]*=/.test(url)) return true;
+  const q = url.split('?')[1]; if (!q) return false;
+  const parts = q.split('&'); const names = parts.map(p => p.split('=')[0]);
+  return parts.some(p => p.includes('=') && !KEY_VALUE_NAMES.test(p.split('=')[0])) || names.some((n, i) => i > 0 && names[i - 1] > n);
+}
 
 export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   const prev = new Map(before.filter(isOpen).map(f => [key(f), f]));

@@ -141,9 +141,19 @@ export function suggestLabels(chains: HarChain[], keepUserLabels = false): void 
 }
 
 
+/** 既定で選ぶ対象ホスト：チェーンのいちばん多いホスト（画面の初期値。回帰テストも同じものを使う） */
+export function defaultHarHosts(imp: HarImport): Set<string> {
+  const count = new Map<string, number>(); for (const c of imp.chains) count.set(c.host, (count.get(c.host) ?? 0) + 1);
+  const main = [...count].sort((a, b) => b[1] - a[1])[0]?.[0];
+  return new Set(main ? [main] : []);
+}
+
 /** 画面で確定したチェーンをターゲットにする */
 export function harTargets(imp: HarImport, selectedHosts: Set<string>): { targets: Target[]; warnings: ParseWarning[] } {
   const targets: Target[] = []; const warnings: ParseWarning[] = [];
+  // 送った JWT は、最初に送ったターゲットにだけ持たせる（SPA の HAR では同じ Bearer の JWT を数百の XHR で送るので、ターゲットごとに A-03 を出すと
+  // 同じ指摘が数百倍になる。curl の -v では、同じ JWT を送るターゲットを1つずつ採取するので、これは HAR だけ）
+  const tokensSeen = new Set<string>();
   let excluded = 0, revalidated = 0;
   for (const c of imp.chains) {
     if (c.excluded && c.status === 304 && selectedHosts.has(c.host)) { revalidated++; continue; }
@@ -157,7 +167,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ（parser/target.ts の ownChain）
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
       // 送った認証情報の推定は、組織プロファイルのセッションCookieの名前で作り直す（Worker の中ではプロファイルが分からない）
-      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens, info: [],
+      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens.filter(tok => !tokensSeen.has(tok) && !!tokensSeen.add(tok)), info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });

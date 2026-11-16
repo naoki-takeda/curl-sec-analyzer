@@ -87,6 +87,7 @@ describe('T-09・T-10：-v で合意した旧バージョン・暗号', () => {
     expect(ids('TLSv1.2 / RC4-SHA')).toContain('T-10.1 high');
   });
   it('TLS 1.2 の AEAD なら①③にしない', () => {
-    expect(ids('TLSv1.2 / ECDHE-RSA-AES128-GCM-SHA256')).toEqual(['T-09.2 info', 'T-10.ok info']);
+    // 合意した暗号だけでは、弱い暗号を受け入れるか・鍵と署名は分からないので、T-10 は合格にしない（第23回）
+    expect(ids('TLSv1.2 / ECDHE-RSA-AES128-GCM-SHA256')).toEqual(['T-09.2 info', 'T-10.na info']);
   });
 });

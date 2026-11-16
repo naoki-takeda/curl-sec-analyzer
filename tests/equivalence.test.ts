@@ -15,11 +15,14 @@ const curlCases = readdirSync(casesDir).filter(f => f.endsWith('.txt')).sort().m
 
 describe('改行の違いで判定が変わらない', () => {
   for (const c of curlCases) {
-    const base = render(analyze(c.text));
-    it(`${c.name}：CRLF`, () => { expect(render(analyze(c.text.replace(/\n/g, '\r\n')))).toBe(base); });
-    // Windows の curl -v（2>&1）は、受信ヘッダの行（< で始まる行）を CR CR LF で終える。入力欄に貼ると、それが空行になる
-    it(`${c.name}：-v の受信ヘッダが CR CR LF`, () => { expect(render(analyze(c.text.replace(/^(< .*)\n/gm, '$1\r\r\n')))).toBe(base); });
-    it(`${c.name}：-v の受信ヘッダのあとに空行（入力欄が CR CR LF を変えたもの）`, () => { expect(render(analyze(c.text.replace(/^(< .*)\n/gm, '$1\n\n')))).toBe(base); });
+    // 基準の結果は、時刻を固定したあと（テストの中）で作る（ファイルを読み込む時点で作ると、採取時刻のない入力では判定した時刻で比べてしまう）
+    const base = () => render(analyze(c.text));
+    it(`${c.name}：CRLF`, () => { expect(render(analyze(c.text.replace(/\n/g, '\r\n')))).toBe(base()); });
+    // Windows の curl -v（2>&1）は、受信ヘッダの行（< で始まる行）を CR CR LF で終える。入力欄に貼ると、それが空行になる。
+    // -v の受信ヘッダがない入力では入力が変わらないので、テストを作らない（変わらない入力どうしを比べて、確かめたことにしない）
+    if (!/^< /m.test(c.text)) continue;
+    it(`${c.name}：-v の受信ヘッダが CR CR LF`, () => { expect(render(analyze(c.text.replace(/^(< .*)\n/gm, '$1\r\r\n')))).toBe(base()); });
+    it(`${c.name}：-v の受信ヘッダのあとに空行（入力欄が CR CR LF を変えたもの）`, () => { expect(render(analyze(c.text.replace(/^(< .*)\n/gm, '$1\n\n')))).toBe(base()); });
   }
 });
 
@@ -114,6 +117,8 @@ describe('curl と HAR で判定が同じ', () => {
     const curl = lines({ curl: toCurl(s) }), har = lines({ har: toHar(s) });
     const allowed = KNOWN_DIFFERENCES[s.name]?.lines ?? [];
     const ok = (l: string) => allowed.some(p => l.startsWith(p));
-    expect({ onlyCurl: curl.filter(l => !har.includes(l) && !ok(l)), onlyHar: har.filter(l => !curl.includes(l) && !ok(l)) }).toEqual({ onlyCurl: [], onlyHar: [] });
+    // 件数まで比べる（含まれるかだけを見ると、HAR で同じ指摘が何倍にもなる退行を見逃す）
+    const minus = (a: string[], b: string[]) => { const rest = [...b]; return a.filter(l => { const i = rest.indexOf(l); if (i >= 0) { rest.splice(i, 1); return false; } return !ok(l); }); };
+    expect({ onlyCurl: minus(curl, har), onlyHar: minus(har, curl) }).toEqual({ onlyCurl: [], onlyHar: [] });
   });
 });

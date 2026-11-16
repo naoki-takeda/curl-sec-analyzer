@@ -55,6 +55,7 @@ export function parseInput(input: string): ParseResult {
   let unparsed = 0; const emptyTargets: string[] = [];
   let json: string[] | null = null;                   // C10（%{header_json}）の読み取り中
   let jsonBytes = 0;
+  const sentNames = new WeakMap<Target, Set<string>>();   // 送った Cookie の名前（重なりを除くため）
   let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
   let connectReq = false;                             // -v で「> CONNECT」を送った（プロキシのトンネル）。その応答のあとは本文がない
   const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; };
@@ -104,9 +105,15 @@ export function parseInput(input: string): ParseResult {
         if (/^CONNECT /i.test(h)) connectReq = true;
         const o = h.match(/^origin:\s*(.*)$/i); if (o) t.sentOrigin = o[1].trim();
         const ck = h.match(/^cookie:\s*(.*)$/i), au = /^authorization:/i.test(h);
-        if (ck) t.sentCookieNames = [...new Set([...(t.sentCookieNames ?? []), ...cookieNames(ck[1])])];
+        // 名前は増えた分だけを見る（行ごとに全体をコピーして推定し直すと、Cookie の行が多い -v で2乗の時間がかかった）
+        const added: string[] = [];
+        if (ck) {
+          const names = t.sentCookieNames ?? (t.sentCookieNames = []);
+          let seen = sentNames.get(t); if (!seen) { seen = new Set(names); sentNames.set(t, seen); }
+          for (const n of cookieNames(ck[1])) if (!seen.has(n)) { seen.add(n); names.push(n); added.push(n); }
+        }
         if (au) t.sentAuthorization = true;
-        if (ck || au) { t.sentAuth = sentAuthOf(!!t.sentAuthorization, t.sentCookieNames ?? []); for (const tok of h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) t.sentTokens.push(tok); }
+        if (ck || au) { t.sentAuth = t.sentAuth || sentAuthOf(au, added); for (const tok of h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) t.sentTokens.push(tok); }
         continue;
       }
       if (/^>\s*$/.test(line)) continue;               // 送信ヘッダの終端
@@ -146,7 +153,12 @@ export function parseInput(input: string): ParseResult {
       continue;
     }
     if (line.trim() === '') { inHeaders = false; continue; }
-    if (/^[ \t]/.test(line) && last) { const v = cur.headers.get(last)!; v[v.length - 1] = `${v[v.length - 1]} ${line.trim()}`.trim(); continue; }  // obs-fold
+    // obs-fold：前の値に足すだけにする（毎回全体を trim し直すと、継続行の多い入力で2乗の時間がかかる。前の値はすでに trim 済み）
+    if (/^[ \t]/.test(line) && last) {
+      const v = cur.headers.get(last)!; const piece = line.trim();
+      if (piece) v[v.length - 1] = v[v.length - 1] ? `${v[v.length - 1]} ${piece}` : piece;
+      continue;
+    }
     const i = line.indexOf(':'); if (i <= 0) continue;
     const raw = line.slice(0, i).trim(); last = raw.toLowerCase(); cur.rawNames.push(raw);
     const val = line.slice(i + 1).trim();

@@ -1,25 +1,15 @@
 ## targets
 pre-login | https://www.example.com/login | key=HAR GET https://www.example.com/login | responses=1
 login | https://www.example.com/login | key=HAR POST https://www.example.com/login | responses=2
-har-3 | https://www.google-analytics.com/g/collect?v=2 | key=HAR GET https://www.google-analytics.com/g/collect?v | responses=1
 har-4 | https://www.example.com/api/me | key=HAR GET https://www.example.com/api/me | responses=1
 logout | https://www.example.com/logout | key=HAR GET https://www.example.com/logout | responses=1
 
 ## warnings
+har-excluded | HAR：1件のエントリ（対象外のホスト、または除外したもの）を判定に使いませんでした
 
 ## findings
 csp-sample-* | H-04.na | info | na | 
 error-* | A-10.na | info | na | 
-har-3 | A-02.ok | info | pass | URL・Location・本文にトークンなし
-har-3 | H-01.1 | high | fail | (ヘッダなし)
-har-3 | H-02.na | info | na | HSTSがない（H-01で判定）
-har-3 | H-08.1 | medium | fail | (ヘッダなし)
-har-3 | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-har-3 | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
-har-3 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
-har-3 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-3 | R-04.ok | info | pass | (ACAOなし)
-har-3 | T-12.ok | info | pass | HTTP/2
 har-4 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 har-4 | A-07.1 | high | fail | キー: passwordHash（値は表示しない）
 har-4 | A-07.2 | medium | fail | キー: isAdmin
@@ -27,7 +17,7 @@ har-4 | A-09.3 | info | fail | CSPなし
 har-4 | E-01.ok | info | pass | エラーの詳細らしき記述なし
 har-4 | H-01.1 | high | fail | (ヘッダなし)
 har-4 | H-02.na | info | na | HSTSがない（H-01で判定）
-har-4 | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+har-4 | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 har-4 | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 har-4 | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 har-4 | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
@@ -76,14 +66,14 @@ pre-login/login | C-09.1 | high | fail | login 応答でセッションIDが再�
 session-sample-* | C-07.na | info | na | 
 
 ## coverage
-H-01 | evaluated | fails=2
+H-01 | evaluated | fails=1
 H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
-H-03 | evaluated | fails=0
+H-03 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=1
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-08 | evaluated | fails=1
+H-08 | evaluated | fails=0
 H-09 | evaluated | fails=1
 H-10 | evaluated | fails=1
 H-11 | evaluated | fails=1

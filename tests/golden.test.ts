@@ -48,6 +48,11 @@ describe('ゴールデン：秘密の値が画面・エクスポートに出な�
   });
 });
 
+it('期待結果のファイルは、コーパスの入力と1対1（入力がないまま残った期待結果を、黙って通さない）', () => {
+  const expected = readdirSync(new URL('./golden/expected/', import.meta.url)).filter(f => f.endsWith('.out')).sort();
+  expect(expected).toEqual(CASES.map(c => `${c.name}.out`).sort());
+});
+
 it('コーパスの各ファイルに、少なくとも1つのターゲットがある（読み込めないファイルを黙って比べない）', () => {
   for (const c of CASES) expect(run(c).targets.length, c.name).toBeGreaterThan(0);
 });

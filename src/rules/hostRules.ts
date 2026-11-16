@@ -59,6 +59,7 @@ export const knownFiles: Rule = { id: 'E-03', title: '既知ファイル（/.git
 // ---- 以下 v0.2 で追加（T-10、T-11） ----
 const WEAK = /RC4|DES-CBC3|3DES|EXPORT|EXP-|NULL|aNULL|ADH|AECDH|MD5/i;
 const AEAD = /GCM|CHACHA20|CCM|^TLS_AES/i;
+const T10_REC = 'C23（暗号ごとの接続の確認）と C11（証明書の取得）を採取する';
 export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵', appliesTo: 'any', scope: 'host',
   basis: ['Mozilla Server Side TLS', 'IPA TLS暗号設定ガイドライン'],
   runCross(x) {
@@ -89,10 +90,13 @@ export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵
       if (sha1) out.push(hf(cipherSuites, host, 2, 'high', 'fail', `署名アルゴリズム: ${sha1}`, 'SHA-256 以上で署名した証明書にする'));
       if (out.length === before) {
         const errs = probes.filter(p => p.result === 'error').length;
-        // 合格にするのは、何かを実際に確かめたときだけ（ハンドシェイクに失敗した openssl の出力だけでは判定できない）
-        const checked = probes.length > errs || negotiated.length > 0 || !!info?.cipher || !!info?.keyBits || !!info?.sigalgs.length;
+        // 合格にするのは、何かを実際に確かめたときだけ（ハンドシェイクに失敗した openssl の出力だけでは判定できない）。
+        // 合意した暗号（curl -v の * SSL connection、openssl の Cipher）だけでは、弱い暗号を受け入れるか（①）も鍵・署名（②）も分からないので合格にしない
+        const checked = probes.length > errs || !!info?.keyBits || !!info?.sigalgs.length;
+        const onlyNegotiated = !checked && (negotiated.length > 0 || !!info?.cipher);
         out.push(probes.length && errs === probes.length
           ? hf(cipherSuites, host, 'na', 'info', 'na', '手元のOpenSSLが試した暗号に対応していない', '弱い暗号に対応した環境で C23 を実行する')
+          : onlyNegotiated ? hf(cipherSuites, host, 'na', 'info', 'na', `合意した暗号（${[...new Set([...negotiated.map(m => `${m[1]} / ${m[2]}`), info?.cipher].filter(Boolean))].join(', ')}）だけでは、弱い暗号を受け入れるか・鍵と署名は分からない`, T10_REC)
           : !checked ? hf(cipherSuites, host, 'na', 'info', 'na', '暗号・鍵の情報がない（ハンドシェイクに失敗した可能性）', 'C11 の出力にエラーがないか確認して採取し直す')
           : hf(cipherSuites, host, 'ok', 'info', 'pass', [info?.cipher && `暗号: ${info.cipher}`, info?.keyBits && `鍵: ${info.keyType ?? ''} ${info.keyBits}bit`, probes.length && `弱い暗号${probes.length}種は拒否`].filter(Boolean).join(' / ') || '問題なし', ''));
       }

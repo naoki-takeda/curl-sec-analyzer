@@ -3,7 +3,7 @@ import type { Coverage, Finding, ParseWarning, Target } from '../../src/model';
 import { coverage, ITEMS } from '../../src/engine/coverage';
 import { runAll } from '../../src/engine/run';
 import { maskText } from '../../src/mask';
-import { harTargets, importHar } from '../../src/parser/har';
+import { defaultHarHosts, harTargets, importHar } from '../../src/parser/har';
 import { parseInput } from '../../src/parser/input';
 import { uniqueLabels } from '../../src/parser/target';
 import { IMPLEMENTED } from '../../src/rules/ruleset';
@@ -11,7 +11,7 @@ import { IMPLEMENTED } from '../../src/rules/ruleset';
 export interface Analysis { targets: Target[]; warnings: ParseWarning[]; findings: Finding[]; cov: Coverage[]; }
 
 /**
- * curl の貼り付けと HAR を、画面と同じ順番で判定する。HAR はすべてのホストを選ぶ。
+ * curl の貼り付けと HAR を、画面と同じ順番で判定する。HAR の対象ホストは画面の初期値と同じ（チェーンのいちばん多いホスト。defaultHarHosts）。
  * harLabels：HAR のチェーンに付けるラベル（チェーンの最初の URL → ラベル）。画面でラベルを選び直すのと同じ
  */
 export function analyze(curl: string, har?: string, harLabels: Record<string, string> = {}): Analysis {
@@ -20,7 +20,7 @@ export function analyze(curl: string, har?: string, harLabels: Record<string, st
   if (har) {
     const imp = importHar(har);
     for (const c of imp.chains) if (harLabels[c.url]) c.label = harLabels[c.url];
-    fromHar = harTargets(imp, new Set(imp.hosts));
+    fromHar = harTargets(imp, defaultHarHosts(imp));
   }
   const targets = [...parsed.targets, ...fromHar.targets];
   const merged = uniqueLabels(targets);

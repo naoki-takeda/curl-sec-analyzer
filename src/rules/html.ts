@@ -82,8 +82,17 @@ export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ct
  * ブラウザは強制する。ただし frame-ancestors・report-uri・sandbox は meta では効かないので除く（H-06 のクリックジャッキング対策には使わない）
  */
 export function metaCspPolicies(ctx: RuleContext): string[] {
-  const html = htmlBody(ctx); if (!html) return [];
-  return tags(html, ['meta']).filter(t => t.attrs.get('http-equiv')?.toLowerCase() === 'content-security-policy')
+  const html = htmlBody(ctx);
+  return html ? metaCspFromHtml(html) : [];
+}
+/**
+ * <head> の中（<body> より前）の meta の CSP だけを読む。ブラウザは <body> の中の meta の CSP を無視するので、それで H-03 を合格にしない。
+ * <body> のない断片は全体を見る
+ */
+export function metaCspFromHtml(html: string): string[] {
+  const end = html.search(/<body[\s>]/i);
+  const head = end >= 0 ? html.slice(0, end) : html;
+  return tags(head, ['meta']).filter(t => t.attrs.get('http-equiv')?.toLowerCase() === 'content-security-policy')
     .flatMap(t => (t.attrs.get('content') ?? '').split(','))
     .map(p => p.split(';').map(d => d.trim()).filter(d => d && !/^(?:frame-ancestors|report-uri|report-to|sandbox)(?![\w-])/i.test(d)).join('; '))
     .filter(Boolean);
@@ -194,10 +203,11 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     const out = [];
     // OpenID Connect の response_mode=form_post：IdP は id_token・access_token を hidden の欄に入れて、アプリへ POST する画面を返す。
     // 利用者のブラウザに渡すのが仕事のトークンなので、その欄の値は秘密情報の露出として数えない（自社の Keycloak などを対象にしたとき）
-    const posted = new Set(forms(html).filter(f => (f.form.attrs.get('method') ?? '').toLowerCase() === 'post')
+    // 除くのはその input のタグだけ（値をページ全体から消すと、値が「A」のとき AWS のキーの A まで消えて見逃した）
+    const posted = forms(html).filter(f => (f.form.attrs.get('method') ?? '').toLowerCase() === 'post')
       .flatMap(f => f.inputs).filter(i => i.attrs.get('type')?.toLowerCase() === 'hidden' && /^(?:id_token|access_token|code|state)$/i.test(i.attrs.get('name') ?? ''))
-      .map(i => i.attrs.get('value') ?? '').filter(Boolean));
-    const scan = posted.size ? [...posted].reduce((h, v) => h.split(v).join(''), html) : html;
+      .map(i => [i.index, html.indexOf('>', i.index) + 1] as const).filter(([, e]) => e > 0).sort((a, b) => b[0] - a[0]);
+    const scan = posted.reduce((h, [s, e]) => h.slice(0, s) + h.slice(e), html);
     for (const [name, re] of SECRETS) if (re.test(scan)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
     const iu = internalUrl(html, hostOf(ctx.target)?.toLowerCase());
     if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));

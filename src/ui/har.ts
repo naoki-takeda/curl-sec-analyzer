@@ -1,5 +1,5 @@
 // ui/har.ts：HARの読み込み（Web Worker）と、エントリ一覧の画面
-import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarImport, suggestLabels } from '../parser/har';
+import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
 import { withProfile } from '../engine/profile';
 import { tr } from '../i18n';
 import { maskText } from '../mask';
@@ -30,9 +30,7 @@ export function loadHar(f: File) {
     const imp = e.data.result;
     // Worker の中では組織プロファイルが分からないため、プロファイルがあればセッションCookieの名前を反映して候補を作り直す
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));
-    const count = new Map<string, number>(); for (const c of imp.chains) count.set(c.host, (count.get(c.host) ?? 0) + 1);
-    const main = [...count].sort((a, b) => b[1] - a[1])[0]?.[0];
-    state.har = { imp, hosts: new Set(main ? [main] : []), name: f.name };
+    state.har = { imp, hosts: defaultHarHosts(imp), name: f.name };
     renderHar(); say('');
     if (state.last) actions.analyze();              // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない
     if (!refs.message.textContent) say(T.loaded(f.name, imp.chains.length));   // 判定し直してエラーが出たら、そちらを残す

@@ -21,7 +21,7 @@ error-* | A-10.1 | info | fail | application/json: error-api / application/probl
 error-api | E-01.ok | info | pass | エラーの詳細らしき記述なし
 error-api | H-01.1 | high | fail | (ヘッダなし)
 error-api | H-02.na | info | na | HSTSがない（H-01で判定）
-error-api | H-03.1 | info | fail | (ヘッダなし)
+error-api | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 error-api | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 error-api | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 error-api | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
@@ -38,7 +38,7 @@ error-api | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 error-notfound | E-01.ok | info | pass | エラーの詳細らしき記述なし
 error-notfound | H-01.1 | high | fail | (ヘッダなし)
 error-notfound | H-02.na | info | na | HSTSがない（H-01で判定）
-error-notfound | H-03.1 | info | fail | (ヘッダなし)
+error-notfound | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 error-notfound | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 error-notfound | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 error-notfound | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
@@ -83,7 +83,7 @@ gql | E-01.ok | info | pass | エラーの詳細らしき記述なし
 gql | E-05.na | info | na | HTTP 200（introspection を試した応答ではない）
 gql | H-01.1 | high | fail | (ヘッダなし)
 gql | H-02.na | info | na | HSTSがない（H-01で判定）
-gql | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+gql | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 gql | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 gql | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 gql | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
@@ -118,7 +118,7 @@ jwt | C-13.ok | info | pass | 共有キャッシュの指定なし
 jwt | E-01.ok | info | pass | エラーの詳細らしき記述なし
 jwt | H-01.1 | high | fail | (ヘッダなし)
 jwt | H-02.na | info | na | HSTSがない（H-01で判定）
-jwt | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+jwt | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 jwt | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 jwt | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 jwt | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
@@ -177,7 +177,7 @@ unauth-users | A-07.2 | medium | fail | キー: [].internal_notes
 ## coverage
 H-01 | evaluated | fails=6
 H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
-H-03 | evaluated | fails=3
+H-03 | evaluated | fails=1
 H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | evaluated | fails=1
 H-06 | evaluated | fails=5

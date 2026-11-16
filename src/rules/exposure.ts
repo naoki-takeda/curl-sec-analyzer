@@ -39,7 +39,8 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     // 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする
     // ORA- は語の境目から（FLORA-12345 のような品番に一致させない）。絶対パスは URL のパスの一部（https://cdn…/opt/app.js、
     // src="/srv/main.js"、url(/srv/…)）には一致させない（直前が URL の文字か、属性・url() の始まり）
-    const trace = b.match(/Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
+    // Node.js（Express の開発用のエラーページ、JSON の stack）の「at 関数 (/パス:行:列)」と node:internal、Go の panic の goroutine、Symfony の例外も見る
+    const trace = b.match(/\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\|node:)[^)\n]{1,300}:\d+:\d+\)|\bnode:internal\/|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt|\/app)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
       // 資格情報を含む jdbc: は①だけにする（②にも出すと二重になる。設計書は②を資格情報のない jdbc: に限る）。スタックトレースがあれば、そちらを証跡にする
       ?? (cred ? null : b.match(/\bjdbc:\w+:(?=\S)/));
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
@@ -59,7 +60,9 @@ export const dirListing: Rule = { id: 'E-02', title: 'ディレクトリリス�
   run(ctx) {
     const b = body(ctx);
     if (!b || ctx.responseKind !== 'html') return [];
-    const m = b.match(/<title>\s*Index of \/[^<]*<\/title>|<h1>\s*Index of \/|Directory listing for \//i);
+    // nginx・Apache の「Index of /」、Python の http.server、IIS の「[To Parent Directory]」、Tomcat の「Directory Listing For [/…]」、
+    // Jetty の「<title>Directory: /…」、Express の serve-index の「listing directory /…」
+    const m = b.match(/<title>\s*Index of \/[^<]*<\/title>|<h1>\s*Index of \/|Directory listing for \/|\[To Parent Directory\]|Directory Listing For \[?\/|<title>\s*Directory: \/|listing directory \//i);
     return m ? [mk(dirListing, ctx, 1, 'medium', 'fail', m[0], 'ディレクトリの一覧表示を無効にする（nginx: autoindex off、Apache: Options -Indexes）')]
              : [mk(dirListing, ctx, 'ok', 'info', 'pass', '一覧表示なし', '')];
   } };

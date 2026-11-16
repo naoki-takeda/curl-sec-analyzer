@@ -4,6 +4,7 @@ import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutF
 import { isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp, splitPolicies } from './util';
+import { metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
@@ -17,16 +18,20 @@ const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.no
  * 2xx・3xx でもログインに失敗した応答。Spring Security の失敗時の転送（302 Location: /login?error）、ログイン画面への転送、
  * パスワード欄のある画面を 200 で返し直すもの（Django、ASP.NET Identity、WordPress）。失敗ならセッションIDを再発行しないのは当然なので C-09① にしない
  */
-function loginRejected(login: Target, pre: Target): string | undefined {
-  const first = ownChain(login)[0]; const fin = finalResponse(login);
-  const loc = first && first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
+// 比べるのは login の URL（ログインのフォームを送った先）のパスとクエリだけ。pre-login の URL とは比べない（HAR では pre-login がトップページ（/）に
+// なることが多く、ログインに成功して / に転送されたのを「戻された」とみなして C-09①（高）を見逃した）。クエリも比べる（/?_task=login と /?_task=mail）。
+// パスワード欄は、login 自身の応答（転送の最初のホップ）だけで見る（-L でたどったアカウント画面のパスワード変更の欄で、成功を失敗とみなさない）
+function loginRejected(login: Target): string | undefined {
+  const first = ownChain(login)[0];
+  if (!first) return undefined;
+  const loc = first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
   if (loc) {
-    let to: URL | undefined; try { to = new URL(loc, login.url ?? 'https://x.invalid/'); } catch { /* 解釈できない */ }
-    const pathOf = (u?: string) => { try { return u ? new URL(u).pathname : undefined; } catch { return undefined; } };
-    if (to && (/[?&](?:error|failed|fail|login_error|authfailed)(?:[=&]|$)/i.test(to.search) || [pathOf(login.url), pathOf(pre.url)].includes(to.pathname)))
+    let to: URL | undefined, self: URL | undefined;
+    try { to = new URL(loc, login.url ?? 'https://x.invalid/'); self = login.url ? new URL(login.url) : undefined; } catch { /* 解釈できない */ }
+    if (to && (/[?&](?:error|failed|fail|login_error|authfailed)(?:[=&]|$)/i.test(to.search) || (self && to.pathname === self.pathname && to.search === self.search)))
       return `HTTP ${first.status} でログイン画面に戻された`;
   }
-  if (fin && fin.status >= 200 && fin.status < 300 && /type\s*=\s*["']?password/i.test(fin.body ?? '')) return `HTTP ${fin.status} でパスワード欄のある画面を返した`;
+  if (first.status >= 200 && first.status < 300 && /type\s*=\s*["']?password/i.test(first.body ?? '')) return `HTTP ${first.status} でパスワード欄のある画面を返した`;
   return undefined;
 }
 
@@ -40,7 +45,7 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
-    const rejected = loginRejected(login, pre);
+    const rejected = loginRejected(login);
     if (rejected) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（${rejected}）`, LOGIN_FAILED_REC)];
     // ログイン前のセッションIDは、pre-login で発行したものに加え、pre-login で送ったもの（トップページで発行され、ログイン画面では送るだけ。
     // ブラウザの普通の流れで、HAR ではほぼこの形になる）も数える。送っただけの値は分からないので、login で新しいセッションCookieを発行したかで見る
@@ -54,13 +59,15 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
 /** 2つ以上のセッションIDを比べ、固定部分や連番がないかを見る */
 // Flask（itsdangerous）の圧縮したセッション（.eJw… で始まる「.ペイロード.時刻.署名」）も、同じアカウントではペイロードの大部分が共通になる。
 // JWT と同じく署名の部分だけで比べる（全体で比べると「先頭57文字が共通」と C-07②（高）の誤検知になる）
-const JWT_VALUE = /^(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.([\w-]*)$/;
+// Django の署名付きのセッション（django.contrib.sessions.backends.signed_cookies。「ペイロード:時刻:署名」で、圧縮したものは . で始まる）も同じ
+const JWT_VALUE = /^(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.([\w-]*)$|^\.?[\w-]+:[\w-]+:([\w-]+)$/;
 export function predictable(raw: string[]): string | undefined {
   // JWT は、同じアカウントで発行するとヘッダとクレーム（iat・exp まで）の大部分が共通になる。乱数性は署名の部分だけで比べる。
   // 署名がない（alg:none）JWT は A-03① で判定する
   const jwt = raw.every(v => JWT_VALUE.test(v));
-  if (jwt && raw.some(v => !v.match(JWT_VALUE)![1])) return undefined;
-  const ids = jwt ? raw.map(v => v.match(JWT_VALUE)![1]) : raw;
+  const sig = (v: string) => { const m = v.match(JWT_VALUE)!; return m[1] ?? m[2] ?? ''; };
+  if (jwt && raw.some(v => !sig(v))) return undefined;
+  const ids = jwt ? raw.map(sig) : raw;
   if (new Set(ids).size < ids.length) return '同じ値が繰り返し発行された';
   let prefix = 0;
   while (ids.every(v => v[prefix] !== undefined && v[prefix] === ids[0][prefix])) prefix++;
@@ -135,7 +142,8 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };
 
-const nonceOf = (t: Target) => splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? [])
+// ヘッダの CSP と、HTML の <head> の <meta> の CSP（H-04 と同じ。meta の CSP の nonce が固定でも⑤）
+const nonceOf = (t: Target) => [...splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? []), ...metaCspFromHtml(finalResponse(t)?.body ?? '')]
   .flatMap(v => [...parseCsp(v).values()].flat()).map(v => v.match(/^'nonce-([^']+)'$/)?.[1]).filter((v): v is string => !!v);
 export const fixedNonce: Rule = { id: 'H-04', title: 'CSP：script-src', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP CSP CS', 'Google csp_evaluator'],

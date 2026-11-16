@@ -5,7 +5,6 @@ har-3 | https://shop.example.com/robots.txt | key=HAR GET https://shop.example.c
 har-4 | https://shop.example.com/static/app.js | key=HAR GET https://shop.example.com/static/app.js | responses=1
 har-5 | https://shop.example.com/api/me | key=HAR GET https://shop.example.com/api/me | responses=1
 har-7 | https://shop.example.com/promo | key=HAR GET https://shop.example.com/promo | responses=2
-har-8 | https://example.com/ | key=HAR GET https://example.com/ | responses=1
 har-9 | https://shop.example.com/ | key=HAR GET https://shop.example.com/ | responses=1
 har-10 | https://shop.example.com/reset?token=Q8w7…(21 chars) | key=HAR GET https://shop.example.com/reset?token | responses=1
 logout | https://shop.example.com/logout | key=HAR GET https://shop.example.com/logout | responses=1
@@ -13,6 +12,7 @@ logout | https://shop.example.com/logout | key=HAR GET https://shop.example.com/
 ## warnings
 har-excluded | HAR：応答のない（status 0）エントリが1件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）
 har-excluded | HAR：304（キャッシュの再検証）のエントリが1件あり、判定に使いませんでした。開発者ツールで「キャッシュを無効にする」を選んで記録し直すと判定できます
+har-excluded | HAR：1件のエントリ（対象外のホスト、または除外したもの）を判定に使いませんでした
 
 ## findings
 apex | H-02.na | info | na | 
@@ -74,7 +74,7 @@ har-5 | A-09.3 | info | fail | CSPなし
 har-5 | E-01.ok | info | pass | エラーの詳細らしき記述なし
 har-5 | H-01.1 | high | fail | (ヘッダなし)
 har-5 | H-02.na | info | na | HSTSがない（H-01で判定）
-har-5 | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+har-5 | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 har-5 | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 har-5 | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 har-5 | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
@@ -115,17 +115,6 @@ har-7 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 har-7 | R-04.ok | info | pass | (ACAOなし)
 har-7 | T-05.ok | info | pass | 1回の転送
 har-7 | T-12.ok | info | pass | HTTP/2
-har-8 | A-02.ok | info | pass | URL・Location・本文にトークンなし
-har-8 | H-01.1 | high | fail | (ヘッダなし)
-har-8 | H-02.na | info | na | HSTSがない（H-01で判定）
-har-8 | H-08.1 | medium | fail | (ヘッダなし)
-har-8 | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
-har-8 | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
-har-8 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
-har-8 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-8 | R-04.ok | info | pass | (ACAOなし)
-har-8 | T-05.ok | info | pass | 1回の転送
-har-8 | T-12.ok | info | pass | HTTP/2
 har-9 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 har-9 | E-01.ok | info | pass | エラーの詳細らしき記述なし
 har-9 | E-02.ok | info | pass | 一覧表示なし
@@ -183,14 +172,14 @@ pre-login/login | C-09.ok | info | pass | ログイン時にセッションIDを
 session-sample-* | C-07.na | info | na | 
 
 ## coverage
-H-01 | evaluated | fails=5
+H-01 | evaluated | fails=4
 H-02 | evaluated | fails=1
 H-03 | evaluated | fails=3
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=4
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-08 | evaluated | fails=6
+H-08 | evaluated | fails=5
 H-09 | evaluated | fails=4
 H-10 | evaluated | fails=4
 H-11 | evaluated | fails=4

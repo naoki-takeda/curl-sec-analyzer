@@ -88,29 +88,33 @@ const maskedParam = (v: string, rest: string) => /…\(\d+$/.test(v) && rest.sta
  */
 // 「//」「%2F%2F」の直後はホスト名（オーソリティ）なので見ない。見ると、長いホスト名（staging-customer-portal-frontend-01.example.com、
 // ELB の名前）まで伏せ、URL で登録した例外が一致しなくなり、CORS の証跡の Origin も読めなくなる
-const PATH_SEGMENT = /(?<=(?<!\/)\/|(?<!%(?:25)*2[Ff])%(?:25)*2[Ff])[A-Za-z0-9_=.:~+-]{16,}/g;
+const PATH_SEGMENT = /(?<=(?<!\/)\/|(?<!%(?:25)*2[Ff])%(?:25)*2[Ff])(?:[A-Za-z0-9_=.:~+-]|%2[Bb]|%3[Dd]){16,}/g;
 const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
   (/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || (p.length >= 32 && /\d/.test(p)));
 /** 伏せ方：画面・エクスポート用（先頭の数文字と長さを残す）と、突き合わせのキー用（記録し直しても変わらないよう、何も残さない） */
 interface Hider { value: (v: string) => string; bare: (v: string) => string }
 const SHOW: Hider = { value: v => maskValue(v), bare: v => `…(${v.length} chars)` };
-const STAR: Hider = { value: () => '*', bare: () => '*' };
 /**
  * かけらを伏せる。英字だけの短い語と - か _ で始まるもの（application-<ダイジェスト>.js、vendor-<ダイジェスト>.js）は、その語を残して
  * 残りだけを伏せる（別のファイルを区別できるように。残りは先頭の文字を残さず、もう一度マスクしても変わらないようにする）
  */
-const maskSegment = (seg: string, h: Hider = SHOW): string => seg.replace(/[^.:~+]+/g, piece => {
-  const body = piece.replace(/=+$/, ''); const pad = piece.slice(body.length);
-  if (!secretPiece(body) || buildAssetName(body)) return piece;
+// ビルドしたファイルの名前として伏せないのは、静的ファイルの拡張子が付いた部分だけ（/magic/login-Xy7Kp2Lm9Qa のようなトークンを伏せ忘れない）
+const ASSET_EXT = /\.(?:m?js|css|map|woff2?|ttf|otf|svg|png|jpe?g|gif|webp|avif|ico)$/i;
+const maskSegment = (seg: string, h: Hider = SHOW): string => { const asset = ASSET_EXT.test(seg); return seg.replace(/[^.:~+]+/g, piece => {
+  // Base64 の + と = をエンコードしたもの（%2B・%3D）もトークンの一部として見る（%2B で区切ると、後ろのかけらが伏せられずに残った）
+  const body = piece.replace(/(?:=|%3[Dd])+$/, ''); const pad = piece.slice(body.length);
+  const plain = body.replace(/%2[Bb]/g, '');
+  if (!secretPiece(plain) || (asset && buildAssetName(body))) return piece;
   const m = body.match(/^([A-Za-z]{3,20}[-_])(.+)$/);
   return m && secretPiece(m[2]) ? m[1] + h.bare(m[2]) + pad : h.value(body) + pad;
-});
+}); };
 /**
  * ビルドしたファイルの名前（英字の語を - _ でつなぎ、最後に短いハッシュを付けたもの）。Vite の AdminDashboard-Dk3x9Lq2、vendor-react-BxYz12Ab、
  * webpack の main-3f8a9c2e1b4d5f6a7b8c。ハッシュは12文字未満か、20文字以下の16進数。トークンではないので伏せない
  * （伏せると、別のファイルが同じ表示・同じキーになる）
  */
 const buildAssetName = (p: string): boolean => {
+  if (/^(?:token|reset|magic|share|login|invite|verify|confirm|auth|session|secret|key|code|otp|download)[-_]/i.test(p)) return false;
   const m = p.match(/^((?:[A-Za-z]+[-_])+)([A-Za-z0-9]+)$/);
   return !!m && (m[2].length < 12 || (m[2].length <= 20 && /^[0-9a-f]+$/i.test(m[2])));
 };
@@ -200,11 +204,50 @@ export function maskKey(raw: string): string {
   try { u = new URL(raw); } catch {
     try { u = new URL(raw, 'https://relative.invalid'); relative = true; } catch { return '*'; }
   }
-  const path = u.pathname.split('/').map(seg => (/^\((?:[A-Z]\([^()]*\))+\)$/.test(seg) ? '(*)' : seg.length >= 16 ? maskSegment(seg, STAR) : seg)).join('/');
-  const names = [...new Set(u.searchParams.keys())].map(n => (n.length >= 16 && secretPiece(n) ? '*' : n));
-  const query = names.length ? `?${names.join('&')}` : '';
+  // デコードするが、%2F（エンコードした /）はそのまま残す（Base64 のトークンの / で分けると、後ろのかけらがキーに残る）
+  const dec = (s: string) => { try { return decodeURIComponent(s.replace(/%2F/gi, '%252F')); } catch { return s; } };
+  const path = u.pathname.split('/').map(seg => {
+    if (/^\((?:[A-Z]\([^()]*\))+\)$/.test(seg)) return '(*)';                 // ASP.NET の Cookie を使わないセッション
+    // パス引数（;jsessionid=…）は名前だけを残す。値はセッションIDのことが多く、記録し直すと変わる
+    const [head, ...params] = seg.split(';');
+    return [keyText(dec(head)), ...params.map(p => keyText(dec(p.split('=')[0])))].join(';');
+  }).join('/');
+  // パラメータは名前だけを並べ替えて持つ（並び順で別のキーにしない）。値は、ページ送りなどの決まった名前で、値がふつうの語のときだけ残す
+  // （?page=1 と ?page=2 を別のキーにし、並び順で番号を付けない）。名前も、トークンらしいもの（JWT を名前にしたものなど）は * にする
+  const params = new Map<string, string>();
+  for (const [n, v] of u.searchParams) {
+    const name = keyText(n); if (params.has(name)) continue;
+    params.set(name, KEY_VALUE_NAMES.test(n) && v.length <= 32 && keyText(v) === v && /^[\w.-]*$/.test(v) ? `${name}=${v}` : name);
+  }
+  const query = params.size ? `?${[...params.keys()].sort().map(k => params.get(k)).join('&')}` : '';
   return relative ? `${path}${query}` : `${u.protocol}//${u.host}${path}${query}`;
 }
+
+/**
+ * キーで * にする、変わりうる値の形。マスクの一覧（パラメータの名前など）とは切り離した、広めの決まった形で、版をまたいでも変えない：
+ * JWT、12桁以上の数字、数字を含む16文字以上の16進数（UUID を含む）、英大文字・小文字・数字が頻繁に入れ替わる12文字以上の並び（トークン）。
+ * 「2026-annual-report-v2」「GettingStartedV2Guide」のような名前は残す（文字の種類の入れ替わりが少ない）。
+ * マスクの判定（秘密の名前、16文字以上の部分）をキーに使うと、;jsessionid= の値や %2B を含むトークンがキーに残り、JSON のエクスポートと
+ * 例外ファイルに出た（v0.4.29）
+ */
+const KEY_RUN = /eyJ[\w-]*(?:\.[\w-]*){1,4}|[A-Za-z0-9_+=%-]+/g;
+const randomLike = (r: string): boolean => {
+  if (/^eyJ/.test(r)) return true;
+  const bare = r.replace(/[-_+=%]/g, '');
+  if (bare.length < 12) return false;
+  if (/^\d+$/.test(bare)) return true;
+  if (bare.length >= 16 && /^[0-9a-f]+$/i.test(bare) && /\d/.test(bare)) return true;
+  return (bare.match(/[a-z]+|[A-Z]+|\d+/g) ?? []).length / bare.length >= 0.5;
+};
+// 英字だけの語と - か _ で始まるもの（application-<ダイジェスト>、AdminDashboard-<ハッシュ>、login-<トークン>）は、語を残して残りを * にする
+// （別のファイルを別のキーにする。残りは伏せる）
+const keyText = (s: string) => s.replace(KEY_RUN, r => {
+  if (!randomLike(r)) return r;
+  const m = r.match(/^([A-Za-z]{3,30}[-_])(.+)$/);
+  return m ? `${m[1]}*` : '*';
+});
+/** キーに値を残すパラメータの名前（ページ送り・並べ替え・表示の切り替え。秘密や個人情報を入れない決まった名前だけ） */
+export const KEY_VALUE_NAMES = /^(?:page|p|per_page|page_size|pagesize|offset|limit|start|sort|order|orderby|dir|lang|locale|hl|tab|view|mode|type|format|fmt|v|version|_task)$/i;
 
 /**
  * 証跡の抜粋：マスクしてから切り詰める。切り詰めてからマスクすると、途中で切れた JWT（ドットが足りない）や

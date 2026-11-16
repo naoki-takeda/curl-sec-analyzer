@@ -125,12 +125,19 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
       : duplicated.has(baseLabel(t.label)) && t.url ? `${baseLabel(t.label)} ${maskKey(t.url)}` : t.label;
     return { t, url, targetKey, host: hostOf(t), allow: allowedItems(t.label), ctx: contextOf(t, findings, maps, opt.profile) };
   });
-  // 同じラベルで同じ URL のターゲット（Cookie の有無を変えて2回採取したなど）と、HAR で同じキーになるエントリ（?q=a と ?q=b。キーは
-  // パラメータの名前だけを持つ）は、キーが重なるので、2つ目から「 #2」を付ける（重なったままだと、差分で片方の指摘が消え、例外が両方に効く）。
-  // この組だけは貼り付け・記録の順番で決まる
-  const seenKeys = new Map<string, number>();
+  // キーが重なるターゲットには、2つ目から「 #2」を付ける（重なったままだと、差分で片方の指摘が消え、例外が両方に効く）：
+  // - curl の同じラベルで同じ URL（Cookie の有無を変えて2回採取したなど）
+  // - HAR で、URL は違うがキーが同じになるもの（値を持たないパラメータの値だけが違う ?q=a と ?q=b）
+  // HAR で URL まで同じもの（ポーリングで同じ URL を何度も取得した）には付けない。同じページなので、例外はすべてに効き、記録し直して回数が
+  // 変わっても差分がずれない。番号は貼り付け・記録の順番で決まるので、付けるのは見分けられないときだけにする
+  const seenKeys = new Map<string, number>(); const seenUrls = new Map<string, Set<string>>();
   for (const p of per) {
     if (p.targetKey === p.t.label) continue;
+    if (p.t.meta.source === 'har') {
+      const urls = seenUrls.get(p.targetKey) ?? new Set<string>(); seenUrls.set(p.targetKey, urls);
+      if (urls.has(p.t.url ?? '')) continue;
+      urls.add(p.t.url ?? '');
+    }
     const n = (seenKeys.get(p.targetKey) ?? 0) + 1; seenKeys.set(p.targetKey, n);
     if (n > 1) p.targetKey = `${p.targetKey} #${n}`;
   }
