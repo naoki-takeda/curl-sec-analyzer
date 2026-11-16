@@ -89,8 +89,23 @@ export function metaCspPolicies(ctx: RuleContext): string[] {
  * <head> の中（<body> より前）の meta の CSP だけを読む。ブラウザは <body> の中の meta の CSP を無視するので、それで H-03 を合格にしない。
  * <body> のない断片は全体を見る
  */
+/**
+ * <body> の始まり。<head> の中のコメント（<!-- … -->）とスクリプト（<script>…</script>）の中の「<body」は飛ばす
+ * （飛ばさないと、そこで <head> が終わったとみなし、あとの meta の CSP を読まなかった）。indexOf で前に進むだけなので、時間は本文の長さに比例する
+ */
+function bodyStart(html: string): number {
+  const lower = html.toLowerCase();
+  for (let i = 0; i < lower.length;) {
+    const lt = lower.indexOf('<', i); if (lt < 0) return -1;
+    if (lower.startsWith('<!--', lt)) { const e = lower.indexOf('-->', lt + 4); if (e < 0) return -1; i = e + 3; continue; }
+    if (/^<script[\s>]/.test(lower.slice(lt, lt + 8))) { const e = lower.indexOf('</script', lt + 7); if (e < 0) return -1; i = e + 8; continue; }
+    if (/^<body[\s>]/.test(lower.slice(lt, lt + 6))) return lt;
+    i = lt + 1;
+  }
+  return -1;
+}
 export function metaCspFromHtml(html: string): string[] {
-  const end = html.search(/<body[\s>]/i);
+  const end = bodyStart(html);
   const head = end >= 0 ? html.slice(0, end) : html;
   return tags(head, ['meta']).filter(t => t.attrs.get('http-equiv')?.toLowerCase() === 'content-security-policy')
     .flatMap(t => (t.attrs.get('content') ?? '').split(','))
@@ -228,7 +243,8 @@ function forms(html: string): { form: Tag; inputs: Tag[] }[] {
     const endRe = /<\/form\s*>/gi; endRe.lastIndex = f.index;
     const end = endRe.exec(html)?.index ?? -1;
     const stop = Math.min(end < 0 ? html.length : end, fs[i + 1]?.index ?? html.length);
-    return { form: f, inputs: tags(html.slice(f.index, stop), ['input']) };
+    // input の位置（index）はページ全体での位置にする（フォームの中での位置のままだと、E-09 がページの別の場所を取り除いた）
+    return { form: f, inputs: tags(html.slice(f.index, stop), ['input']).map(t => ({ ...t, index: t.index + f.index })) };
   });
 }
 

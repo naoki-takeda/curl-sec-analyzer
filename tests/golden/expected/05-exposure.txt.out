@@ -22,7 +22,7 @@ actuator | E-01.ok | info | pass | エラーの詳細らしき記述なし
 actuator | E-05.1 | high | fail | /actuator（HTTP 200）
 actuator | H-01.1 | high | fail | (ヘッダなし)
 actuator | H-02.na | info | na | HSTSがない（H-01で判定）
-actuator | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
+actuator | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
 actuator | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 actuator | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 actuator | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
@@ -187,7 +187,7 @@ session-sample-* | C-07.na | info | na |
 swagger | A-02.ok | info | pass | URL・Location・本文にトークンなし
 swagger | E-01.ok | info | pass | エラーの詳細らしき記述なし
 swagger | E-02.ok | info | pass | 一覧表示なし
-swagger | E-05.2 | medium | fail | /swagger-ui（HTTP 200）
+swagger | E-05.na | info | na | /swagger-ui（HTTP 200、HTML。その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性））
 swagger | E-07.ok | info | pass | http:// の資源なし
 swagger | E-08.ok | info | pass | 外部オリジンのscriptなし
 swagger | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
@@ -285,7 +285,7 @@ E-01 | evaluated | fails=3
 E-02 | evaluated | fails=1
 E-03 | evaluated | fails=3
 E-04 | evaluated | fails=0
-E-05 | evaluated | fails=3
+E-05 | evaluated | fails=2
 E-06 | evaluated | fails=1
 E-07 | evaluated | fails=0
 E-08 | evaluated | fails=0

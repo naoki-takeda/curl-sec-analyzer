@@ -18,20 +18,36 @@ const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.no
  * 2xx・3xx でもログインに失敗した応答。Spring Security の失敗時の転送（302 Location: /login?error）、ログイン画面への転送、
  * パスワード欄のある画面を 200 で返し直すもの（Django、ASP.NET Identity、WordPress）。失敗ならセッションIDを再発行しないのは当然なので C-09① にしない
  */
-// 比べるのは login の URL（ログインのフォームを送った先）のパスとクエリだけ。pre-login の URL とは比べない（HAR では pre-login がトップページ（/）に
-// なることが多く、ログインに成功して / に転送されたのを「戻された」とみなして C-09①（高）を見逃した）。クエリも比べる（/?_task=login と /?_task=mail）。
-// パスワード欄は、login 自身の応答（転送の最初のホップ）だけで見る（-L でたどったアカウント画面のパスワード変更の欄で、成功を失敗とみなさない）
-function loginRejected(login: Target): string | undefined {
+// 失敗とみなす転送先：?error などのクエリ、ログインらしいパス（/login・/signin など）、login の URL のパス、pre-login の URL のパス（トップ（/）を除く）。
+// パスは末尾の / を除いて比べ、クエリは比べない（/login?next=%2Fhome から /login への転送は失敗）。ただし login の URL のパスがトップ（/）の
+// ときは、クエリで画面を切り替えるアプリ（/?_task=login と /?_task=mail）なので、クエリまで比べる。
+// pre-login の URL のパスがトップ（/）のときは比べない（HAR では pre-login がトップになることが多く、成功してトップに転送されたのを失敗とみなした）。
+// パスワード欄は、login 自身の応答と、ログインらしいパスへ転送したときの最後の応答で見る（-L でたどったアカウント画面のパスワード変更の欄で、
+// 成功を失敗とみなさない）
+const LOGIN_PATH = /\/(?:log-?in|sign-?in|signon|auth\/login)\/?$/i;
+const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
+const trimSlash = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+function loginRejected(login: Target, pre: Target): string | undefined {
   const first = ownChain(login)[0];
   if (!first) return undefined;
   const loc = first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
   if (loc) {
-    let to: URL | undefined, self: URL | undefined;
-    try { to = new URL(loc, login.url ?? 'https://x.invalid/'); self = login.url ? new URL(login.url) : undefined; } catch { /* 解釈できない */ }
-    if (to && (/[?&](?:error|failed|fail|login_error|authfailed)(?:[=&]|$)/i.test(to.search) || (self && to.pathname === self.pathname && to.search === self.search)))
-      return `HTTP ${first.status} でログイン画面に戻された`;
+    let to: URL | undefined, self: URL | undefined, before: URL | undefined;
+    try { to = new URL(loc, login.url ?? 'https://x.invalid/'); } catch { /* 解釈できない */ }
+    try { self = login.url ? new URL(login.url) : undefined; } catch { /* なし */ }
+    try { before = pre.url ? new URL(pre.url) : undefined; } catch { /* なし */ }
+    if (to) {
+      const path = trimSlash(to.pathname);
+      const backToSelf = self && (trimSlash(self.pathname) === '/' ? path === '/' && to.search === self.search : path === trimSlash(self.pathname));
+      const backToPre = before && trimSlash(before.pathname) !== '/' && path === trimSlash(before.pathname);
+      if (/[?&](?:error|failed|fail|login_error|authfailed)(?:[=&]|$)/i.test(to.search) || LOGIN_PATH.test(path) || backToSelf || backToPre) {
+        const fin = finalResponse(login);
+        return fin && fin !== first && fin.status >= 200 && fin.status < 300 && PASSWORD_FIELD.test(fin.body ?? '')
+          ? `HTTP ${first.status} でログイン画面に戻され、パスワード欄のある画面を返した` : `HTTP ${first.status} でログイン画面に戻された`;
+      }
+    }
   }
-  if (first.status >= 200 && first.status < 300 && /type\s*=\s*["']?password/i.test(first.body ?? '')) return `HTTP ${first.status} でパスワード欄のある画面を返した`;
+  if (first.status >= 200 && first.status < 300 && PASSWORD_FIELD.test(first.body ?? '')) return `HTTP ${first.status} でパスワード欄のある画面を返した`;
   return undefined;
 }
 
@@ -45,7 +61,7 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
-    const rejected = loginRejected(login);
+    const rejected = loginRejected(login, pre);
     if (rejected) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（${rejected}）`, LOGIN_FAILED_REC)];
     // ログイン前のセッションIDは、pre-login で発行したものに加え、pre-login で送ったもの（トップページで発行され、ログイン画面では送るだけ。
     // ブラウザの普通の流れで、HAR ではほぼこの形になる）も数える。送っただけの値は分からないので、login で新しいセッションCookieを発行したかで見る
@@ -117,6 +133,11 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     const first = after.responses.find(isHop)!;
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!first.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
+    // 旧Cookieで 200 でも、ログインのフォーム（パスワード欄）を返したなら、セッションは使えていない（転送せずにその場でログイン画面を出すアプリ）。
+    // ログイン後のページ（mypage）自身にパスワード欄があるときは、見分けられないので判定に使わない
+    const mpBody = mp ? finalResponse(mp)?.body ?? '' : '';
+    if (first.status >= 200 && first.status < 300 && PASSWORD_FIELD.test(first.body ?? '') && !PASSWORD_FIELD.test(mpBody))
+      return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `旧Cookieでの認証後ページが HTTP ${first.status} でログイン画面（パスワード欄）を返した`, '')];
     return first.status >= 200 && first.status < 300
       ? [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', `旧Cookieでの認証後ページが HTTP ${first.status}`, 'ログアウト時にサーバ側のセッションを破棄する')]
       : [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `旧Cookieでの認証後ページが HTTP ${first.status}`, '')];

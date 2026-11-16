@@ -40,7 +40,8 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     // ORA- は語の境目から（FLORA-12345 のような品番に一致させない）。絶対パスは URL のパスの一部（https://cdn…/opt/app.js、
     // src="/srv/main.js"、url(/srv/…)）には一致させない（直前が URL の文字か、属性・url() の始まり）
     // Node.js（Express の開発用のエラーページ、JSON の stack）の「at 関数 (/パス:行:列)」と node:internal、Go の panic の goroutine、Symfony の例外も見る
-    const trace = b.match(/\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\|node:)[^)\n]{1,300}:\d+:\d+\)|\bnode:internal\/|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt|\/app)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
+    // Node.js のフレームは、ファイル（.js・.ts など）か node: の行と列まであるものだけ（文章の「at Building A (/floor:3:12)」に一致させない）
+    const trace = b.match(/\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
       // 資格情報を含む jdbc: は①だけにする（②にも出すと二重になる。設計書は②を資格情報のない jdbc: に限る）。スタックトレースがあれば、そちらを証跡にする
       ?? (cred ? null : b.match(/\bjdbc:\w+:(?=\S)/));
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
@@ -62,7 +63,7 @@ export const dirListing: Rule = { id: 'E-02', title: 'ディレクトリリス�
     if (!b || ctx.responseKind !== 'html') return [];
     // nginx・Apache の「Index of /」、Python の http.server、IIS の「[To Parent Directory]」、Tomcat の「Directory Listing For [/…]」、
     // Jetty の「<title>Directory: /…」、Express の serve-index の「listing directory /…」
-    const m = b.match(/<title>\s*Index of \/[^<]*<\/title>|<h1>\s*Index of \/|Directory listing for \/|\[To Parent Directory\]|Directory Listing For \[?\/|<title>\s*Directory: \/|listing directory \//i);
+    const m = b.match(/<title>\s*Index of \/[^<]*<\/title>|<h1>\s*Index of \/|Directory listing for \/|\[To Parent Directory\]|Directory Listing For \[?\/|<title>\s*Directory: \/|<title>\s*listing directory \//i);
     return m ? [mk(dirListing, ctx, 1, 'medium', 'fail', m[0], 'ディレクトリの一覧表示を無効にする（nginx: autoindex off、Apache: Options -Indexes）')]
              : [mk(dirListing, ctx, 'ok', 'info', 'pass', '一覧表示なし', '')];
   } };
@@ -151,6 +152,12 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     // ①②は「未認証で使える・公開されている」。Cookie・Authorization を送った応答の 200 では、未認証で使えるかは分からない
     if (ctx.target.sentAuth) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。Cookie・Authorization を送った応答で、未認証で使えるかは分からない）`, 'Cookie・Authorization を付けずに採取し直す')];
+    // HTML の 200 は、その機能の画面だと分かるときだけ①②にする。どのパスにも index.html を 200 で返す SPA（Netlify・Vercel・Firebase Hosting・
+    // S3＋CloudFront）では、/actuator・/swagger-ui/ も同じ画面になる（E-03② と同じ考え方）。actuator と API 仕様（openapi.json など）の本体は JSON・YAML
+    const isHtml = /^\s*text\/html/i.test(header(ctx, 'content-type')[0] ?? '') || /^\s*(?:<!doctype html|<html)/i.test(b);
+    const ui = /swagger-ui|SwaggerUIBundle|redoc|rapidoc|scalar/i.test(b);
+    if (isHtml && !(docSegment(p) !== 'actuator' && ui))
+      return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? '' : NO_BODY_REC)];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
     return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}）`, 'API仕様は本番で無効にするか、認証の内側に置く')];
   } };

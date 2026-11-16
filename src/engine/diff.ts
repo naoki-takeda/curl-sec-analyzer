@@ -1,7 +1,7 @@
 // engine/diff.ts：前回の結果（JSONエクスポート）との差分（v0.4）
 import type { Finding, Profile, Severity } from '../model';
 import { parseProfile } from './profile';
-import { KEY_VALUE_NAMES } from '../mask';
+import { maskKey } from '../mask';
 
 export type DiffKind = 'new' | 'resolved' | 'continuing' | 'severity-changed' | 'not-rechecked' | 'suppressed';
 export interface DiffRow { kind: DiffKind; ruleId: string; item: string; condition?: number; title: string; target: string; severity: Severity; before?: Severity; }
@@ -50,18 +50,13 @@ const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
  * - 前回の指摘が今回ない場合、同じターゲットで同じ項目を判定していれば「解消」、判定していなければ「再診断していない」とする
  */
 /**
- * v0.4.29 までの形式のキー（v0.4.26〜v0.4.28：マスクの出力から作り、伏せた値の「…」やクエリの値「=」を含む。v0.4.29：パラメータの名前を並べ替えず、
- * パス引数（;jsessionid=…）の値を含む）。v0.4.30 からはキーを決まった形で作る（mask.ts の maskKey）ので、以前の例外ファイル・前回の結果の
- * キーは突き合わない。黙って突き合わなくならないよう、読み込んだときに件数を知らせる
+ * 以前の版の形式のキー。今のキーは maskKey の出力なので、キーの URL の部分にもう一度 maskKey をかけても変わらない。変わるものは以前の形式
+ * （v0.4.26〜v0.4.28：伏せた値の「…」やクエリの値、v0.4.29：パス引数の値や並べ替えていない名前、v0.4.30：残す形が違うパスの部分）。
+ * 形式ごとに見分けると、パスの部分の伏せ方が変わったキーを見逃し、黙って突き合わなくなった。読み込んだときに件数を知らせる
  */
 export function legacyHarKey(k?: string): boolean {
   const m = k?.match(/^(?:HAR \S+|\S+) ((?:https?:\/\/|\/)\S*)/);
-  if (!m) return false;
-  const url = m[1];
-  if (url.includes('…') || /;[^/?]*=/.test(url)) return true;
-  const q = url.split('?')[1]; if (!q) return false;
-  const parts = q.split('&'); const names = parts.map(p => p.split('=')[0]);
-  return parts.some(p => p.includes('=') && !KEY_VALUE_NAMES.test(p.split('=')[0])) || names.some((n, i) => i > 0 && names[i - 1] > n);
+  return !!m && maskKey(m[1]) !== m[1];
 }
 
 export function diff(before: Finding[], after: Finding[]): DiffRow[] {

@@ -199,6 +199,8 @@ export const requestContentType: Rule = { id: 'A-08', title: 'リクエストの
     if (baseLabel(ctx.target.label) !== 'ctype') return [];
     const s = status(ctx);
     if (!s) return [mk(requestContentType, ctx, 'na', 'info', 'na', '応答がない', '')];
+    // 認証・認可・パスで断られた応答（401・403・404）は、Content-Type を確かめるところまで届いていない
+    if (s === 401 || s === 403 || s === 404) return [mk(requestContentType, ctx, 'na', 'info', 'na', `HTTP ${s}（Content-Type を確かめる前に断られた）`, '認証情報を付けて、存在する API の URL で採取し直す')];
     return s >= 200 && s < 300
       ? [mk(requestContentType, ctx, 1, 'medium', 'fail', `Content-Type: text/plain のJSONが HTTP ${s} で処理された`, 'application/json 以外は 415 で拒否する（CSRFの単純リクエスト対策）')]
       : [mk(requestContentType, ctx, 'ok', 'info', 'pass', `HTTP ${s}`, '')];

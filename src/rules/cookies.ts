@@ -1,7 +1,7 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
-import { isDeletion, isInfraCookie, looksLikeSession, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
+import { isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
 import { baseLabel, firstStatus, hostOf, logoutFailed } from '../parser/target';
 import { LOGOUT_FAILED_REC, mk } from './util';
 
@@ -183,7 +183,9 @@ export const sessionInUrl: Rule = { id: 'C-09', title: 'セッション固定化
 export const cookieOverHttp: Rule = { id: 'C-10', title: 'HTTP応答でのCookie発行', appliesTo: 'any', scope: 'target',
   basis: ['MDN'],
   run(ctx) {
-    const httpResponses = /^http:\/\//i.test(ctx.target.url ?? '') ? [ctx.chain[0]].filter(Boolean) : [];
+    // http のホップすべて（http://…/app → http://…/app/ → https の2つ目のホップで発行した Cookie も平文で送られる）。
+    // 各ホップの URL はパーサ・HAR の取り込みが付ける（parser/target.ts の assignHopUrls）。URL の分からないホップは最初のものだけ
+    const httpResponses = /^http:\/\//i.test(ctx.target.url ?? '') ? ctx.chain.filter((r, i) => i === 0 || /^http:\/\//i.test(r.url ?? '')) : [];
     if (!httpResponses.length) return [];
     const cs = httpResponses.flatMap(r => r!.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
     if (!cs.length) return [mk(cookieOverHttp, ctx, 'ok', 'info', 'pass', 'HTTP応答でCookieを発行していない', '')];
@@ -199,7 +201,11 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
     if (!ctx.final) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (logoutFailed(ctx.target)) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const del = ctx.target.responses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
-    return del.length ? [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', del.map(cookieEvidence).join(' / '), '')]
+    // 消したのがセッションCookieらしい名前のものか（Spring Security の既定のログアウトは remember-me だけを消し、セッションCookie は残す）
+    const sessionDel = del.filter(c => looksLikeSessionName(c.name));
+    if (del.length && !sessionDel.length)
+      return [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', `削除したのは ${del.map(c => c.name).join(', ')} だけ（セッションCookieらしい名前ではない）`, 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];
+    return del.length ? [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', sessionDel.map(cookieEvidence).join(' / '), '')]
                       : [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', 'ログアウト応答でCookieを削除していない', 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];
   } };
 

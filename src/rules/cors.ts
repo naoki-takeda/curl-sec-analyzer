@@ -1,6 +1,6 @@
 // rules/cors.ts：第3章 CORS・WebSocket（R-01〜R-09）
 import type { Rule, RuleContext } from '../model';
-import { hostOf } from '../parser/target';
+import { baseLabel, hostOf } from '../parser/target';
 import { mk, sensitiveUnlessStatic } from './util';
 
 const TEST_ORIGINS = ['https://evil.example'];        // 既知のテスト値（ツール設計1）
@@ -63,6 +63,9 @@ export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo:
     if (isOwnOrigin(ctx, ctx.target.sentOrigin))
       return [mk(corsReflect, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin}（自サイトの Origin。許可外の Origin では試していない）`, 'C6 のとおり許可外の Origin（https://evil.example）で採取し直す')];
     if (noOriginSent(ctx)) return [mk(corsReflect, ctx, 'na', 'info', 'na', 'Origin を送っていない（-v の送信ヘッダに Origin がない）', NO_ORIGIN_REC)];
+    // Origin: null を送った応答（cors-null）では、許可外の Origin を反射するかは試していない（null は R-02 で判定する）
+    if (ctx.target.sentOrigin === 'null' || (ctx.target.sentOrigin === undefined && baseLabel(ctx.target.label) === 'cors-null'))
+      return [mk(corsReflect, ctx, 'na', 'info', 'na', 'Origin: null を送った応答（R-02 で判定する）', 'C6 のとおり許可外の Origin（https://evil.example）で採取する')];
     const ok = () => [mk(corsReflect, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     if (!acao || acao === '*' || acao === 'null') return ok();   // * は R-04、null は R-02 で判定する
     const sent = ctx.target.sentOrigin ?? (TEST_ORIGINS.includes(acao) ? acao : undefined);
@@ -79,6 +82,10 @@ export const corsNull: Rule = { id: 'R-02', title: 'null許可', appliesTo: 'any
     if (!ctx.final) return [mk(corsNull, ctx, 'na', 'info', 'na', '応答がない', '')];
     const acao = acaoOf(ctx);
     if (acao !== 'null' && noOriginSent(ctx)) return [mk(corsNull, ctx, 'na', 'info', 'na', 'Origin を送っていない（-v の送信ヘッダに Origin がない）', NO_ORIGIN_REC)];
+    // 合格にするのは、Origin: null を送った応答（送った Origin が分からない -i では cors-null のラベル）だけ。evil.example を送った応答の
+    // ACAO から、null を許可しないとは言えない（どの Origin も反射するサーバは null も許可することが多い）
+    const sentNull = ctx.target.sentOrigin === 'null' || (ctx.target.sentOrigin === undefined && baseLabel(ctx.target.label) === 'cors-null');
+    if (acao !== 'null' && !sentNull) return [mk(corsNull, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin ?? '(不明)'}（null では試していない）`, 'C7 のとおり Origin: null を送って採取する')];
     if (acao !== 'null') return [mk(corsNull, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     const cred = credOf(ctx);
     return [mk(corsNull, ctx, cred ? 1 : 2, cred ? 'high' : 'medium', 'fail', `ACAO: null${cred ? ' / ACAC: true' : ''}`, 'Origin: null を許可しない（サンドボックス化したiframeやファイルから送られる）')];

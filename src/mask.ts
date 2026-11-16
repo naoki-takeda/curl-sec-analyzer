@@ -19,7 +19,7 @@ const MASK_EXACT = new Set(MASK_PARAM_NAMES.map(n => n.toLowerCase()));
 /** 区切った語にこれがあればマスクする（x-amz-security-token、x-goog-signature、private_token、x-api-key、access-token など） */
 const MASK_WORDS = new Set(['token', 'secret', 'signature', 'sig', 'credential', 'credentials', 'password', 'passwd', 'pwd', 'pass', 'pw', 'key', 'apikey',
   'accesskey', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp', 'ticket', 'verifier', 'samlresponse', 'samlart', 'samlassertion',
-  'assertion', 'nonce', 'passcode', 'hash']);   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
+  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf']);   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
 /**
  * 語 code と組み合わせても秘密ではない語（country_code、zip_code、error_code、currency_code）。名前の語が code とこれらだけなら伏せない。
  * code だけの名前と、auth_code・verification_code・otp_code・device_code のように秘密の語と組み合わせたものは伏せる
@@ -54,7 +54,9 @@ const SEP = String.raw`[?&#;]|%(?:25)*(?:3[Ff]|26|23|3[Bb])|\\u00(?:26)|\\x26|&a
 const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];|&equals;`;
 // 値はエンコードした区切りの前まで（長さの上限は付けない。上限で切ると、6KB の JWT などの残りが伏せられずに残る。繰り返しは入れ子でないので時間は線形）。
 // 名前は最短一致（エンコードした = を名前に含めない）
-const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)(${EQ})((?:(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\])+)`, 'g');
+// 値の前の引用符（?token='…'）は = の側に含め、値は JSON の「\/」（PHP の json_encode は / をこう書く）を越えて続ける
+// （\ で値を切ると、?token=abc\/def の残りが伏せられずに残った）
+const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)((?:${EQ})['"]?)((?:(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|\\\/)+)`, 'g');
 // JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる。
 // 「Bearer_eyJ…」「access_token_eyJ…」のように語と _ でつないだものも含める（直前の語は _ を含めて40文字までで、その前が語の外のときだけ。
 // 「_eyJ」の繰り返しで2乗の時間にしない）。JWE（5つの部分。鍵の部分が空の dir 形式「eyJ….. iv.暗号文.タグ」を含む）は5つ目まで、JWS は3つ目まで伏せる
@@ -88,9 +90,13 @@ const maskedParam = (v: string, rest: string) => /…\(\d+$/.test(v) && rest.sta
  */
 // 「//」「%2F%2F」の直後はホスト名（オーソリティ）なので見ない。見ると、長いホスト名（staging-customer-portal-frontend-01.example.com、
 // ELB の名前）まで伏せ、URL で登録した例外が一致しなくなり、CORS の証跡の Origin も読めなくなる
-const PATH_SEGMENT = /(?<=(?<!\/)\/|(?<!%(?:25)*2[Ff])%(?:25)*2[Ff])(?:[A-Za-z0-9_=.:~+-]|%2[Bb]|%3[Dd]){16,}/g;
+// ? # & のあと（= のないクエリ ?<トークン>、フラグメント #<トークン>）も見る。= を含むもの（?token=…）は、かけらが秘密の形にならないので ANY_PARAM に任せる
+const PATH_SEGMENT = /(?<=(?<!\/)\/|(?<!%(?:25)*2[Ff])%(?:25)*2[Ff]|[?#&])(?:[A-Za-z0-9_=.:~+-]|%2[Bb]|%3[Dd]){16,}/g;
+// 小文字（または大文字）と数字だけの20文字以上の並び（base36・base32 のトークン。x7k2…・MFRGGZDF…）も、数字と英字が4つ以上ずつあれば伏せる。
+// - _ で区切った部分ごとに見る（sk_live_<トークン>）。区切りのある読める名前（2026-annual-report-v2）は部分が短いので残る
+const caseToken = (x: string) => x.length >= 20 && (/^[a-z0-9]+$/.test(x) || /^[A-Z0-9]+$/.test(x)) && (x.match(/\d/g) ?? []).length >= 4 && (x.match(/[A-Za-z]/g) ?? []).length >= 4;
 const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
-  (/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || (p.length >= 32 && /\d/.test(p)));
+  (/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || (p.length >= 32 && /\d/.test(p)) || p.split(/[-_]/).some(caseToken));
 /** 伏せ方：画面・エクスポート用（先頭の数文字と長さを残す）と、突き合わせのキー用（記録し直しても変わらないよう、何も残さない） */
 interface Hider { value: (v: string) => string; bare: (v: string) => string }
 const SHOW: Hider = { value: v => maskValue(v), bare: v => `…(${v.length} chars)` };
@@ -204,56 +210,58 @@ export function maskKey(raw: string): string {
   try { u = new URL(raw); } catch {
     try { u = new URL(raw, 'https://relative.invalid'); relative = true; } catch { return '*'; }
   }
-  // デコードするが、%2F（エンコードした /）はそのまま残す（Base64 のトークンの / で分けると、後ろのかけらがキーに残る）
+  // デコードするが、%2F（エンコードした /）はそのまま残す（Base64 のトークンの / で分けると、後ろのかけらが残る）
   const dec = (s: string) => { try { return decodeURIComponent(s.replace(/%2F/gi, '%252F')); } catch { return s; } };
   const path = u.pathname.split('/').map(seg => {
     if (/^\((?:[A-Z]\([^()]*\))+\)$/.test(seg)) return '(*)';                 // ASP.NET の Cookie を使わないセッション
-    // パス引数（;jsessionid=…）は名前だけを残す。値はセッションIDのことが多く、記録し直すと変わる
+    // パス引数（;jsessionid=…）は名前だけを残す。値はセッションIDのことが多い
     const [head, ...params] = seg.split(';');
-    return [keyText(dec(head)), ...params.map(p => keyText(dec(p.split('=')[0])))].join(';');
+    return [keySegment(dec(head)), ...params.map(p => keySegment(dec(p.split('=')[0])))].join(';');
   }).join('/');
-  // パラメータは名前だけを並べ替えて持つ（並び順で別のキーにしない）。値は、ページ送りなどの決まった名前で、値がふつうの語のときだけ残す
-  // （?page=1 と ?page=2 を別のキーにし、並び順で番号を付けない）。名前も、トークンらしいもの（JWT を名前にしたものなど）は * にする
+  // パラメータは名前だけを並べ替えて持つ。値は、ページ送り（数字）と並べ替え・表示の切り替え（英字の語）の決まった名前のときだけ残す
   const params = new Map<string, string>();
   for (const [n, v] of u.searchParams) {
-    const name = keyText(n); if (params.has(name)) continue;
-    params.set(name, KEY_VALUE_NAMES.test(n) && v.length <= 32 && keyText(v) === v && /^[\w.-]*$/.test(v) ? `${name}=${v}` : name);
+    const name = keySegment(n); if (params.has(name)) continue;
+    const keep = (KEY_NUMBER_NAMES.test(n) && /^\d{1,4}$/.test(v)) || (KEY_WORD_NAMES.test(n) && /^[A-Za-z][A-Za-z_-]{0,19}$/.test(v));
+    params.set(name, keep ? `${name}=${v}` : name);
   }
   const query = params.size ? `?${[...params.keys()].sort().map(k => params.get(k)).join('&')}` : '';
   return relative ? `${path}${query}` : `${u.protocol}//${u.host}${path}${query}`;
 }
 
 /**
- * キーで * にする、変わりうる値の形。マスクの一覧（パラメータの名前など）とは切り離した、広めの決まった形で、版をまたいでも変えない：
- * JWT、12桁以上の数字、数字を含む16文字以上の16進数（UUID を含む）、英大文字・小文字・数字が頻繁に入れ替わる12文字以上の並び（トークン）。
- * 「2026-annual-report-v2」「GettingStartedV2Guide」のような名前は残す（文字の種類の入れ替わりが少ない）。
- * マスクの判定（秘密の名前、16文字以上の部分）をキーに使うと、;jsessionid= の値や %2B を含むトークンがキーに残り、JSON のエクスポートと
- * 例外ファイルに出た（v0.4.29）
+ * キーのパスの部分とパラメータの名前は、残してよい形だけを残す（許可リスト）。部分を - _ . で区切ったかけらのうち、
+ * 英字の語（24文字まで。大文字・小文字の入れ替わりは4回まで（AdminDashboard）。大文字だけは10文字まで（API・SAML））、6桁までの数字、
+ * 「v2」「x64」のような短い語と数字を残し、それ以外は * にする（続く * は1つにまとめる）。
+ * 秘密らしい形を数え上げて伏せる作り（v0.4.29・v0.4.30）は、;jsessionid= の値や、小文字と数字だけのトークン（t2ybctp0…）を見分けられず、
+ * JSON のエクスポートと例外ファイルに出した。残す形を決めておけば、トークンがどんな形でもキーには入らない。
+ * 別のページが同じキーになることはある（GettingStartedV2Guide と MigrationGuideV3 はどちらも *）が、秘密は漏れない
  */
-const KEY_RUN = /eyJ[\w-]*(?:\.[\w-]*){1,4}|[A-Za-z0-9_+=%-]+/g;
-const randomLike = (r: string): boolean => {
-  if (/^eyJ/.test(r)) return true;
-  const bare = r.replace(/[-_+=%]/g, '');
-  if (bare.length < 12) return false;
-  if (/^\d+$/.test(bare)) return true;
-  if (bare.length >= 16 && /^[0-9a-f]+$/i.test(bare) && /\d/.test(bare)) return true;
-  return (bare.match(/[a-z]+|[A-Z]+|\d+/g) ?? []).length / bare.length >= 0.5;
+const keyPiece = (p: string): boolean => {
+  if (p === '*' || /^\d{1,6}$/.test(p) || /^[A-Za-z]{1,2}\d{1,2}$/.test(p)) return true;
+  if (!/^[A-Za-z]{1,24}$/.test(p)) return false;
+  if (/^[A-Z]+$/.test(p)) return p.length <= 10;
+  return (p.match(/[a-z]+|[A-Z]+/g) ?? []).length <= 4;
 };
-// 英字だけの語と - か _ で始まるもの（application-<ダイジェスト>、AdminDashboard-<ハッシュ>、login-<トークン>）は、語を残して残りを * にする
-// （別のファイルを別のキーにする。残りは伏せる）
-const keyText = (s: string) => s.replace(KEY_RUN, r => {
-  if (!randomLike(r)) return r;
-  const m = r.match(/^([A-Za-z]{3,30}[-_])(.+)$/);
-  return m ? `${m[1]}*` : '*';
-});
-/** キーに値を残すパラメータの名前（ページ送り・並べ替え・表示の切り替え。秘密や個人情報を入れない決まった名前だけ） */
-export const KEY_VALUE_NAMES = /^(?:page|p|per_page|page_size|pagesize|offset|limit|start|sort|order|orderby|dir|lang|locale|hl|tab|view|mode|type|format|fmt|v|version|_task)$/i;
+const keySegment = (s: string): string => s.replace(/[^-_.~]+/g, piece => (keyPiece(piece) ? piece : '*')).replace(/\*(?:[-_.~]\*)+/g, '*');
+/** キーに値を残すパラメータの名前（秘密や個人情報を入れない決まった名前だけ）。数字の値（ページ送り）と英字の語の値（並べ替え・表示の切り替え） */
+const KEY_NUMBER_NAMES = /^(?:page|per_page|page_size|pagesize|offset|limit|start)$/i;
+const KEY_WORD_NAMES = /^(?:sort|order|orderby|dir|lang|locale|hl|tab|view|mode|type|format|_task)$/i;
 
 /**
  * 証跡の抜粋：マスクしてから切り詰める。切り詰めてからマスクすると、途中で切れた JWT（ドットが足りない）や
  * パラメータが一致せず、生の値が残るため
  */
 export const clip = (s: string, n: number) => maskText(s).slice(0, n);
+
+/**
+ * 手で書いた #META cmd= のコマンド（CSV の「実施コマンド」）。maskText に加えて、curl の認証情報の引数を伏せる：
+ * -u・--user（ユーザー:パスワード）、-b・--cookie（Cookie）、-H の Authorization・Cookie・Proxy-Authorization の値。
+ * 区切りは空白のほか、#META の値に空白を入れられないので書く「_」も認める
+ */
+export const maskCommand = (s: string): string => maskText(s)
+  .replace(/(^|[\s_])(-u|--user|-b|--cookie|--oauth2-bearer)([\s_=]+)(['"]?)[^\s'"]+/g, '$1$2$3$4****')
+  .replace(/((?:Proxy-)?Authorization|Cookie)(:[\s_]*)(?:(Basic|Bearer|Digest|Negotiate|NTLM)([\s_]+))?[^\s'"]+/gi, (_, h: string, c: string, scheme?: string, sp?: string) => `${h}${c}${scheme ? `${scheme}${sp}` : ''}****`);
 
 // #PROBE の head は判定にだけ使い、表示・エクスポートにはパターン名だけを出す。
 // [パターン名, 判定する項目, 対象パス, 先頭64バイトの目安]（ツール設計1「プローブの判定パターン」）

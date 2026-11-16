@@ -74,7 +74,7 @@ har-5 | A-09.3 | info | fail | CSPなし
 har-5 | E-01.ok | info | pass | エラーの詳細らしき記述なし
 har-5 | H-01.1 | high | fail | (ヘッダなし)
 har-5 | H-02.na | info | na | HSTSがない（H-01で判定）
-har-5 | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
+har-5 | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
 har-5 | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 har-5 | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
 har-5 | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)

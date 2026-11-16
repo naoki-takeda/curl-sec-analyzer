@@ -189,7 +189,8 @@ describe('P2 重要度「高」の誤判定と見逃し', () => {
       expect(ids(input, 'E-05')).toEqual(['E-05.na']);
     });
     it('同じホストの Swagger UI のページへの転送（/swagger-ui → /swagger-ui/index.html）は、転送先で判定する', () => {
-      const followed = t('t', 'https://a.example/swagger-ui', 'HTTP/2 302\nlocation: /swagger-ui/index.html\n\nHTTP/2 200\ncontent-type: text/html');
+      // 第24回から、HTML の 200 はその機能の画面（swagger-ui を含む）と分かるときだけ②にする
+      const followed = t('t', 'https://a.example/swagger-ui', 'HTTP/2 302\nlocation: /swagger-ui/index.html\n\nHTTP/2 200\ncontent-type: text/html', '<div id="swagger-ui"></div>');
       expect(ids(followed, 'E-05')).toEqual(['E-05.2']);
       // -L を付けずに転送だけを採取したら、判定しない
       const notFollowed = t('t', 'https://a.example/swagger-ui', 'HTTP/2 302\nlocation: /swagger-ui/index.html');
@@ -265,7 +266,7 @@ describe('レビューの指摘（同じ PR の中で見つかったもの）', 
     const input = t('t', 'https://a.example/actuator', 'HTTP/2 302\nlocation: /actuator/login\n\nHTTP/2 200\ncontent-type: text/html');
     expect(ids(input, 'E-05')).toEqual(['E-05.ok']);
     // springdoc の /swagger-ui.html → /swagger-ui/index.html は転送先で見る
-    const springdoc = t('t', 'https://a.example/swagger-ui.html', 'HTTP/2 302\nlocation: /swagger-ui/index.html\n\nHTTP/2 200\ncontent-type: text/html');
+    const springdoc = t('t', 'https://a.example/swagger-ui.html', 'HTTP/2 302\nlocation: /swagger-ui/index.html\n\nHTTP/2 200\ncontent-type: text/html', '<div id="swagger-ui"></div>');
     expect(ids(springdoc, 'E-05')).toEqual(['E-05.2']);
   });
 });

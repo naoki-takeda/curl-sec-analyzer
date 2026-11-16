@@ -12,6 +12,8 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     if (!first) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
     const rec = '同じホストの https:// へ 301 または 308 で転送する';
     const loc = first.headers.get('location')?.[0];
+    // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、転送したかどうかも分からない（A-01・C-12・E-05 と同じ）
+    if (!first.status) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
     // HTTP を 4xx で断る（CloudFront の「HTTPS のみ」、HTTP を拒否する API）は、HTTP でコンテンツを返していないので①にしない。
     // 5xx はサーバの不調で、HTTP をどう扱う設定かが分からない
     if (first.status >= 400 && first.status < 500) return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', `HTTP ${first.status}（HTTP のリクエストを拒否）`, '')];
@@ -94,13 +96,20 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
                         : [mk(methods, ctx, 'ok', 'info', 'pass', `Allow: ${allow}`, '')];
   } };
 
+const OPEN_REDIRECT_REC = 'next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す';
 export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレクト', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Unvalidated Redirects CS', 'IPA'],
   run(ctx) {
     if (!ctx.final) return [mk(openRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(l => /^(?:https?:)?\/\/(?:[^/]*@)?evil\.example\b/i.test(l.trim()));
-    return loc ? [mk(openRedirect, ctx, 1, 'medium', 'fail', `Location: ${loc}`, '転送先は許可リスト（または相対パス）に限る')]
-               : [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')];
+    const evil = (l: string) => /^(?:https?:)?\/\/(?:[^/]*@)?evil\.example\b/i.test(l.trim());
+    const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(evil);
+    // Refresh ヘッダ（Refresh: 0; url=https://evil.example/）による転送も見る
+    const refresh = ctx.target.responses.flatMap(r => r.headers.get('refresh') ?? []).map(v => v.match(/url\s*=\s*['"]?([^'"\s;]+)/i)?.[1] ?? '').find(evil);
+    if (loc || refresh) return [mk(openRedirect, ctx, 1, 'medium', 'fail', loc ? `Location: ${loc}` : `Refresh: url=${refresh}`, '転送先は許可リスト（または相対パス）に限る')];
+    // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）
+    const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location')) || r.headers.has('refresh'));
+    return redirected ? [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')]
+      : [mk(openRedirect, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（転送しなかった。転送先を検証しているかは分からない）`, OPEN_REDIRECT_REC)];
   } };
 
 export const httpVersion: Rule = { id: 'T-12', title: 'HTTP/2・HTTP/3', appliesTo: 'any', scope: 'target',

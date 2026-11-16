@@ -1,0 +1,86 @@
+#TARGET url=https://idp.example.com/authorize label=form-post
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=63072000
+content-security-policy: default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
+
+<html><head><title>Submit</title></head><body><noscript>JavaScript is required.</noscript>
+<form method="post" action="https://app.example.com/signin-oidc"><input type="hidden" name="id_token" value="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJDQU5BUlkifQ.c2lnQ0FOQVJZc2lnbmF0dXJl"><input type="hidden" name="state" value="A"></form>
+<script src="/js/submit.js"></script>
+</body></html>
+
+#TARGET url=https://www.example.com/actuator label=spa-actuator
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=63072000
+
+<!doctype html><html><head><title>App</title><meta http-equiv="Content-Security-Policy" content="default-src 'self'"></head><body><div id="root"></div><script type="module" src="/app/assets/main-Dk3x9Lq2.js"></script></body></html>
+
+#TARGET url=http://www.example.com/app label=http
+#META at=2026-11-01T10:00:00
+HTTP/1.1 301 Moved Permanently
+Location: http://www.example.com/app/
+
+HTTP/1.1 302 Found
+Location: https://www.example.com/app/
+Set-Cookie: ASP.NET_SessionId=CANARYsessionx0123456789ab; path=/; HttpOnly
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body>app</body></html>
+
+#TARGET url=https://www.example.com/signin-oidc label=session-sample-1
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+set-cookie: .AspNetCore.Cookies=chunks-2; path=/; secure; samesite=lax; httponly
+set-cookie: .AspNetCore.CookiesC1=CfDJ8Ab3Xy9Qw2Er7Ty6Ui1Op5As4Df8Gh3Jk2Lz7Xc1CANARYc1a; path=/; secure; samesite=lax; httponly
+
+#TARGET url=https://www.example.com/signin-oidc label=session-sample-2
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+set-cookie: .AspNetCore.Cookies=chunks-2; path=/; secure; samesite=lax; httponly
+set-cookie: .AspNetCore.CookiesC1=CfDJ8Qw2Er7Ty6Ui1Op5As4Df8Gh3Jk2Lz7Xc1Vb9Nm4CANARYc1b; path=/; secure; samesite=lax; httponly
+
+#TARGET url=http://api.example.com/ label=http
+#META at=2026-11-01T10:00:00
+{"location":["https://api.example.com/"],"content-length":["0"],"date":["Sun, 01 Nov 2026 01:00:00 GMT"]}
+
+#TARGET url=https://www.example.com/mypage label=mypage sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body>my page</body></html>
+
+#TARGET url=https://www.example.com/logout label=logout
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+set-cookie: remember-me=; Max-Age=0; path=/
+
+#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body><form method="post" action="/login"><input name="u"><input type="password" name="p"></form></body></html>
+
+#TARGET url=https://www.example.com/go?next=https://evil.example/ label=open-redirect
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body>login</body></html>
+
+#TARGET url=https://api.example.com/v1/items label=ctype
+#META at=2026-11-01T10:00:00
+HTTP/2 401
+content-type: application/json
+www-authenticate: Bearer
+
+{"error":"unauthorized"}

@@ -98,6 +98,9 @@ export const cookieNames = (v: string) => v.split(';').map(c => c.split('=')[0].
 /** now：削除用かどうか（過去の Expires）を判定する時刻。ルールからは採取時刻（RuleContext.now）を渡す */
 export function looksLikeSession(c: SetCookie, now = Date.now()): boolean {
   if (isDeletion(c, now)) return false;
+  // ASP.NET Core の Cookie の分割の印（.AspNetCore.Cookies=chunks-2。中身は .AspNetCore.CookiesC1・C2 にある）はセッションIDではない
+  // （セッションIDとして数えると、C-07①（約48bit）・C-07②（同じ値）の誤検知になる）
+  if (/^chunks-\d+$/.test(c.value)) return false;
   if (sessionConfig.names.length) return sessionConfig.names.some(n => n.toLowerCase() === c.name.toLowerCase());   // 指定があれば推定しない
   if (notSessionName(c.name)) return false;
   const persistent = c.attrs.has('expires') || c.attrs.has('max-age');

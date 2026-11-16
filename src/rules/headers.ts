@@ -44,7 +44,8 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
     if (meta.length) return [mk(cspPresence, ctx, 'ok', 'info', 'pass', `<meta http-equiv> の CSP: ${meta.join(' / ')}（frame-ancestors・report-uri・sandbox は meta では効かない）`, '')];
     // ヘッダがなく本文も採取していない（-D - -o /dev/null、-v）なら、<meta> の CSP があるかが分からないので①にしない（同じ URL を -i で採取すると
     // meta の CSP で合格になり、採取の方法で結果が食い違った）
-    if (!rawEnforce.length && !ro.length && !htmlBody(ctx)) return [mk(cspPresence, ctx, 'na', 'info', 'na', 'CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）', NO_BODY_REC)];
+    // HTML の応答だけ（JSON の API の応答には本文があっても htmlBody は空。API は①を情報に下げ、A-09③ として数える（DEDUPE））
+    if (!rawEnforce.length && !ro.length && ctx.responseKind === 'html' && !htmlBody(ctx)) return [mk(cspPresence, ctx, 'na', 'info', 'na', 'CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）', NO_BODY_REC)];
     if (!rawEnforce.length && !ro.length) return [mk(cspPresence, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
     if (!rawEnforce.length) return [mk(cspPresence, ctx, 2, 'medium', 'fail', `Report-Onlyのみ: ${ro[0]}`, '確認できたら強制モードの Content-Security-Policy に切り替える')];
     // ③は、ヘッダ値のどのポリシーにもディレクティブがないとき。カンマのあとのかけら（report-uri の URL の中のカンマなど）だけが
@@ -89,12 +90,13 @@ export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appl
 
 // 本文のない応答（204 No Content、304 Not Modified）。キャッシュに残す内容も、ほかのオリジンに読ませる内容もないので、H-12・H-11 の対象外
 // （ログインした HAR では、ビーコンや XHR の 204 のたびに H-12①（高）が出た。H-13 も同じ応答を除いている）
+const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（204・304 は対象外）';
 const NO_CONTENT = (ctx: RuleContext) => ctx.final?.status === 204 || ctx.final?.status === 304;
 export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS', 'OWASP REST Security CS'],
   run(ctx) {
     if (!ctx.final) return [mk(cacheControl, ctx, 'na', 'info', 'na', '応答がない', '')];
-    if (NO_CONTENT(ctx)) return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, '')];
+    if (NO_CONTENT(ctx)) return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const cc = header(ctx, 'cache-control').join(', ').toLowerCase();
     const dirs = new Set(cc.split(',').map(s => s.trim().split('=')[0]).filter(Boolean));
     const ev = cc || (header(ctx, 'pragma').length ? `(Cache-Controlなし、Pragma: ${header(ctx, 'pragma')[0]})` : '(ヘッダなし)');
@@ -252,7 +254,7 @@ export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CO
   basis: ['MDN', 'OWASP Secure Headers'],
   run(ctx) {
     if (!ctx.final) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', '応答がない', '')];
-    if (NO_CONTENT(ctx)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, '')];
+    if (NO_CONTENT(ctx)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const out = []; const sensitive = sensitiveUnlessStatic(ctx);
     if (sensitive && !header(ctx, 'cross-origin-resource-policy').length)
       out.push(mk(crossOriginIsolation, ctx, 1, 'low', 'fail', '機密応答に Cross-Origin-Resource-Policy なし', 'Cross-Origin-Resource-Policy: same-origin'));

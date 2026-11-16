@@ -56,14 +56,14 @@ api | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 api | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 api | R-04.ok | info | pass | (ACAOなし)
 api | T-12.1 | info | fail | HTTP/1.0
-cors-null | R-01.ok | info | pass | (ACAOなし)
+cors-null | R-01.na | info | na | Origin: null を送った応答（R-02 で判定する）
 cors-null | R-02.ok | info | pass | (ACAOなし)
 cors-null | R-04.ok | info | pass | (ACAOなし)
-cors-partial | R-02.ok | info | pass | (ACAOなし)
+cors-partial | R-02.na | info | na | Origin: https://www.example.com.evil.net（null では試していない）
 cors-partial | R-03.ok | info | pass | Origin: https://www.example.com.evil.net → (ACAOなし)
 cors-partial | R-04.ok | info | pass | (ACAOなし)
 cors-reflect | R-01.ok | info | pass | (ACAOなし)
-cors-reflect | R-02.ok | info | pass | (ACAOなし)
+cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）
 cors-reflect | R-04.ok | info | pass | (ACAOなし)
 crlf | T-08.ok | info | pass | 注入したヘッダは応答に現れない
 csp-sample-* | H-04.na | info | na | CSPにnonceがない
@@ -159,7 +159,7 @@ notfound | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 notfound | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 notfound | R-04.ok | info | pass | (ACAOなし)
 notfound | T-12.1 | info | fail | HTTP/1.0
-open-redirect | T-06.ok | info | pass | 外部ホスト（evil.example）へは転送しない
+open-redirect | T-06.na | info | na | HTTP 200（転送しなかった。転送先を検証しているかは分からない）
 page | A-02.ok | info | pass | URL・Location・本文にトークンなし
 page | E-01.ok | info | pass | エラーの詳細らしき記述なし
 page | H-01.1 | high | fail | (ヘッダなし)
@@ -277,7 +277,7 @@ T-02 | manual | fails=0
 T-03 | manual | fails=0
 T-04 | missing-input | fails=0 | 必要なラベル: http
 T-05 | missing-input | fails=0 | 必要なラベル: （一般）, http
-T-06 | evaluated | fails=0
+T-06 | missing-input | fails=0 | next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す
 T-07 | evaluated | fails=0
 T-08 | evaluated | fails=0
 T-09 | evaluated | fails=0

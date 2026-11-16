@@ -55,7 +55,8 @@ export function parseInput(input: string): ParseResult {
   let unparsed = 0; const emptyTargets: string[] = [];
   let json: string[] | null = null;                   // C10（%{header_json}）の読み取り中
   let jsonBytes = 0;
-  const sentNames = new WeakMap<Target, Set<string>>();   // 送った Cookie の名前（重なりを除くため）
+  const sentNames = new WeakMap<Target, Set<string>>();
+  const pendingJson: HttpResponse[] = [];            // ステータスがまだない %{header_json} の応答（あとの #META response_code= で補う）   // 送った Cookie の名前（重なりを除くため）
   let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
   let connectReq = false;                             // -v で「> CONNECT」を送った（プロキシのトンネル）。その応答のあとは本文がない
   const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; };
@@ -71,11 +72,12 @@ export function parseInput(input: string): ParseResult {
     if (mk) {                                          // マーカー行は必ず応答を閉じる
       close(); inOpenssl = false; vBody = false; if (json) { unparsed += json.length; json = null; }
       const [, tag, rest] = mk; const a = attrs(rest);
-      if (tag === 'TARGET') { flush(); t = newTarget(a); }
+      if (tag === 'TARGET') { flush(); t = newTarget(a); pendingJson.length = 0; }
       else if (tag === 'META') {
         Object.assign(t.meta, a);
         // %{header_json} のあとに出した response_code（-w '%{header_json}' のあとの #META）も、その応答のステータスにする
-        if (a.response_code) for (const r of t.responses) if (r.status === 0 && r.reason === 'header_json') r.status = Number(a.response_code) || 0;
+        // ステータスがまだない %{header_json} の応答だけを見る（行ごとに全応答を見直すと、#META の多い入力で2乗の時間になった）
+        if (a.response_code) { for (const r of pendingJson) if (r.status === 0) r.status = Number(a.response_code) || 0; pendingJson.length = 0; }
       }
       else if (tag === 'PROBE') t.probes.push({ path: a.path ?? '', code: +a.code, size: +a.size, contentType: a.ct ?? '', headB64: a.head ?? '' });
       else if (tag === 'CIPHERPROBE') t.cipherProbes.push({ cipher: a.c ?? '', result: probeResult(a.ok) });
@@ -143,7 +145,7 @@ export function parseInput(input: string): ParseResult {
       // 上限は先に見る（} で終わる行が続くと、行ごとに全体をつないで解析し直し、入力の長さの2乗の時間がかかる）
       const r = jsonBytes > BODY_LIMIT ? null : /\}\s*$/.test(line) ? headerJson(json.join('\n'), t.meta.response_code) : undefined;
       // null：JSON としては読めたが、ヘッダの形ではない（curl -s で出力した API の本文など）。応答にせず、解析できない行として警告する
-      if (r) { t.responses.push(r); json = null; } else if (r === null || json.length > 500) { unparsed += json.length; json = null; }
+      if (r) { t.responses.push(r); if (r.status === 0) pendingJson.push(r); json = null; } else if (r === null || json.length > 500) { unparsed += json.length; json = null; }
       continue;
     }
     if (!cur) { if (line.trim()) unparsed++; continue; }

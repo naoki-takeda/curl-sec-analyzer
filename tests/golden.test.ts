@@ -29,7 +29,8 @@ const run = (c: { name: string; url: URL }) => (/\.har$/.test(c.name) ? analyze(
  * 画面・エクスポートに出てはいけない値。コーパスの秘密の値には「CANARY」を入れてある（maskValue が残す先頭の4文字より後ろ）。
  * CANARY を Base64 にしたもの（JWT の署名の部分）も見る
  */
-const SECRETS = [/CANARY/, /Q0FOQVJZ/, /c2lnQ0FO/];
+// 小文字のトークン（canary を含む）も見る（小文字と数字だけのトークンが突き合わせのキーに残った、第24回）
+const SECRETS = [/CANARY/, /Q0FOQVJZ/, /c2lnQ0FO/, /canary/];
 
 beforeAll(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW); });
 afterAll(() => { vi.useRealTimers(); });
