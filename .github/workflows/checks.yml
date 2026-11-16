@@ -1,0 +1,72 @@
+# CI と公開で共通の検査（再利用するワークフロー）
+#
+# CI（ci.yml）と公開（deploy.yml）の両方から呼び、検査の内容がずれないようにする。
+# 公開のときは、E2E まで通ったのと同じ dist を Pages の成果物として保存する（検査していないビルドを公開しない）。
+#
+# セキュリティ方針（docs/design.md「サプライチェーン」）
+# - 使用する Action はタグではなくコミットSHAで固定する（タグの付け替えによるすり替えを防ぐ）。更新は Dependabot が行う
+# - 権限は既定ですべて無効にし、ジョブには読み取りだけを付与する（呼び出し側の権限を超えられない）
+# - checkout で認証情報を残さない（persist-credentials: false）
+# - 書き換えたときは tests/workflows.test.ts の検査も通ること
+name: Checks
+
+on:
+  workflow_call:
+    inputs:
+      upload-pages:
+        description: 検査に通った dist を GitHub Pages の成果物として保存する
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # E2E を3種類のブラウザで実行するため、長めにする
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # package-lock.json どおりに入れる（lock が無い・食い違う場合は失敗する）。
+      # 依存のインストールスクリプトは実行しない。次の署名の検証より前に、改ざんされたパッケージのコードを動かさないため。
+      # いまの依存でスクリプトを持つのは fsevents（macOS 専用の任意の依存で、Linux には入らない）だけで、ビルド・テストに要らない。
+      # スクリプトが必要な依存を足したときは、署名の検証の後に npm rebuild <パッケージ名> を足す
+      - run: npm ci --ignore-scripts
+
+      # npm レジストリの署名を検証し、改ざんされたパッケージを入れていないか確認する
+      # （手元では npm run audit で同じ2つを実行する。オプションは package.json の scripts だけに書く）
+      - run: npm run audit:signatures
+
+      # 公開物に含まれる依存（csp_evaluator など）に重大な既知の脆弱性がないか
+      - run: npm run audit:deps
+
+      # 型チェック（tsc）と ESLint（innerHTML・eval の禁止を含む）
+      - run: npm run lint
+
+      - run: npm test -- --run
+
+      # 共有用の画像（OGP）の絶対URLに使う公開先のURL。API を呼ばずにリポジトリの情報から組み立てる（追加の権限が要らず、Pages を有効にする前でも失敗しない）。
+      # 再利用するワークフローの github コンテキストは呼び出し側のもの。
+      # 独自ドメインで公開する場合は、リポジトリの変数 SITE_URL（Settings → Secrets and variables → Actions → Variables）で上書きする
+      - run: npm run build
+        env:
+          SITE_URL: ${{ vars.SITE_URL || format('https://{0}.github.io/{1}', github.repository_owner, github.event.repository.name) }}
+
+      # 本番ビルドを Chromium・Firefox・WebKit で開き、外部へのリクエストがないこと・マスキング・アクセシビリティなどを確認する
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npx playwright test
+
+      - if: ${{ inputs.upload-pages }}
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: dist

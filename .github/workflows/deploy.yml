@@ -1,0 +1,40 @@
+# main への push で、検査（checks.yml）に通った dist を GitHub Pages に公開する
+# プルリクエストの検査は ci.yml が行う（検査の内容は共通）
+#
+# セキュリティ方針は checks.yml の先頭にある。公開のジョブだけに pages: write と id-token: write を与える
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# 公開は1つずつ行う。実行中の公開は取り消さない（途中で止めると Pages が中途半端な状態になりうる）
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/checks.yml
+    with:
+      upload-pages: ${{ github.ref == 'refs/heads/main' }}
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.d.outputs.page_url }}
+    steps:
+      - id: d
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

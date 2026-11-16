@@ -1,0 +1,989 @@
+[
+ {
+  "id": "H-01",
+  "title": "Strict-Transport-Security",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Strict-Transport-Security",
+  "asvs": [
+   "3.4.1"
+  ],
+  "ipa": [
+   "2.3-1)"
+  ]
+ },
+ {
+  "id": "H-02",
+  "title": "HSTS preload",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "HSTS preload",
+  "asvs": [
+   "3.7.4"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-03",
+  "title": "CSP（存在・強制）",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "CSP (presence and enforcement)",
+  "asvs": [
+   "3.4.3"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-04",
+  "title": "CSP：script-src",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "CSP: script-src",
+  "asvs": [
+   "3.4.3"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-05",
+  "title": "CSP：object-src・base-uri",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "CSP: object-src and base-uri",
+  "asvs": [
+   "3.4.3"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-06",
+  "title": "クリックジャッキング対策（frame-ancestors・X-Frame-Options）",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Clickjacking protection (frame-ancestors, X-Frame-Options)",
+  "asvs": [
+   "3.4.6"
+  ],
+  "ipa": [
+   "9-(i)-a"
+  ]
+ },
+ {
+  "id": "H-07",
+  "title": "CSP：非推奨ディレクティブ・混在コンテンツ・構文",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "CSP: deprecated directives, mixed content and syntax",
+  "asvs": [
+   "3.4.3",
+   "3.4.7",
+   "12.2.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-08",
+  "title": "X-Content-Type-Options",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "X-Content-Type-Options",
+  "asvs": [
+   "3.4.4"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-09",
+  "title": "Referrer-Policy",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Referrer-Policy",
+  "asvs": [
+   "3.4.5"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-10",
+  "title": "Permissions-Policy",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Permissions-Policy",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "H-11",
+  "title": "COOP・COEP・CORP",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "COOP, COEP and CORP",
+  "asvs": [
+   "3.4.8",
+   "3.5.8"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-12",
+  "title": "Cache-Control",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Cache-Control",
+  "asvs": [
+   "14.3.2",
+   "14.2.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-13",
+  "title": "Content-Typeとcharset",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Content-Type and charset",
+  "asvs": [
+   "4.1.1"
+  ],
+  "ipa": [
+   "5-(viii)"
+  ]
+ },
+ {
+  "id": "H-14",
+  "title": "X-Permitted-Cross-Domain-Policies",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "X-Permitted-Cross-Domain-Policies",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "H-15",
+  "title": "Clear-Site-Data",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Clear-Site-Data",
+  "asvs": [
+   "14.3.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-16",
+  "title": "製品・バージョン・デバッグ情報の露出",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Product, version and debug information",
+  "asvs": [
+   "13.4.2",
+   "13.4.6"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "H-17",
+  "title": "廃止・非推奨ヘッダ",
+  "chapter": 1,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Obsolete and deprecated headers",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "C-01",
+  "title": "Secure",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Secure",
+  "asvs": [
+   "3.3.1"
+  ],
+  "ipa": [
+   "4-(iii)"
+  ]
+ },
+ {
+  "id": "C-02",
+  "title": "HttpOnly",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "HttpOnly",
+  "asvs": [
+   "3.3.4"
+  ],
+  "ipa": [
+   "5-(ix)"
+  ]
+ },
+ {
+  "id": "C-03",
+  "title": "SameSite",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "SameSite",
+  "asvs": [
+   "3.3.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "C-04",
+  "title": "Domain・Path",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Domain and Path",
+  "asvs": [
+   "3.3.3"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "C-05",
+  "title": "Expires・Max-Age",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Expires and Max-Age",
+  "asvs": [],
+  "ipa": [
+   "4-(vi)"
+  ]
+ },
+ {
+  "id": "C-06",
+  "title": "__Host-・__Secure-プレフィックス",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "__Host- and __Secure- prefixes",
+  "asvs": [
+   "3.3.1",
+   "3.3.3"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "C-07",
+  "title": "セッションIDの長さ・推測可能性",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Session ID length and predictability",
+  "asvs": [
+   "7.2.3"
+  ],
+  "ipa": [
+   "4-(i)",
+   "4-(v)"
+  ]
+ },
+ {
+  "id": "C-08",
+  "title": "既定のCookie名",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Default cookie names",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "C-09",
+  "title": "セッション固定化",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Session fixation",
+  "asvs": [
+   "7.2.4",
+   "14.2.1"
+  ],
+  "ipa": [
+   "4-(iv)-a",
+   "4-(ii)"
+  ]
+ },
+ {
+  "id": "C-10",
+  "title": "HTTP応答でのCookie発行",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Cookies set over HTTP",
+  "asvs": [
+   "3.3.1",
+   "12.2.1"
+  ],
+  "ipa": [
+   "4-(iii)"
+  ]
+ },
+ {
+  "id": "C-11",
+  "title": "Partitioned（CHIPS）",
+  "chapter": 2,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "Partitioned (CHIPS)",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "C-12",
+  "title": "ログアウト後のセッション無効化",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Session invalidation after logout",
+  "asvs": [
+   "7.4.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "C-13",
+  "title": "Set-Cookieと共有キャッシュ",
+  "chapter": 2,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Set-Cookie and shared caches",
+  "asvs": [
+   "14.2.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "C-14",
+  "title": "セッションタイムアウト",
+  "chapter": 2,
+  "manual": true,
+  "phase": "手動",
+  "titleEn": "Session timeout",
+  "asvs": [
+   "7.3.1",
+   "7.3.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "C-15",
+  "title": "アカウントの列挙",
+  "chapter": 2,
+  "manual": true,
+  "phase": "手動",
+  "titleEn": "Account enumeration",
+  "asvs": [
+   "6.3.8"
+  ],
+  "ipa": [
+   "2.5-3)"
+  ]
+ },
+ {
+  "id": "R-01",
+  "title": "Origin反射",
+  "chapter": 3,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Origin reflection",
+  "asvs": [
+   "3.4.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "R-02",
+  "title": "null許可",
+  "chapter": 3,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Allowing null",
+  "asvs": [
+   "3.4.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "R-03",
+  "title": "部分一致の不備",
+  "chapter": 3,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Partial-match flaws",
+  "asvs": [
+   "3.4.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "R-04",
+  "title": "ワイルドカード",
+  "chapter": 3,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Wildcard",
+  "asvs": [
+   "3.4.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "R-05",
+  "title": "プリフライト応答",
+  "chapter": 3,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Preflight responses",
+  "asvs": [
+   "3.4.2",
+   "4.1.4"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "R-06",
+  "title": "Vary: Origin",
+  "chapter": 3,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Vary: Origin",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "R-07",
+  "title": "Access-Control-Expose-Headers",
+  "chapter": 3,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Access-Control-Expose-Headers",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "R-08",
+  "title": "Timing-Allow-Origin",
+  "chapter": 3,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "Timing-Allow-Origin",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "R-09",
+  "title": "WebSocketのOrigin検証",
+  "chapter": 3,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "WebSocket Origin check",
+  "asvs": [
+   "4.4.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "T-01",
+  "title": "OPTIONS・TRACE",
+  "chapter": 4,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "OPTIONS and TRACE",
+  "asvs": [
+   "13.4.4",
+   "4.1.4"
+  ],
+  "ipa": [
+   "5-(ix)"
+  ]
+ },
+ {
+  "id": "T-02",
+  "title": "PUT・DELETE（静的パス）",
+  "chapter": 4,
+  "manual": true,
+  "phase": "手動",
+  "titleEn": "Dangerous methods",
+  "asvs": [
+   "4.1.4"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "T-03",
+  "title": "メソッド上書き",
+  "chapter": 4,
+  "manual": true,
+  "phase": "手動",
+  "titleEn": "Method override",
+  "asvs": [
+   "4.1.4"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "T-04",
+  "title": "HTTP→HTTPSリダイレクト",
+  "chapter": 4,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "HTTP to HTTPS redirect",
+  "asvs": [
+   "12.2.1",
+   "4.1.2"
+  ],
+  "ipa": [
+   "2.3-1)"
+  ]
+ },
+ {
+  "id": "T-05",
+  "title": "リダイレクトチェーン",
+  "chapter": 4,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Redirect chain",
+  "asvs": [
+   "12.2.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "T-06",
+  "title": "オープンリダイレクト",
+  "chapter": 4,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "Open redirect",
+  "asvs": [
+   "3.7.2"
+  ],
+  "ipa": [
+   "2.4-3)"
+  ]
+ },
+ {
+  "id": "T-07",
+  "title": "Host・X-Forwarded-Hostヘッダインジェクション",
+  "chapter": 4,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Host and X-Forwarded-Host header injection",
+  "asvs": [
+   "4.1.3"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "T-08",
+  "title": "CRLFインジェクション",
+  "chapter": 4,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "CRLF injection",
+  "asvs": [
+   "1.2.1",
+   "4.2.4"
+  ],
+  "ipa": [
+   "7-(i)-a",
+   "7-(i)-b",
+   "7-(ii)"
+  ]
+ },
+ {
+  "id": "T-09",
+  "title": "TLSバージョン",
+  "chapter": 4,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "TLS versions",
+  "asvs": [
+   "12.1.1"
+  ],
+  "ipa": [
+   "2.3-1)"
+  ]
+ },
+ {
+  "id": "T-10",
+  "title": "暗号スイート・鍵",
+  "chapter": 4,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "Cipher suites and keys",
+  "asvs": [
+   "12.1.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "T-11",
+  "title": "証明書",
+  "chapter": 4,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "Certificate",
+  "asvs": [
+   "12.2.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "T-12",
+  "title": "HTTP/2・HTTP/3",
+  "chapter": 4,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "HTTP/2 and HTTP/3",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "T-13",
+  "title": "送信元IPの偽装（X-Forwarded-Forなど）",
+  "chapter": 4,
+  "manual": true,
+  "phase": "手動",
+  "titleEn": "Source IP spoofing",
+  "asvs": [
+   "4.1.3",
+   "15.3.4"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "E-01",
+  "title": "スタックトレース・デバッグ情報",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "Stack traces and debug information",
+  "asvs": [
+   "16.5.1",
+   "13.4.2"
+  ],
+  "ipa": [
+   "1-(iii)"
+  ]
+ },
+ {
+  "id": "E-02",
+  "title": "ディレクトリリスティング",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "Directory listing",
+  "asvs": [
+   "13.4.3"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "E-03",
+  "title": "既知ファイル（/.git、/.envなど）",
+  "chapter": 5,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "Known files (/.git, /.env, etc.)",
+  "asvs": [
+   "13.4.1",
+   "13.4.7"
+  ],
+  "ipa": [
+   "2.1-5)"
+  ]
+ },
+ {
+  "id": "E-04",
+  "title": "robots.txt・security.txt",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "robots.txt and security.txt",
+  "asvs": [],
+  "ipa": []
+ },
+ {
+  "id": "E-05",
+  "title": "API仕様・管理機能",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "API specs and admin endpoints",
+  "asvs": [
+   "13.4.5",
+   "4.3.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "E-06",
+  "title": "JSONP",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "JSONP",
+  "asvs": [
+   "3.5.6",
+   "3.5.7"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "E-07",
+  "title": "HTML本文：混在コンテンツ",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "HTML body: mixed content",
+  "asvs": [
+   "12.2.1"
+  ],
+  "ipa": [
+   "2.3-1)"
+  ]
+ },
+ {
+  "id": "E-08",
+  "title": "HTML本文：第三者スクリプトのSRI",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "HTML body: SRI for third-party scripts",
+  "asvs": [
+   "3.6.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "E-09",
+  "title": "HTML本文：機密・内部情報",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "HTML body: secrets and internal information",
+  "asvs": [
+   "13.4.6"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "E-10",
+  "title": "HTML本文：パスワードフォーム",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "HTML body: password forms",
+  "asvs": [
+   "12.2.1",
+   "14.2.1"
+  ],
+  "ipa": [
+   "2.3-1)"
+  ]
+ },
+ {
+  "id": "E-11",
+  "title": "ダウンロード応答",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "Download responses",
+  "asvs": [
+   "3.2.1",
+   "5.4.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "E-12",
+  "title": "HTML本文：CSRFトークンの有無",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "HTML body: CSRF tokens",
+  "asvs": [
+   "3.5.1"
+  ],
+  "ipa": [
+   "6-(i)-a"
+  ]
+ },
+ {
+  "id": "E-13",
+  "title": "ソースマップの露出",
+  "chapter": 5,
+  "manual": false,
+  "phase": "v0.2",
+  "titleEn": "Source map exposure",
+  "asvs": [
+   "13.4.7"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-01",
+  "title": "未認証アクセス",
+  "chapter": 6,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "Unauthenticated access",
+  "asvs": [
+   "8.2.1",
+   "12.2.1"
+  ],
+  "ipa": [
+   "11-(i)"
+  ]
+ },
+ {
+  "id": "A-02",
+  "title": "トークンの露出",
+  "chapter": 6,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "Token exposure",
+  "asvs": [
+   "14.2.1"
+  ],
+  "ipa": [
+   "4-(ii)"
+  ]
+ },
+ {
+  "id": "A-03",
+  "title": "JWTの中身",
+  "chapter": 6,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "JWT contents",
+  "asvs": [
+   "9.1.2",
+   "9.2.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-04",
+  "title": "レート制限",
+  "chapter": 6,
+  "manual": true,
+  "phase": "手動",
+  "titleEn": "Rate limiting",
+  "asvs": [
+   "2.4.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-05",
+  "title": "ページングの上限",
+  "chapter": 6,
+  "manual": true,
+  "phase": "手動",
+  "titleEn": "Pagination limits",
+  "asvs": [
+   "15.2.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-06",
+  "title": "リクエストサイズの上限",
+  "chapter": 6,
+  "manual": true,
+  "phase": "手動",
+  "titleEn": "Request size limits",
+  "asvs": [
+   "15.2.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-07",
+  "title": "過剰なデータ露出",
+  "chapter": 6,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "Excessive data exposure",
+  "asvs": [
+   "8.2.3",
+   "14.2.6"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-08",
+  "title": "リクエストのContent-Type",
+  "chapter": 6,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "Request Content-Type",
+  "asvs": [
+   "3.5.2"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-09",
+  "title": "JSON応答のヘッダ",
+  "chapter": 6,
+  "manual": false,
+  "phase": "MVP",
+  "titleEn": "JSON response headers",
+  "asvs": [
+   "4.1.1",
+   "3.4.4",
+   "3.4.3"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-10",
+  "title": "エラー形式",
+  "chapter": 6,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "Error format",
+  "asvs": [
+   "16.5.1"
+  ],
+  "ipa": []
+ },
+ {
+  "id": "A-11",
+  "title": "メソッド制御・旧版",
+  "chapter": 6,
+  "manual": false,
+  "phase": "v0.3",
+  "titleEn": "Method control and old versions",
+  "asvs": [
+   "4.1.4"
+  ],
+  "ipa": []
+ }
+]

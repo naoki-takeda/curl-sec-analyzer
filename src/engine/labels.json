@@ -1,0 +1,422 @@
+[
+ {
+  "match": "default",
+  "name": "一般",
+  "items": [
+   "H-01",
+   "H-02",
+   "H-03",
+   "H-04",
+   "H-05",
+   "H-06",
+   "H-07",
+   "H-08",
+   "H-09",
+   "H-10",
+   "H-11",
+   "H-12",
+   "H-13",
+   "H-14",
+   "H-16",
+   "H-17",
+   "C-01",
+   "C-02",
+   "C-03",
+   "C-04",
+   "C-05",
+   "C-06",
+   "C-08",
+   "C-11",
+   "C-13",
+   "R-04",
+   "R-06",
+   "R-07",
+   "R-08",
+   "T-05.2",
+   "T-12",
+   "E-01",
+   "E-02",
+   "E-04.1",
+   "E-05",
+   "E-06",
+   "E-07",
+   "E-08",
+   "E-09",
+   "E-10",
+   "E-11",
+   "E-12",
+   "E-13.2",
+   "A-01.3",
+   "A-02",
+   "A-03",
+   "A-04",
+   "A-05",
+   "A-06",
+   "A-07",
+   "A-09"
+  ],
+  "har": true,
+  "nameEn": "General"
+ },
+ {
+  "match": "prefix",
+  "label": "error-",
+  "name": "エラー応答",
+  "items": [
+   "H-01",
+   "H-02",
+   "H-03",
+   "H-04",
+   "H-05",
+   "H-06",
+   "H-07",
+   "H-08",
+   "H-09",
+   "H-10",
+   "H-11",
+   "H-12",
+   "H-13",
+   "H-14",
+   "H-16",
+   "H-17",
+   "E-01",
+   "A-10"
+  ],
+  "har": true,
+  "nameEn": "Error response"
+ },
+ {
+  "match": "exact",
+  "label": "http",
+  "name": "HTTPでの採取",
+  "items": [
+   "T-04",
+   "T-05",
+   "C-10",
+   "A-01.3"
+  ],
+  "har": true,
+  "nameEn": "Over HTTP"
+ },
+ {
+  "match": "exact",
+  "label": "apex",
+  "name": "apexドメイン",
+  "items": [
+   "H-01",
+   "H-02"
+  ],
+  "har": true,
+  "nameEn": "Apex domain"
+ },
+ {
+  "match": "exact",
+  "label": "pre-login",
+  "name": "ログイン前",
+  "items": [
+   "C-01",
+   "C-02",
+   "C-03",
+   "C-04",
+   "C-05",
+   "C-06",
+   "C-07",
+   "C-08",
+   "C-09",
+   "C-11",
+   "C-13",
+   "H-12",
+   "A-02",
+   "A-03"
+  ],
+  "har": true,
+  "nameEn": "Before login"
+ },
+ {
+  "match": "exact",
+  "label": "login",
+  "name": "ログイン",
+  "items": [
+   "C-01",
+   "C-02",
+   "C-03",
+   "C-04",
+   "C-05",
+   "C-06",
+   "C-07",
+   "C-08",
+   "C-09",
+   "C-11",
+   "C-13",
+   "H-12",
+   "A-02",
+   "A-03"
+  ],
+  "har": true,
+  "nameEn": "Login"
+ },
+ {
+  "match": "prefix",
+  "label": "session-sample-",
+  "name": "セッションIDの比較",
+  "items": [
+   "C-01",
+   "C-02",
+   "C-03",
+   "C-04",
+   "C-05",
+   "C-06",
+   "C-07",
+   "C-08",
+   "C-09",
+   "C-11",
+   "C-13",
+   "H-12"
+  ],
+  "har": false,
+  "nameEn": "Session ID sample"
+ },
+ {
+  "match": "exact",
+  "label": "logout",
+  "name": "ログアウト",
+  "items": [
+   "H-15",
+   "C-12"
+  ],
+  "har": true,
+  "nameEn": "Logout"
+ },
+ {
+  "match": "exact",
+  "label": "after-logout",
+  "name": "ログアウト後",
+  "items": [
+   "C-12"
+  ],
+  "har": false,
+  "nameEn": "After logout"
+ },
+ {
+  "match": "prefix",
+  "label": "cors-",
+  "name": "CORS確認",
+  "items": [
+   "R-01",
+   "R-02",
+   "R-03",
+   "R-04",
+   "R-05",
+   "R-06",
+   "R-07"
+  ],
+  "har": false,
+  "nameEn": "CORS check"
+ },
+ {
+  "match": "exact",
+  "label": "websocket",
+  "name": "WebSocketのOrigin確認",
+  "items": [
+   "R-09"
+  ],
+  "har": false,
+  "nameEn": "WebSocket Origin"
+ },
+ {
+  "match": "exact",
+  "label": "options",
+  "name": "メソッド確認",
+  "items": [
+   "T-01"
+  ],
+  "har": false,
+  "nameEn": "Method check"
+ },
+ {
+  "match": "exact",
+  "label": "trace",
+  "name": "メソッド確認",
+  "items": [
+   "T-01"
+  ],
+  "har": false,
+  "nameEn": "Method check"
+ },
+ {
+  "match": "exact",
+  "label": "method-override",
+  "name": "メソッド上書き",
+  "items": [
+   "T-03"
+  ],
+  "har": false,
+  "nameEn": "Method override"
+ },
+ {
+  "match": "exact",
+  "label": "open-redirect",
+  "name": "オープンリダイレクト",
+  "items": [
+   "T-06"
+  ],
+  "har": false,
+  "nameEn": "Open redirect"
+ },
+ {
+  "match": "exact",
+  "label": "host-inj",
+  "name": "Hostヘッダインジェクション",
+  "items": [
+   "T-07"
+  ],
+  "har": false,
+  "nameEn": "Host header injection"
+ },
+ {
+  "match": "exact",
+  "label": "crlf",
+  "name": "CRLFインジェクション",
+  "items": [
+   "T-08"
+  ],
+  "har": false,
+  "nameEn": "CRLF injection"
+ },
+ {
+  "match": "exact",
+  "label": "xff-spoof",
+  "name": "送信元IPの偽装",
+  "items": [
+   "T-13"
+  ],
+  "har": false,
+  "nameEn": "IP spoofing"
+ },
+ {
+  "match": "exact",
+  "label": "probes",
+  "name": "既知ファイル",
+  "items": [
+   "E-03",
+   "E-04.2",
+   "E-13.1"
+  ],
+  "har": false,
+  "nameEn": "Known files"
+ },
+ {
+  "match": "exact",
+  "label": "tls",
+  "name": "opensslの出力",
+  "items": [
+   "T-09",
+   "T-10",
+   "T-11"
+  ],
+  "har": false,
+  "nameEn": "openssl output"
+ },
+ {
+  "match": "prefix",
+  "label": "unauth-",
+  "name": "未認証アクセス",
+  "items": [
+   "A-01",
+   "A-02",
+   "A-07"
+  ],
+  "har": false,
+  "nameEn": "Unauthenticated"
+ },
+ {
+  "match": "exact",
+  "label": "ctype",
+  "name": "Content-Typeの確認",
+  "items": [
+   "A-08"
+  ],
+  "har": false,
+  "nameEn": "Content-Type check"
+ },
+ {
+  "match": "prefix",
+  "label": "method-",
+  "name": "メソッド制御",
+  "items": [
+   "A-11"
+  ],
+  "har": false,
+  "nameEn": "Method control"
+ },
+ {
+  "match": "prefix",
+  "label": "old-",
+  "name": "旧版のAPI",
+  "items": [
+   "A-11"
+  ],
+  "har": false,
+  "nameEn": "Old API version"
+ },
+ {
+  "match": "prefix",
+  "label": "csp-sample-",
+  "name": "CSPのnonce比較",
+  "items": [
+   "H-01",
+   "H-02",
+   "H-03",
+   "H-04",
+   "H-05",
+   "H-06",
+   "H-07",
+   "H-08",
+   "H-09",
+   "H-10",
+   "H-11",
+   "H-12",
+   "H-13",
+   "H-14",
+   "H-16",
+   "H-17",
+   "C-01",
+   "C-02",
+   "C-03",
+   "C-04",
+   "C-05",
+   "C-06",
+   "C-08",
+   "C-11",
+   "C-13",
+   "R-04",
+   "R-06",
+   "R-07",
+   "R-08",
+   "T-05.2",
+   "T-12",
+   "E-01",
+   "E-02",
+   "E-04.1",
+   "E-05",
+   "E-06",
+   "E-07",
+   "E-08",
+   "E-09",
+   "E-10",
+   "E-11",
+   "E-12",
+   "E-13.2",
+   "A-01.3",
+   "A-02",
+   "A-03",
+   "A-04",
+   "A-05",
+   "A-06",
+   "A-07",
+   "A-09"
+  ],
+  "har": true,
+  "nameEn": "CSP nonce sample"
+ }
+]

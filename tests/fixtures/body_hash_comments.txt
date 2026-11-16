@@ -1,0 +1,10 @@
+#TARGET url=https://www.example.com/ label=top
+HTTP/1.1 200 OK
+Content-Type: text/html
+X-Content-Type-Options: nosniff
+X-Long:
+ continued value
+
+# これは本文の行で、マーカーではない
+#TARGETS も本文
+<p>HTTP/1.1 200 OK という文字列を含む本文</p>

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: このツールの脆弱性の報告 / Report a vulnerability
+    url: https://docs.github.com/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability
+    about: 公開の Issue ではなく、Security タブの「Report a vulnerability」から非公開で報告してください（SECURITY.md）

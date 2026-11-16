@@ -1,0 +1,36 @@
+name: 誤検知・見落としの報告 / False positive or missed finding
+description: 判定が間違っている、または見落としていると思われる場合
+labels: [rule]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **生の curl の出力・HAR・Cookie・トークンは貼らないでください。** ツールの「保存（マスク済み）」で出力した Markdown か、値をダミーに置き換えた最小の入力を使ってください。
+        **Do not paste raw curl output, HAR files, cookies or tokens.** Use the masked export or a minimal input with dummy values.
+  - type: checkboxes
+    id: masked
+    attributes:
+      label: 確認 / Confirmation
+      options:
+        - label: 実在のシステムの秘密情報（パスワード、Cookie、トークン、未公開のURL）を含めていない / I have removed all secrets from real systems
+          required: true
+  - type: input
+    id: rule
+    attributes:
+      label: 項目と条件（例：H-04①） / Check and condition
+    validations: { required: true }
+  - type: textarea
+    id: input
+    attributes:
+      label: 最小の入力（ダミーの値） / Minimal input with dummy values
+      render: text
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した結果と、その根拠（OWASP・MDN などの資料） / Expected result and reference
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: ツールとルールセットの版（画面の上部） / Tool and ruleset version

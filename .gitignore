@@ -1,0 +1,21 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+
+# 診断で作るファイル。秘密情報や診断結果を含むので、コミットしない
+# （コマンド生成器・run.sh が作るもの）
+out.txt
+login.txt
+jar.txt
+old.txt
+s[0-9].txt
+run.sh.local
+*.har
+# テスト用の HAR（example.com に置き換え済み）はコミットする
+!tests/fixtures/*.har
+# ツールから保存した診断結果（マスク済みでも、未修正の脆弱性の情報を含む）
+sec-report-*
+# 認証ヘッダを書いたファイル（設計書 0.5 の推奨。中身はトークン）
+headers.txt
+auth.conf

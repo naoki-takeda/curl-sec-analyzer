@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# run.sh：curl の出力を #TARGET 形式でまとめて out.txt に書き出す（設計書「推奨コマンド」）
+# 使い方：HOST を書き換えて bash run.sh。out.txt をツールで読み込んだら削除する（rm -f out.txt jar.txt）
+# 簡易版。ログインの流れや CORS・TLS を含む推奨コマンドは、ツールの「コマンドを作る」で生成する
+set -u
+umask 077                         # out.txt と jar.txt を本人だけが読めるようにする（設計書 0.5）
+HOST=${HOST:-www.example.com}
+H=https://$HOST
+
+# t <label> <url> <sensitive(1/0/空)> <curlの引数...>
+t() { local label=$1 url=$2 s=$3; shift 3
+  echo "#TARGET url=$url label=$label${s:+ sensitive=$s}"
+  echo "#META at=$(date +%Y-%m-%dT%H:%M:%S)"
+  curl -sS "$@" "$url" 2>&1; echo; }
+
+{
+  t top          "$H/"            ""  -v -o /dev/null
+  t http         "http://$HOST/"  ""  -L -D - -o /dev/null
+  t notfound     "$H/no-such-page-$RANDOM" "" -D - -o /dev/null
+  t cors-reflect "$H/"            ""  -v -o /dev/null -H 'Origin: https://evil.example'
+  # 認証後のページ（Cookie は jar.txt から渡す。jar.txt はブラウザやログイン手順で用意し、chmod 600 にする）
+  # t mypage     "$H/mypage"      1   -v -o /dev/null -b jar.txt
+} > out.txt
+echo "out.txt に書き出しました。ツールで読み込んだら削除してください：rm -f out.txt" >&2

@@ -1,0 +1,62 @@
+# CodeQL によるコードとワークフローの脆弱性スキャン（公開リポジトリは無料）
+# 結果はリポジトリの Security → Code scanning に表示される
+#
+# private リポジトリでは Code scanning が使えず（GitHub Advanced Security が必要）失敗するため、公開リポジトリのときだけ実行する。
+# github コンテキストには公開状態がなく、github.event.repository もイベント（schedule など）によっては
+# 含まれないため、最初のジョブで API から公開状態を調べる。
+#
+# セキュリティ方針は checks.yml の先頭と同じ（SHA 固定・最小権限・認証情報を残さない）
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 3 * * 1' # 毎週月曜 12:23 JST
+
+permissions: {}
+
+jobs:
+  visibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      private: ${{ steps.check.outputs.private }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: echo "private=$(gh api "repos/$REPO" --jq .private)" >> "$GITHUB_OUTPUT"
+
+  analyze:
+    needs: visibility
+    # 公開リポジトリのときだけ実行する（private ならスキップ。スキップは失敗扱いにならない）
+    if: needs.visibility.outputs.private == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
