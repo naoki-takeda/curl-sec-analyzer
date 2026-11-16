@@ -1,0 +1,94 @@
+## targets
+tls | https://www.example.com/ | key=- | responses=0
+
+## warnings
+
+## findings
+csp-sample-* | H-04.na | info | na | 
+error-* | A-10.na | info | na | 
+logout/after-logout | C-12.na | info | na | 
+pre-login/login | C-09.na | info | na | 
+session-sample-* | C-07.na | info | na | 
+www.example.com | T-10.ok | info | pass | 暗号: TLS_AES_256_GCM_SHA384 / 鍵: rsaEncryption 2048bit
+www.example.com | T-11.1 | high | fail | Verify return code: 18（self-signed certificate）
+www.example.com | T-11.2 | medium | fail | 期限まで30日（notAfter: 2026-12-01）
+
+## coverage
+H-01 | missing-input | fails=0 | 必要なラベル: （一般）, error-*, apex
+H-02 | missing-input | fails=0 | 必要なラベル: （一般）, error-*, apex
+H-03 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-04 | missing-input | fails=0 | 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-06 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-07 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-08 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-09 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-10 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-11 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-12 | missing-input | fails=0 | 必要なラベル: （一般）, error-*, pre-login, login, session-sample-*
+H-13 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-14 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-15 | missing-input | fails=0 | 必要なラベル: logout
+H-16 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-17 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+C-01 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-02 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-04 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-05 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-06 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
+C-10 | missing-input | fails=0 | 必要なラベル: http
+C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
+C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | missing-input | fails=0 | 必要なラベル: cors-*
+R-02 | missing-input | fails=0 | 必要なラベル: cors-*
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | missing-input | fails=0 | 必要なラベル: http
+T-05 | missing-input | fails=0 | 必要なラベル: （一般）, http
+T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | missing-input | fails=0 | 必要なラベル: tls
+T-10 | evaluated | fails=0
+T-11 | evaluated | fails=2
+T-12 | missing-input | fails=0 | 必要なラベル: （一般）
+T-13 | manual | fails=0
+E-01 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+E-02 | missing-input | fails=0 | 必要なラベル: （一般）
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | 必要なラベル: （一般）
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | missing-input | fails=0 | 必要なラベル: （一般）
+E-08 | missing-input | fails=0 | 必要なラベル: （一般）
+E-09 | missing-input | fails=0 | 必要なラベル: （一般）
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
+A-02 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, unauth-*
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | missing-input | fails=0 | 必要なラベル: （一般）, unauth-*
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | missing-input | fails=0 | 必要なラベル: （一般）
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 必要なラベル: method-*, old-*

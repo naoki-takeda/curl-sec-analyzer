@@ -1,0 +1,89 @@
+#TARGET url=https://www.example.com/%25%25%25 label=error-url
+#META at=2026-11-01T10:00:00
+HTTP/2 500
+content-type: text/html; charset=utf-8
+
+<html><head><title>Whitelabel Error Page</title></head><body>
+java.lang.IllegalStateException: boom
+	at com.example.app.web.ItemController.show(ItemController.java:42)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:897)
+spring.datasource.url=jdbc:mysql://db01:3306/app?user=app&password=s3cr3tCANARYjdbc
+</body></html>
+
+#TARGET url=https://www.example.com/missing label=error-custom
+#META at=2026-11-01T10:00:00
+HTTP/2 404
+content-type: text/html; charset=utf-8
+
+<html><head><title>Error 404 - Page not found | Example Shop</title></head><body><p>Item FLORA-12345 is sold out. Built with Ruby on Rails.</p><script src="/srv/main.js"></script></body></html>
+
+#TARGET url=https://www.example.com/images/ label=listing
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><head><title>Index of /images/</title></head><body><h1>Index of /images/</h1></body></html>
+
+#TARGET url=https://www.example.com/ label=probes
+#META at=2026-11-01T10:00:00
+#PROBE path=/.git/HEAD head=cmVmOiByZWZzL2hlYWRzL21haW4= code=200 size=21 ct=text/plain
+#PROBE path=/.env head=QVBQX0tFWT1iYXNlNjQ6cTlXMnhDQU5BUlllbnYwMTIzNDU2Nzg5CkRCX1BBU1NXT1JEPWh1bnRlckNBTkFSWQ== code=200 size=80 ct=text/plain
+#PROBE path=/backup.zip head=PCFET0NUWVBFIGh0bWw+PGh0bWw+PGhlYWQ+PHRpdGxlPk5vdCBGb3VuZDwvdGl0bGU+ code=200 size=5120 ct=text/html
+#PROBE path=/server-status head= code=000 size=0 ct=
+#PROBE path=/.well-known/security.txt head=Q29udGFjdDogbWFpbHRvOnNlY3VyaXR5QGV4YW1wbGUuY29tCkV4cGlyZXM6IDIwMjctMTItMzFUMDA6MDA6MA== code=200 size=80 ct=text/plain
+#PROBE path=/assets/app.js.map head=eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbInNyYy9hcHAudHMiXSwibWFwcGluZ3MiOiJBQUFBIn0= code=200 size=4096 ct=application/json
+
+#TARGET url=https://www.example.com/actuator label=actuator
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/vnd.spring-boot.actuator.v3+json
+
+{"_links":{"self":{"href":"https://www.example.com/actuator"}}}
+
+#TARGET url=https://www.example.com/swagger-ui label=swagger
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /swagger-ui/index.html
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><title>Swagger UI</title></html>
+
+#TARGET url=https://www.example.com/graphql label=graphql
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<!doctype html><div id="graphiql"></div><script>const q = getIntrospectionQuery(); // introspection</script>
+
+#TARGET url=https://www.example.com/api/user?callback=cb label=jsonp sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/javascript
+
+/**/ typeof cb === 'function' && cb({"email":"alice@example.com"});
+
+#TARGET url=https://www.example.com/uploads/avatar.svg label=upload
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: image/svg+xml
+
+<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>
+
+#TARGET url=https://www.example.com/files/report.pdf label=download
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/pdf
+
+#TARGET url=https://www.example.com/settings label=secrets sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body>
+<script>var cfg = {"api_key": "AKIAQ4CANARYKEY0EXAMPLE", "password": "/users/password/new", "client_secret": "cs_9f8e7dCANARYsecret6c5b4a"};</script>
+<form action="http://www.example.com/login" method="get"><input type="password" name="pw"></form>
+<form action="/settings" method="post"><input name="email"></form>
+<a href="https://www.example.com/password/reset/Xk9pQ2CANARYreset7Lm4Zt8">reset</a>
+</body></html>

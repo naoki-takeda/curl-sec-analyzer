@@ -1,0 +1,307 @@
+## targets
+error-url | https://www.example.com/%25%25%25 | key=error-url | responses=1
+error-custom | https://www.example.com/missing | key=error-custom | responses=1
+listing | https://www.example.com/images/ | key=listing | responses=1
+probes | https://www.example.com/ | key=probes | responses=0
+actuator | https://www.example.com/actuator | key=actuator | responses=1
+swagger | https://www.example.com/swagger-ui | key=swagger | responses=2
+graphql | https://www.example.com/graphql | key=graphql | responses=1
+jsonp | https://www.example.com/api/user?callback=cb | key=jsonp | responses=1
+upload | https://www.example.com/uploads/avatar.svg | key=upload | responses=1
+download | https://www.example.com/files/report.pdf | key=download | responses=1
+secrets | https://www.example.com/settings | key=secrets | responses=1
+
+## warnings
+
+## findings
+actuator | A-02.ok | info | pass | URL・Location・本文にトークンなし
+actuator | A-07.ok | info | pass | キー3種に秘密情報・内部属性らしきものなし
+actuator | A-09.2 | medium | fail | nosniff なし
+actuator | A-09.3 | info | fail | CSPなし
+actuator | E-01.ok | info | pass | エラーの詳細らしき記述なし
+actuator | E-05.1 | high | fail | /actuator（HTTP 200）
+actuator | H-01.1 | high | fail | (ヘッダなし)
+actuator | H-02.na | info | na | HSTSがない（H-01で判定）
+actuator | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+actuator | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+actuator | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+actuator | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
+actuator | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+actuator | H-08.1 | medium | na | (ヘッダなし) | dedupedBy=A-09.2
+actuator | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+actuator | H-10.1 | info | fail | (ヘッダなし)
+actuator | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+actuator | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+actuator | H-13.ok | info | pass | application/vnd.spring-boot.actuator.v3+json
+actuator | H-14.1 | info | fail | (ヘッダなし)
+actuator | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+actuator | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+actuator | R-04.ok | info | pass | (ACAOなし)
+actuator | T-12.ok | info | pass | HTTP/2
+csp-sample-* | H-04.na | info | na | 
+download | A-02.ok | info | pass | URL・Location・本文にトークンなし
+download | E-11.2 | low | fail | Content-Type: application/pdf（Content-Dispositionなし）
+download | H-01.1 | high | fail | (ヘッダなし)
+download | H-02.na | info | na | HSTSがない（H-01で判定）
+download | H-08.1 | medium | fail | (ヘッダなし)
+download | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+download | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+download | H-13.ok | info | pass | application/pdf
+download | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+download | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+download | R-04.ok | info | pass | (ACAOなし)
+download | T-12.ok | info | pass | HTTP/2
+error-* | A-10.na | info | na | 
+error-custom | E-01.ok | info | pass | エラーの詳細らしき記述なし
+error-custom | H-01.1 | high | fail | (ヘッダなし)
+error-custom | H-02.na | info | na | HSTSがない（H-01で判定）
+error-custom | H-03.1 | high | fail | (ヘッダなし)
+error-custom | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-custom | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-custom | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+error-custom | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-custom | H-08.1 | medium | fail | (ヘッダなし)
+error-custom | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+error-custom | H-10.1 | info | fail | (ヘッダなし)
+error-custom | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+error-custom | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-custom | H-13.ok | info | pass | text/html; charset=utf-8
+error-custom | H-14.1 | low | fail | (ヘッダなし)
+error-custom | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+error-custom | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+error-url | E-01.1 | high | fail | 接続文字列・認証情報らしき値（値は表示しない）
+error-url | E-01.2 | medium | fail | at com.example.app.web.ItemController.show(ItemController.java:42)
+error-url | E-01.3 | low | fail | Whitelabel Error Page
+error-url | H-01.1 | high | fail | (ヘッダなし)
+error-url | H-02.na | info | na | HSTSがない（H-01で判定）
+error-url | H-03.1 | high | fail | (ヘッダなし)
+error-url | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-url | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-url | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+error-url | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-url | H-08.1 | medium | fail | (ヘッダなし)
+error-url | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+error-url | H-10.1 | info | fail | (ヘッダなし)
+error-url | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+error-url | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-url | H-13.ok | info | pass | text/html; charset=utf-8
+error-url | H-14.1 | low | fail | (ヘッダなし)
+error-url | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+error-url | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+graphql | A-02.ok | info | pass | URL・Location・本文にトークンなし
+graphql | E-01.ok | info | pass | エラーの詳細らしき記述なし
+graphql | E-02.ok | info | pass | 一覧表示なし
+graphql | E-05.2 | medium | fail | /graphql（HTTP 200、GraphQL の IDE（GraphiQL など）の画面）
+graphql | E-07.ok | info | pass | http:// の資源なし
+graphql | E-08.ok | info | pass | 外部オリジンのscriptなし
+graphql | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+graphql | H-01.1 | high | fail | (ヘッダなし)
+graphql | H-02.na | info | na | HSTSがない（H-01で判定）
+graphql | H-03.1 | high | fail | (ヘッダなし)
+graphql | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+graphql | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+graphql | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+graphql | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+graphql | H-08.1 | medium | fail | (ヘッダなし)
+graphql | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+graphql | H-10.1 | info | fail | (ヘッダなし)
+graphql | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+graphql | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+graphql | H-13.ok | info | pass | text/html; charset=utf-8
+graphql | H-14.1 | low | fail | (ヘッダなし)
+graphql | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+graphql | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+graphql | R-04.ok | info | pass | (ACAOなし)
+graphql | T-12.ok | info | pass | HTTP/2
+jsonp | A-02.ok | info | pass | URL・Location・本文にトークンなし
+jsonp | E-01.ok | info | pass | エラーの詳細らしき記述なし
+jsonp | E-06.1 | high | fail | 本文が cb( で始まる（機密応答）
+jsonp | E-13.ok | info | pass | ソースマップへの参照なし
+jsonp | H-01.1 | high | fail | (ヘッダなし)
+jsonp | H-02.na | info | na | HSTSがない（H-01で判定）
+jsonp | H-08.1 | medium | fail | (ヘッダなし)
+jsonp | H-11.1 | low | fail | 機密応答に Cross-Origin-Resource-Policy なし
+jsonp | H-12.1 | high | fail | (ヘッダなし)
+jsonp | H-13.ok | info | pass | text/javascript
+jsonp | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+jsonp | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+jsonp | R-04.ok | info | pass | (ACAOなし)
+jsonp | T-12.ok | info | pass | HTTP/2
+listing | A-02.ok | info | pass | URL・Location・本文にトークンなし
+listing | E-01.ok | info | pass | エラーの詳細らしき記述なし
+listing | E-02.1 | medium | fail | <title>Index of /images/</title>
+listing | E-07.ok | info | pass | http:// の資源なし
+listing | E-08.ok | info | pass | 外部オリジンのscriptなし
+listing | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+listing | H-01.1 | high | fail | (ヘッダなし)
+listing | H-02.na | info | na | HSTSがない（H-01で判定）
+listing | H-03.1 | high | fail | (ヘッダなし)
+listing | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+listing | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+listing | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+listing | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+listing | H-08.1 | medium | fail | (ヘッダなし)
+listing | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+listing | H-10.1 | info | fail | (ヘッダなし)
+listing | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+listing | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+listing | H-13.ok | info | pass | text/html; charset=utf-8
+listing | H-14.1 | low | fail | (ヘッダなし)
+listing | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+listing | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+listing | R-04.ok | info | pass | (ACAOなし)
+listing | T-12.ok | info | pass | HTTP/2
+logout/after-logout | C-12.na | info | na | 
+pre-login/login | C-09.na | info | na | 
+probes | E-04.ok | info | pass | /.well-known/security.txt（HTTP 200）
+probes | E-13.1 | medium | fail | /assets/app.js.map（HTTP 200、一致したパターン: source-map）
+secrets | A-02.ok | info | pass | URL・Location・本文にトークンなし
+secrets | E-01.ok | info | pass | エラーの詳細らしき記述なし
+secrets | E-02.ok | info | pass | 一覧表示なし
+secrets | E-07.ok | info | pass | http:// の資源なし
+secrets | E-08.ok | info | pass | 外部オリジンのscriptなし
+secrets | E-09.1 | high | fail | 本文に「キー・シークレットの代入」らしき値（値は表示しない）
+secrets | E-10.1 | high | fail | <form action="http://www.example.com/login" method="get">
+secrets | E-10.2 | medium | fail | <form action="http://www.example.com/login" method="get">
+secrets | E-12.1 | info | fail | <form action="/settings" method="post">
+secrets | H-01.1 | high | fail | (ヘッダなし)
+secrets | H-02.na | info | na | HSTSがない（H-01で判定）
+secrets | H-03.1 | high | fail | (ヘッダなし)
+secrets | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+secrets | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+secrets | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+secrets | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+secrets | H-08.1 | medium | fail | (ヘッダなし)
+secrets | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+secrets | H-10.1 | info | fail | (ヘッダなし)
+secrets | H-11.1 | low | fail | 機密応答に Cross-Origin-Resource-Policy なし
+secrets | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+secrets | H-12.1 | high | fail | (ヘッダなし)
+secrets | H-13.ok | info | pass | text/html; charset=utf-8
+secrets | H-14.1 | low | fail | (ヘッダなし)
+secrets | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+secrets | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+secrets | R-04.ok | info | pass | (ACAOなし)
+secrets | T-12.ok | info | pass | HTTP/2
+session-sample-* | C-07.na | info | na | 
+swagger | A-02.ok | info | pass | URL・Location・本文にトークンなし
+swagger | E-01.ok | info | pass | エラーの詳細らしき記述なし
+swagger | E-02.ok | info | pass | 一覧表示なし
+swagger | E-05.2 | medium | fail | /swagger-ui（HTTP 200）
+swagger | E-07.ok | info | pass | http:// の資源なし
+swagger | E-08.ok | info | pass | 外部オリジンのscriptなし
+swagger | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+swagger | H-01.1 | high | fail | (ヘッダなし)
+swagger | H-02.na | info | na | HSTSがない（H-01で判定）
+swagger | H-03.1 | high | fail | (ヘッダなし)
+swagger | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+swagger | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+swagger | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+swagger | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+swagger | H-08.1 | medium | fail | (ヘッダなし)
+swagger | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+swagger | H-10.1 | info | fail | (ヘッダなし)
+swagger | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+swagger | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+swagger | H-13.ok | info | pass | text/html; charset=utf-8
+swagger | H-14.1 | low | fail | (ヘッダなし)
+swagger | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+swagger | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+swagger | R-04.ok | info | pass | (ACAOなし)
+swagger | T-05.ok | info | pass | 1回の転送
+swagger | T-12.ok | info | pass | HTTP/2
+upload | A-02.ok | info | pass | URL・Location・本文にトークンなし
+upload | E-11.1 | high | fail | Content-Type: image/svg+xml / Content-Disposition: (なし)
+upload | H-01.1 | high | fail | (ヘッダなし)
+upload | H-02.na | info | na | HSTSがない（H-01で判定）
+upload | H-08.1 | medium | fail | (ヘッダなし)
+upload | H-11.ok | info | pass | (該当なし)
+upload | H-12.3 | info | fail | (ヘッダなし)
+upload | H-13.ok | info | pass | image/svg+xml
+upload | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+upload | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+upload | R-04.ok | info | pass | (ACAOなし)
+upload | T-12.ok | info | pass | HTTP/2
+www.example.com | E-03.1 | high | fail | /.env（HTTP 200、一致したパターン: dotenv）
+www.example.com | E-03.1 | high | fail | /.git/HEAD（HTTP 200、一致したパターン: git-head）
+www.example.com | E-03.2 | info | fail | /backup.zip（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）
+
+## coverage
+H-01 | evaluated | fails=10
+H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
+H-03 | evaluated | fails=6
+H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
+H-06 | evaluated | fails=7
+H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
+H-08 | evaluated | fails=9
+H-09 | evaluated | fails=7
+H-10 | evaluated | fails=7
+H-11 | evaluated | fails=8
+H-12 | evaluated | fails=3
+H-13 | evaluated | fails=0
+H-14 | evaluated | fails=7
+H-15 | missing-input | fails=0 | 必要なラベル: logout
+H-16 | evaluated | fails=0
+H-17 | evaluated | fails=0
+C-01 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-02 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-04 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-05 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-06 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
+C-10 | missing-input | fails=0 | 必要なラベル: http
+C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
+C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | missing-input | fails=0 | 必要なラベル: cors-*
+R-02 | missing-input | fails=0 | 必要なラベル: cors-*
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=0
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | missing-input | fails=0 | 必要なラベル: http
+T-05 | evaluated | fails=0
+T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | missing-input | fails=0 | 必要なラベル: tls
+T-10 | missing-input | fails=0 | 必要なラベル: tls
+T-11 | missing-input | fails=0 | 必要なラベル: tls
+T-12 | evaluated | fails=0
+T-13 | manual | fails=0
+E-01 | evaluated | fails=3
+E-02 | evaluated | fails=1
+E-03 | evaluated | fails=3
+E-04 | evaluated | fails=0
+E-05 | evaluated | fails=3
+E-06 | evaluated | fails=1
+E-07 | evaluated | fails=0
+E-08 | evaluated | fails=0
+E-09 | evaluated | fails=1
+E-10 | evaluated | fails=2
+E-11 | evaluated | fails=2
+E-12 | evaluated | fails=1
+E-13 | evaluated | fails=1
+A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
+A-02 | evaluated | fails=0
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | evaluated | fails=0
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | evaluated | fails=2
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 必要なラベル: method-*, old-*

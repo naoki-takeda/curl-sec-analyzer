@@ -1,0 +1,100 @@
+#TARGET url=https://api.example.com/v1/me label=cors-reflect sensitive=1
+#META at=2026-11-01T10:00:00
+* Connected to api.example.com (192.0.2.20) port 443
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / x25519 / id-ecPublicKey
+> GET /v1/me HTTP/2
+> Host: api.example.com
+> Origin: https://evil.example
+> Cookie: sid=c00k1e00CANARYsent0000000001
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: https://evil.example
+< access-control-allow-credentials: true
+< access-control-expose-headers: X-Auth-Token, X-CSRF-Token
+< cache-control: no-store
+<
+
+#TARGET url=https://api.example.com/v1/me label=cors-null sensitive=1
+#META at=2026-11-01T10:00:00
+* Connected to api.example.com (192.0.2.20) port 443
+> GET /v1/me HTTP/2
+> Origin: null
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: null
+< vary: X-Origin-Id
+<
+
+#TARGET url=https://api.example.com/v1/me label=cors-partial sensitive=1
+#META at=2026-11-01T10:00:00
+* Connected to api.example.com (192.0.2.20) port 443
+> GET /v1/me HTTP/2
+> Origin: https://example.com.evil.net
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: https://example.com.evil.net
+< vary: Origin
+<
+
+#TARGET url=https://api.example.com/v1/me label=cors-self
+#META at=2026-11-01T10:00:00
+* Connected to api.example.com (192.0.2.20) port 443
+> GET /v1/me HTTP/2
+> Origin: https://api.example.com
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: https://api.example.com
+< vary: Origin
+<
+
+#TARGET url=https://api.example.com/v1/me label=cors-http-origin
+#META at=2026-11-01T10:00:00
+* Connected to api.example.com (192.0.2.20) port 443
+> GET /v1/me HTTP/2
+> Origin: http://api.example.com
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: http://api.example.com
+< access-control-allow-credentials: true
+<
+
+#TARGET url=https://api.example.com/v1/items/1 label=cors-preflight
+#META at=2026-11-01T10:00:00
+* Connected to api.example.com (192.0.2.20) port 443
+> OPTIONS /v1/items/1 HTTP/2
+> Origin: https://evil.example
+> Access-Control-Request-Method: PUT
+>
+< HTTP/2 204
+< access-control-allow-origin: https://evil.example
+< access-control-allow-methods: *
+< access-control-max-age: 86400
+<
+
+#TARGET url=https://api.example.com/public/feed label=cors-wildcard
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+access-control-allow-origin: *
+access-control-expose-headers: *
+
+{"items":[]}
+
+#TARGET url=https://app.example.com/ws label=websocket sensitive=1
+#META at=2026-11-01T10:00:00
+* Connected to app.example.com (192.0.2.21) port 443
+> GET /ws HTTP/1.1
+> Connection: Upgrade
+> Upgrade: websocket
+> Origin: https://evil.example
+> Cookie: sid=c00k1e00CANARYsent0000000002
+>
+< HTTP/1.1 101 Switching Protocols
+< Upgrade: websocket
+< Connection: Upgrade
+<

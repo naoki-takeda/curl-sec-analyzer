@@ -1,0 +1,155 @@
+## targets
+options | https://www.example.com/ | key=options | responses=1
+trace | https://www.example.com/ | key=trace | responses=1
+host-inj | https://www.example.com/ | key=host-inj | responses=1
+open-redirect | https://www.example.com/redirect | key=open-redirect | responses=1
+crlf | https://www.example.com/redirect | key=crlf | responses=1
+chain | https://www.example.com/start | key=chain | responses=3
+own-port | https://admin.example.com:8443/ | key=own-port | responses=2
+http | http://www.example.com/ | key=http | responses=1
+tls | https://www.example.com/ | key=- | responses=0
+
+## warnings
+tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
+
+## findings
+chain | A-02.ok | info | pass | URL・Location・本文にトークンなし
+chain | H-01.1 | high | fail | (ヘッダなし)
+chain | H-02.na | info | na | HSTSがない（H-01で判定）
+chain | H-03.1 | high | fail | (ヘッダなし)
+chain | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+chain | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+chain | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+chain | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+chain | H-08.1 | medium | fail | (ヘッダなし)
+chain | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+chain | H-10.1 | info | fail | (ヘッダなし)
+chain | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+chain | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+chain | H-13.ok | info | pass | text/html; charset=utf-8
+chain | H-14.1 | low | fail | (ヘッダなし)
+chain | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+chain | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+chain | R-04.ok | info | pass | (ACAOなし)
+chain | T-05.2 | low | fail | Location: https://internal-app01.corp:8443/final
+chain | T-12.ok | info | pass | HTTP/2
+crlf | T-08.1 | high | fail | 注入したヘッダ（Set-Cookie: crlf=1）が応答に現れた
+csp-sample-* | H-04.na | info | na | 
+error-* | A-10.na | info | na | 
+host-inj | T-07.2 | medium | fail | Location: https://evil.example/reset?token=r3se…(23 chars)
+http | C-10.ok | info | pass | HTTP応答でCookieを発行していない
+http | T-04.3 | low | fail | HTTP 302 → https://example.com/
+http | T-05.ok | info | pass | 1回の転送
+logout/after-logout | C-12.na | info | na | 
+open-redirect | T-06.1 | medium | fail | Location: //evil.example/
+options | T-01.2 | low | fail | Allow: GET, HEAD, OPTIONS, PUT, DELETE, PROPFIND
+own-port | A-02.ok | info | pass | URL・Location・本文にトークンなし
+own-port | H-01.1 | high | fail | (ヘッダなし)
+own-port | H-02.na | info | na | HSTSがない（H-01で判定）
+own-port | H-03.1 | high | fail | (ヘッダなし)
+own-port | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+own-port | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+own-port | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+own-port | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+own-port | H-08.1 | medium | fail | (ヘッダなし)
+own-port | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+own-port | H-10.1 | info | fail | (ヘッダなし)
+own-port | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+own-port | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+own-port | H-13.ok | info | pass | text/html; charset=utf-8
+own-port | H-14.1 | low | fail | (ヘッダなし)
+own-port | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+own-port | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+own-port | R-04.ok | info | pass | (ACAOなし)
+own-port | T-05.ok | info | pass | 1回の転送
+own-port | T-12.1 | info | fail | HTTP/1.1
+pre-login/login | C-09.na | info | na | 
+session-sample-* | C-07.na | info | na | 
+trace | T-01.1 | medium | fail | HTTP 200（リクエストを反射）
+www.example.com | T-09.1 | high | fail | 接続できた旧バージョン: tls1
+www.example.com | T-10.1 | high | fail | 接続できた弱い暗号: DES-CBC3-SHA
+www.example.com | T-10.2 | high | fail | RSA 1024bit
+www.example.com | T-10.2 | high | fail | 署名アルゴリズム: sha1WithRSAEncryption
+www.example.com | T-10.3 | medium | fail | TLS 1.2で接続できたCBC・静的RSAの暗号: AES128-SHA
+www.example.com | T-11.1 | high | fail | Verify return code: 20（unable to get local issuer certificate）
+www.example.com | T-11.2 | medium | fail | 期限まで19日（notAfter: 2026-11-20、2026-11-01T10:00:00 時点）
+
+## coverage
+H-01 | evaluated | fails=2
+H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
+H-03 | evaluated | fails=2
+H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
+H-06 | evaluated | fails=2
+H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
+H-08 | evaluated | fails=2
+H-09 | evaluated | fails=2
+H-10 | evaluated | fails=2
+H-11 | evaluated | fails=2
+H-12 | missing-input | fails=0 | 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-13 | evaluated | fails=0
+H-14 | evaluated | fails=2
+H-15 | missing-input | fails=0 | 必要なラベル: logout
+H-16 | evaluated | fails=0
+H-17 | evaluated | fails=0
+C-01 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-02 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-04 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-05 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-06 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
+C-10 | evaluated | fails=0
+C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
+C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | missing-input | fails=0 | 必要なラベル: cors-*
+R-02 | missing-input | fails=0 | 必要なラベル: cors-*
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=0
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | evaluated | fails=2
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | evaluated | fails=1
+T-05 | evaluated | fails=1
+T-06 | evaluated | fails=1
+T-07 | evaluated | fails=1
+T-08 | evaluated | fails=1
+T-09 | evaluated | fails=1
+T-10 | evaluated | fails=4
+T-11 | evaluated | fails=2
+T-12 | evaluated | fails=1
+T-13 | manual | fails=0
+E-01 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+E-02 | missing-input | fails=0 | 必要なラベル: （一般）
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | 必要なラベル: （一般）
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | missing-input | fails=0 | 必要なラベル: （一般）
+E-08 | missing-input | fails=0 | 必要なラベル: （一般）
+E-09 | missing-input | fails=0 | 必要なラベル: （一般）
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
+A-02 | evaluated | fails=0
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | missing-input | fails=0 | 必要なラベル: （一般）, unauth-*
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | missing-input | fails=0 | 必要なラベル: （一般）
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 必要なラベル: method-*, old-*

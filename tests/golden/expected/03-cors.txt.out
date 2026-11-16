@@ -1,0 +1,131 @@
+## targets
+cors-reflect | https://api.example.com/v1/me | key=cors-reflect | responses=1
+cors-null | https://api.example.com/v1/me | key=cors-null | responses=1
+cors-partial | https://api.example.com/v1/me | key=cors-partial | responses=1
+cors-self | https://api.example.com/v1/me | key=cors-self | responses=1
+cors-http-origin | https://api.example.com/v1/me | key=cors-http-origin | responses=1
+cors-preflight | https://api.example.com/v1/items/1 | key=cors-preflight | responses=1
+cors-wildcard | https://api.example.com/public/feed | key=cors-wildcard | responses=1
+websocket | https://app.example.com/ws | key=websocket | responses=1
+
+## warnings
+
+## findings
+api.example.com | T-10.ok | info | pass | 問題なし
+cors-http-origin | R-01.1 | high | fail | Origin: http://api.example.com → ACAO: http://api.example.com / ACAC: true
+cors-http-origin | R-02.ok | info | pass | ACAO: http://api.example.com
+cors-http-origin | R-04.ok | info | pass | ACAO: http://api.example.com
+cors-http-origin | R-06.1 | low | fail | ACAO: http://api.example.com / Vary: (なし)
+cors-null | R-01.ok | info | pass | ACAO: null
+cors-null | R-02.2 | medium | fail | ACAO: null
+cors-null | R-04.ok | info | pass | ACAO: null
+cors-null | R-06.1 | low | fail | ACAO: null / Vary: x-origin-id
+cors-partial | R-02.ok | info | pass | ACAO: https://example.com.evil.net
+cors-partial | R-03.2 | medium | fail | Origin: https://example.com.evil.net → ACAO: https://example.com.evil.net
+cors-partial | R-04.ok | info | pass | ACAO: https://example.com.evil.net
+cors-partial | R-06.ok | info | pass | Vary: origin
+cors-preflight | R-01.2 | medium | fail | Origin: https://evil.example → ACAO: https://evil.example
+cors-preflight | R-02.ok | info | pass | ACAO: https://evil.example
+cors-preflight | R-04.ok | info | pass | ACAO: https://evil.example
+cors-preflight | R-05.1 | medium | fail | ACAO: https://evil.example / Allow-Methods: *
+cors-preflight | R-05.2 | info | fail | Access-Control-Max-Age: 86400
+cors-preflight | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
+cors-reflect | R-01.1 | high | fail | Origin: https://evil.example → ACAO: https://evil.example / ACAC: true
+cors-reflect | R-02.ok | info | pass | ACAO: https://evil.example
+cors-reflect | R-04.ok | info | pass | ACAO: https://evil.example
+cors-reflect | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
+cors-reflect | R-07.1 | medium | fail | X-Auth-Token, X-CSRF-Token
+cors-self | R-01.na | info | na | Origin: https://api.example.com（自サイトの Origin。許可外の Origin では試していない）
+cors-self | R-02.ok | info | pass | ACAO: https://api.example.com
+cors-self | R-04.ok | info | pass | ACAO: https://api.example.com
+cors-self | R-06.ok | info | pass | Vary: origin
+cors-wildcard | R-01.ok | info | pass | ACAO: *
+cors-wildcard | R-02.ok | info | pass | ACAO: *
+cors-wildcard | R-04.3 | info | fail | ACAO: *（機密応答かどうか分からない）
+cors-wildcard | R-07.2 | low | fail | *
+csp-sample-* | H-04.na | info | na | 
+error-* | A-10.na | info | na | 
+logout/after-logout | C-12.na | info | na | 
+pre-login/login | C-09.na | info | na | 
+session-sample-* | C-07.na | info | na | 
+websocket | R-09.1 | high | fail | Origin: https://evil.example で 101 Switching Protocols（Cookie認証）
+
+## coverage
+H-01 | missing-input | fails=0 | 必要なラベル: （一般）, error-*, apex
+H-02 | missing-input | fails=0 | 必要なラベル: （一般）, error-*, apex
+H-03 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-04 | missing-input | fails=0 | 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-06 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-07 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-08 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-09 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-10 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-11 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-12 | missing-input | fails=0 | 必要なラベル: （一般）, error-*, pre-login, login, session-sample-*
+H-13 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-14 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-15 | missing-input | fails=0 | 必要なラベル: logout
+H-16 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+H-17 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+C-01 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-02 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-04 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-05 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-06 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
+C-10 | missing-input | fails=0 | 必要なラベル: http
+C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
+C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | evaluated | fails=3
+R-02 | evaluated | fails=1
+R-03 | evaluated | fails=1
+R-04 | evaluated | fails=1
+R-05 | evaluated | fails=2
+R-06 | evaluated | fails=4
+R-07 | evaluated | fails=2
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | evaluated | fails=1
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | missing-input | fails=0 | 必要なラベル: http
+T-05 | missing-input | fails=0 | 必要なラベル: （一般）, http
+T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | missing-input | fails=0 | 必要なラベル: tls
+T-10 | evaluated | fails=0
+T-11 | missing-input | fails=0 | 必要なラベル: tls
+T-12 | missing-input | fails=0 | 必要なラベル: （一般）
+T-13 | manual | fails=0
+E-01 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
+E-02 | missing-input | fails=0 | 必要なラベル: （一般）
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | 必要なラベル: （一般）
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | missing-input | fails=0 | 必要なラベル: （一般）
+E-08 | missing-input | fails=0 | 必要なラベル: （一般）
+E-09 | missing-input | fails=0 | 必要なラベル: （一般）
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
+A-02 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, unauth-*
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | missing-input | fails=0 | 必要なラベル: （一般）, unauth-*
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | missing-input | fails=0 | 必要なラベル: （一般）
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 必要なラベル: method-*, old-*

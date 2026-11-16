@@ -1,0 +1,78 @@
+#TARGET url=https://www.example.com/ label=options
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+allow: GET, HEAD, OPTIONS, PUT, DELETE, PROPFIND
+content-length: 0
+
+#TARGET url=https://www.example.com/ label=trace
+#META at=2026-11-01T10:00:00
+HTTP/1.1 200 OK
+Content-Type: message/http
+
+TRACE / HTTP/1.1
+Host: www.example.com
+Cookie: sid=tr4ce000CANARYtrace00000001
+
+#TARGET url=https://www.example.com/ label=host-inj
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: https://evil.example/reset?token=r3setT0kCANARYreset0001
+
+#TARGET url=https://www.example.com/redirect label=open-redirect
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: //evil.example/
+
+#TARGET url=https://www.example.com/redirect label=crlf
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+set-cookie: crlf=1
+
+#TARGET url=https://www.example.com/start label=chain
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: http://www.example.com/step
+
+HTTP/1.1 301 Moved Permanently
+Location: https://internal-app01.corp:8443/final
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+#TARGET url=https://admin.example.com:8443/ label=own-port
+#META at=2026-11-01T10:00:00
+HTTP/1.1 302 Found
+Location: https://admin.example.com:8443/login
+
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+
+#TARGET url=http://www.example.com/ label=http
+#META at=2026-11-01T10:00:00
+HTTP/1.1 302 Found
+Location: https://example.com/
+
+#TARGET url=https://www.example.com/ label=tls
+#META at=2026-11-01T10:00:00
+#TLSPROBE v=tls1 ok=1
+#TLSPROBE v=tls1_1 ok=0
+#TLSPROBE v=tls1_3 ok=1
+#CIPHERPROBE c=DES-CBC3-SHA ok=1
+#CIPHERPROBE c=AES128-SHA ok=1
+#CIPHERPROBE c=RC4-SHA ok=err
+CONNECTED(00000003)
+---
+Certificate chain
+ 0 s:CN = www.example.com
+   i:C = US, O = Example CA, CN = Example Issuing CA
+   a:PKEY: rsaEncryption, 1024 (bit); sigalg: sha1WithRSAEncryption
+---
+New, TLSv1.2, Cipher is ECDHE-RSA-AES128-SHA
+Verify return code: 20 (unable to get local issuer certificate)
+subject=CN = www.example.com
+issuer=C = US, O = Example CA, CN = Example Issuing CA
+notBefore=Oct  1 00:00:00 2026 GMT
+notAfter=Nov 20 00:00:00 2026 GMT
+X509v3 Subject Alternative Name:
+    DNS:example.com, DNS:www.example.com
