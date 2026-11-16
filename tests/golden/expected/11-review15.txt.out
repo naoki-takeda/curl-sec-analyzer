@@ -1,0 +1,239 @@
+## targets
+pre-login | https://www.example.com/mypage | key=pre-login | responses=2
+login | https://www.example.com/login | key=login | responses=1
+mypage | https://www.example.com/mypage | key=mypage | responses=1
+logout | https://www.example.com/wp-login.php?action=logout | key=logout | responses=1
+after-logout | https://www.example.com/mypage | key=- | responses=2
+unauth-me | https://api.example.com/api/me | key=unauth-me | responses=2
+websocket | https://www.example.com/ws | key=websocket | responses=1
+cors-preflight | https://api.example.com/v1/items | key=cors-preflight | responses=1
+jsonp | https://api.example.com/api/user.js?callback=test123 | key=jsonp | responses=1
+dl | https://www.example.com/download/windows.html | key=dl | responses=1
+error-trace | https://www.example.com/x | key=error-trace | responses=1
+open-redirect | https://www.example.com/open?next=https://evil.example/ | key=open-redirect | responses=1
+reset | https://www.example.com/reset/AbCd…(22 chars) | key=reset | responses=1
+
+## warnings
+
+## findings
+after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200（同じページへの転送のあと）
+cors-preflight | R-01.2 | medium | fail | Origin: https://evil.example → ACAO: https://evil.example
+cors-preflight | R-02.na | info | na | Origin: (不明)（null では試していない）
+cors-preflight | R-04.ok | info | pass | ACAO: https://evil.example
+cors-preflight | R-05.1 | medium | fail | ACAO: https://evil.example / Allow-Methods: GET, PUT, DELETE
+cors-preflight | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
+csp-sample-* | H-04.na | info | na | 
+dl | A-02.ok | info | pass | URL・Location・本文にトークンなし
+dl | E-01.ok | info | pass | エラーの詳細らしき記述なし
+dl | E-02.ok | info | pass | 一覧表示なし
+dl | E-07.ok | info | pass | http:// の資源なし
+dl | E-08.ok | info | pass | 外部オリジンのscriptなし
+dl | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+dl | H-01.1 | high | fail | (ヘッダなし)
+dl | H-02.na | info | na | HSTSがない（H-01で判定）
+dl | H-03.1 | high | fail | (ヘッダなし)
+dl | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+dl | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+dl | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+dl | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+dl | H-08.1 | medium | fail | (ヘッダなし)
+dl | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+dl | H-10.1 | info | fail | (ヘッダなし)
+dl | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+dl | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+dl | H-13.ok | info | pass | text/html; charset=utf-8
+dl | H-14.1 | low | fail | (ヘッダなし)
+dl | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+dl | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+dl | R-04.ok | info | pass | (ACAOなし)
+dl | T-12.ok | info | pass | HTTP/2
+error-* | A-10.na | info | na | 
+error-trace | E-01.2 | medium | fail | at /app/index.js:7:9
+error-trace | H-01.1 | high | fail | (ヘッダなし)
+error-trace | H-02.na | info | na | HSTSがない（H-01で判定）
+error-trace | H-08.1 | medium | fail | (ヘッダなし)
+error-trace | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+error-trace | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-trace | H-13.ok | info | pass | text/plain
+error-trace | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+error-trace | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+jsonp | A-02.ok | info | pass | URL・Location・本文にトークンなし
+jsonp | E-06.na | info | na | HTTP 200（本文を採取していない）
+jsonp | E-13.na | info | na | 本文を採取していない
+jsonp | H-01.1 | high | fail | (ヘッダなし)
+jsonp | H-02.na | info | na | HSTSがない（H-01で判定）
+jsonp | H-08.1 | medium | fail | (ヘッダなし)
+jsonp | H-11.1 | low | fail | 機密応答に Cross-Origin-Resource-Policy なし
+jsonp | H-12.1 | high | fail | (ヘッダなし)
+jsonp | H-13.ok | info | pass | application/javascript
+jsonp | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+jsonp | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+jsonp | R-04.ok | info | pass | (ACAOなし)
+jsonp | T-12.ok | info | pass | HTTP/2
+login | A-02.ok | info | pass | URL・Location・本文にトークンなし
+login | C-01.1 | high | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
+login | C-02.1 | high | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
+login | C-03.1 | medium | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
+login | C-04.ok | info | pass | .AspNetCore.Identity.Application, .AspNetCore.Identity.ApplicationC1
+login | C-05.1 | medium | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/（期限 約9287時間、基準 24時間）
+login | C-06.1 | info | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
+login | C-07.ok | info | pass | .AspNetCore.Identity.ApplicationC1
+login | C-08.ok | info | pass | .AspNetCore.Identity.ApplicationC1
+login | C-09.ok | info | pass | URLにセッションIDなし
+login | C-11.ok | info | pass | .AspNetCore.Identity.ApplicationC1
+login | C-13.ok | info | pass | 共有キャッシュの指定なし
+login | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+logout | C-12.ok | info | pass | wordpress_logged_in_0123456789abcdef0123456789abcdef=…(1 chars); expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+logout | H-15.1 | info | fail | (ヘッダなし)
+mypage | A-02.ok | info | pass | URL・Location・本文にトークンなし
+mypage | E-01.ok | info | pass | エラーの詳細らしき記述なし
+mypage | E-02.ok | info | pass | 一覧表示なし
+mypage | E-07.ok | info | pass | http:// の資源なし
+mypage | E-08.ok | info | pass | 外部オリジンのscriptなし
+mypage | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+mypage | H-01.1 | high | fail | (ヘッダなし)
+mypage | H-02.na | info | na | HSTSがない（H-01で判定）
+mypage | H-03.1 | high | fail | (ヘッダなし)
+mypage | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+mypage | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+mypage | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+mypage | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+mypage | H-08.1 | medium | fail | (ヘッダなし)
+mypage | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+mypage | H-10.1 | info | fail | (ヘッダなし)
+mypage | H-11.1 | low | fail | 機密応答に Cross-Origin-Resource-Policy なし
+mypage | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+mypage | H-12.1 | high | fail | (ヘッダなし)
+mypage | H-13.ok | info | pass | text/html; charset=utf-8
+mypage | H-14.1 | low | fail | (ヘッダなし)
+mypage | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+mypage | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+mypage | R-04.ok | info | pass | (ACAOなし)
+mypage | T-12.ok | info | pass | HTTP/2
+open-redirect | T-06.na | info | na | HTTP 302（ログイン画面か同じページへの転送。転送先を検証しているかは分からない）
+pre-login | A-02.ok | info | pass | URL・Location・本文にトークンなし
+pre-login | C-01.ok | info | pass | JSESSIONID
+pre-login | C-02.ok | info | pass | JSESSIONID
+pre-login | C-03.ok | info | pass | JSESSIONID
+pre-login | C-04.ok | info | pass | JSESSIONID
+pre-login | C-05.ok | info | pass | JSESSIONID
+pre-login | C-06.1 | info | fail | JSESSIONID=ABCD…(35 chars); Path=/; Secure; HttpOnly; SameSite=Lax
+pre-login | C-07.ok | info | pass | JSESSIONID
+pre-login | C-08.1 | info | fail | JSESSIONID
+pre-login | C-09.ok | info | pass | URLにセッションIDなし
+pre-login | C-11.ok | info | pass | JSESSIONID
+pre-login | C-13.ok | info | pass | 共有キャッシュの指定なし
+pre-login | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+pre-login/login | C-09.ok | info | pass | ログイン時にセッションIDを再発行している
+reset | A-02.ok | info | pass | URL・Location・本文にトークンなし
+reset | E-01.ok | info | pass | エラーの詳細らしき記述なし
+reset | E-02.ok | info | pass | 一覧表示なし
+reset | E-07.ok | info | pass | http:// の資源なし
+reset | E-08.ok | info | pass | 外部オリジンのscriptなし
+reset | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+reset | H-01.1 | high | fail | (ヘッダなし)
+reset | H-02.na | info | na | HSTSがない（H-01で判定）
+reset | H-03.1 | high | fail | (ヘッダなし)
+reset | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+reset | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+reset | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+reset | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+reset | H-08.1 | medium | fail | (ヘッダなし)
+reset | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+reset | H-10.1 | info | fail | (ヘッダなし)
+reset | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+reset | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+reset | H-13.ok | info | pass | text/html; charset=utf-8
+reset | H-14.1 | low | fail | (ヘッダなし)
+reset | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+reset | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+reset | R-04.ok | info | pass | (ACAOなし)
+reset | T-12.ok | info | pass | HTTP/2
+session-sample-* | C-07.na | info | na | 
+unauth-me | A-01.1 | high | fail | 認証なしで HTTP 200
+unauth-me | A-02.ok | info | pass | URL・Location・本文にトークンなし
+unauth-me | A-07.ok | info | pass | キー1種に秘密情報・内部属性らしきものなし
+websocket | R-09.na | info | na | 101 Switching Protocols（Origin を送っていない）
+www.example.com | T-09.2 | info | fail | 合意したバージョン: TLSv1.2
+www.example.com | T-09.na | info | na | 旧バージョンの接続可否が分からない（#TLSPROBE がない。合意したバージョンだけでは分からない）
+www.example.com | T-10.3 | medium | fail | 合意した暗号: TLSv1.2 / AES128-GCM-SHA256
+
+## coverage
+H-01 | evaluated | fails=5
+H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
+H-03 | evaluated | fails=3
+H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
+H-06 | evaluated | fails=3
+H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
+H-08 | evaluated | fails=5
+H-09 | evaluated | fails=3
+H-10 | evaluated | fails=3
+H-11 | evaluated | fails=5
+H-12 | evaluated | fails=2
+H-13 | evaluated | fails=0
+H-14 | evaluated | fails=3
+H-15 | evaluated | fails=1
+H-16 | evaluated | fails=0
+H-17 | evaluated | fails=0
+C-01 | evaluated | fails=1
+C-02 | evaluated | fails=1
+C-03 | evaluated | fails=1
+C-04 | evaluated | fails=0
+C-05 | evaluated | fails=1
+C-06 | evaluated | fails=2
+C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | evaluated | fails=1
+C-09 | evaluated | fails=0
+C-10 | missing-input | fails=0 | 必要なラベル: http
+C-11 | evaluated | fails=0
+C-12 | evaluated | fails=1
+C-13 | evaluated | fails=0
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | evaluated | fails=1
+R-02 | missing-input | fails=0 | C7 のとおり Origin: null を送って採取する
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=0
+R-05 | evaluated | fails=1
+R-06 | evaluated | fails=1
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | C16 のとおり許可外の Origin（https://evil.example）で採取し直す
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | missing-input | fails=0 | 必要なラベル: http
+T-05 | missing-input | fails=0 | 必要なラベル: （一般）, http
+T-06 | missing-input | fails=0 | next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / C12（プロトコルごとの接続の確認）を採取する
+T-10 | evaluated | fails=1
+T-11 | missing-input | fails=0 | 必要なラベル: tls
+T-12 | evaluated | fails=0
+T-13 | manual | fails=0
+E-01 | evaluated | fails=1
+E-02 | evaluated | fails=0
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | 必要なラベル: （一般）
+E-06 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-07 | evaluated | fails=0
+E-08 | evaluated | fails=0
+E-09 | evaluated | fails=0
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-13 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+A-01 | evaluated | fails=1
+A-02 | evaluated | fails=0
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | evaluated | fails=0
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | missing-input | fails=0 | 必要なラベル: （一般）
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 必要なラベル: method-*, old-*

@@ -1,0 +1,107 @@
+#TARGET url=https://www.example.com/mypage label=pre-login
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /login
+set-cookie: JSESSIONID=ABCDEF0123456789CANARYpre0123456789; Path=/; Secure; HttpOnly; SameSite=Lax
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body><form method="post" action="/login"><input name="username"><input type="password" name="password"></form></body></html>
+
+#TARGET url=https://www.example.com/login label=login
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /mypage
+set-cookie: .AspNetCore.Identity.Application=chunks-2; expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
+set-cookie: .AspNetCore.Identity.ApplicationC1=CfDJ8Qw7Er2Ty9Ui4Op1As6Df3Gh8Jk5Lz0XcCANARYc1; expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
+
+#TARGET url=https://www.example.com/mypage label=mypage sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body>my page</body></html>
+
+#TARGET url=https://www.example.com/wp-login.php?action=logout label=logout
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: https://www.example.com/wp-login.php?loggedout=true
+set-cookie: wordpress_logged_in_0123456789abcdef0123456789abcdef=+; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+
+#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 301
+location: https://www.example.com/mypage/
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body>my page</body></html>
+
+#TARGET url=https://api.example.com/api/me label=unauth-me
+#META at=2026-11-01T10:00:00
+HTTP/2 307
+location: /api/me/
+
+HTTP/2 200
+content-type: application/json
+
+{"id":1}
+
+#TARGET url=https://www.example.com/ws label=websocket
+#META at=2026-11-01T10:00:00
+* Connected to www.example.com (192.0.2.1) port 443
+* SSL connection using TLSv1.2 / AES128-GCM-SHA256
+> GET /ws HTTP/1.1
+> Host: www.example.com
+> Cookie: sessionid=CANARYwsSession0123456789
+> Upgrade: websocket
+>
+< HTTP/1.1 101 Switching Protocols
+< Upgrade: websocket
+<
+
+#TARGET url=https://api.example.com/v1/items label=cors-preflight
+#META at=2026-11-01T10:00:00
+HTTP/2 204
+access-control-allow-origin: https://evil.example
+access-control-allow-methods: GET, PUT, DELETE
+
+#TARGET url=https://api.example.com/api/user.js?callback=test123 label=jsonp
+#META at=2026-11-01T10:00:00
+* Connected to api.example.com (192.0.2.2) port 443
+> GET /api/user.js?callback=test123 HTTP/1.1
+> Cookie: sessionid=CANARYjsonp0123456789
+>
+< HTTP/2 200
+< content-type: application/javascript
+<
+
+#TARGET url=https://www.example.com/download/windows.html label=dl
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body>Download for Windows</body></html>
+
+#TARGET url=https://www.example.com/x label=error-trace
+#META at=2026-11-01T10:00:00
+HTTP/2 500
+content-type: text/plain
+
+Error: boom
+    at /app/index.js:7:9
+    at node:internal/main/run_main_module:28:49
+
+#TARGET url=https://www.example.com/open?next=https://evil.example/ label=open-redirect
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /login?next=https://evil.example/
+
+#TARGET url=https://www.example.com/reset/AbCdEfGhIjKlMnOpQrStUv label=reset
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body>reset</body></html>

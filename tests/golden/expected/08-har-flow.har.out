@@ -173,7 +173,7 @@ session-sample-* | C-07.na | info | na |
 
 ## coverage
 H-01 | evaluated | fails=4
-H-02 | evaluated | fails=1
+H-02 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: apex（https://apexドメイン/）
 H-03 | evaluated | fails=3
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
@@ -195,12 +195,12 @@ C-03 | evaluated | fails=0
 C-04 | evaluated | fails=0
 C-05 | evaluated | fails=0
 C-06 | evaluated | fails=2
-C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | evaluated | fails=0
 C-09 | evaluated | fails=0
 C-10 | missing-input | fails=0 | 必要なラベル: http
 C-11 | evaluated | fails=0
-C-12 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件）は入力不足 / 必要なラベル: logout, after-logout
+C-12 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: logout, after-logout
 C-13 | evaluated | fails=0
 C-14 | manual | fails=0
 C-15 | manual | fails=0

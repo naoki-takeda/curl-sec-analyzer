@@ -100,7 +100,8 @@ describe('11〜18 判定', () => {
   it('12・18 C-12：ログイン画面を返したら①にしない。セッションCookieでないものを消しただけなら②', () => {
     const mp = t('mypage', 'https://a.example/mypage', HTML, '<p>me</p>', 'sensitive=1');
     const lo = (set: string) => t('logout', 'https://a.example/logout', `HTTP/2 302\nlocation: /\nset-cookie: ${set}`);
-    const al = t('after-logout', 'https://a.example/mypage', HTML, '<form method="post"><input type="password" name="p"></form>', 'sensitive=1');
+    // ログインのフォームは、ユーザー名の欄とパスワード欄が1つずつあるもの（第25回で、パスワード変更の画面と区別するために求めた）
+    const al = t('after-logout', 'https://a.example/mypage', HTML, '<form method="post"><input name="username"><input type="password" name="p"></form>', 'sensitive=1');
     expect(evaluate(mp + lo('sid=; Max-Age=0; Path=/') + al).findings.filter(f => f.item === 'C-12' && f.target === 'after-logout').map(f => f.ruleId)).toEqual(['C-12.ok']);
     const c12 = (input: string) => evaluate(input).findings.filter(f => f.item === 'C-12' && f.target === 'logout').map(f => f.ruleId);
     expect(c12(lo('remember-me=; Max-Age=0; Path=/'))).toEqual(['C-12.2']);

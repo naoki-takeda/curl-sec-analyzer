@@ -117,7 +117,7 @@ www.example.com | T-10.na | info | na | 合意した暗号（TLSv1.3 / TLS_AES_2
 H-01 | evaluated | fails=1
 H-02 | evaluated | fails=1
 H-03 | evaluated | fails=0
-H-04 | evaluated | fails=2
+H-04 | evaluated | fails=2 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | evaluated | fails=1
 H-06 | evaluated | fails=1
 H-07 | evaluated | fails=0
@@ -137,7 +137,7 @@ C-03 | evaluated | fails=2
 C-04 | evaluated | fails=0
 C-05 | evaluated | fails=0
 C-06 | evaluated | fails=2
-C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | evaluated | fails=0
 C-09 | evaluated | fails=1
 C-10 | evaluated | fails=0

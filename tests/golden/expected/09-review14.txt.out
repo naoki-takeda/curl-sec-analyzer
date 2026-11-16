@@ -80,28 +80,28 @@ mypage | T-12.ok | info | pass | HTTP/2
 open-redirect | T-06.na | info | na | HTTP 200（転送しなかった。転送先を検証しているかは分からない）
 pre-login/login | C-09.na | info | na | 
 session-sample-* | C-07.ok | info | pass | .AspNetCore.CookiesC1：2件に共通部分・連番なし
-session-sample-1 | C-01.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-1 | C-01.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-02.ok | info | pass | .AspNetCore.CookiesC1
-session-sample-1 | C-03.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-1 | C-03.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-04.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
 session-sample-1 | C-05.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-06.1 | info | fail | .AspNetCore.CookiesC1=CfDJ…(53 chars); path=/; secure; samesite=lax; httponly
 session-sample-1 | C-07.ok | info | pass | .AspNetCore.CookiesC1
-session-sample-1 | C-08.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-1 | C-08.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-09.ok | info | pass | URLにセッションIDなし
-session-sample-1 | C-11.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-1 | C-11.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-13.ok | info | pass | 共有キャッシュの指定なし
 session-sample-1 | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
-session-sample-2 | C-01.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-2 | C-01.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-02.ok | info | pass | .AspNetCore.CookiesC1
-session-sample-2 | C-03.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-2 | C-03.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-04.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
 session-sample-2 | C-05.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-06.1 | info | fail | .AspNetCore.CookiesC1=CfDJ…(53 chars); path=/; secure; samesite=lax; httponly
 session-sample-2 | C-07.ok | info | pass | .AspNetCore.CookiesC1
-session-sample-2 | C-08.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-2 | C-08.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-09.ok | info | pass | URLにセッションIDなし
-session-sample-2 | C-11.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-2 | C-11.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-13.ok | info | pass | 共有キャッシュの指定なし
 session-sample-2 | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
 spa-actuator | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -134,7 +134,7 @@ spa-actuator | T-12.ok | info | pass | HTTP/2
 H-01 | evaluated | fails=3
 H-02 | evaluated | fails=2
 H-03 | evaluated | fails=1
-H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | evaluated | fails=1
 H-06 | evaluated | fails=2
 H-07 | evaluated | fails=0
@@ -156,7 +156,7 @@ C-05 | evaluated | fails=0
 C-06 | evaluated | fails=2
 C-07 | evaluated | fails=0
 C-08 | evaluated | fails=0
-C-09 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件）は入力不足 / 必要なラベル: pre-login, login
+C-09 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: pre-login, login
 C-10 | evaluated | fails=1
 C-11 | evaluated | fails=0
 C-12 | evaluated | fails=1

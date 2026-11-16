@@ -155,6 +155,7 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   }
   const x = crossContext(targets, findings);
   for (const rule of [...hostRules, ...crossRules])           // ③④
-    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: maskText(f.evidence) });
+    // 横断・ホスト単位のルールの na は、その条件だけが入力不足（ほかの条件はターゲット単位で判定しているかもしれない）。カバレッジで示すため印を付ける
+    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: maskText(f.evidence), ...(f.status === 'na' ? { partial: true } : {}) });
   return findings;
 }

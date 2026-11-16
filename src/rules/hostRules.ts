@@ -9,7 +9,7 @@ const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Seve
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
      target: host, host, evidence, recommendation, references: rule.basis, score: 0 });
 
-const OLD = /^(ssl3|tls1(?:\.0)?|tls1\.1|tls1_1|tls1_0|tlsv1(?:\.0)?|tlsv1\.1)$/i;
+const OLD = /^(ssl3|sslv3|tls1(?:\.0)?|tls1\.1|tls1_1|tls1_0|tlsv1(?:\.0)?|tlsv1\.1)$/i;   // -v の「SSL connection using SSLv3」も
 export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appliesTo: 'any', scope: 'host',
   basis: ['Mozilla Server Side TLS', 'IPA TLS暗号設定ガイドライン'],
   runCross(x) {
@@ -27,6 +27,8 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
         'TLS 1.2 と 1.3 だけを有効にする'));
       else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected')) out.push(hf(tlsVersion, host, 'ok', 'info', 'pass', '旧バージョンは拒否された', ''));
       else if (probes.length) out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（手元のOpenSSLが非対応）', '旧バージョンに対応した環境で C12 を実行する'));
+      // プローブがなく、合意したバージョン（-v）が新しいだけなら、旧バージョンを受け入れるか（①）は分からない。② だけで「判定済み」と数えないよう、①は na として出す
+      else out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（#TLSPROBE がない。合意したバージョンだけでは分からない）', 'C12（プロトコルごとの接続の確認）を採取する'));
       // TLS 1.3 のプローブ（#TLSPROBE v=tls1_3）で接続できたなら、合意が 1.2 なのは curl 側の事情（古い OpenSSL など）。②にしない
       const tls13 = probes.some(p => p.result === 'accepted' && /1[._]?3$/.test(p.version.replace(/\s/g, '')));
       if (negotiated.length && !negotiated.includes('TLSv1.3') && !tls13) out.push(hf(tlsVersion, host, 2, 'info', 'fail', `合意したバージョン: ${[...new Set(negotiated)].join(', ')}`, 'TLS 1.3 を有効にする（curl 側が 1.3 に対応しているかも確認）'));
@@ -59,6 +61,9 @@ export const knownFiles: Rule = { id: 'E-03', title: '既知ファイル（/.git
 // ---- 以下 v0.2 で追加（T-10、T-11） ----
 const WEAK = /RC4|DES-CBC3|3DES|EXPORT|EXP-|NULL|aNULL|ADH|AECDH|MD5/i;
 const AEAD = /GCM|CHACHA20|CCM|^TLS_AES/i;
+// 前方秘匿性のある鍵交換（ECDHE・DHE）か、TLS 1.3 の暗号。AES128-GCM-SHA256 のような静的 RSA の鍵交換は、GCM でも③（AEAD だけを見ると見逃した）
+const FORWARD_SECRET = /^(?:ECDHE|DHE|EDH|TLS_AES|TLS_CHACHA20|TLS_ECDHE|TLS_DHE)/i;
+const modern = (c: string) => AEAD.test(c) && FORWARD_SECRET.test(c);
 const T10_REC = 'C23（暗号ごとの接続の確認）と C11（証明書の取得）を採取する';
 export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵', appliesTo: 'any', scope: 'host',
   basis: ['Mozilla Server Side TLS', 'IPA TLS暗号設定ガイドライン'],
@@ -72,13 +77,13 @@ export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵
       const before = out.length;
       for (const p of probes.filter(p => p.result === 'accepted')) {
         if (WEAK.test(p.cipher)) out.push(hf(cipherSuites, host, 1, 'high', 'fail', `接続できた弱い暗号: ${p.cipher}`, 'RC4・3DES・NULL・EXPORT などを無効にする'));
-        else if (!AEAD.test(p.cipher)) out.push(hf(cipherSuites, host, 3, 'medium', 'fail', `TLS 1.2で接続できたCBC・静的RSAの暗号: ${p.cipher}`, 'TLS 1.2 では ECDHE＋AEAD（AES-GCM、ChaCha20-Poly1305）だけにする'));
+        else if (!modern(p.cipher)) out.push(hf(cipherSuites, host, 3, 'medium', 'fail', `TLS 1.2で接続できたCBC・静的RSAの暗号: ${p.cipher}`, 'TLS 1.2 では ECDHE＋AEAD（AES-GCM、ChaCha20-Poly1305）だけにする'));
       }
       // 合意した暗号：TLS 1.3 以外（1.2 以下）で、弱い暗号なら①、CBC・静的RSAなら③（旧バージョンで合意した CBC も合格にしない）
       for (const [, ver, c] of negotiated) {
         if (ver === 'TLSv1.3') continue;
         if (WEAK.test(c)) out.push(hf(cipherSuites, host, 1, 'high', 'fail', `合意した弱い暗号: ${ver} / ${c}`, 'RC4・3DES・NULL・EXPORT などを無効にする'));
-        else if (!AEAD.test(c)) out.push(hf(cipherSuites, host, 3, 'medium', 'fail', `合意した暗号: ${ver} / ${c}`, 'ECDHE＋AEAD の暗号を優先する'));
+        else if (!modern(c)) out.push(hf(cipherSuites, host, 3, 'medium', 'fail', `合意した暗号: ${ver} / ${c}`, 'ECDHE＋AEAD の暗号を優先する'));
       }
       // ②鍵：OpenSSL 1.1・LibreSSL は「Server public key is N bit」だけで種類を出さない。256・384・521bit は楕円曲線、
       // 224bit は P-224、253bit は Ed25519、456bit は Ed448、それ以外は RSA とみなす（512bit は brainpoolP512r1 と RSA 512bit を区別できないので RSA とする）

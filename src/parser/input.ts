@@ -70,7 +70,8 @@ export function parseInput(input: string): ParseResult {
     line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
     if (mk) {                                          // マーカー行は必ず応答を閉じる
-      close(); inOpenssl = false; vBody = false; if (json) { unparsed += json.length; json = null; }
+      // 前のターゲットの状態（CONNECT を送った、など）を持ち越さない（持ち越すと、次のターゲットの本物の 200 をプロキシの応答とみなした）
+      close(); inOpenssl = false; vBody = false; connectReq = false; if (json) { unparsed += json.length; json = null; }
       const [, tag, rest] = mk; const a = attrs(rest);
       if (tag === 'TARGET') { flush(); t = newTarget(a); pendingJson.length = 0; }
       else if (tag === 'META') {
@@ -89,7 +90,10 @@ export function parseInput(input: string): ParseResult {
     // -L や認証のやり直しで curl が次のリクエストを送るときの印（「* Issue another request」、「> GET /x HTTP/1.1」の要求行）でも終える。
     // 終えないと、2つ目のホップの TLS（* SSL connection）や送信した Origin・Cookie を失う。本文の「* SSL connection …」だけの行では終えない
     if (t.verbose && vBody) {
-      if (/^< HTTP\//.test(line) || /^\* Issue another request/.test(line) || /^> [A-Z]+ \S+ HTTP\/[\d.]+\s*$/.test(line)) vBody = false;
+      // 「< HTTP/」で終えるのは、前の応答のあとに次の応答が続きうる（転送・1xx・認証のやり直し）ときだけ。200 の本文の中の「< HTTP/1.1 200 OK」
+      // （curl の出力を載せたページなど）を次の応答として読むと、本物の応答が捨てられた
+      const prev = t.responses.at(-1);
+      if ((/^< HTTP\//.test(line) && (!prev || nextHopAfter(prev.status))) || /^\* Issue another request/.test(line) || /^> [A-Z]+ \S+ HTTP\/[\d.]+\s*$/.test(line)) vBody = false;
       else continue;
     }
     if (!inBody() && OPENSSL_START.test(line)) { close(); inOpenssl = true; }
@@ -125,7 +129,8 @@ export function parseInput(input: string): ParseResult {
         const r = cur as HttpResponse | null;          // close() が書き換えるので、型の絞り込みに頼らない
         const st = r?.status ?? 0;
         const tunnel = st >= 200 && st < 300 && (connectReq || /connection established/i.test(r?.reason ?? ''));
-        close(); vBody = st >= 200 && !tunnel; if (tunnel) connectReq = false;
+        // CONNECT への応答が届いたら、トンネルができたかどうかにかかわらず CONNECT の状態を終える（407 で諦めた場合も）
+        close(); vBody = st >= 200 && !tunnel; if (tunnel || (connectReq && st >= 200)) connectReq = false;
         continue;
       }  // 受信ヘッダの終端。-v では本文を解析しない
       if (line.startsWith('< ')) line = line.slice(2);

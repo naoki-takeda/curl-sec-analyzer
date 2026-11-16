@@ -79,6 +79,8 @@ export function generateScript(o: CommandOptions): string {
   t('options', `${H}/`); L.push('curl -sS -i -X OPTIONS "$H/"');
   t('trace', `${H}/`); L.push('curl -sS -i -X TRACE "$H/"');
   t('host-inj', `${H}/`); L.push(`curl -sS -i -H 'X-Forwarded-Host: evil.example' "$H/"`);
+  // T-06 は、転送した応答だけで判定する（ログイン画面が 200 を返すと na）。next= で実際に転送する URL があれば、そちらに置き換えるよう書いておく
+  L.push('# T-06：ログイン画面が 200 を返すと判定できない（na）。next= などで実際に転送する URL（ログアウト、ログイン後の転送先）に置き換える');
   t('open-redirect', `${H}${o.loginPath}`); L.push(`curl -sS -D - -o /dev/null "$H"${q(`${o.loginPath}?next=https://evil.example&returnTo=https://evil.example&url=https://evil.example`)}`);
   t('jsonp', `${H}${o.apiPath}?callback=test123`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(`${o.apiPath}?callback=test123`)}`);
 

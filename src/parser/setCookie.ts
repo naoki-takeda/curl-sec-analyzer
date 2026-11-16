@@ -50,8 +50,10 @@ export function isDeletion(c: SetCookie, now = Date.now()): boolean {
 const SESSION_WORD = /^(?:(?:j|php|s)?sess\w*|sid|token|auth|jwt|login|aspxauth)$/i;
 // ASP.NET の認証の Cookie。名前の語（AspNetCore・Identity・Application）にはセッションらしい語がなく、「ログインしたままにする」では期限付きで
 // 発行するので、推定ではセッションCookieに見えない（C-01① が②になり、C-02 を見逃した）
-const AUTH_COOKIE = /^\.(?:AspNetCore\.(?:Identity\.Application|Cookies|Session|Antiforgery(?!\.))|ASPXAUTH|AspNet\.ApplicationCookie)$/i;
-const SESSION_NAME = { test: (name: string) => (AUTH_COOKIE.test(name) && !/antiforgery/i.test(name)) || name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).some(w => SESSION_WORD.test(w)) };
+// 4KB を超えて分割したもの（.AspNetCore.Identity.ApplicationC1・C2）も同じ。WordPress のログインの Cookie（wordpress_sec_<hash>・wordpress_logged_in_<hash>）と
+// Shibboleth のセッション（_shibsession_<id>）も、名前の語にセッションらしい語がないので、ここで挙げる
+const AUTH_COOKIE = /^(?:\.(?:AspNetCore\.(?:Identity\.Application|Cookies|Session)(?:C\d+)?|ASPXAUTH|AspNet\.ApplicationCookie)|wordpress_(?:sec|logged_in)_\w+|_shibsession_\w+)$/i;
+const SESSION_NAME = { test: (name: string) => AUTH_COOKIE.test(name) || name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).some(w => SESSION_WORD.test(w)) };
 /** 組織プロファイルで変えられる設定（engine/profile.ts の withProfile が実行中だけ差し替える） */
 export const sessionConfig = { names: [] as string[], maxAgeHours: 24 };
 
@@ -95,12 +97,16 @@ export const sentAuthOf = (authorization: boolean, cookieNames: string[]) => aut
 /** リクエストの Cookie ヘッダの値から名前だけを取り出す */
 export const cookieNames = (v: string) => v.split(';').map(c => c.split('=')[0].trim()).filter(Boolean);
 
+/**
+ * ASP.NET Core の Cookie の分割の印（.AspNetCore.Cookies=chunks-2。中身は …C1・C2 にある）。セッションCookie の属性の判定（C-01〜C-06）には
+ * 含めるが、セッションIDの値として比べるとき（C-07①②・C-09）は除く（約48bit・同じ値の誤検知になる）。
+ * セッションCookie の推定から外すと、分割した Cookie 全体がセッションCookie とみなされなくなった（第24回の退行）
+ */
+export const isChunkMarker = (c: SetCookie) => /^chunks-\d+$/.test(c.value);
+
 /** now：削除用かどうか（過去の Expires）を判定する時刻。ルールからは採取時刻（RuleContext.now）を渡す */
 export function looksLikeSession(c: SetCookie, now = Date.now()): boolean {
   if (isDeletion(c, now)) return false;
-  // ASP.NET Core の Cookie の分割の印（.AspNetCore.Cookies=chunks-2。中身は .AspNetCore.CookiesC1・C2 にある）はセッションIDではない
-  // （セッションIDとして数えると、C-07①（約48bit）・C-07②（同じ値）の誤検知になる）
-  if (/^chunks-\d+$/.test(c.value)) return false;
   if (sessionConfig.names.length) return sessionConfig.names.some(n => n.toLowerCase() === c.name.toLowerCase());   // 指定があれば推定しない
   if (notSessionName(c.name)) return false;
   const persistent = c.attrs.has('expires') || c.attrs.has('max-age');

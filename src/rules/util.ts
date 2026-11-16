@@ -38,7 +38,8 @@ const JSONP_PARAM = /[?&](?:callback|jsonp)=/i;
 export const isStaticResource = (ctx: RuleContext): boolean => {
   const u = ctx.target.url ?? '';
   const p = pathOf(u);
-  return STATIC_RE.test(p) || PUBLIC_FILE.test(p) || (!JSONP_PARAM.test(u) && STATIC_CT.test(header(ctx, 'content-type')[0] ?? ''));
+  // JSONP（?callback=）は、拡張子が .js（/api/user.js?callback=）でも、Content-Type が JS でも静的リソースとしない
+  return PUBLIC_FILE.test(p) || (!JSONP_PARAM.test(u) && (STATIC_RE.test(p) || STATIC_CT.test(header(ctx, 'content-type')[0] ?? '')));
 };
 /**
  * 機密応答かどうか（第0章 0.3）。ただし静的リソースと公開ファイルは、sensitive=1 を明示したときだけ機密とする。

@@ -125,7 +125,8 @@ export const corsPreflight: Rule = { id: 'R-05', title: 'プリフライト応�
     if (!ctx.final || (!methods && !maxAge)) return [];      // プリフライト応答だけ
     const out = [];
     const acao = acaoOf(ctx); const sent = ctx.target.sentOrigin;
-    const foreign = acao === '*' || (!!sent && acao === sent && (TEST_ORIGINS.includes(sent) || isLookalike(ctx, sent)));
+    // 許可外の Origin を許可したか：R-01 と同じく、送った Origin（自サイト以外）を反射したか。送った Origin が分からない -i では、テスト値の ACAO
+    const foreign = acao === '*' || (!!acao && !!sent && acao === sent && !isOwnOrigin(ctx, sent)) || (!sent && !!acao && TEST_ORIGINS.includes(acao));
     // Allow-Methods: * は、資格情報（Cookie）を伴わないリクエストではすべてのメソッドを許す（Fetch Standard）。ACAC: true のときは
     // 「*」という名前のメソッドの意味になるので、状態を変えるメソッドの許可にはしない
     const anyMethod = !!methods && /(?:^|,)\s*\*\s*(?:,|$)/.test(methods) && !credOf(ctx);
@@ -183,7 +184,13 @@ export const websocketOrigin: Rule = { id: 'R-09', title: 'WebSocketのOrigin検
     if (s !== 101) return [mk(websocketOrigin, ctx, 'na', 'info', 'na', `HTTP ${s}（WebSocket のエンドポイントではない可能性）`, 'C16 の URL が WebSocket のエンドポイントか確認して採取し直す（拒否なら 401 か 403、受け入れなら 101 が返る）')];
     // 送った Origin が対象と同じホスト（自サイト）なら、101 は正しい動作で、許可外の Origin を拒否するかは分からない
     if (sameHostOrigin(ctx)) return [mk(websocketOrigin, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin} で 101 Switching Protocols（自サイトの Origin。許可外の Origin では試していない）`, 'C16 のとおり許可外の Origin（https://evil.example）で採取し直す')];
-    return ctx.target.sentAuth || ctx.sensitive
+    // -v で Origin を送っていないなら、許可外の Origin を拒否するかは試していない（Origin のないハンドシェイクを受け入れるサーバは多いが、
+    // ブラウザは必ず Origin を送る）。機密かどうかは 0.3 の判定（sensitive=0 の明示を優先し、分からなければ na）に従う
+    if (noOriginSent(ctx)) return [mk(websocketOrigin, ctx, 'na', 'info', 'na', '101 Switching Protocols（Origin を送っていない）', 'C16 のとおり許可外の Origin（https://evil.example）で採取し直す')];
+    // -v で送信ヘッダが見えていて Cookie・Authorization を送っていないなら、認証なしの WebSocket（②）
+    const sensitive = ctx.sensitive ?? (ctx.target.verbose && !ctx.target.sentAuth ? false : undefined);
+    if (sensitive === undefined) return [mk(websocketOrigin, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin ?? '(不明)'} で 101 Switching Protocols（Cookie認証かどうか分からない）`, '認証後に使う WebSocket なら #TARGET に sensitive=1、公開用なら sensitive=0 を付ける')];
+    return sensitive
       ? [mk(websocketOrigin, ctx, 1, 'high', 'fail', `Origin: ${ctx.target.sentOrigin ?? '(不明)'} で 101 Switching Protocols（Cookie認証）`, 'ハンドシェイクで Origin を許可リストと照合し、許可外は 403 で拒否する')]
       : [mk(websocketOrigin, ctx, 2, 'info', 'fail', `Origin: ${ctx.target.sentOrigin ?? '(不明)'} で 101 Switching Protocols（認証なし）`, '公開用のWebSocketなら問題ない。意図どおりか確認する')];
   } };

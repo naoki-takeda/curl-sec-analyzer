@@ -41,7 +41,11 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     // src="/srv/main.js"、url(/srv/…)）には一致させない（直前が URL の文字か、属性・url() の始まり）
     // Node.js（Express の開発用のエラーページ、JSON の stack）の「at 関数 (/パス:行:列)」と node:internal、Go の panic の goroutine、Symfony の例外も見る
     // Node.js のフレームは、ファイル（.js・.ts など）か node: の行と列まであるものだけ（文章の「at Building A (/floor:3:12)」に一致させない）
-    const trace = b.match(/\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
+    // 無名のフレーム（at /app/index.js:7:9）と node: のフレーム（at node:internal/main/run_main_module:28:49）も見る。
+    // Docker でよく使う /app の下のスタックトレースは、行の形で見る：Rails の「/app/…/x.rb:12:in」、Python の「File "/app/main.py", line 41」、
+    // Node.js の無名のフレーム（上の at /app/index.js:7:9）。/app を絶対パスの一覧に入れると、serviceWorker.register("/app/sw.js")・
+    // {"entry":"/app/main.js"}・文章の「/app/index.js」まで②にした（第23回で外した誤検知が戻った）
+    const trace = b.match(/\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|\bat (?:\/|[A-Z]:\\)[^\s()]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
       // 資格情報を含む jdbc: は①だけにする（②にも出すと二重になる。設計書は②を資格情報のない jdbc: に限る）。スタックトレースがあれば、そちらを証跡にする
       ?? (cred ? null : b.match(/\bjdbc:\w+:(?=\S)/));
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
@@ -155,7 +159,7 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     // HTML の 200 は、その機能の画面だと分かるときだけ①②にする。どのパスにも index.html を 200 で返す SPA（Netlify・Vercel・Firebase Hosting・
     // S3＋CloudFront）では、/actuator・/swagger-ui/ も同じ画面になる（E-03② と同じ考え方）。actuator と API 仕様（openapi.json など）の本体は JSON・YAML
     const isHtml = /^\s*text\/html/i.test(header(ctx, 'content-type')[0] ?? '') || /^\s*(?:<!doctype html|<html)/i.test(b);
-    const ui = /swagger-ui|SwaggerUIBundle|redoc|rapidoc|scalar/i.test(b);
+    const ui = /swagger[- ]ui|SwaggerUIBundle|redoc|rapidoc|scalar/i.test(b);   // <title>Swagger UI</title> も
     if (isHtml && !(docSegment(p) !== 'actuator' && ui))
       return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? '' : NO_BODY_REC)];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
@@ -201,7 +205,9 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     const p = path(ctx);
     // サーバ側で動くページ（/download/index.php、/files/list.aspx）と、ディレクトリの index.html は、アップロードしたファイルではないので除く
     const uploadPath = /\/(uploads?|files?|attachments?|media|download)\//i.test(p) && /\/[^/]+\.[a-z0-9]{1,10}$/i.test(p)
-      && !/\.(?:php\d?|phtml|aspx?|ashx|jspx?|do|action|cgi|pl|cfm|shtml)$|\/index\.html?$/i.test(p);
+      && !/\.(?:php\d?|phtml|aspx?|ashx|jspx?|do|action|cgi|pl|cfm|shtml)$|\/index\.html?$/i.test(p)
+      // /download/ の下の .html（/download/windows.html）は、配布物を案内する普通のページ。利用者のアップロード先（uploads・files・attachments・media）だけ HTML を①にする
+      && !/\/download\/(?:[^/]+\/)*[^/]+\.html?$/i.test(p);
     if (!DOWNLOAD_CT.test(ct) && !uploadPath && !cd) return [];   // ファイル配信の応答だけ
     // JSON の API の応答（/api/files/123.json など、パスがアップロード先らしくても）は、ダウンロードではない（DOWNLOAD_CT で +json を除くのと同じ）
     // Content-Type で見る（kind=api を明示したターゲットの SVG・PDF まで除かないため）

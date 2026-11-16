@@ -1,7 +1,7 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
-import { isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
+import { isChunkMarker, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
 import { baseLabel, firstStatus, hostOf, logoutFailed } from '../parser/target';
 import { LOGOUT_FAILED_REC, mk } from './util';
 
@@ -36,7 +36,9 @@ export const cookieEvidence = (c: SetCookie) => {
 /** Cookie ごとの判定を集める。指摘が1件もなければ .ok を1件返す。Set-Cookie がなければ適用外（空配列） */
 function perCookie(rule: Rule, ctx: RuleContext, judge: (c: SetCookie) => Finding | undefined, subset = (_: SetCookie) => true): Finding[] {
   if (ctx.isHttps === false) return [];                // HTTP応答のCookieは C-10 で扱う（MVP）
-  const cs = cookiesOf(ctx).filter(subset);
+  // 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ応答に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない）
+  const all = cookiesOf(ctx); const names = new Set(all.map(c => c.name));
+  const cs = all.filter(c => !(isChunkMarker(c) && names.has(`${c.name}C1`))).filter(subset);
   if (!cs.length) return [];
   const fails = cs.map(judge).filter((f): f is Finding => !!f);
   return fails.length ? fails : [mk(rule, ctx, 'ok', 'info', 'pass', cs.map(cookieName).join(', '), '')];
@@ -159,7 +161,7 @@ export const sessionIdStrength: Rule = { id: 'C-07', title: 'セッションID�
       const uuid = timeBasedUuid(c.value);
       const bits = uuid?.bits ?? estimateBits(c.value);
       return bits < 128 ? mk(sessionIdStrength, ctx, 1, 'high', 'fail', `${cookieEvidence(c)}（推定 約${bits}bit${uuid ? `。時刻から作る UUID v${uuid.version}` : ''}）`, '128bit以上のエントロピーを持つ乱数をセッションIDにする（ASVS 5.0.0 7.2.3）') : undefined;
-    }, c => looksLikeSession(c, ctx.now));
+    }, c => looksLikeSession(c, ctx.now) && !isChunkMarker(c));   // 分割の印（chunks-2）は値を比べない
   } };
 
 const DEFAULT_NAMES = /^(PHPSESSID|JSESSIONID|ASP\.NET_SessionId|connect\.sid|laravel_session|CFID|CFTOKEN)$/i;
@@ -202,6 +204,9 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
     if (logoutFailed(ctx.target)) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const del = ctx.target.responses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
     // 消したのがセッションCookieらしい名前のものか（Spring Security の既定のログアウトは remember-me だけを消し、セッションCookie は残す）
+    // Clear-Site-Data: "cookies"（か "*"）で消すログアウトは、名前を挙げずにすべての Cookie を消す（H-15 と同じ扱い）
+    const csd = ctx.target.responses.flatMap(r => r.headers.get('clear-site-data') ?? []).join(',');
+    if (/"(?:cookies|\*)"/i.test(csd)) return [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', `Clear-Site-Data: ${csd}`, '')];
     const sessionDel = del.filter(c => looksLikeSessionName(c.name));
     if (del.length && !sessionDel.length)
       return [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', `削除したのは ${del.map(c => c.name).join(', ')} だけ（セッションCookieらしい名前ではない）`, 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];

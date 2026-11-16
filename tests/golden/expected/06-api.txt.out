@@ -178,7 +178,7 @@ unauth-users | A-07.2 | medium | fail | キー: [].internal_notes
 H-01 | evaluated | fails=6
 H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
 H-03 | evaluated | fails=3
-H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | evaluated | fails=1
 H-06 | evaluated | fails=5
 H-07 | evaluated | fails=0

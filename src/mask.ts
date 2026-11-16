@@ -96,7 +96,18 @@ const PATH_SEGMENT = /(?<=(?<!\/)\/|(?<!%(?:25)*2[Ff])%(?:25)*2[Ff]|[?#&])(?:[A-
 // - _ で区切った部分ごとに見る（sk_live_<トークン>）。区切りのある読める名前（2026-annual-report-v2）は部分が短いので残る
 const caseToken = (x: string) => x.length >= 20 && (/^[a-z0-9]+$/.test(x) || /^[A-Z0-9]+$/.test(x)) && (x.match(/\d/g) ?? []).length >= 4 && (x.match(/[A-Za-z]/g) ?? []).length >= 4;
 const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
-  (/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || (p.length >= 32 && /\d/.test(p)) || p.split(/[-_]/).some(caseToken));
+  (/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || (p.length >= 32 && /\d/.test(p)) || p.split(/[-_]/).some(caseToken)
+  || p.split(/[-_]/).some(randomLetters));
+/**
+ * 数字のない、大文字・小文字が頻繁に入れ替わる16文字以上の並び（AbCdEfGhIjKlMnOpQrStUv）。英語の名前（GettingStartedGuide）は入れ替わりが少ない
+ * （かたまりの数が長さの半分未満）。数字を求めると、英字だけのトークンを伏せずに残した
+ */
+// 母音の割合でも見る（英語のキャメルケース（getUserByIdAndName）は母音が3〜4割、乱数の英字は2割ほど）。入れ替わりの多さだけで見ると、
+// 短い語をつないだ API のパスまで伏せた
+const randomLetters = (x: string) => x.length >= 16 && /^[A-Za-z]+$/.test(x) && (x.match(/[a-z]+|[A-Z]+/g) ?? []).length / x.length >= 0.4
+  && (x.match(/[aeiou]/gi) ?? []).length / x.length < 0.3;
+/** 語として残してよい接頭辞（application・login・AdminDashboard）。トークンの先頭（QwErTyUiOpAsDfGhJk）は残さない */
+const wordPrefix = (w: string) => w.length <= 20 && (w.match(/[a-z]+|[A-Z]+/g) ?? []).length / w.length < 0.3;
 /** 伏せ方：画面・エクスポート用（先頭の数文字と長さを残す）と、突き合わせのキー用（記録し直しても変わらないよう、何も残さない） */
 interface Hider { value: (v: string) => string; bare: (v: string) => string }
 const SHOW: Hider = { value: v => maskValue(v), bare: v => `…(${v.length} chars)` };
@@ -110,8 +121,12 @@ const maskSegment = (seg: string, h: Hider = SHOW): string => { const asset = AS
   // Base64 の + と = をエンコードしたもの（%2B・%3D）もトークンの一部として見る（%2B で区切ると、後ろのかけらが伏せられずに残った）
   const body = piece.replace(/(?:=|%3[Dd])+$/, ''); const pad = piece.slice(body.length);
   const plain = body.replace(/%2[Bb]/g, '');
-  if (!secretPiece(plain) || (asset && buildAssetName(body))) return piece;
+  // webpack の [name].[contenthash].js（main.3f8a9c2e1b4d5f6a7b8c.js）のハッシュ（20文字以下の16進数）も伏せない
+  // 16進数のハッシュは、語のあとに「.」でつないだもの（main.<ハッシュ>.js）だけ。名前全体が16進数のファイル（3F8A….png）はアップロードした
+  // ファイルのランダムな名前のことがあるので伏せる
+  if (!secretPiece(plain) || (asset && (buildAssetName(body) || (/^[0-9a-f]{8,20}$/i.test(body) && /^[A-Za-z][\w-]*\.[0-9a-f]{8,20}\./i.test(seg))))) return piece;
   const m = body.match(/^([A-Za-z]{3,20}[-_])(.+)$/);
+  if (m && !wordPrefix(m[1].slice(0, -1))) return h.value(body) + pad;
   return m && secretPiece(m[2]) ? m[1] + h.bare(m[2]) + pad : h.value(body) + pad;
 }); };
 /**
@@ -213,7 +228,9 @@ export function maskKey(raw: string): string {
   // デコードするが、%2F（エンコードした /）はそのまま残す（Base64 のトークンの / で分けると、後ろのかけらが残る）
   const dec = (s: string) => { try { return decodeURIComponent(s.replace(/%2F/gi, '%252F')); } catch { return s; } };
   const path = u.pathname.split('/').map(seg => {
-    if (/^\((?:[A-Z]\([^()]*\))+\)$/.test(seg)) return '(*)';                 // ASP.NET の Cookie を使わないセッション
+    // ASP.NET の Cookie を使わないセッション。キーの (*) はそのまま残す（もう一度 maskKey をかけても変わらないように。変わると、この版で出力した
+    // 結果まで「以前の形式」と知らせた）
+    if (seg === '(*)' || /^\((?:[A-Z]\([^()]*\))+\)$/.test(seg)) return '(*)';
     // パス引数（;jsessionid=…）は名前だけを残す。値はセッションIDのことが多い
     const [head, ...params] = seg.split(';');
     return [keySegment(dec(head)), ...params.map(p => keySegment(dec(p.split('=')[0])))].join(';');
@@ -221,7 +238,7 @@ export function maskKey(raw: string): string {
   // パラメータは名前だけを並べ替えて持つ。値は、ページ送り（数字）と並べ替え・表示の切り替え（英字の語）の決まった名前のときだけ残す
   const params = new Map<string, string>();
   for (const [n, v] of u.searchParams) {
-    const name = keySegment(n); if (params.has(name)) continue;
+    const name = keySegment(n); if (!name || params.has(name)) continue;   // 名前のないパラメータ（?=x）は持たない（URLSearchParams は「?&q」の空の名前を読まない）
     const keep = (KEY_NUMBER_NAMES.test(n) && /^\d{1,4}$/.test(v)) || (KEY_WORD_NAMES.test(n) && /^[A-Za-z][A-Za-z_-]{0,19}$/.test(v));
     params.set(name, keep ? `${name}=${v}` : name);
   }
@@ -255,13 +272,33 @@ const KEY_WORD_NAMES = /^(?:sort|order|orderby|dir|lang|locale|hl|tab|view|mode|
 export const clip = (s: string, n: number) => maskText(s).slice(0, n);
 
 /**
- * 手で書いた #META cmd= のコマンド（CSV の「実施コマンド」）。maskText に加えて、curl の認証情報の引数を伏せる：
- * -u・--user（ユーザー:パスワード）、-b・--cookie（Cookie）、-H の Authorization・Cookie・Proxy-Authorization の値。
- * 区切りは空白のほか、#META の値に空白を入れられないので書く「_」も認める
+ * 手で書いた #META cmd= のコマンド（CSV の「実施コマンド」）。maskText に加えて、curl のオプションの値を見る。#META の値に空白を入れられない
+ * ので「_」で区切って書くことが多い。値は、空白か、次のオプション・URL の前の「_」（_- 、_http）までとする（それより先まで伏せると URL が消えた）：
+ * - 認証情報：-u・-U・--user・--proxy-user（ユーザー:パスワード）、-b・--cookie、--oauth2-bearer、-E・--cert（証明書:パスワード）、--pass は値を伏せる。
+ *   値を続けて書いたもの（-ualice:pw）も見る
+ * - 送る本文：-d・--data…・-F・--form は、パラメータとして伏せる（-d password=… の最初の項目は ? や & が前にないので maskText だけでは伏せない）
+ * - ヘッダ：-H・--header は、名前が Authorization・Cookie・Proxy-Authorization か、秘密らしい名前（X-Api-Key、X-Auth-Token）なら値を伏せる
  */
-export const maskCommand = (s: string): string => maskText(s)
-  .replace(/(^|[\s_])(-u|--user|-b|--cookie|--oauth2-bearer)([\s_=]+)(['"]?)[^\s'"]+/g, '$1$2$3$4****')
-  .replace(/((?:Proxy-)?Authorization|Cookie)(:[\s_]*)(?:(Basic|Bearer|Digest|Negotiate|NTLM)([\s_]+))?[^\s'"]+/gi, (_, h: string, c: string, scheme?: string, sp?: string) => `${h}${c}${scheme ? `${scheme}${sp}` : ''}****`);
+// 値の終わり：空白、「・」（複数のコマンドのつなぎ）、URL の前の「_」、次のオプションの前の「_」（_--long、_-sS のような4文字までの短いオプション）。
+// 「_-」だけで止めると、base64url のトークンや Cookie の値の中の「_-」で止まり、残りが伏せられずに出た。引用符で始まる値は閉じる引用符まで
+const CMD_VALUE = String.raw`"[^"]*"?|'[^']*'?|(?:(?![\s・]|_(?:https?:|--[a-z]|-[A-Za-z]{1,4}(?=[_\s・]|$))).)+`;
+const CMD_OPTION = new RegExp(String.raw`(^|[\s_・])(--[a-z][\w-]*|-[A-Za-z])(?:([\s_=]+)(?!-)|(?=[^\s_-]))(${CMD_VALUE})`, 'g');
+const CRED_OPTIONS = new Set(['-u', '-U', '--user', '--proxy-user', '-b', '--cookie', '--oauth2-bearer', '-E', '--cert', '--pass', '--proxy-pass']);
+const DATA_OPTIONS = new Set(['-d', '--data', '--data-raw', '--data-binary', '--data-ascii', '--data-urlencode', '-F', '--form', '--form-string']);
+const HEADER_OPTIONS = new Set(['-H', '--header', '--proxy-header']);
+// オプションの値を先に伏せてから、全体に maskText をかける（先に maskText をかけると、伏せた値の「…(N chars)」の空白で値が切れた）。
+// 値を囲む引用符は残す
+export const maskCommand = (s: string): string => maskText(s.replace(CMD_OPTION, (all: string, pre: string, opt: string, sep: string | undefined, v: string) => {
+  const head = `${pre}${opt}${sep ?? ''}`;
+  const q = /^["']/.test(v) ? v[0] : ''; const inner = q ? v.slice(1).replace(new RegExp(`${q}$`), '') : v; const close = q && v.endsWith(q) && v.length > 1 ? q : '';
+  if (CRED_OPTIONS.has(opt)) return `${head}${q}****${close}`;
+  if (DATA_OPTIONS.has(opt)) return `${head}${q}${maskText(`?${inner}`).slice(1)}${close}`;
+  if (HEADER_OPTIONS.has(opt)) {
+    const m = inner.match(/^([\w-]+)(:[\s_]*)(?:(Basic|Bearer|Digest|Negotiate|NTLM)([\s_]+))?/i);
+    if (m && (/^(?:(?:proxy-)?authorization|cookie)$/i.test(m[1]) || isSecretParamName(m[1]))) return `${head}${q}${m[0]}****${close}`;
+  }
+  return all;
+}));
 
 // #PROBE の head は判定にだけ使い、表示・エクスポートにはパターン名だけを出す。
 // [パターン名, 判定する項目, 対象パス, 先頭64バイトの目安]（ツール設計1「プローブの判定パターン」）

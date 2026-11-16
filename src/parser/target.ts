@@ -58,6 +58,26 @@ const upgradedToHttps = (t: Target): boolean => {
  * そのターゲットの URL 自身の応答から始まるチェーン。http から https に転送されたチェーン（HAR はターゲットの URL を https にする。
  * curl は upgradedToHttps）は、最初の https のホップから始める（apex の「自身の応答」や、E-05・E-11 の「そのURLの応答」に http の転送を使わないため）
  */
+const trimPath = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+/** 転送先が同じページ（同じホストで、パスが末尾の / の違いだけ）か。Django の APPEND_SLASH、FastAPI の redirect_slashes、Apache の DirectorySlash など */
+export function sameDocument(r: HttpResponse, base?: string): boolean {
+  try {
+    const from = new URL(r.url ?? base ?? ''), to = new URL(r.headers.get('location')?.[0] ?? '', from);
+    // クエリも同じもの（/login?next=… から /login、/redirect?url=… から /redirect?error=… は別のページへの転送）
+    return to.host === from.host && trimPath(to.pathname) === trimPath(from.pathname) && to.search === from.search;
+  } catch { return false; }
+}
+
+/**
+ * その URL の応答のうち、同じページへの転送をたどった先（A-01・A-08・A-11 のステータス、C-12①）。
+ * 末尾の / への 307 のあとの 200 を、転送の 307 で判定しないため。転送先を採取していない（-L なし）ときは unfollowed
+ */
+export function sameDocumentHop(t: Target): { hop?: HttpResponse; unfollowed: boolean } {
+  const c = ownChain(t); let i = 0;
+  while (c[i]?.kind === 'redirect' && sameDocument(c[i], t.url)) { if (!c[i + 1]) return { hop: c[i], unfollowed: true }; i++; }
+  return { hop: c[i], unfollowed: false };
+}
+
 export function ownChain(t: Target): HttpResponse[] {
   const c = chainOf(t);
   if (!/^https:/i.test(t.url ?? '') && !upgradedToHttps(t)) return c;

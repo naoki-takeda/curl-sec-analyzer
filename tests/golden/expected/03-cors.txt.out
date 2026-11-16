@@ -11,6 +11,7 @@ websocket | https://app.example.com/ws | key=websocket | responses=1
 ## warnings
 
 ## findings
+api.example.com | T-09.na | info | na | 旧バージョンの接続可否が分からない（#TLSPROBE がない。合意したバージョンだけでは分からない）
 api.example.com | T-10.na | info | na | 合意した暗号（TLSv1.3 / TLS_AES_128_GCM_SHA256）だけでは、弱い暗号を受け入れるか・鍵と署名は分からない
 cors-http-origin | R-01.1 | high | fail | Origin: http://api.example.com → ACAO: http://api.example.com / ACAC: true
 cors-http-origin | R-02.na | info | na | Origin: http://api.example.com（null では試していない）
@@ -100,7 +101,7 @@ T-05 | missing-input | fails=0 | 必要なラベル: （一般）, http
 T-06 | missing-input | fails=0 | 必要なラベル: open-redirect
 T-07 | missing-input | fails=0 | 必要なラベル: host-inj
 T-08 | missing-input | fails=0 | 必要なラベル: crlf
-T-09 | missing-input | fails=0 | 必要なラベル: tls
+T-09 | missing-input | fails=0 | C12（プロトコルごとの接続の確認）を採取する
 T-10 | missing-input | fails=0 | C23（暗号ごとの接続の確認）と C11（証明書の取得）を採取する
 T-11 | missing-input | fails=0 | 必要なラベル: tls
 T-12 | missing-input | fails=0 | 必要なラベル: （一般）

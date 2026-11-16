@@ -1,7 +1,7 @@
 // rules/transport.ts：第4章 メソッド・転送・ヘッダインジェクション（T-01、T-04〜T-08、T-12。TLSは rules/hostRules.ts）
-import type { Rule } from '../model';
+import type { HttpResponse, Rule } from '../model';
 import { NO_BODY_REC, mk } from './util';
-import { baseLabel } from '../parser/target';
+import { baseLabel, sameDocument } from '../parser/target';
 
 export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイレクト', appliesTo: 'any', scope: 'target',
   basis: ['MDN HTTP Observatory'],
@@ -107,9 +107,21 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
     const refresh = ctx.target.responses.flatMap(r => r.headers.get('refresh') ?? []).map(v => v.match(/url\s*=\s*['"]?([^'"\s;]+)/i)?.[1] ?? '').find(evil);
     if (loc || refresh) return [mk(openRedirect, ctx, 1, 'medium', 'fail', loc ? `Location: ${loc}` : `Refresh: url=${refresh}`, '転送先は許可リスト（または相対パス）に限る')];
     // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）
-    const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location')) || r.headers.has('refresh'));
+    // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面への転送（next= を持ち越した /login?next=…evil.example。ログインのあとで使う）と、
+    // 同じページへの転送（末尾の /）は、転送先の検証を試していないので na
+    const tested = (r: HttpResponse) => {
+      // 試していない転送：テスト値を持ち越したログイン画面への転送（/login?next=https://evil.example）と、同じページへの転送。
+      // /home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、転送先を検証して止めたので合格
+      const loc = r.headers.get('location')?.[0] ?? '';
+      let path = ''; try { path = new URL(loc, r.url ?? ctx.target.url ?? 'https://x.invalid/').pathname; } catch { /* 解釈できない */ }
+      const carriedToLogin = /evil\.example/i.test(loc) && /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login\.php)\/?$/i.test(path);
+      return !carriedToLogin && !sameDocument(r, ctx.target.url);
+    };
+    const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location') && tested(r)) || r.headers.has('refresh'));
     return redirected ? [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')]
-      : [mk(openRedirect, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（転送しなかった。転送先を検証しているかは分からない）`, OPEN_REDIRECT_REC)];
+      : [mk(openRedirect, ctx, 'na', 'info', 'na', ctx.target.responses.some(r => r.status >= 300 && r.status < 400)
+        ? `HTTP ${ctx.final.status}（ログイン画面か同じページへの転送。転送先を検証しているかは分からない）`
+        : `HTTP ${ctx.final.status}（転送しなかった。転送先を検証しているかは分からない）`, OPEN_REDIRECT_REC)];
   } };
 
 export const httpVersion: Rule = { id: 'T-12', title: 'HTTP/2・HTTP/3', appliesTo: 'any', scope: 'target',
