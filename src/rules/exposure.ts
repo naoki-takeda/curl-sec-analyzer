@@ -1,6 +1,6 @@
 // rules/exposure.ts：第5章 エラー・情報露出（E-01、E-02、E-04〜E-06、E-11、E-13）
 import type { Rule, RuleContext } from '../model';
-import { probePattern } from '../mask';
+import { clip, probePattern } from '../mask';
 import { header, mk } from './util';
 
 const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : undefined);
@@ -28,10 +28,10 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     if (CREDENTIALS.some(re => re.test(b)))
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
     const trace = b.match(/Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|ORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/);
-    if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', trace[0].slice(0, 120), 'スタックトレース・SQL文・絶対パスを応答に含めない'));
+    if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・絶対パスを応答に含めない'));
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る
     const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Ruby on Rails|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|Express<\/title>|<title>Error \d{3}[^<]*<\/title>/i);
-    if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', page[0].slice(0, 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
+    if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', clip(page[0], 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
     return out.length ? out : [mk(errorDetail, ctx, 'ok', 'info', 'pass', 'エラーの詳細らしき記述なし', '')];
   } };
 
@@ -70,18 +70,23 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     return [];
   } };
 
+// パスの区切り（/）で区切った1つの部分として一致させる。部分一致だと /category/actuator-kits や /blog/swagger-tips の
+// ような普通のページまで E-05（①は高）にしてしまう
+const DOC_SEGMENT = /\/(actuator|swagger-ui(?:\.html)?|swagger(?:\.json|\.ya?ml)?|openapi\.(?:json|ya?ml)|api-docs|graphql)(?=\/|$)/i;
+const docSegment = (p: string) => p.match(DOC_SEGMENT)?.[1].toLowerCase();
+
 export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API8・API9'],
   run(ctx) {
     const p = path(ctx); const f = ctx.final;
-    if (!f || !/\/(actuator|swagger-ui|swagger|openapi\.(json|ya?ml)|v[23]\/api-docs|api-docs|graphql)\b/i.test(p)) return [];
+    if (!f || !docSegment(p)) return [];
     const ok200 = f.status >= 200 && f.status < 300;
     const b = body(ctx) ?? '';
-    if (/\/graphql/i.test(p)) return ok200 && /"__schema"/.test(b)
+    if (docSegment(p) === 'graphql') return ok200 && /"__schema"/.test(b)
       ? [mk(apiDocsAdmin, ctx, 3, 'medium', 'fail', 'introspection の応答に __schema がある', '本番では introspection を無効にする')]
       : [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
-    if (/\/actuator/i.test(p)) return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
+    if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
     return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}）`, 'API仕様は本番で無効にするか、認証の内側に置く')];
   } };
 
@@ -137,6 +142,6 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     const ref = header(ctx, 'sourcemap')[0] ?? header(ctx, 'x-sourcemap')[0] ?? body(ctx)?.match(/\/[/*]#\s*sourceMappingURL=(\S+)/)?.[1];
     const isJs = /javascript|ecmascript/i.test(header(ctx, 'content-type')[0] ?? '') || /\.m?js(?:[?#]|$)/.test(ctx.target.url ?? '');
     if (!isJs && !ref) return [];
-    return ref ? [mk(sourceMap, ctx, 2, 'low', 'fail', `参照: ${ref.slice(0, 120)}`, '本番ビルドでは sourceMappingURL を出さない。.map を C13 のパス一覧に追加して取得できるか確認する')]
+    return ref ? [mk(sourceMap, ctx, 2, 'low', 'fail', `参照: ${clip(ref, 120)}`, '本番ビルドでは sourceMappingURL を出さない。.map を C13 のパス一覧に追加して取得できるか確認する')]
                : [mk(sourceMap, ctx, 'ok', 'info', 'pass', 'ソースマップへの参照なし', '')];
   } };

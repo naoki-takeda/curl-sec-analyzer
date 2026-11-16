@@ -1,6 +1,7 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、#META、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
 import { uniqueLabels } from './target';
+import { splitSetCookie } from './setCookie';
 
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
 const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
@@ -37,6 +38,7 @@ export function parseInput(input: string): ParseResult {
   let cur: HttpResponse | null = null, inHeaders = false, last = '', inOpenssl = false;
   let unparsed = 0; const emptyTargets: string[] = [];
   let json: string[] | null = null;                   // C10（%{header_json}）の読み取り中
+  let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
   const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; };
   const inBody = () => cur !== null && !inHeaders;
   const flush = () => { if (hasData(t)) targets.push(t); else if (t.label !== 'default') emptyTargets.push(t.label); };
@@ -44,15 +46,22 @@ export function parseInput(input: string): ParseResult {
   for (let line of input.replace(/\r\n?/g, '\n').split('\n')) {
     const mk = line.match(MARKER_RE);
     if (mk) {                                          // マーカー行は必ず応答を閉じる
-      close(); inOpenssl = false; if (json) { unparsed += json.length; json = null; }
+      close(); inOpenssl = false; vBody = false; if (json) { unparsed += json.length; json = null; }
       const [, tag, rest] = mk; const a = attrs(rest);
       if (tag === 'TARGET') { flush(); t = newTarget(a); }
-      else if (tag === 'META') Object.assign(t.meta, a);
+      else if (tag === 'META') {
+        Object.assign(t.meta, a);
+        // %{header_json} のあとに出した response_code（-w '%{header_json}' のあとの #META）も、その応答のステータスにする
+        if (a.response_code) for (const r of t.responses) if (r.status === 0 && r.reason === 'header_json') r.status = Number(a.response_code) || 0;
+      }
       else if (tag === 'PROBE') t.probes.push({ path: a.path ?? '', code: +a.code, size: +a.size, contentType: a.ct ?? '', headB64: a.head ?? '' });
       else if (tag === 'CIPHERPROBE') t.cipherProbes.push({ cipher: a.c ?? '', result: probeResult(a.ok) });
       else t.tlsProbes.push({ version: a.v ?? '', result: probeResult(a.ok) });
       continue;
     }
+    // -v で本文も出力した（-o /dev/null のない）場合、本文の行（ドキュメントの例の「HTTP/1.1 200 OK」、「* 」「> 」で始まる行など）を
+    // 応答・情報行・送信ヘッダとして読まない。-L の次の応答は、curl が「< HTTP/」の形で出す
+    if (t.verbose && vBody) { if (/^< HTTP\//.test(line)) vBody = false; else continue; }
     if (!inBody() && OPENSSL_START.test(line)) { close(); inOpenssl = true; }
     if (inOpenssl && !STATUS_RE.test(line) && !/^[*<>] /.test(line)) { t.openssl.push(line); continue; }
     inOpenssl = false;
@@ -66,7 +75,7 @@ export function parseInput(input: string): ParseResult {
         continue;
       }
       if (/^>\s*$/.test(line)) continue;               // 送信ヘッダの終端
-      if (/^<\s*$/.test(line)) { close(); continue; }  // 受信ヘッダの終端。-v では本文を解析しない
+      if (/^<\s*$/.test(line)) { close(); vBody = true; continue; }  // 受信ヘッダの終端。-v では本文を解析しない
       if (line.startsWith('< ')) line = line.slice(2);
       else if (/^[{}] \[/.test(line)) continue;
     }
@@ -79,7 +88,8 @@ export function parseInput(input: string): ParseResult {
     if (!cur && !t.verbose && (json || (!t.responses.length && /^\s*\{\s*"[\w-]+"\s*:\s*\[/.test(line)))) {
       json = [...(json ?? []), line];
       const r = headerJson(json.join('\n'), t.meta.response_code);
-      if (r) { t.responses.push(r); json = null; } else if (json.length > 500) { unparsed += json.length; json = null; }
+      // null：JSON としては読めたが、ヘッダの形ではない（curl -s で出力した API の本文など）。応答にせず、解析できない行として警告する
+      if (r) { t.responses.push(r); json = null; } else if (r === null || json.length > 500) { unparsed += json.length; json = null; }
       continue;
     }
     if (!cur) { if (line.trim()) unparsed++; continue; }
@@ -92,27 +102,40 @@ export function parseInput(input: string): ParseResult {
     if (/^[ \t]/.test(line) && last) { const v = cur.headers.get(last)!; v[v.length - 1] = `${v[v.length - 1]} ${line.trim()}`.trim(); continue; }  // obs-fold
     const i = line.indexOf(':'); if (i <= 0) continue;
     const raw = line.slice(0, i).trim(); last = raw.toLowerCase(); cur.rawNames.push(raw);
-    (cur.headers.get(last) ?? cur.headers.set(last, []).get(last)!).push(line.slice(i + 1).trim());
+    const val = line.slice(i + 1).trim();
+    (cur.headers.get(last) ?? cur.headers.set(last, []).get(last)!).push(...(last === 'set-cookie' ? splitSetCookie(val) : [val]));
   }
   close(); flush();
-  for (const tg of targets) for (const r of tg.responses) {
+  for (const tg of targets) tg.responses.forEach((r, i) => {
+    // CONNECT（プロキシ）の応答：理由句が「Connection established」のもの。理由句が違っても、本文のない 2xx のあとに応答が続くなら、それはプロキシの応答
+    const proxyReply = r.status >= 200 && r.status < 300 && i < tg.responses.length - 1 && !r.body?.trim() && r.reason !== 'header_json';
     if (r.status > 0 && r.status < 200) r.kind = 'informational';
-    else if (r.status === 200 && /connection established/i.test(r.reason ?? '')) r.kind = 'connect';
+    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '')) || proxyReply) r.kind = 'connect';
     else if (r.status >= 300 && r.status < 400 && r.headers.has('location')) r.kind = 'redirect';
     if (r.body !== undefined && !r.body.trim()) r.body = undefined;
-  }
+  });
   const dup = uniqueLabels(targets);
   return { targets, warnings: [...dup, ...collectWarnings(targets, unparsed, emptyTargets)] };
 }
 
-/** curl -w '%{header_json}' の出力。ステータスは #META response_code（C5の -w）から取る。なければ0（不明） */
-function headerJson(text: string, code?: string): HttpResponse | undefined {
+// %{header_json} にほぼ必ずある応答ヘッダ。どれもない JSON（{"tags":["a"]} など）はヘッダとみなさない
+const TYPICAL_HEADER = /^(?:date|content-type|content-length|server|cache-control|set-cookie|strict-transport-security|vary|etag|last-modified|location|expires|age|via|connection|transfer-encoding)$/;
+/**
+ * curl -w '%{header_json}' の出力。ステータスは #META response_code（C5の -w）から取る。なければ0（不明。あとの #META で補う）。
+ * undefined：まだ JSON として読めない（続きの行を待つ）。
+ * null：JSON だがヘッダの形ではない（名前がヘッダに使える文字、値が文字列の配列、よくあるヘッダを含む、のどれかを満たさない）
+ */
+function headerJson(text: string, code?: string): HttpResponse | null | undefined {
   let obj: unknown;
   try { obj = JSON.parse(text); } catch { return undefined; }
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return undefined;
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const entries = Object.entries(obj as Record<string, unknown>);
+  const isHeaders = entries.some(([k]) => TYPICAL_HEADER.test(k.toLowerCase()))
+    && entries.every(([k, v]) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(k) && Array.isArray(v) && v.every(x => typeof x === 'string'));
+  if (!isHeaders) return null;
   const headers = new Map<string, string[]>();
-  for (const [k, v] of Object.entries(obj as Record<string, unknown>))
-    headers.set(k.toLowerCase(), (Array.isArray(v) ? v : [v]).map(String));
+  for (const [k, v] of entries)
+    headers.set(k.toLowerCase(), k.toLowerCase() === 'set-cookie' ? (v as string[]).flatMap(splitSetCookie) : (v as string[]));
   return { httpVersion: '', status: Number(code) || 0, reason: 'header_json', headers, rawNames: [...headers.keys()], kind: 'final' };
 }
 

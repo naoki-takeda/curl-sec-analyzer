@@ -61,6 +61,8 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
     if (!ctx.target.label.startsWith('unauth-')) return [];   // ①②は認証情報を付けずに送ったターゲット（unauth-*）だけ
     if (ctx.target.sentAuth) return [mk(unauthAccess, ctx, 'na', 'info', 'na', '認証情報（Cookie・Authorization）を送っている', 'unauth-* は認証情報を付けずに採取する')];
     const s = status(ctx);
+    // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
+    if (!s) return [mk(unauthAccess, ctx, 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     if (s >= 200 && s < 300) return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
     if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${ctx.chain[0]?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
     if (s === 401 && !www) return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', 'HTTP 401（WWW-Authenticate なし）', '')];

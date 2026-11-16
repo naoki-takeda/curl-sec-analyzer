@@ -1,6 +1,6 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, finalResponse, isHttps } from '../parser/target';
+import { capturedAt, chainOf, finalResponse, isHttps } from '../parser/target';
 import { isDeletion, looksLikeSession, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { hstsDirective, parseCsp } from './util';
@@ -51,7 +51,12 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
     const samples = x.withPrefix('session-sample-');
     if (samples.length < 2) return na(sessionPredictable, 'session-sample-*', 'session-sample-1, session-sample-2（2つ以上）');
     const byName = new Map<string, string[]>();
-    for (const t of samples) for (const c of sessionCookies(t)) byName.set(c.name, [...(byName.get(c.name) ?? []), c.value]);
+    // サンプルごとに、名前ごとの値は1つ（最後のもの）にする。同じ応答に同じ Set-Cookie が2つある場合や、-L の転送で同じ Cookie を
+    // 再び送る場合に、1つのサンプルの値を2回数えて「同じ値が繰り返し発行された」にしないため
+    for (const t of samples) {
+      const last = new Map(sessionCookies(t).map(c => [c.name, c.value]));
+      for (const [name, value] of last) byName.set(name, [...(byName.get(name) ?? []), value]);
+    }
     const out: Finding[] = [];
     for (const [name, vals] of byName) {
       if (vals.length < 2) continue;
@@ -70,6 +75,8 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     const f = finalResponse(after);
     if (!f) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', '応答がない', '')];
     const first = after.responses.find(r => r.kind !== 'informational' && r.kind !== 'connect')!;
+    // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
+    if (!first.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     return first.status >= 200 && first.status < 300
       ? [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', `旧Cookieでの認証後ページが HTTP ${first.status}`, 'ログアウト時にサーバ側のセッションを破棄する')]
       : [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `旧Cookieでの認証後ページが HTTP ${first.status}`, '')];
@@ -82,7 +89,8 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
     if (!preload) return [];                                   // preload を付けていなければ適用外
     const apex = x.byLabel('apex');
     if (!apex) return na(apexHsts, 'apex', 'apex（https://apexドメイン/）');
-    const v = finalResponse(apex)?.headers.get('strict-transport-security')?.[0];
+    // apex 自身の応答（転送の最初のホップ）で見る。-L や HAR で www への転送をたどった最後の応答は www のもの
+    const v = chainOf(apex)[0]?.headers.get('strict-transport-security')?.[0];
     return v ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };

@@ -6,6 +6,7 @@ const EXACT: Record<string, string> = {
   "Content-Security-Policy: frame-ancestors 'none'（旧ブラウザ向けに X-Frame-Options: DENY も併用）": "Content-Security-Policy: frame-ancestors 'none' (add X-Frame-Options: DENY for older browsers)",
   "frame-ancestors は 'none' か 'self'（埋め込みを許す相手は個別のオリジン）にする": "Set frame-ancestors to 'none' or 'self' (list individual origins if embedding must be allowed)",
   '#TARGET に url= を付ける': 'Add url= to the #TARGET line',
+  '-w に #META response_code=%{response_code} を加えて採取する': 'Capture again with #META response_code=%{response_code} added to -w',
   '確認できたら強制モードの Content-Security-Policy に切り替える': 'Once verified, switch to an enforced Content-Security-Policy',
   '静的リソースにもキャッシュ方針（max-age など）を明示する': 'Set an explicit caching policy (such as max-age) for static resources too',
   '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける': 'Add sensitive=1 to #TARGET for pages behind login and APIs that return personal data',

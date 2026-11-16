@@ -2,7 +2,7 @@
 // - request.postData（ログインのパスワードなど）は読まない。本文は HTML と JSON の先頭64KBだけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
-import { looksLikeSession, parseSetCookie } from './setCookie';
+import { looksLikeSession, parseSetCookie, splitSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
 import { baseLabel } from './target';
 
@@ -44,7 +44,7 @@ function toResponse(e: HarEntry): HttpResponse {
     const k = h.name.toLowerCase(); rawNames.push(h.name);
     // 1つのヘッダに複数の Set-Cookie を改行でつないで書き出すものがある。1件ずつに分けないと、2つ目以降の Cookie を判定せず、
     // 証跡（値は先頭の name=value だけをマスクする）に生の値が出てしまう
-    const vals = k === 'set-cookie' ? String(h.value ?? '').split(/\r?\n/).filter(v => v.trim()) : [String(h.value ?? '')];
+    const vals = k === 'set-cookie' ? String(h.value ?? '').split(/\r?\n/).flatMap(splitSetCookie) : [String(h.value ?? '')];
     (headers.get(k) ?? headers.set(k, []).get(k)!).push(...vals);
   }
   if (e.response.redirectURL && !headers.has('location') && e.response.status >= 300 && e.response.status < 400) headers.set('location', [e.response.redirectURL]);
@@ -73,14 +73,18 @@ export function importHar(text: string): HarImport {
     if (used.has(i)) return;
     used.add(i);
     const hops = [e];
-    let cur = e;
+    let cur = e, ci = i;
     while (cur.response.status >= 300 && cur.response.status < 400) {          // Location の先のエントリをつなぐ
       const loc = cur.response.redirectURL || cur.response.headers?.find(h => h.name.toLowerCase() === 'location')?.value;
       if (!loc) break;
-      let next: string; try { next = new URL(loc, cur.request.url).href; } catch { break; }
-      const j = entries.findIndex((x, k) => k > entries.indexOf(cur) && !used.has(k) && x.request.url === next);
+      let next: URL; try { next = new URL(loc, cur.request.url); } catch { break; }
+      // 別のホスト（IdP、apex から www など）への転送先はつながない。つなぐと、対象外のホストの応答を、選んだホストのURLの結果として判定してしまう。
+      // 同じホストの http から https への転送はつなぐ
+      if (next.hostname !== new URL(cur.request.url).hostname) break;
+      const from = ci;
+      const j = entries.findIndex((x, k) => k > from && !used.has(k) && x.request.url === next.href);
       if (j < 0) break;
-      used.add(j); cur = entries[j]; hops.push(cur);
+      used.add(j); cur = entries[j]; ci = j; hops.push(cur);
     }
     const reqH = (e.request.headers ?? []).map(h => h.name.toLowerCase());
     const sentAuth = reqH.includes('cookie') || reqH.includes('authorization');

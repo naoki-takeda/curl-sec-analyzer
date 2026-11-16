@@ -3,6 +3,7 @@ import type { Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
 import { mk } from './util';
+import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
 export interface Tag { name: string; attrs: Map<string, string>; evidence: string; index: number; }
@@ -15,7 +16,7 @@ export interface Tag { name: string; attrs: Map<string, string>; evidence: strin
 const SHOWN_ATTRS = new Set(['src', 'href', 'action', 'data', 'rel', 'method', 'type', 'name', 'content', 'integrity', 'crossorigin', 'as']);
 export function tagEvidence(name: string, attrs: Map<string, string>): string {
   const parts = [...attrs].map(([k, v]) => (SHOWN_ATTRS.has(k) ? `${k}="${v}"` : v === '' ? k : `${k}="…"`));
-  return `<${[name, ...parts].join(' ')}>`.slice(0, 200);
+  return clip(`<${[name, ...parts].join(' ')}>`, 200);
 }
 
 /** 開始タグを列挙する（属性名は小文字） */
@@ -122,7 +123,7 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     const out = [];
     for (const [name, re] of SECRETS) if (re.test(html)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
     const iu = html.match(INTERNAL_URL)?.[0];
-    if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${iu.slice(0, 120)}`, '本番のHTMLに内部URLを残さない'));
+    if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
     // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す
     const dc = devCommentWord(html);
     if (dc) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `開発用コメント（「${dc}」を含む。中身は表示しない）`, 'ビルド時にコメントを削除する'));

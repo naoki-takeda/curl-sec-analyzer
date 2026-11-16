@@ -6,12 +6,18 @@ import { baseLabel } from '../parser/target';
 import { htmlBody, mixedContent } from './html';
 import { type CspIssue, evaluateCsp, issueEvidence } from './csp';
 
+/**
+ * 判定に使う HSTS ヘッダ。apex は、apex 自身の応答（転送の最初のホップ）で見る。
+ * -L や HAR で www への転送をたどった最後の応答は www のもの（H-02「apex自身もHSTSを返す」）
+ */
+const hstsOf = (ctx: RuleContext) => (baseLabel(ctx.target.label) === 'apex' ? ctx.chain[0] : ctx.final)?.headers.get('strict-transport-security')?.[0];
+
 export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS', 'MDN HTTP Observatory'],
   run(ctx) {
     if (ctx.isHttps === false) return [];               // http のターゲットは適用外（T-04 で評価）
     if (ctx.isHttps === undefined || !ctx.final) return [mk(hsts, ctx, 'na', 'info', 'na', 'HTTPSかどうか判定できない', '#TARGET に url= を付ける')];
-    const v = header(ctx, 'strict-transport-security')[0];
+    const v = hstsOf(ctx);
     const rec = 'Strict-Transport-Security: max-age=63072000; includeSubDomains';
     if (!v) return [mk(hsts, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec, { obsId: 'hsts-not-implemented', score: -20 })];
     const age = Number(v.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? NaN);
@@ -97,7 +103,7 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
   basis: ['hstspreload.org', 'MDN'],
   run(ctx) {
     if (ctx.isHttps === false) return [];
-    const v = header(ctx, 'strict-transport-security')[0];
+    const v = hstsOf(ctx);
     if (!ctx.final || !v) return [mk(hstsPreload, ctx, 'na', 'info', 'na', 'HSTSがない（H-01で判定）', '')];
     const age = Number(v.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? 0);
     if (!hstsDirective(v, 'preload')) return [mk(hstsPreload, ctx, 2, 'info', 'fail', v, 'preload リストへの登録を検討する（max-age 31536000 以上＋includeSubDomains＋preload）')];
@@ -105,13 +111,29 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
     return [mk(hstsPreload, ctx, 'ok', 'info', 'pass', v, '')];
   } };
 
+/**
+ * 複数の強制モードのポリシーは、すべてを満たすものだけが許される（制限が重なる）。あるポリシーにないディレクティブ（MISSING_DIRECTIVES）や、
+ * default-src へのフォールバックの指摘は、別のポリシーがそのディレクティブ（スクリプト・object は default-src でも可）を指定していれば出さない。
+ * 例：厳しいポリシーとは別に frame-ancestors だけのヘッダがあっても、H-04②・H-05① にしない。別のポリシー自身の問題は、そのポリシーの評価で出る
+ */
+function coveredByOther(i: CspIssue, others: Map<string, string[]>[]): boolean {
+  if (i.type !== 'MISSING_DIRECTIVES' && i.directive !== 'default-src') return false;
+  const d = i.item === 'H-04' ? 'script-src' : i.item === 'H-05' ? (i.condition === 1 ? 'object-src' : 'base-uri') : undefined;
+  return !!d && others.some(p => p.has(d) || (d !== 'base-uri' && p.has('default-src')));
+}
+
 /** 強制モードの各ポリシーを csp_evaluator で評価し、指定した項目の指摘だけを返す（同じ条件・ディレクティブ・値は1件にまとめる） */
 function cspIssues(ctx: RuleContext, item: CspIssue['item']): CspIssue[] {
   const seen = new Set<string>(); const out: CspIssue[] = [];
-  for (const v of header(ctx, 'content-security-policy')) for (const i of evaluateCsp(v)) {
-    const k = `${i.item}|${i.condition}|${i.directive}|${i.value ?? ''}|${i.type}`;
-    if (i.item === item && !seen.has(k)) { seen.add(k); out.push(i); }
-  }
+  const policies = header(ctx, 'content-security-policy');
+  const parsed = policies.map(parseCsp);
+  policies.forEach((v, n) => {
+    const others = parsed.filter((_, m) => m !== n);
+    for (const i of evaluateCsp(v)) {
+      const k = `${i.item}|${i.condition}|${i.directive}|${i.value ?? ''}|${i.type}`;
+      if (i.item === item && !seen.has(k) && !coveredByOther(i, others)) { seen.add(k); out.push(i); }
+    }
+  });
   return out;
 }
 const CSP_REC: Record<number, string> = {
