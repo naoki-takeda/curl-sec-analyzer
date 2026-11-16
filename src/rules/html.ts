@@ -176,12 +176,20 @@ const notSecretValue = (key: string, v: string): boolean =>
   v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v);
 // Google の API キー（AIza…）は、Maps・Firebase などブラウザから使う前提のキー（HTTP リファラーや API の制限で守る）なので、HTML にあっても①にしない。
 // Stripe の公開キー（pk_live_…）、PaymentIntent の client_secret も同じ（A-07 と同じ isPublicClientValue）
+/** 公開を前提にした JWT（ペイロードの role が anon。Supabase の anon key） */
+const publicJwt = (payload: string): boolean => {
+  try {
+    const j = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '='))) as { role?: unknown };
+    return j.role === 'anon';
+  } catch { return false; }
+};
 const SECRETS: [string, { test(s: string): boolean }][] = [
   ['AWSアクセスキー', /\bAKIA[0-9A-Z]{16}\b/],
   ['秘密鍵', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
   ['Slackトークン', /\bxox[baprs]-[0-9A-Za-z-]{10,}/],
   ['GitHubトークン', /\bgh[pousr]_[0-9A-Za-z]{36,}\b/],
-  ['JWT', /\beyJ[\w-]{10,}\.eyJ[\w-]{10,}\.[\w-]{10,}/],
+  // ブラウザに渡す前提の JWT（Supabase の anon key。ペイロードの role が anon）は除く（行レベルのセキュリティで守る公開のキー）
+  ['JWT', { test: (s: string) => [...s.matchAll(/\beyJ[\w-]{10,}\.(eyJ[\w-]{10,})\.[\w-]{10,}/g)].some(m => !publicJwt(m[1])) }],
   ['キー・シークレットの代入', { test: (s: string) => [...s.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2])) }],
 ];
 // ホスト名の最後で区切る（edge01.local.example-cdn.net の .local. には一致させない）。複数のラベルのホスト名（db.prod.internal）も含める
@@ -194,7 +202,12 @@ function internalUrl(html: string, own?: string): string | undefined {
   }
   return undefined;
 }
-const DEV_WORD = /TODO|FIXME|XXX|HACK|debug|password|パスワード|本番|staging/i;
+// 英字の境目で照合する（「_」は境目にする。debug_mode・staging_db も見る。\b は「_」を語の一部とみなした）。password・パスワードは、
+// 画面の部品の説明（<!-- Password field -->、パスワード欄）を除く
+// 開発用の語は大文字・小文字を区別して、後ろに小文字が続かないもの（debugMode・debug_mode は見る。/i で照合すると debugMode の M も
+// 小文字の扱いになって見逃した）
+const DEV_CODE_WORD = /(?<![A-Za-z])(?:TODO|FIXME|XXX|HACK|[Dd]ebug|DEBUG|[Ss]taging|STAGING)(?![a-z])/;
+const DEV_WORD = /(?<![A-Za-z])pass(?:word)?(?![a-z])(?![\s_-]*(?:field|input|label|form|reset|box|placeholder|strength|hint|toggle|visibility|policy)\b)|パスワード(?!欄|入力|を忘れ|の再設定|の変更|変更|リセット)|本番/i;
 /**
  * 閉じたコメント（<!-- … -->）を1つずつ切り出し、その中だけで開発用の語を探す。一致した語を返す。
  * 正規表現1つで「コメントの中の語」を探すと、閉じのない <!-- が続く本文でバックトラックが爆発する（64KBで数分）ため、indexOf で線形に走査する。
@@ -204,7 +217,7 @@ export function devCommentWord(html: string): string | undefined {
   for (let i = html.indexOf('<!--'); i >= 0;) {
     const end = html.indexOf('-->', i + 4);
     if (end < 0) return undefined;
-    const m = html.slice(i + 4, end).match(DEV_WORD);
+    const c = html.slice(i + 4, end); const m = c.match(DEV_CODE_WORD) ?? c.match(DEV_WORD);
     if (m) return m[0];
     i = html.indexOf('<!--', end + 3);
   }
@@ -287,9 +300,9 @@ export const csrfToken: Rule = { id: 'E-12', title: 'HTML本文：CSRFトーク�
 /**
  * ログインのフォーム：フォームごとに見て、パスワード欄が1つで、次のどれでもないもの：
  * - パスワードを決める欄（name・id・autocomplete に new・confirm・確認用の retype・repeat があるもの。autocomplete="new-password"）
- * - name・id に current・old があり、autocomplete が current-password でない欄（アカウントの削除・メールアドレスの変更の画面の current_password・
- *   old_password。旧セッションが使えるときに出る再認証の画面）。web.dev が勧めるログイン画面（id="current-password" と
- *   autocomplete="current-password"）は除かない
+ * - name に current_password・old_password がある欄（Devise の user[current_password]、アカウントの削除・メールアドレスの変更の画面。
+ *   旧セッションが使えるときに出る再認証の画面）。web.dev が勧めるログイン画面（name="current-password" と autocomplete="current-password"）と、
+ *   id だけが currentPassword のログイン画面は除かない
  * そのうえで、ユーザー名の欄（パスワード・ボタン以外の input。2段階のログイン画面の hidden の username も）があるもの。パスワード欄だけの
  * フォームは、autocomplete="current-password" で、フォームの送り先（action）がログインらしいもの（/login・/signin・/session など。sudo・
  * reauth・confirm・verify を除く）だけ（ユーザー名を文字で表示した2段階目の画面。GitHub の sudo モードのような再認証の画面と分けるため）。
@@ -300,7 +313,13 @@ const INPUT_TAG = /<input\b[^>]*(?:>|$)/gi;
 const attr = (tag: string, name: string) => tag.match(new RegExp(String.raw`(?<![\w-])${name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`, 'i'))?.slice(1).find(v => v !== undefined) ?? '';
 const NON_TEXT_INPUT = /^(?:hidden|password|submit|button|checkbox|radio|image|reset|file|range|color)$/i;
 const SETTING_FIELD = /(?:^|[\s_-])(?:new|confirm|confirmation|retype|repeat)(?:[\s_-]|$)|new[-_]?pass|(?:pass(?:word)?|pwd)[-_]?confirm/i;
-const REAUTH_FIELD = /(?:^|[\s_-])(?:current|old)(?:[\s_-]|$)|(?:current|old)[-_]?pass/i;
+/**
+ * ログイン画面・認証の入り口のパス（C-09・C-12・T-06 で共有）：/login・/signin・Devise の /users/sign_in・WordPress の /wp-login.php・
+ * OIDC の …/openid-connect/auth・/authorize・oauth2-proxy の /oauth2/start・SAML の /saml/login、拡張子の付いたログイン画面（ASP.NET の
+ * /Account/Login.aspx、/login.php・.jsp・.do）、Spring Security の /oauth2/authorization/<登録名>、IdP の入り口（Google の /o/oauth2/v2/auth、
+ * Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls、SimpleSAMLphp の SSOService.php）
+ */
+export const LOGIN_PATH = /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login|authorize|oauth2\/(?:start|auth(?:orize)?)|oauth2\/authorization\/[\w.-]+|o\/oauth2(?:\/v\d)?\/auth|protocol\/openid-connect\/auth|saml2?\/(?:login|sso)|SAML2\/(?:Redirect|POST)\/SSO|adfs\/ls|SSOService)(?:\.(?:php|aspx?|jspx?|do|action|html?|cgi|pl))?\/?$/i;
 export function loginForm(body: string): boolean {
   const chunks = /<form\b/i.test(body) ? body.split(/<form\b/i).slice(1).map(c => c.split(/<\/form\s*>/i)[0]) : [body];
   return chunks.some(f => {
@@ -310,7 +329,12 @@ export function loginForm(body: string): boolean {
     const ac = attr(pw[0], 'autocomplete'), nameId = `${attr(pw[0], 'name')} ${attr(pw[0], 'id')}`;
     if (SETTING_FIELD.test(`${nameId} ${ac}`)) return false;
     const currentPassword = /\bcurrent-password\b/i.test(ac);
-    if (REAUTH_FIELD.test(nameId) && !currentPassword) return false;
+    // current・old の欄は、name か id がちょうど current-password のもの（web.dev が勧めるログイン画面）だけ認める。autocomplete が
+    // current-password なら認めると、Devise の再認証のフォーム（name="user[current_password]" autocomplete="current-password"）をログイン画面とした
+    // name に current_password・old_password があるもの（Devise の user[current_password]、メールアドレスの変更の old_password）だけを除く。
+    // id だけで見ると、id="currentPassword" のログインのフォームまで外した
+    const pwName = attr(pw[0], 'name');
+    if (/(?:current|old)[-_]?pass/i.test(pwName) && !(currentPassword && /^current-password$/i.test(pwName))) return false;
     const user = inputs.some(t => !NON_TEXT_INPUT.test(attr(t, 'type')))
       || inputs.some(t => /^hidden$/i.test(attr(t, 'type')) && /^(?:user(?:name)?|email|login|identifier|j_username)$/i.test(attr(t, 'name')));
     if (user) return true;

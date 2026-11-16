@@ -20,7 +20,15 @@ const MAX_PATTERN = 500;
 
 export function matches(s: Suppression, f: Finding): boolean {
   const ruleOk = s.ruleId === f.item || s.ruleId === f.ruleId;
-  const targetOk = s.target === f.target || s.target === f.targetKey || (!!f.url && s.target.length <= MAX_PATTERN && wildcardMatch(s.target, f.url)) || s.target === '*';   // HAR は「HAR メソッド URL」で照合
+  // URL のパターンは、画面に出す（マスクした）URL のほかに、突き合わせのキーの URL（マスクとは別に作る。マスクの一覧を変えても変わらない）とも照合する。
+  // マスクした URL とだけ比べると、マスクの一覧を変えるたびに、伏せ方の変わった URL のパターンが黙って外れた
+  // キーの最後の絶対 URL（「 #2」を除く）。ラベルの中の「/admin」のような語は URL にしない
+  const keyUrl = f.targetKey?.match(/(?:^|\s)(https?:\/\/\S*)(?: #\d+)?$/)?.[1];
+  const pattern = s.target.length <= MAX_PATTERN;
+  const targetOk = s.target === f.target || s.target === f.targetKey || (pattern && !!f.url && wildcardMatch(s.target, f.url))
+    || (pattern && !!keyUrl && wildcardMatch(s.target, keyUrl))
+    // 以前の版のキー（HAR GET https://www.example.jp/*）も、キーの全体と * で照合する（キーの形を変えると、例外が黙って外れた）
+    || (pattern && !!f.targetKey && s.target.includes('*') && wildcardMatch(s.target, f.targetKey)) || s.target === '*';   // HAR は「HAR メソッド URL」で照合
   return ruleOk && targetOk;
 }
 

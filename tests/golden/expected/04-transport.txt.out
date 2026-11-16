@@ -16,18 +16,9 @@ tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応してい�
 chain | A-02.ok | info | pass | URL・Location・本文にトークンなし
 chain | H-01.1 | high | fail | (ヘッダなし)
 chain | H-02.na | info | na | HSTSがない（H-01で判定）
-chain | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
-chain | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
-chain | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
-chain | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
-chain | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
 chain | H-08.1 | medium | fail | (ヘッダなし)
-chain | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
-chain | H-10.1 | info | fail | (ヘッダなし)
-chain | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
-chain | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
-chain | H-13.ok | info | pass | text/html; charset=utf-8
-chain | H-14.1 | low | fail | (ヘッダなし)
+chain | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+chain | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
 chain | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 chain | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 chain | R-04.ok | info | pass | (ACAOなし)
@@ -80,15 +71,15 @@ H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
 H-03 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-06 | evaluated | fails=2
+H-06 | evaluated | fails=1
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-08 | evaluated | fails=2
-H-09 | evaluated | fails=2
-H-10 | evaluated | fails=2
-H-11 | evaluated | fails=2
-H-12 | missing-input | fails=0 | 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-09 | evaluated | fails=1
+H-10 | evaluated | fails=1
+H-11 | evaluated | fails=1
+H-12 | missing-input | fails=0 | 転送先の本文のある応答（認証後ページなど）で採取する / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
-H-14 | evaluated | fails=2
+H-14 | evaluated | fails=1
 H-15 | missing-input | fails=0 | 必要なラベル: logout
 H-16 | evaluated | fails=0
 H-17 | evaluated | fails=0

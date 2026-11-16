@@ -62,7 +62,9 @@ export const sessionConfig = { names: [] as string[], maxAgeHours: 24 };
 // CSRFトークンや設定用のCookie。csrf・xsrf・consent は名前のどこにあってもよい（csrftoken、CookieConsent）。
 // それ以外は区切り（- _ .）で分けた語として一致させる。部分一致だと sso_gateway_sid（_ga）や golang_session（lang）まで外れてしまう
 // ASP.NET の CSRF 対策（.AspNetCore.Antiforgery.*、__RequestVerificationToken）も同じ。後者は語 Token でセッションらしく見えてしまう
-const NOT_SESSION = /csrf|xsrf|consent|antiforgery|requestverificationtoken/i;
+// OpenID Connect のセッション管理（check_session_iframe）のために、仕様上 JS から読む Cookie（IdentityServer の idsrv.session、
+// Keycloak の KEYCLOAK_SESSION）は、値を盗まれても認証には使えないのでセッションCookie としない（C-02①（高）の誤検知になった）
+const NOT_SESSION = /csrf|xsrf|consent|antiforgery|requestverificationtoken|^idsrv\.session$|^KEYCLOAK_SESSION(?:_LEGACY)?$/i;
 // 解析・チャット・決済などの外部サービスの Cookie。名前に session・sid・token を含むが、ログインの状態ではない。
 // HAR で機密応答と推定すると、robots.txt などの公開ページまで H-12①（高）になる
 const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_uet|_clck$|_clsk$|__hs|hubspot|ajs_|amplitude|mp_|_fbp$|_gcl_)/i;

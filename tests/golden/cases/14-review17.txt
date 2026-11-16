@@ -1,0 +1,120 @@
+#TARGET url=https://app.example.com/magic?t=kyFBQuRU5fCANARYaxZry&page=2 label=top
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: https://legacy.example.net/
+strict-transport-security: max-age=31536000; includeSubDomains
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body><a href="https://example.com/?redirect=https%3A%2F%2Falice%3ACANARYpw%40evil.example%2F">x</a></body></html>
+
+#TARGET url=https://www.example.com/logout label=logout
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /
+set-cookie: sid=; Max-Age=0; Path=/
+
+#TARGET url=https://www.example.com/account/email label=after-logout sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><body><form method="post"><input type=email name=email><input type=password name="current_password" autocomplete="current-password"></form></body></html>
+
+#TARGET url=https://www.example.com/login label=pre-login
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+set-cookie: sessionid=AbCdEf0123456789CANARYpre0123456789; Path=/; Secure; HttpOnly
+
+<form method="post"><input name="u"><input type="password" name="p"></form>
+
+#TARGET url=https://www.example.com/login label=login sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /account/two_factor/verify
+
+#TARGET url=https://www.example.com/graphql label=unauth-gql
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+
+{"errors":[{"extensions":{"code":"UNAUTHENTICATED"}}],"data":{"me":null}}
+
+#TARGET url=https://www.example.com/api/export.php label=unauth-export
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=UTF-8
+
+id,email
+1,a@example.com
+
+#TARGET url=https://www.example.com/api/x label=method-delete
+#META at=2026-11-01T10:00:00
+HTTP/2 403
+content-type: application/json
+
+{"error":"forbidden"}
+
+#TARGET url=https://www.example.com/redirect?url=https://evil.example label=open-redirect
+#META at=2026-11-01T10:00:00
+HTTP/2 302
+location: /login.php?redirect_to=https%3A%2F%2Fevil.example
+
+#TARGET url=https://www.example.com/api/fail label=error-500
+#META at=2026-11-01T10:00:00
+HTTP/2 500
+content-type: application/json
+
+{"db":"mongodb://db.example.com:27017/app","contact":"ops@example.com","trace":"java.lang.NullPointerException\n\tat com.example.Ctl.get(Ctl.java:21)"}
+
+#TARGET url=https://www.example.com/ label=page
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+content-security-policy: default-src 'self'; object-src 'none'; base-uri 'none'; fenced-frame-src 'none'
+content-security-policy: script-src 'self' 'unsafe-inline' https:
+
+<html><head><title>Example Express</title></head><body><!-- Password field --><input type="password"></body></html>
+
+#TARGET url=https://www.example.com/api/me label=me kind=api sensitive=1
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: application/json
+x-content-type-options: nosniff
+cache-control: no-store
+
+{"credentials":{"password":"set","otp_secret":"configured"},"salt":"AbCdEf0123456789"}
+
+#TARGET url=https://www.example.com/media/download/press.html label=press
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<p>press</p>
+
+#TARGET url=https://www.example.com/static/media/uploads/evil.html label=upload
+#META at=2026-11-01T10:00:00
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<p>uploaded</p>
+
+#TARGET label="quoted label" url="https://www.example.com/q"
+#META at=2026-11-01T10:00:00
+HTTP/2 401
+www-authenticate: Bearer
+
+#TARGET url=https://www.example.com/ label=tls
+HTTP/1.1 200 OK
+X: 1
+
+CONNECTED(00000003)
+depth=0 CN = www.example.com
+---
+Verify return code: 0 (ok)
+subject=CN = www.example.com
+notAfter=Jan  1 00:00:00 2036 GMT
+X509v3 Subject Alternative Name:
+    DNS:www.example.com

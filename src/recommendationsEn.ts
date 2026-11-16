@@ -111,6 +111,11 @@ const EXACT: Record<string, string> = {
   'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）': 'Check the network and run C13 again (HTTP 000 means the connection failed)',
   '-L を付けて、転送先まで採取し直す': 'Capture again with -L to follow the redirect',
   'API の URL（JSON を返すもの）で採取し直す': 'Capture again with an API URL (one that returns JSON)',
+  '認証が必要なクエリ（me など）で採取し直す': 'Capture again with a query that requires authentication (such as me)',
+  '認証情報を付けて採取し直す（401・403・ログイン画面への転送では、認証の内側で動くかが分からない）':
+    'Capture again with credentials (a 401, a 403 or a redirect to the login page does not show whether it works behind authentication)',
+  '2段階目（ワンタイムの番号の入力など）まで済ませた応答を login として採取する': 'Capture as login the response after completing the second step (such as entering the one-time code)',
+  '転送先の本文のある応答（認証後ページなど）で採取する': 'Capture the redirect target that has a body (such as the page after login)',
   '存在する API の URL で、認証情報を付けずに採取し直す': 'Capture again with an existing API URL, without credentials',
   "本番ビルドではインラインのソースマップ（webpack の inline-source-map・Vite の sourcemap: 'inline' など）を出さない（sourcesContent に元のソースがあるかは手動で確認）":
     "Do not emit inline source maps in production builds (webpack inline-source-map, Vite sourcemap: 'inline', etc.); check manually whether sourcesContent holds the original source",

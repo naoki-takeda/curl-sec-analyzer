@@ -21,13 +21,18 @@ const CREDENTIALS: RegExp[] = [
   /\bjdbc:\w{1,32}:(?:\w{1,32}:){0,3}\/\/[^\s/:@;?&"'<>]{1,256}:[^\s@;?&"'<>]{1,256}@/i,
   /\bjdbc:\w+:[^\s"'<>]{0,300}?[?;&](?:password|pwd)=[^&;\s"'<>]+/i,
   /\bjdbc:oracle:\w+:[^\s/@:"'<>]+\/[^\s@"'<>]+@/i,
-  /mongodb(?:\+srv)?:\/\/[^\s:]+:[^\s@]+@/i,
+  // ユーザー名とパスワードに引用符・「/」・「@」を含めない（資格情報のない mongodb://db.example.com:27017/app のあとのメールアドレスの @ までを
+  // 「ユーザー:パスワード@」と読み、高の誤検知にした）
+  /mongodb(?:\+srv)?:\/\/[^\s:"'<>/@]{1,256}:[^\s@"'<>/]{1,256}@/i,
   /\b(?:Server|Data Source|Host|User ID|Uid|Database|Initial Catalog)\s*=[^;\n]{0,200};(?:[^;\n]{0,200};){0,10}?\s*(?:Password|PWD|Pwd)\s*=\s*[^;\s]+/,
 ];
 // AWS のアクセスキー。HTML の応答では E-09①（HTML本文の秘密情報）が同じ値を数えるので、E-01① では見ない（第0章 0.2「同じ事象は1つの項目でだけ減点」）
 const AWS_KEY = /\bAKIA[0-9A-Z]{16}\b/;
 const path = (ctx: RuleContext) => { try { return new URL(ctx.target.url ?? '').pathname; } catch { return ''; } };
 
+// E-01② のスタックトレース・SQL・絶対パスなど（下の errorDetail の注記を参照）
+const TRACE = /\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?:(?<!["'`]\s{0,20})|(?<=(?:[[,]\s*|"(?:stack|trace|stacktrace|stack_trace|error|err|message|exception)"\s*:\s*)"\s{0,20}))\bat (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|\.php<\/b> on line <b>\d+|Stack trace:\s*#0 |(?:(?<=^|[\r\n]|\\n)[ \t]{1,20})at [A-Z]\w*(?:\.[\w<>`|$]+){2,}\(|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/;
+const matchTrace = (s: string) => s.match(TRACE);
 export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース・デバッグ情報', appliesTo: 'any', scope: 'target',
   basis: ['ISOG-J', 'OWASP Error Handling CS'],
   run(ctx) {
@@ -51,13 +56,16 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     // Docker でよく使う /app の下のスタックトレースは、行の形で見る：Rails の「/app/…/x.rb:12:in」、Python の「File "/app/main.py", line 41」、
     // Node.js の無名のフレーム（上の at /app/index.js:7:9）。/app を絶対パスの一覧に入れると、serviceWorker.register("/app/sw.js")・
     // {"entry":"/app/main.js"}・文章の「/app/index.js」まで②にした（第23回で外した誤検知が戻った）
-    const trace = b.match(/\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?<=(?:^|[\r\n]|\\n|<br\s*\/?>|[[,]\s*")(?:[ \t]|&nbsp;){0,20})at (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/)
+    // JSON の文字列に入れたスタックトレース（Spring の "trace":"…\n\tat com.example…"、エスケープした Python の File \"/app/main.py\"）は、
+    // エスケープを戻した本文でも照合する
+    const unescaped = b.includes('\\') ? b.replace(/\\[nt]/g, ' \n').replace(/\\(["/])/g, '$1') : b;
+    const trace = matchTrace(b) ?? (unescaped !== b ? matchTrace(unescaped) : null)
       // 資格情報を含む jdbc: は①だけにする（②にも出すと二重になる。設計書は②を資格情報のない jdbc: に限る）。スタックトレースがあれば、そちらを証跡にする
       ?? (cred ? null : b.match(/\bjdbc:\w+:(?=\S)/));
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る。Rails も同じく、既定のエラーページ
     // （public/404.html・500.html）と開発用の画面の文言で見る（「Ruby on Rails」はブログの記事などにも出る）
-    const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Action Controller: Exception caught|<h1>Routing Error<\/h1>|We're sorry, but something went wrong\.|The page you were looking for doesn't exist\.|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|Express<\/title>/i)
+    const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Action Controller: Exception caught|<h1>Routing Error<\/h1>|We're sorry, but something went wrong\.|The page you were looking for doesn't exist\.|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|<title>Express<\/title>/i)
       // Jetty の既定のエラーページ（<title>Error 404 Not Found</title>）は、本文の「HTTP ERROR 404」「Powered by Jetty」と合わせて見る。
       // <title>Error 404 - Page not found | MyShop</title> のような独自のエラーページを既定のページとしない
       ?? (/HTTP ERROR:?\s*\d{3}|Powered by Jetty/i.test(b) ? b.match(/<title>Error \d{3}[^<]*<\/title>/i) : null);
@@ -223,10 +231,12 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
       && !/\.(?:php\d?|phtml|aspx?|ashx|jspx?|do|action|cgi|pl|cfm|shtml)$|\/index\.html?$/i.test(p)
       // /download/ の下の .html（/download/windows.html）は、配布物を案内する普通のページ。ただし、アップロード先らしいディレクトリ
       // （uploads・files・attachments・media）も含むもの（Redmine の /attachments/download/42/evil.html）は、利用者のファイルなので除かない
-      && !(/\/download\/(?:[^/]+\/)*[^/]+\.html?$/i.test(p) && !/\/(uploads?|files?|attachments?|media)\//i.test(p))
+      // media は CMS の配布物の置き場にも使う（/media/download/press.html）ので、ここでは利用者のファイルの印にしない
+      && !(/\/download\/(?:[^/]+\/)*[^/]+\.html?$/i.test(p) && !/\/(uploads?|files?|attachments?)\//i.test(p))
       // ビルドしたファイル（Create React App の /static/media/logo.6ce24c58.svg、Next.js の /_next/static/media/…）は、ページが読み込むもので、
       // 利用者がアップロードしたファイルではない。名前のハッシュだけでは見ない（/uploads/avatar.5f3a9c2e.svg、日付の minutes.20241231.html を見逃す）
-      && !/\/_next\/static\/|\/static\/media\//i.test(p);
+      // ビルドの置き場の下でも、アップロード先らしいディレクトリ（/static/media/uploads/evil.html）は除かない
+      && !(/\/_next\/static\/|\/static\/media\//i.test(p) && !/\/(?:uploads?|attachments?|user[-_]?files?)\//i.test(p));
     if (!DOWNLOAD_CT.test(ct) && !uploadPath && !cd) return [];   // ファイル配信の応答だけ
     // JSON の API の応答（/api/files/123.json など、パスがアップロード先らしくても）は、ダウンロードではない（DOWNLOAD_CT で +json を除くのと同じ）
     // Content-Type で見る（kind=api を明示したターゲットの SVG・PDF まで除かないため）

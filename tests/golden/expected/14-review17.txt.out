@@ -1,0 +1,266 @@
+## targets
+top | https://app.example.com/magic?t=kyFB…(21 chars)&page=2 | key=top | responses=2
+logout | https://www.example.com/logout | key=logout | responses=1
+after-logout | https://www.example.com/account/email | key=- | responses=1
+pre-login | https://www.example.com/login | key=pre-login | responses=1
+login | https://www.example.com/login | key=login | responses=1
+unauth-gql | https://www.example.com/graphql | key=unauth-gql | responses=1
+unauth-export | https://www.example.com/api/export.php | key=unauth-export | responses=1
+method-delete | https://www.example.com/api/x | key=method-delete | responses=1
+open-redirect | https://www.example.com/redirect?url=https://evil.example | key=open-redirect | responses=1
+error-500 | https://www.example.com/api/fail | key=error-500 | responses=1
+page | https://www.example.com/ | key=page | responses=1
+me | https://www.example.com/api/me | key=me | responses=1
+press | https://www.example.com/media/download/press.html | key=press | responses=1
+upload | https://www.example.com/static/media/uploads/evil.html | key=upload | responses=1
+quoted label | https://www.example.com/q | key=quoted label | responses=1
+tls | https://www.example.com/ | key=- | responses=1
+
+## warnings
+
+## findings
+after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200
+csp-sample-* | H-04.na | info | na | 
+error-* | A-10.na | info | na | 
+error-500 | E-01.2 | medium | fail | at com.example.Ctl.get(Ctl.java:21)
+error-500 | H-01.1 | high | fail | (ヘッダなし)
+error-500 | H-02.na | info | na | HSTSがない（H-01で判定）
+error-500 | H-03.1 | info | fail | (ヘッダなし)
+error-500 | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-500 | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-500 | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
+error-500 | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+error-500 | H-08.1 | medium | fail | (ヘッダなし)
+error-500 | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+error-500 | H-10.1 | info | fail | (ヘッダなし)
+error-500 | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+error-500 | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+error-500 | H-13.ok | info | pass | application/json
+error-500 | H-14.1 | info | fail | (ヘッダなし)
+error-500 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+error-500 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+login | A-02.ok | info | pass | URL・Location・本文にトークンなし
+login | C-09.ok | info | pass | URLにセッションIDなし
+login | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+logout | C-12.ok | info | pass | sid=…(0 chars); Max-Age=0; Path=/
+logout | H-15.1 | info | fail | (ヘッダなし)
+me | A-02.ok | info | pass | URL・Location・本文にトークンなし
+me | A-07.2 | medium | fail | キー: salt
+me | A-09.3 | info | fail | CSPなし
+me | E-01.ok | info | pass | エラーの詳細らしき記述なし
+me | H-01.1 | high | fail | (ヘッダなし)
+me | H-02.na | info | na | HSTSがない（H-01で判定）
+me | H-03.1 | info | na | (ヘッダなし) | dedupedBy=A-09.3
+me | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+me | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+me | H-06.1 | info | fail | (frame-ancestors も X-Frame-Options もない)
+me | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+me | H-08.ok | info | pass | nosniff
+me | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+me | H-10.1 | info | fail | (ヘッダなし)
+me | H-11.1 | info | fail | 機密応答に Cross-Origin-Resource-Policy なし
+me | H-12.ok | info | pass | no-store
+me | H-13.ok | info | pass | application/json
+me | H-14.1 | info | fail | (ヘッダなし)
+me | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+me | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+me | R-04.ok | info | pass | (ACAOなし)
+me | T-12.ok | info | pass | HTTP/2
+method-delete | A-11.na | info | na | HTTP 403（メソッドを断ったかは分からない）
+open-redirect | T-06.na | info | na | HTTP 302（ログイン画面か同じページへの転送。転送先を検証しているかは分からない）
+page | A-02.ok | info | pass | URL・Location・本文にトークンなし
+page | E-01.ok | info | pass | エラーの詳細らしき記述なし
+page | E-02.ok | info | pass | 一覧表示なし
+page | E-07.ok | info | pass | http:// の資源なし
+page | E-08.ok | info | pass | 外部オリジンのscriptなし
+page | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+page | H-01.1 | high | fail | (ヘッダなし)
+page | H-02.na | info | na | HSTSがない（H-01で判定）
+page | H-03.ok | info | pass | default-src 'self'; object-src 'none'; base-uri 'none'; fenced-frame-src 'none' / script-src 'self' 'unsafe-inline' https:
+page | H-04.ok | info | pass | script-src 'self' / script-src 'self' 'unsafe-inline' https:
+page | H-05.ok | info | pass | object-src・base-uri あり
+page | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+page | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし
+page | H-08.1 | medium | fail | (ヘッダなし)
+page | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+page | H-10.1 | info | fail | (ヘッダなし)
+page | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+page | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+page | H-13.ok | info | pass | text/html; charset=utf-8
+page | H-14.1 | low | fail | (ヘッダなし)
+page | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+page | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+page | R-04.ok | info | pass | (ACAOなし)
+page | T-12.ok | info | pass | HTTP/2
+pre-login | A-02.ok | info | pass | URL・Location・本文にトークンなし
+pre-login | C-01.ok | info | pass | sessionid
+pre-login | C-02.ok | info | pass | sessionid
+pre-login | C-03.1 | medium | fail | sessionid=AbCd…(35 chars); Path=/; Secure; HttpOnly
+pre-login | C-04.ok | info | pass | sessionid
+pre-login | C-05.ok | info | pass | sessionid
+pre-login | C-06.1 | info | fail | sessionid=AbCd…(35 chars); Path=/; Secure; HttpOnly
+pre-login | C-07.ok | info | pass | sessionid
+pre-login | C-08.ok | info | pass | sessionid
+pre-login | C-09.ok | info | pass | URLにセッションIDなし
+pre-login | C-11.ok | info | pass | sessionid
+pre-login | C-13.ok | info | pass | 共有キャッシュの指定なし
+pre-login | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+pre-login/login | C-09.na | info | na | 多要素認証の途中（/account/two_factor/verify への転送）。ログインが終わっていない
+press | A-02.ok | info | pass | URL・Location・本文にトークンなし
+press | E-01.ok | info | pass | エラーの詳細らしき記述なし
+press | E-02.ok | info | pass | 一覧表示なし
+press | E-07.ok | info | pass | http:// の資源なし
+press | E-08.ok | info | pass | 外部オリジンのscriptなし
+press | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+press | H-01.1 | high | fail | (ヘッダなし)
+press | H-02.na | info | na | HSTSがない（H-01で判定）
+press | H-03.1 | high | fail | (ヘッダなし)
+press | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+press | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+press | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+press | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+press | H-08.1 | medium | fail | (ヘッダなし)
+press | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+press | H-10.1 | info | fail | (ヘッダなし)
+press | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+press | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+press | H-13.ok | info | pass | text/html; charset=utf-8
+press | H-14.1 | low | fail | (ヘッダなし)
+press | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+press | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+press | R-04.ok | info | pass | (ACAOなし)
+press | T-12.ok | info | pass | HTTP/2
+quoted label | A-02.ok | info | pass | URL・Location・本文にトークンなし
+quoted label | H-01.1 | high | fail | (ヘッダなし)
+quoted label | H-02.na | info | na | HSTSがない（H-01で判定）
+quoted label | H-08.1 | medium | fail | (ヘッダなし)
+quoted label | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+quoted label | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+quoted label | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+quoted label | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+quoted label | R-04.ok | info | pass | (ACAOなし)
+quoted label | T-12.ok | info | pass | HTTP/2
+session-sample-* | C-07.na | info | na | 
+top | A-02.ok | info | pass | URL・Location・本文にトークンなし
+top | H-01.ok | info | pass | max-age=31536000; includeSubDomains
+top | H-02.2 | info | fail | max-age=31536000; includeSubDomains
+top | H-08.1 | medium | fail | (ヘッダなし)
+top | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+top | H-12.na | info | na | HTTP 302（鮮度の指定のない転送はキャッシュされない）
+top | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+top | R-04.ok | info | pass | (ACAOなし)
+top | T-05.ok | info | pass | 1回の転送
+top | T-12.ok | info | pass | HTTP/2
+unauth-export | A-01.1 | high | fail | 認証なしで HTTP 200
+unauth-export | A-02.ok | info | pass | URL・Location・本文にトークンなし
+unauth-gql | A-01.ok | info | pass | HTTP 200（GraphQL の認証エラー。データは null）
+unauth-gql | A-02.ok | info | pass | URL・Location・本文にトークンなし
+unauth-gql | A-07.ok | info | pass | キー5種に秘密情報・内部属性らしきものなし
+upload | A-02.ok | info | pass | URL・Location・本文にトークンなし
+upload | E-01.ok | info | pass | エラーの詳細らしき記述なし
+upload | E-02.ok | info | pass | 一覧表示なし
+upload | E-07.ok | info | pass | http:// の資源なし
+upload | E-08.ok | info | pass | 外部オリジンのscriptなし
+upload | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
+upload | E-11.1 | high | fail | Content-Type: text/html; charset=utf-8 / Content-Disposition: (なし)
+upload | H-01.1 | high | fail | (ヘッダなし)
+upload | H-02.na | info | na | HSTSがない（H-01で判定）
+upload | H-03.1 | high | fail | (ヘッダなし)
+upload | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
+upload | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
+upload | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
+upload | H-07.na | info | na | 強制モードのCSPがない（H-03で判定）
+upload | H-08.1 | medium | fail | (ヘッダなし)
+upload | H-09.3 | info | fail | (ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)
+upload | H-10.1 | info | fail | (ヘッダなし)
+upload | H-11.2 | info | fail | Cross-Origin-Opener-Policy なし
+upload | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
+upload | H-13.ok | info | pass | text/html; charset=utf-8
+upload | H-14.1 | low | fail | (ヘッダなし)
+upload | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
+upload | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
+upload | R-04.ok | info | pass | (ACAOなし)
+upload | T-12.ok | info | pass | HTTP/2
+www.example.com | T-10.na | info | na | 暗号・鍵の情報がない（ハンドシェイクに失敗した可能性）
+www.example.com | T-11.ok | info | pass | notAfter: 2036-01-01 / SAN: www.example.com
+
+## coverage
+H-01 | evaluated | fails=6
+H-02 | evaluated | fails=1
+H-03 | evaluated | fails=3
+H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
+H-05 | evaluated | fails=0
+H-06 | evaluated | fails=5
+H-07 | evaluated | fails=0
+H-08 | evaluated | fails=6
+H-09 | evaluated | fails=5
+H-10 | evaluated | fails=5
+H-11 | evaluated | fails=4
+H-12 | evaluated | fails=0
+H-13 | evaluated | fails=0
+H-14 | evaluated | fails=5
+H-15 | evaluated | fails=1
+H-16 | evaluated | fails=0
+H-17 | evaluated | fails=0
+C-01 | evaluated | fails=0
+C-02 | evaluated | fails=0
+C-03 | evaluated | fails=1
+C-04 | evaluated | fails=0
+C-05 | evaluated | fails=0
+C-06 | evaluated | fails=1
+C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
+C-08 | evaluated | fails=0
+C-09 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 2段階目（ワンタイムの番号の入力など）まで済ませた応答を login として採取する
+C-10 | missing-input | fails=0 | 必要なラベル: http
+C-11 | evaluated | fails=0
+C-12 | evaluated | fails=1
+C-13 | evaluated | fails=0
+C-14 | manual | fails=0
+C-15 | manual | fails=0
+R-01 | missing-input | fails=0 | 必要なラベル: cors-*
+R-02 | missing-input | fails=0 | 必要なラベル: cors-*
+R-03 | missing-input | fails=0 | 必要なラベル: cors-*
+R-04 | evaluated | fails=0
+R-05 | missing-input | fails=0 | 必要なラベル: cors-*
+R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
+R-08 | missing-input | fails=0 | 必要なラベル: （一般）
+R-09 | missing-input | fails=0 | 必要なラベル: websocket
+T-01 | missing-input | fails=0 | 必要なラベル: options, trace
+T-02 | manual | fails=0
+T-03 | manual | fails=0
+T-04 | missing-input | fails=0 | 必要なラベル: http
+T-05 | evaluated | fails=0
+T-06 | missing-input | fails=0 | next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す
+T-07 | missing-input | fails=0 | 必要なラベル: host-inj
+T-08 | missing-input | fails=0 | 必要なラベル: crlf
+T-09 | missing-input | fails=0 | 必要なラベル: tls
+T-10 | missing-input | fails=0 | C11 の出力にエラーがないか確認して採取し直す
+T-11 | evaluated | fails=0
+T-12 | evaluated | fails=0
+T-13 | manual | fails=0
+E-01 | evaluated | fails=1
+E-02 | evaluated | fails=0
+E-03 | missing-input | fails=0 | 必要なラベル: probes
+E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-05 | missing-input | fails=0 | 必要なラベル: （一般）
+E-06 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0
+E-08 | evaluated | fails=0
+E-09 | evaluated | fails=0
+E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-11 | evaluated | fails=1
+E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+A-01 | evaluated | fails=1
+A-02 | evaluated | fails=0
+A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
+A-04 | manual | fails=0
+A-05 | manual | fails=0
+A-06 | manual | fails=0
+A-07 | evaluated | fails=1
+A-08 | missing-input | fails=0 | 必要なラベル: ctype
+A-09 | evaluated | fails=1
+A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
+A-11 | missing-input | fails=0 | 認証情報を付けて採取し直す（401・403・ログイン画面への転送では、認証の内側で動くかが分からない）

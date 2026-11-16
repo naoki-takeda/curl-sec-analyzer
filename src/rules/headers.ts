@@ -104,16 +104,21 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
     const ev = cc || (header(ctx, 'pragma').length ? `(Cache-Controlなし、Pragma: ${header(ctx, 'pragma')[0]})` : '(ヘッダなし)');
     const isStatic = isStaticResource(ctx);
     if (dirs.has('no-store')) return [mk(cacheControl, ctx, 'ok', 'info', 'pass', cc, '')];
+    // 本文のない転送（302・303・307）は、鮮度の指定（max-age・s-maxage・public・Expires）がなければキャッシュに保存されない（RFC 9111 4.2.2。
+    // 経験的にキャッシュしてよいステータスではない）。ログイン後の 302 で H-12①（高）を出していた
+    if ([302, 303, 307].includes(ctx.final.status) && !['max-age', 's-maxage', 'public'].some(d => dirs.has(d)) && !header(ctx, 'expires').length)
+      return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（鮮度の指定のない転送はキャッシュされない）`, '転送先の本文のある応答（認証後ページなど）で採取する')];
+    const limited = (f: ReturnType<typeof mk>) => ({ ...f, limited: true });
     // 静的リソース・公開ファイルは、sensitive=1 を明示したときだけ機密応答として扱う（rules/util.ts の sensitiveUnlessStatic）
     const sensitive = sensitiveUnlessStatic(ctx);
     if (sensitive === undefined) {
-      if (isStatic && !cc) return [mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する')];
-      if (isStatic) return [mk(cacheControl, ctx, 'ok', 'info', 'pass', ev, '')];
+      if (isStatic && !cc) return [limited(mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する'))];
+      if (isStatic) return [limited(mk(cacheControl, ctx, 'ok', 'info', 'pass', ev, ''))];
       return [mk(cacheControl, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（${ev}）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
     }
     if (!sensitive) {
-      if (isStatic && !cc) return [mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する')];
-      return [mk(cacheControl, ctx, 'ok', 'info', 'pass', ev || '(機密でない応答)', '')];
+      if (isStatic && !cc) return [limited(mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する'))];
+      return [limited(mk(cacheControl, ctx, 'ok', 'info', 'pass', ev || '(機密でない応答)', ''))];
     }
     if (dirs.has('private') && !dirs.has('public')) return [mk(cacheControl, ctx, 2, 'medium', 'fail', ev, 'Cache-Control: no-store')];
     return [mk(cacheControl, ctx, 1, 'high', 'fail', ev, 'Cache-Control: no-store')];
@@ -143,8 +148,11 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
  * ただし、その別のポリシーが同じ項目・条件の指摘を持つ（同じくらい緩い。アプリとプロキシが同じヘッダを2回付けた場合など）なら、制限にならないので出す
  */
 interface Policy { dirs: Map<string, string[]>; issues: CspIssue[]; }
+// H-04 の指摘（unsafe-inline・広い指定・unsafe-eval・JSONP のホスト）も同じ考え方で見る。別のポリシーがスクリプトを制限していて
+// （script-src か default-src があり）、同じ条件の指摘がなければ、ブラウザはそちらで止める（default-src 'self' のポリシーと
+// script-src 'unsafe-inline' https: のポリシーの組で、H-04①②（高）を出していた）
 function coveredByOther(i: CspIssue, others: Policy[]): boolean {
-  if (i.type !== 'MISSING_DIRECTIVES' && i.directive !== 'default-src') return false;
+  if (i.item !== 'H-04' && i.type !== 'MISSING_DIRECTIVES' && i.directive !== 'default-src') return false;
   const d = i.item === 'H-04' ? 'script-src' : i.item === 'H-05' ? (i.condition === 1 ? 'object-src' : 'base-uri') : undefined;
   return !!d && others.some(p => (p.dirs.has(d) || (d !== 'base-uri' && p.dirs.has('default-src')))
     && !p.issues.some(x => (x.item === i.item && x.condition === i.condition) || x.type === EVALUATOR_ERROR));
@@ -277,7 +285,9 @@ export const contentType: Rule = { id: 'H-13', title: 'Content-Typeとcharset', 
     if (f.status === 204 || f.status === 304 || (f.status >= 300 && f.status < 400)) return [];   // 本文のない応答は適用外
     const ct = header(ctx, 'content-type')[0];
     // 本文が空の応答（Content-Length: 0 の 401・201 など。Spring Security の API の 401）は、型を示す本文がないので①の対象外
-    if (!ct && header(ctx, 'content-length').some(v => /^\s*0\s*$/.test(v))) return [];
+    // HTTP/2 は Content-Length を付けないことがあるので、本文がない（空・採取していない）201・202・401・403 も対象外にする（本文のない
+    // 認証の拒否・作成の応答が多い。本文があれば①）
+    if (!ct && (header(ctx, 'content-length').some(v => /^\s*0\s*$/.test(v)) || ([201, 202, 401, 403].includes(f.status) && !f.body?.trim()))) return [];
     if (!ct) return [mk(contentType, ctx, 1, 'medium', 'fail', '(Content-Typeなし)', 'Content-Type を必ず付ける（HTML は text/html; charset=utf-8）')];
     if (/^text\/html/i.test(ct) && !/charset=/i.test(ct)) return [mk(contentType, ctx, 2, 'medium', 'fail', ct, 'Content-Type: text/html; charset=utf-8')];
     return [mk(contentType, ctx, 'ok', 'info', 'pass', ct, '')];

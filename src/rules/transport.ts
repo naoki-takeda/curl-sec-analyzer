@@ -2,6 +2,7 @@
 import type { HttpResponse, Rule } from '../model';
 import { NO_BODY_REC, mk } from './util';
 import { baseLabel, sameDocument } from '../parser/target';
+import { LOGIN_PATH } from './html';
 
 export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイレクト', appliesTo: 'any', scope: 'target',
   basis: ['MDN HTTP Observatory'],
@@ -103,7 +104,8 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
     if (!ctx.final) return [mk(openRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
     // 転送先はブラウザと同じ読み方（WHATWG URL）で解釈する。http・https の URL の「\」は「/」と読まれるので、/\evil.example・https:\\evil.example/・
     // ///evil.example も外部ホストへの転送になる（正規表現の //evil.example だけでは、よく使われる回避の値を合格にした）
-    const base = ctx.target.url ?? 'https://x.invalid/';
+    // ターゲットの URL が絶対 URL でないとき（url=a.example/r?to=…）は、仮の基準で読む（基準を作れずに例外になり、evil.example への転送を合格にした）
+    const base = (() => { try { return new URL(ctx.target.url ?? '').href; } catch { return 'https://x.invalid/'; } })();
     // 末尾のドット（FQDN の表記 evil.example.）も同じホスト
     const evil = (l: string) => { try { return /(?:^|\.)evil\.example\.?$/i.test(new URL(l.trim(), base).hostname); } catch { return false; } };
     const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(evil);
@@ -114,12 +116,12 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
     // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面への転送（next= を持ち越した /login?next=…evil.example。ログインのあとで使う）と、
     // 同じページへの転送（末尾の /）は、転送先の検証を試していないので na
     const tested = (r: HttpResponse) => {
-      // 試していない転送：テスト値を持ち越したログイン画面への転送（/login?next=https://evil.example）と、同じページへの転送。
-      // /home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、転送先を検証して止めたので合格
+      // 試していない転送：ログイン画面・認証の入り口への転送（テスト値を持ち越したかによらない。Spring・Devise・Laravel は保存したリクエストで
+      // ログインのあとに戻る）と、同じページへの転送。/home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、
+      // 転送先を検証して止めたので合格
       const loc = r.headers.get('location')?.[0] ?? '';
-      let path = ''; try { path = new URL(loc, r.url ?? ctx.target.url ?? 'https://x.invalid/').pathname; } catch { /* 解釈できない */ }
-      const carriedToLogin = /evil\.example/i.test(loc) && /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login\.php)\/?$/i.test(path);
-      return !carriedToLogin && !sameDocument(r, ctx.target.url);
+      let path = ''; try { path = new URL(loc, r.url ?? base).pathname; } catch { /* 解釈できない */ }
+      return !LOGIN_PATH.test(path.length > 1 ? path.replace(/\/+$/, '') : path) && !sameDocument(r, ctx.target.url);
     };
     const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location') && tested(r)) || r.headers.has('refresh'));
     return redirected ? [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')]

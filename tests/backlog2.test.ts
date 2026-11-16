@@ -48,8 +48,11 @@ describe('第1章 ヘッダ', () => {
     expect(ids(page(csp), 'H-06')).toEqual(['H-06.ok']);
     expect(ids(page(csp), 'H-07')).toEqual(['H-07.ok']);
     expect(ids(page(csp), 'H-04')).toContain('H-04.ok');
-    // 緩いポリシーと厳しいポリシーをカンマでつないでも、緩いほうだけで①にしない（別のポリシーが制限する）・厳しいほうだけで合格にしない
-    expect(ids(page("content-security-policy: script-src * 'unsafe-inline', script-src 'self'"), 'H-04')).not.toContain('H-04.ok');
+    // 緩いポリシーと厳しいポリシーをカンマでつないでも、緩いほうだけで①②にしない（ブラウザはすべてのポリシーを満たすものだけを許すので、
+    // 'self' のポリシーがインラインと * を止める）。第29回から、別のポリシーが同じ条件の指摘なしにスクリプトを制限していれば H-04 の指摘も出さない
+    const both = ids(page("content-security-policy: script-src * 'unsafe-inline', script-src 'self'"), 'H-04');
+    expect(both).not.toContain('H-04.1');
+    expect(both).not.toContain('H-04.2');
   });
 
   it('H-02③：別のサイトの preload で、apex を③にしない', () => {

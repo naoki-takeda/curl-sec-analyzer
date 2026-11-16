@@ -83,6 +83,16 @@ export function importHar(text: string): HarImport {
   // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）
   const byUrl = new Map<string, number[]>();
   entries.forEach((x, k) => { const u = withoutHash(x.request.url); (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
+  // URL ごとに、使い済みの先頭を読み飛ばす位置を持つ（同じ URL へ転送する 3xx が多い HAR で、毎回先頭からなめて2乗の時間がかかった）
+  const firstUnused = new Map<string, number>();
+  const nextEntry = (href: string, from: number): number => {
+    const list = byUrl.get(href); if (!list) return -1;
+    let p = firstUnused.get(href) ?? 0;
+    while (p < list.length && used.has(list[p])) p++;
+    firstUnused.set(href, p);
+    for (let q = p; q < list.length; q++) if (list[q] > from && !used.has(list[q])) return list[q];
+    return -1;
+  };
   let anyCookie = false;
   entries.forEach((e, i) => {
     if (used.has(i)) return;
@@ -98,7 +108,7 @@ export function importHar(text: string): HarImport {
       // 同じホストの http から https への転送はつなぐ
       if (next.hostname !== new URL(cur.request.url).hostname) break;
       const from = ci;
-      const j = byUrl.get(next.href)?.find(k => k > from && !used.has(k)) ?? -1;
+      const j = nextEntry(next.href, from);
       if (j < 0) break;
       used.add(j); cur = entries[j]; ci = j; hops.push(cur);
     }

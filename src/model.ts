@@ -66,6 +66,7 @@ export interface Finding {
   obsId?: string; title: string; severity: Severity; status: Status;
   target: string; url?: string; host?: string;
   partial?: boolean;                // 横断・ホスト単位の条件が入力不足で na（診断カバレッジで「一部の条件は入力不足」と示す）
+  limited?: boolean;                // 機密でない応答（静的リソースなど）だけで判定した（H-12。項目のすべてがこれなら、カバレッジで「機密応答では判定していない」と示す）
   targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（マスク済み）」
   evidence: string; recommendation: string; references: string[];
   score: number;                    // obsId があるルール以外は常に0

@@ -4,7 +4,7 @@ import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutF
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp, splitPolicies } from './util';
-import { loginForm, metaCspFromHtml } from './html';
+import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
@@ -27,8 +27,18 @@ const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.no
 // ログイン画面・認証の入り口のパス：/login・/signin・Devise の /users/sign_in・WordPress の /wp-login.php・OIDC の …/openid-connect/auth・
 // /authorize・oauth2-proxy の /oauth2/start・SAML の /saml/login
 // 拡張子の付いたログイン画面（ASP.NET の /Account/Login.aspx、/login.php・.jsp・.do）と、Spring Security の /oauth2/authorization/<登録名> も含める
-const LOGIN_PATH = /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login|authorize|oauth2\/(?:start|auth(?:orize)?)|oauth2\/authorization\/[\w.-]+|protocol\/openid-connect\/auth|saml2?\/(?:login|sso))(?:\.(?:php|aspx?|jspx?|do|action|html?|cgi|pl))?\/?$/i;
+// IdP の入り口（Google の /o/oauth2/v2/auth、Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls/、SimpleSAMLphp の SSOService.php）も含める。
+// T-06 と共有する（rules/html.ts の LOGIN_PATH。T-06 だけ狭い一覧を持っていて、/login.php・/oauth2/authorization/x への転送を合格にした）
 const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
+const MFA_REC = '2段階目（ワンタイムの番号の入力など）まで済ませた応答を login として採取する';
+/** login の最初の応答が、多要素認証の2段階目の画面（/two_factor、/mfa、/otp、/2fa、/webauthn）への転送か。/verify-email のようなメールの確認の案内は、ログインが済んでいるので含めない */
+function mfaStep(login: Target): string | undefined {
+  const first = ownChain(login)[0];
+  const loc = first && first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
+  if (!loc) return undefined;
+  let p: string; try { p = new URL(loc, login.url ?? 'https://x.invalid/').pathname; } catch { return undefined; }
+  return /(?:^|\/)(?:two[-_]?factor|2fa|mfa|otp|totp|webauthn|second[-_]?factor)(?:[/._-]|$)/i.test(p) ? p : undefined;
+}
 const trimSlash = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
 function loginRejected(login: Target, pre: Target): string | undefined {
   const first = ownChain(login)[0];
@@ -71,6 +81,9 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
     const rejected = loginRejected(login, pre);
     if (rejected) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（${rejected}）`, LOGIN_FAILED_REC)];
+    // 多要素認証の途中（2段階目の画面への転送）は、ログインが終わっていない。セッションIDの再発行は、ふつう2段階目のあとに行う
+    const mfa = mfaStep(login);
+    if (mfa) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `多要素認証の途中（${mfa} への転送）。ログインが終わっていない`, MFA_REC)];
     // ログイン前のセッションIDは、pre-login で発行したものに加え、pre-login で送ったもの（トップページで発行され、ログイン画面では送るだけ。
     // ブラウザの普通の流れで、HAR ではほぼこの形になる）も数える。送っただけの値は分からないので、login で新しいセッションCookieを発行したかで見る
     const sent = (pre.sentCookieNames ?? []).filter(looksLikeSessionName);

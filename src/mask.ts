@@ -19,7 +19,7 @@ const MASK_EXACT = new Set(MASK_PARAM_NAMES.map(n => n.toLowerCase()));
 /** 区切った語にこれがあればマスクする（x-amz-security-token、x-goog-signature、private_token、x-api-key、access-token など） */
 const MASK_WORDS = new Set(['token', 'secret', 'signature', 'sig', 'credential', 'credentials', 'password', 'passwd', 'pwd', 'pass', 'pw', 'key', 'apikey',
   'accesskey', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp', 'ticket', 'verifier', 'samlresponse', 'samlart', 'samlassertion',
-  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf', 'hmac', 'hdnts', 'hdnea']);   // hdnts・hdnea は Akamai の署名トークン（acl=/* の値は持参人の資格情報）   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
+  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf', 'hmac', 'hdnts', 'hdnea', 'bearer', 'authentication']);   // hdnts・hdnea は Akamai の署名トークン（acl=/* の値は持参人の資格情報）   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
 /**
  * 語 code と組み合わせても秘密ではない語（country_code、zip_code、error_code、currency_code）。名前の語が code とこれらだけなら伏せない。
  * code だけの名前と、auth_code・verification_code・otp_code・device_code のように秘密の語と組み合わせたものは伏せる
@@ -73,6 +73,12 @@ const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-])|(?<=(?:^|[^\w-])[A-Za-z0-9_]{1,4
 // スキームの前が数字のとき（エンコードした引用符 %22https://…、%3Dhttps://…）も含める（\b だと「2」と「h」の間を語の先頭とみなさず、パスワードを残した）。
 // スキームは英字の直後でないところから始める（「-」「.」の直後も含める。除くと、32文字を超える corp-egress-…-https://user:pw@ を見逃した）
 const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)([^/\s?#<>"']{1,512})@/g;
+/**
+ * パラメータの値に入れた、エンコードした URL のユーザー情報（?redirect=https%3A%2F%2Falice%3A<パスワード>%40evil.example）。
+ * パスワード（%3A の後ろ、%40 の前）を伏せる。伏せ済みの「****」は伏せ直さない
+ */
+// スキームは語の先頭から（どの位置からも試すと、長い語の本文で位置ごとに32文字ずつ読み、マスク全体の時間が2倍になった）
+const URL_CRED_ENCODED = /((?<![\w+.-])[A-Za-z][\w+.-]{0,31}%3A%2F%2F)([^\s?#&<>"'/%]{0,256})%3A(?!\*{4}%40)[^\s?#&<>"'/]{1,512}?%40/gi;
 /** パスワードがあればユーザー名を残してパスワードを伏せる。ユーザー名だけ（https://<トークン>@host/ の形）なら、それをトークンとしてマスクする */
 const maskUserinfo = (u: string, h: Hider) => { const i = u.indexOf(':'); return i >= 0 ? `${u.slice(0, i)}:****` : h.value(u); };
 
@@ -160,7 +166,18 @@ const SHOW: Hider = { value: v => maskValue(v), bare: v => `…(${v.length} char
  */
 // ビルドしたファイルの名前として伏せないのは、静的ファイルの拡張子が付いた部分だけ（/magic/login-Xy7Kp2Lm9Qa のようなトークンを伏せ忘れない）
 const ASSET_EXT = /\.(?:m?js|css|map|woff2?|ttf|otf|svg|png|jpe?g|gif|webp|avif|ico)$/i;
-const maskSegment = (seg: string, h: Hider = SHOW): string => { const asset = ASSET_EXT.test(seg); return seg.replace(/[^.:~+]+/g, piece => {
+const PUBLIC_PARAM = /^(?:utm_\w+|gclid|gbraid|wbraid|fbclid|msclkid|yclid|dclid|mc_cid|mc_eid|_ga|_gl|list|v|vid|video|id|ids|uuid|guid|title|name|slug|q|query|search|keyword|s|ref|ref_src|lang|locale|hl|page|sort|order|category|cat|tag|tags|format|type|mode|view|tab|ver|version)$/i;
+const maskSegment = (seg: string, h: Hider = SHOW): string => { const asset = ASSET_EXT.test(seg); const one = (piece: string): string => {
+  // 名前が一覧にないパラメータ（?t=<トークン>・&invite=<トークン>・?RelayState=…）は、「=」の後ろを値として同じ基準で見る
+  // （「=」を含んだまま見ると、トークンの形に当たらず、パスに置いた同じトークンは伏せるのに値のトークンを残した）。末尾の「=」（Base64 の詰め物）は値の一部
+  // 「=」で分けたかけらごとに見る（再帰で1つずつ切り出すと、a=b の繰り返しで入力の長さの2乗の時間と深い再帰になった）
+  const core = piece.replace(/=+$/, '');
+  // 公開の値を入れる決まった名前（utm_*・gclid・list・id・title・q など）の値は見ない（キャンペーン名・動画の一覧・UUID の ID まで伏せた）
+  if (core.includes('=')) {
+    const parts = core.split('='); parts[parts.length - 1] += piece.slice(core.length);
+    if (parts.length === 2 && PUBLIC_PARAM.test(parts[0])) return piece;
+    return parts.map(p => (p ? one(p) : p)).join('=');
+  }
   // Base64 の + と = をエンコードしたもの（%2B・%3D）もトークンの一部として見る（%2B で区切ると、後ろのかけらが伏せられずに残った）
   const body = piece.replace(/(?:=|%3[Dd])+$/, ''); const pad = piece.slice(body.length);
   const plain = body.replace(/%2[Bb]/g, '');
@@ -172,7 +189,7 @@ const maskSegment = (seg: string, h: Hider = SHOW): string => { const asset = AS
   const m = body.match(/^([A-Za-z]{3,20}[-_])(.+)$/);
   if (m && !wordPrefix(m[1].slice(0, -1))) return h.value(body) + pad;
   return m && secretPiece(m[2]) ? m[1] + h.bare(m[2]) + pad : h.value(body) + pad;
-}); };
+}; return seg.replace(/[^.:~+]+/g, one); };
 /**
  * ビルドしたファイルの名前（英字の語を - _ でつなぎ、最後に短いハッシュを付けたもの）。Vite の AdminDashboard-Dk3x9Lq2、vendor-react-BxYz12Ab、
  * webpack の main-3f8a9c2e1b4d5f6a7b8c。ハッシュは12文字未満か、20文字以下の16進数。トークンではないので伏せない
@@ -243,6 +260,7 @@ function mask(s: string, h: Hider): string {
   return maskParams(maskJsonPairs(nonce, h), h)
           .replace(JWT, t => h.value(t))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
+          .replace(URL_CRED_ENCODED, (_, sc: string, user: string) => `${sc}${user}%3A****%40`)
           .replace(ASPNET_COOKIELESS, (_, inner: string) => `/(${inner.replace(/([A-Z])\(([^()]+)\)/g, (__, k: string, v: string) => `${k}(${h.value(v)})`)})`)
           .replace(HASH_OR_SEGMENT, (seg, hash: string | undefined) => (hash ? seg : maskSegment(seg, h)));
 }
@@ -323,8 +341,12 @@ const CMD_START = /(?<=^|[\s_・])(?:(--[a-z][a-z0-9-]*)(?=[\s_=]|$)|-([A-Za-z]+
 const CMD_SEP = /[\s_=]+(?!-)/y;
 /** 値を取る短いオプション。まとめ書きでは、最初にこれが来たところから後ろが値になる（-sSu_alice:pw の u、-XPOST の X） */
 const SHORT_WITH_VALUE = new Set('AbcCdDeEFHKmoPQrtTuUwxXyYz');
+// wget の --password・--http-password・--proxy-password・--ftp-password、httpie・xh の --auth・--bearer も含める
+// （design.md は curl・httpie・wget のオプションを伏せるとしているのに、curl のものしかなかった）
 const CRED_OPTIONS = new Set(['-u', '-U', '--user', '--proxy-user', '-b', '--cookie', '--oauth2-bearer', '-E', '--cert', '--proxy-cert', '--pass', '--proxy-pass',
-  '--tlspassword', '--proxy-tlspassword']);
+  '--tlspassword', '--proxy-tlspassword', '--password', '--http-password', '--proxy-password', '--ftp-password', '--auth', '--bearer']);
+/** プロキシ（-x・--proxy）は、スキームのない「ユーザー:パスワード@ホスト」のパスワードだけを伏せる（スキームのあるものは maskText が伏せる） */
+const PROXY_OPTIONS = new Set(['-x', '--proxy']);
 const DATA_OPTIONS = new Set(['-d', '--data', '--data-raw', '--data-binary', '--data-ascii', '--data-urlencode', '-F', '--form', '--form-string', '--json', '--url-query']);
 const HEADER_OPTIONS = new Set(['-H', '--header', '--proxy-header']);
 const AUTH_SCHEME = String.raw`(?:(Basic|Bearer|Digest|Negotiate|NTLM)([\s_]+))?`;
@@ -333,6 +355,11 @@ const secretHeaderName = (n: string) => /^(?:(?:proxy-)?authorization|cookie)$/i
 const maskOptionValue = (opt: string, v: string): string => {
   const q = /^["']/.test(v) ? v[0] : ''; const inner = q ? v.slice(1).replace(new RegExp(`${q}$`), '') : v; const close = q && v.endsWith(q) && v.length > 1 ? q : '';
   if (CRED_OPTIONS.has(opt)) return `${q}****${close}`;
+  // スキームのあるもの（http://alice:pw@…）は maskText に任せる（ここでも見ると、伏せたあとにもう一度かけたとき、スキームを名前と読んで http:****@ にした）
+  if (PROXY_OPTIONS.has(opt)) {
+    if (/^[a-z][\w+.-]*:\/\//i.test(inner)) return v;
+    const r = inner.replace(/^([^:@/\s]*):(?!\*{4}@)[^@\s]*@/, '$1:****@'); return r === inner ? v : `${q}${r}${close}`;
+  }
   // --variable NAME=値（値は秘密のことが多い。%NAME の環境変数の読み込みと @ファイルは名前だけなので残す）
   if (opt === '--variable') return inner.includes('=') ? `${q}${inner.slice(0, inner.indexOf('=') + 1)}****${close}` : v;
   if (DATA_OPTIONS.has(opt)) return `${q}${maskText(`?${inner}`).slice(1)}${close}`;
@@ -347,7 +374,7 @@ const maskOptionValue = (opt: string, v: string): string => {
   }
   return v;
 };
-const SENSITIVE_OPTION = (opt: string) => CRED_OPTIONS.has(opt) || DATA_OPTIONS.has(opt) || HEADER_OPTIONS.has(opt) || opt === '--variable';
+const SENSITIVE_OPTION = (opt: string) => CRED_OPTIONS.has(opt) || DATA_OPTIONS.has(opt) || HEADER_OPTIONS.has(opt) || PROXY_OPTIONS.has(opt) || opt === '--variable';
 /**
  * 認証情報を持つオプションだけを探して値を伏せる。ほかのオプション（-X POST、--compressed）は値を読み飛ばさない
  * （読み飛ばすと、-X_POST_-uadmin:pw の -u や、--compressed_-H_Cookie:… の -H が、前のオプションの値の中に入って伏せられなかった）
@@ -362,17 +389,72 @@ const VARIABLE_HEAD = /["']?[%\w-]{1,100}=/y;
 // Windows のパスで書いた curl（C:\Windows\System32\curl.exe）も含める（「\」の直後の curl を見ず、-u alice:pw をそのまま出した）。
 // 「\」の直後は curl だけ（D:\logs\http_dump\grep_-E_… の http_ をクライアントとみなし、grep の値を伏せた）で、後ろが空白・オプション・URL・閉じ引用符の
 // ときだけ（D:\tools\curl_8.5\bin\openssl_… のディレクトリの curl_ をクライアントとみなした）。引用符で囲んだパス（"C:\Program Files\curl\bin\curl.exe"）も含める
-const HTTP_CLIENT = /(?:^|[\s_/])(?:curl|https?|wget|xh)(?:\.exe)?(?:[\s_]|$)|\\curl(?:\.exe)?(?:"?\s|_(?=-|https?:)|"?$)/i;
-const maskClientOptions = (s: string): string => s.split(/(・|\n)/).map((seg, i) => (i % 2 === 0 && HTTP_CLIENT.test(seg) ? maskOptions(seg) : seg)).join('');
-const maskOptions = (s: string): string => {
-  let out = ''; let last = 0;
+/**
+ * オプションを伏せないのは、curl 以外の既知のツール（openssl・grep など）のコマンドだけ（「・」・改行と、前後が空白・「_」の「|」「&&」「;」で
+ * 区切ったコマンドごと）。curl などの名前を認識できるときだけ伏せる作り（v0.4.34）は、C3:curl_-u_… や引数だけの -u_alice:pw、curl8・curlie の
+ * 値をそのまま CSV に出した。伏せない名前を決めておけば、名前を認識できないコマンドでも伏せる（伏せすぎるほうを選ぶ）
+ */
+// プログラムのパスは、ルート・ドライブ・./・~ から始まるもの（D:\tools\curl_8.5\bin\openssl。ディレクトリの名前は「_」を含みうる）
+const OTHER_TOOL = /^[\s_]*(?:sudo[\s_]+)?(?:(?:[A-Za-z]:|\.{1,2}|~)?[\\/](?:[\w.+-]+[\\/])*)?(?:openssl|grep|egrep|fgrep|rg|sed|awk|jq|yq|head|tail|cut|tr|sort|uniq|wc|tee|base64|xxd|od|cat|echo|printf|date|sleep|ls|find|dig|nslookup|host|nc|ncat|nmap|sslscan|testssl(?:\.sh)?|tar|gzip|gunzip|zcat|less|more|diff)(?:\.exe)?(?=[\s_]|$)/i;
+/** httpie・xh のコマンド（-a は認証、name=value の項目は本文） */
+const HTTPIE = /^[\s_]*(?:(?:[A-Za-z]:|\.{1,2}|~)?[\\/](?:[\w.+-]+[\\/])*)?(?:https?|xh|xhs)(?:\.exe)?(?=[\s_]|$)/i;
+/**
+ * コマンドに分ける（区切りも結果に残す）：「・」・改行と、引用符の外の「;」「|」「||」「&&」。前の語に付けた「;」（sleep 2; curl …）でも区切る
+ * （前後の空白を求めると、sleep・echo のあとの curl を同じコマンドとみなし、先頭の sleep を見て値を伏せなかった）。
+ * 引用符の中（-H "Cookie: lang=ja ; sid=…"）では区切らない（区切ると、後ろの引数を別のコマンドとして伏せすぎた）
+ */
+const splitCommands = (s: string): string[] => {
+  const out: string[] = []; let cur = ''; let q = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (q) { cur += ch; if (ch === q) q = ''; continue; }
+    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+    const sep = ch === '・' || ch === '\n' || ch === ';' ? ch : s.startsWith('&&', i) ? '&&' : s.startsWith('||', i) ? '||' : ch === '|' ? '|' : '';
+    if (sep) { out.push(cur, sep); cur = ''; i += sep.length - 1; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+};
+/** 後ろに HTTP のクライアントの名前があるコマンド（grep … && curl の区切りを書き忘れたものなど）は、先頭がほかのツールでも伏せる */
+// http・https の語はパス（/var/log/http_access）にも出るので見ない
+const HAS_CLIENT = /(?:^|[\s_])(?:curl|wget|xh)(?:\.exe)?(?:[\s_]|$)/i;
+/**
+ * コマンドの前の環境変数の代入（TOKEN=<トークン>_curl_…、API_KEY=… curl …）。名前が秘密らしければ値を伏せる。
+ * 値は空白か、次の代入・コマンドの前の「_」まで
+ */
+const ENV_ASSIGN = /^([\s_]*)([A-Za-z_]\w{0,63})=((?:"[^"]*"?|'[^']*'?)|(?:(?!\s|_(?:[A-Za-z_]\w{0,63}=|(?:[^\s_]*[\\/])?(?:curl|wget|https?|xh)(?:\.exe)?(?:[\s_]|$))).)*)/;
+const maskEnvPrefix = (seg: string): string => {
+  let out = ''; let rest = seg;
+  for (let i = 0; i < 8; i++) {
+    const m = rest.match(ENV_ASSIGN);
+    if (!m || !m[0]) break;
+    out += `${m[1]}${m[2]}=${isSecretParamName(m[2]) && m[3] && !/^\*{4}$/.test(m[3]) ? '****' : m[3]}`; rest = rest.slice(m[0].length);
+  }
+  return out + rest;
+};
+const maskClientOptions = (s: string): string => splitCommands(s).map((seg, i) => (i % 2 === 0 && (!OTHER_TOOL.test(seg) || HAS_CLIENT.test(seg.replace(OTHER_TOOL, ''))) ? maskOptions(maskEnvPrefix(seg), HTTPIE.test(seg)) : seg)).join('');
+/**
+ * httpie・xh の項目（password=…、token:=…、クエリの api_key==…）のうち、名前が秘密らしいものの値。値は次の項目・オプション・URL の前の「_」か空白まで。
+ * 印（=・:=・==）はそのまま残す（== を = にすると、クエリの項目が本文の項目に見えた）
+ */
+const HTTPIE_ITEM = /(?<=[\s_])([A-Za-z][\w.-]{0,63})(==|:?=)((?:"[^"]*"?|'[^']*'?)|(?:(?![\s・]|_(?:[A-Za-z][\w.-]{0,63}(?:==|:?=)|-|https?:)).)+)/g;
+/**
+ * 値の中にある秘密のオプションの始まり：値を取らない文字（-s・-S・-L・-f など）のあとに -u・-U・-b・-E・-x が来るまとめ書き、-H、
+ * 認証・プロキシ・ヘッダの長いオプション。-d の値の中の -dab（d は値を取るので -u ではない）には一致させない（一致させると、_-dab の繰り返しで
+ * 読み直しが続いた）
+ */
+const SECRET_OPTION_IN_VALUE = /(?<=[\s_・'"])-(?:[aBfgGhiIjJklLMnNOpqRsSvVZ0-9]*[uUbEx]|H|-(?:user|proxy-user|cookie|oauth2-bearer|cert|proxy-cert|pass|proxy-pass|tlspassword|proxy-tlspassword|password|http-password|proxy-password|ftp-password|auth|bearer|proxy|header|proxy-header|variable)\b)/;
+const maskOptions = (s: string, httpie = false): string => {
+  let out = ''; let last = 0; let skip = 0;
   for (const m of s.matchAll(CMD_START)) {
-    if (m.index < last) continue;   // 前に伏せた値の中
+    if (m.index < last || m.index < skip) continue;   // 前に伏せた値・伏せなかった本文の中
     let opt: string; let p: number;
     if (m[1]) { opt = m[1]; p = m.index + m[0].length; } else {
-      const k = [...m[2]].findIndex(c => SHORT_WITH_VALUE.has(c));
+      // httpie・xh の -a（--auth）は認証の値。curl の -a（--append）は値を取らない
+      const k = [...m[2]].findIndex(c => SHORT_WITH_VALUE.has(c) || (httpie && c === 'a'));
       if (k < 0) continue;
-      opt = `-${m[2][k]}`; p = m.index + 2 + k;   // 値を取る文字の直後（まとめ書きの残り -uadmin の admin は値）
+      opt = httpie && m[2][k] === 'a' ? '--auth' : `-${m[2][k]}`; p = m.index + 2 + k;   // 値を取る文字の直後（まとめ書きの残り -uadmin の admin は値）
     }
     if (!SENSITIVE_OPTION(opt)) continue;
     CMD_SEP.lastIndex = p;
@@ -385,10 +467,15 @@ const maskOptions = (s: string): string => {
     const v = readValue(s, p);
     if (!v) continue;
     const masked = maskOptionValue(opt, v);
-    if (masked === v) continue;   // 伏せなかった値（-H Accept:*/*）は読み飛ばさない（値の中の _-ualice:pw を見つけるため）
+    // 伏せなかった本文（-d の値に秘密がない）は、もう読まない（値は、値を続けて書いた秘密のオプション（_-ualice:pw）の前で止まるので、
+    // その中にほかの秘密のオプションはない。読み直すと「_-daaaaa」の繰り返しで2乗の時間がかかった）
+    // ただし、値の中に秘密のオプション（まとめ書きの -sSLfu、-x、-H、--user など）があれば、その手前までだけ読み飛ばす
+    // （値をまるごと飛ばすと、-d x=1_-sSLfu_alice:pw の -u を伏せなかった）
+    if (masked === v) { const o = v.search(SECRET_OPTION_IN_VALUE); skip = p + (o > 0 ? o : v.length); continue; }
     out += s.slice(last, p) + masked; last = p + v.length;
   }
-  return out + s.slice(last);
+  const rest = out + s.slice(last);
+  return httpie ? rest.replace(HTTPIE_ITEM, (all: string, name: string, op: string, v: string) => (isSecretParamName(name) && !/^\*{4}$|…\(\d+ chars\)$/.test(v) ? `${name}${op}****` : all)) : rest;
 };
 /**
  * オプションの外に書いた Authorization・Cookie・秘密らしい名前のヘッダ（httpie の Authorization:Bearer_…、-H の値の続き）も伏せる。
@@ -404,6 +491,7 @@ const LOOSE_HEADER_NAME = /(?<=^|[\s_・'"]|(?<![\w-])-H|--(?:proxy-)?header=)[A
 // 方式の名前のあと（Authorization:Bearer_-Abc_<トークン>）は、「-」で始まってもトークンとして伏せる（断ると、方式の名前だけを伏せてトークンを残した）
 const LOOSE_HEADER_VALUE = new RegExp(String.raw`:([\s_]*)${AUTH_SCHEME}((?!https?:)${UNQUOTED_VALUE})`, 'y');
 const OPTION_START = /^(?:--[a-z]|-[A-Za-z]{1,4}(?=[_\s・'"]|$))/;
+const LOOSE_HEADER_HEAD = new RegExp(String.raw`:([\s_]*)${AUTH_SCHEME}`, 'y');
 const GLUED_SECRET_HEADER = /^(?:-H|--(?:proxy-)?header=)([A-Za-z0-9-]{1,100}):/;
 /** 伏せ済みの値（****、先頭の数文字と印。後ろに **** が続くものを含む）。値全体がこの形のときだけ伏せ直さない（先頭だけ見ると、印の後ろの値を残した） */
 const MASKED_WHOLE = /^(?:\*+|[^…\s]{0,4}…\(\d+ chars\)\**)$/;
@@ -411,14 +499,21 @@ const maskLooseHeaders = (s: string): string => {
   let out = ''; let last = 0;
   for (const m of s.matchAll(LOOSE_HEADER_NAME)) {
     if (m.index < last || !secretHeaderName(m[0])) continue;
+    // 値のないヘッダか（区切りのあとが次のオプション、値を続けて書いた秘密の -H）は、値を読む前に先頭だけで確かめる
+    // （値を最後まで読んでから断ると、「Cookie:-H」の繰り返しで、名前ごとに末尾まで読み直して2乗の時間がかかった）
+    LOOSE_HEADER_HEAD.lastIndex = m.index + m[0].length;
+    const head = LOOSE_HEADER_HEAD.exec(s);
+    if (!head) continue;
+    const peek = s.slice(LOOSE_HEADER_HEAD.lastIndex, LOOSE_HEADER_HEAD.lastIndex + 120);
+    // 値のないヘッダのあとの、値を続けて書いた秘密の -H（-H Cookie: -HAuthorization: …、--header=Authorization: …）は値にしない
+    // （そのヘッダとして、後ろのトークンを伏せる）
+    if (head[1] && !head[2] && OPTION_START.test(peek)) continue;
+    const g = peek.match(GLUED_SECRET_HEADER);
+    if (g && secretHeaderName(g[1])) continue;
     LOOSE_HEADER_VALUE.lastIndex = m.index + m[0].length;
     const v = LOOSE_HEADER_VALUE.exec(s);
-    // 伏せ済みの値は伏せ直さない（伏せ直すと、もう一度かけたときに結果が変わった）。値のないヘッダのあとの、値を続けて書いた秘密の -H
-    // （-H Cookie: -HAuthorization: …、--header=Authorization: …）は値にしない（そのヘッダとして、後ろのトークンを伏せる）
+    // 伏せ済みの値は伏せ直さない（伏せ直すと、もう一度かけたときに結果が変わった）
     if (!v || MASKED_WHOLE.test(v[4])) continue;
-    if (v[1] && !v[2] && OPTION_START.test(v[4])) continue;
-    const g = v[4].match(GLUED_SECRET_HEADER);
-    if (g && secretHeaderName(g[1])) continue;
     const end = LOOSE_HEADER_VALUE.lastIndex;
     out += s.slice(last, end - v[4].length) + '****'; last = end;
   }

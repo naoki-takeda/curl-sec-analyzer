@@ -54,8 +54,12 @@ export function urlKey(raw: string): string {
  * JSON のエクスポートと例外ファイルに出した。残す形を決めておけば、トークンがどんな形でもキーには入らない。
  * 別のページが同じキーになることはある（GettingStartedV2Guide と MigrationGuideV3 はどちらも *）が、秘密は漏れない
  */
+// 日本語などの ASCII 以外の文字の語（お知らせ・採用情報）も残す（大文字・小文字の入れ替わりは英字と同じく4回まで）。すべて * にすると、別のページが
+// 同じキーになり、記録の順番だけで「 #2」が入れ替わって、差分（新規と解消が同時に出る）と例外の対象がずれた。
+// 数字は6桁まで（7〜8桁にすると、パスに置いたワンタイムの番号がキーに入り、JSON と例外ファイルに出た）
 const keyPiece = (p: string): boolean => {
   if (p === '*' || /^\d{1,6}$/.test(p) || /^[A-Za-z]{1,2}\d{1,2}$/.test(p)) return true;
+  if (/[^\p{ASCII}]/u.test(p)) return /^[\p{L}\p{M}]{1,24}$/u.test(p) && (p.match(/\p{Lu}+|[\p{Ll}\p{Lo}\p{M}]+/gu) ?? []).length <= 4;
   if (!/^[A-Za-z]{1,24}$/.test(p)) return false;
   if (/^[A-Z]+$/.test(p)) return p.length <= 10;
   return (p.match(/[a-z]+|[A-Z]+/g) ?? []).length <= 4;

@@ -36,10 +36,9 @@ export function attrs(s: string): Record<string, string> {
   const out: Record<string, string> = {};
   const ct = s.match(/(?:^|\s)ct=(.*)$/);
   if (ct) { out.ct = ct[1].trim(); s = s.slice(0, ct.index); }
-  for (const kv of s.trim().split(/\s+/)) {
-    const i = kv.indexOf('=');
-    if (i > 0) out[kv.slice(0, i)] = kv.slice(i + 1);
-  }
+  // 値は引用符で囲んでもよい（url="https://…"、label="top page"）。引用符をそのまま値にすると、url が URL として読めず、警告なしで
+  // HTTPS ではないものとして扱った
+  for (const m of s.matchAll(/(?:^|\s)([^\s=]+)=(?:"([^"]*)"|'([^']*)'|(\S*))/g)) out[m[1]] = m[2] ?? m[3] ?? m[4] ?? '';
   return out;
 }
 
@@ -61,6 +60,9 @@ export function parseInput(input: string): ParseResult {
   let unparsed = 0; const emptyTargets: string[] = [];
   let json: string[] | null = null;                   // C10（%{header_json}）の読み取り中
   let jsonBytes = 0;
+  // 読み取り中の JSON の括弧の深さと、文字列の中か（} で終わる行ごとに全体をつないで解析し直すと、閉じない括弧の続く入力で遅かった。
+  // 括弧が閉じたときだけ解析する）
+  const js = { depth: 0, inStr: false, esc: false };
   const sentNames = new WeakMap<Target, Set<string>>();
   const pendingJson: HttpResponse[] = [];            // ステータスがまだない %{header_json} の応答（あとの #META response_code= で補う）   // 送った Cookie の名前（重なりを除くため）
   let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
@@ -108,7 +110,10 @@ export function parseInput(input: string): ParseResult {
     }
     // 「Connecting to」は、次の行が CONNECTED( のときだけ openssl の出力の始まりとする（ほかの場所の同じ文言で、普通のターゲットを
     // openssl の出力とみなし、T-10・T-11 を「ハンドシェイクに失敗した可能性」にした）
-    if (!inBody() && (OPENSSL_START.test(line) || (CONNECTING.test(line) && /^CONNECTED\(/.test(lines[li + 1] ?? '')))) { close(); inOpenssl = true; }
+    // 同じターゲットで HTTP の応答に続けた openssl の出力（CONNECTED( の行、Connecting to と CONNECTED( の2行）は、応答の本文の中でも
+    // openssl の出力の始まりとして応答を閉じる（本文に入れると t.openssl が空になり、T-10・T-11 で使えなかった）。ほかの始まりの行（depth= など）は本文の外だけ
+    const opensslHead = /^CONNECTED\(\d+\)\s*$/.test(line) || (CONNECTING.test(line) && /^CONNECTED\(/.test(lines[li + 1] ?? ''));
+    if ((!inBody() && (OPENSSL_START.test(line) || opensslHead)) || (inBody() && opensslHead)) { close(); inOpenssl = true; }
     if (inOpenssl && !STATUS_RE.test(line) && !/^[*<>] /.test(line)) { t.openssl.push(line); continue; }
     inOpenssl = false;
     if (!inBody() && VERBOSE_HINT.test(line)) t.verbose = true;
@@ -156,11 +161,15 @@ export function parseInput(input: string): ParseResult {
     }
     // C10：ヘッダ名が小文字のJSON。-v の本文や、応答のあとの本文（{"items":[...]} など）は対象にしない
     if (!cur && !t.verbose && (json || (!t.responses.length && /^\s*\{\s*"[\w-]+"\s*:\s*\[/.test(line)))) {
-      if (!json) { json = []; jsonBytes = 0; }
+      if (!json) { json = []; jsonBytes = 0; js.depth = 0; js.inStr = false; js.esc = false; }
       json.push(line); jsonBytes += line.length;
+      for (const ch of line) {
+        if (js.inStr) { if (js.esc) js.esc = false; else if (ch === '\\') js.esc = true; else if (ch === '"') js.inStr = false; }
+        else if (ch === '"') js.inStr = true; else if (ch === '{' || ch === '[') js.depth++; else if (ch === '}' || ch === ']') js.depth--;
+      }
       // JSON のオブジェクトは } で終わるので、そこまでは読み直さない（行ごとに全体をつないで解析すると、入力の長さの2乗の時間がかかる）
       // 上限は先に見る（} で終わる行が続くと、行ごとに全体をつないで解析し直し、入力の長さの2乗の時間がかかる）
-      const r = jsonBytes > BODY_LIMIT ? null : /\}\s*$/.test(line) ? headerJson(json.join('\n'), t.meta.response_code) : undefined;
+      const r = jsonBytes > BODY_LIMIT || js.depth < 0 ? null : js.depth === 0 && /\}\s*$/.test(line) ? headerJson(json.join('\n'), t.meta.response_code) : undefined;
       // null：JSON としては読めたが、ヘッダの形ではない（curl -s で出力した API の本文など）。応答にせず、解析できない行として警告する
       if (r) { t.responses.push(r); if (r.status === 0) pendingJson.push(r); json = null; } else if (r === null || json.length > 500) { unparsed += json.length; json = null; }
       continue;
@@ -236,6 +245,9 @@ function collectWarnings(targets: Target[], unparsed: number, emptyTargets: stri
   for (const l of emptyTargets) w.push({ kind: 'orphan-block', detail: `#TARGET label=${l} にデータがありません` });
   for (const t of targets) if (!t.url && !t.meta.url_effective)
     w.push({ kind: 'unknown-url', label: t.label, detail: `ターゲット「${t.label}」のURLが分かりません。HTTPSかどうかを使う項目は判定できません（#TARGET に url= を付けてください）` });
+  // url= はあるが、スキームのある URL として読めない（a.example/r、https:/a.example）。HTTPS かどうかを使う項目が黙って適用外になる
+  else if (t.url && !/^[a-z][\w+.-]*:\/\/[^/?#\s]/i.test(t.url))
+    w.push({ kind: 'unknown-url', label: t.label, detail: `ターゲット「${t.label}」の url= を URL として読めません。HTTPSかどうかを使う項目は判定できません（https:// から書いてください）` });
   for (const t of targets) for (const p of [...t.tlsProbes, ...t.cipherProbes]) if (p.result === 'error')
     w.push({ kind: 'tls-probe-error', detail: `ターゲット「${t.label}」：手元のOpenSSLが対応していないプローブがあります（判定不能）` });
   return w;

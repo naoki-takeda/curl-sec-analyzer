@@ -2,7 +2,7 @@
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
 import { baseLabel, finalResponse, responseKind, sameDocumentHop } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk } from './util';
+import { NO_BODY_REC, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk } from './util';
 import { loginForm } from './html';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
@@ -40,13 +40,32 @@ const UNFOLLOWED = (ctx: RuleContext) => sameDocumentHop(ctx.target).unfollowed;
  * API の URL に HTML の画面を 200 で返したか（どのパスにも index.html を返す SPA、ログイン画面）。A-01・A-11 では、データを返したかが
  * 分からないので①②にしない（E-05 の HTML の 200 と同じ考え方）。ログインのフォームなら、認証を求めたのと同じ
  */
-const htmlPage = (ctx: RuleContext): 'login' | 'html' | undefined => {
+const htmlPage = (ctx: RuleContext): 'login' | 'html' | 'unknown' | undefined => {
   const r = sameDocumentHop(ctx.target).hop ?? ctx.final;
   const ct = r?.headers.get('content-type')?.[0] ?? ''; const b = r?.body ?? '';
-  // 本文が JSON（{・[ で始まる）なら、Content-Type が text/html でも HTML の画面ではない（PHP の既定の Content-Type のまま JSON を返す API）
-  if (/^\s*[{[]/.test(b)) return undefined;
-  if (!/^\s*(?:text\/html|application\/xhtml\+xml)/i.test(ct) && !/^\s*(?:<!doctype html|<html)/i.test(b)) return undefined;
+  // HTML の画面とみなすのは、本文がタグで始まるものだけ。Content-Type が text/html でも、本文が JSON・CSV・平文・空のもの（PHP の既定の
+  // Content-Type のまま返す API）は HTML の画面ではない（Content-Type だけで見ると、利用者のデータの CSV を返す API を na にした）
+  const htmlCt = /^\s*(?:text\/html|application\/xhtml\+xml)/i.test(ct);
+  // 本文を採取していない text/html（curl -I、-o /dev/null）は、SPA の画面かデータかが分からない
+  if (!b.trim()) return htmlCt ? 'unknown' : undefined;
+  // 先頭の 1KB に <!doctype html>・<html があるもの（PHP の Notice の行のあとに続く HTML も）か、タグで始まるもの
+  const head = b.slice(0, 1024);
+  if (!/<!doctype html|<html\b/i.test(head) && !(htmlCt && /^\s*<(?!\?xml\b)/i.test(b))) return undefined;
   return loginForm(b) ? 'login' : 'html';
+};
+/**
+ * GraphQL の認証エラー（200 で {"errors":[…],"data":null}）。errors があり、data が null か、値がすべて null のもの。
+ * エラーの code・message が認証・認可の拒否（UNAUTHENTICATED・FORBIDDEN・not authenticated など）なら 'denied'、それ以外は 'error'
+ */
+const graphqlError = (ctx: RuleContext): 'denied' | 'error' | undefined => {
+  const b = (sameDocumentHop(ctx.target).hop ?? ctx.final)?.body ?? '';
+  if (!/^\s*\{/.test(b) || !/"errors"\s*:/.test(b)) return undefined;
+  let j: { errors?: unknown; data?: unknown };
+  try { j = JSON.parse(b) as typeof j; } catch { return undefined; }
+  if (!Array.isArray(j.errors) || !j.errors.length) return undefined;
+  const d = j.data;
+  if (!(d === null || d === undefined || (typeof d === 'object' && Object.values(d as Record<string, unknown>).every(v => v === null)))) return undefined;
+  return /UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|not authenticated|unauthori[sz]ed|authentication required|access denied|not logged in|login required/i.test(JSON.stringify(j.errors)) ? 'denied' : 'error';
 };
 
 /**
@@ -82,7 +101,12 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
     if (s >= 200 && s < 300) {
       const page = htmlPage(ctx);
       // ログインのフォームがあっても合格にはしない（ゲスト用のログイン欄と利用者のデータを並べる画面がある）
+      if (page === 'unknown') return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（text/html。本文を採取していないので、データを返したかは分からない）`, NO_BODY_REC)];
       if (page) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（HTML の画面${page === 'login' ? '。ログインのフォームを含む' : '。どのパスにも同じ画面を返す SPA の可能性'}。データを返したかは分からない）`, 'API の URL（JSON を返すもの）で採取し直す')];
+      // GraphQL は認証のエラーも 200 で返す（{"errors":[{"extensions":{"code":"UNAUTHENTICATED"}}],"data":{"me":null}}）。データを返していない
+      const gql = graphqlError(ctx);
+      if (gql === 'denied') return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', `HTTP ${s}（GraphQL の認証エラー。データは null）`, '')];
+      if (gql) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（GraphQL のエラー。データは null で、認証で断られたかは分からない）`, '認証が必要なクエリ（me など）で採取し直す')];
       return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
     }
     if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${sameDocumentHop(ctx.target).hop?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
@@ -189,14 +213,20 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   if (Array.isArray(v)) v.slice(0, 50).forEach(x => secretValuedKeys(x, `${prefix}[]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
     const p = prefix ? `${prefix}.${k}` : k;
-    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x) && !isPlaceholderValue(x)) out.add(p);
+    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x) && !isPlaceholderValue(x) && !stateWord(x)) out.add(p);
     secretValuedKeys(x, p, out, depth + 1);
   }
   return out;
 }
-const SECRET_KEY = /(^|[._[\]])(password|passwd|password_?hash|pass_?hash|secret|client_?secret|api_?key|private_?key|salt|otp_?secret|mfa_?secret)$/i;
+// salt は秘密ではない（パスワードのハッシュと一緒に漏れると総当たりの手がかりになるが、事前認証の API が返す設計もある）ので②（内部属性）で数える
+const SECRET_KEY = /(^|[._[\]])(password|passwd|password_?hash|pass_?hash|secret|client_?secret|api_?key|private_?key|otp_?secret|mfa_?secret)$/i;
+/**
+ * 状態を表す短い語・真偽値の文字列（{"password":"set"}、{"otp_secret":"configured"}、{"password":"true"}）。値を出していないので①にしない。
+ * 決まった状態の語と真偽値だけ（英小文字の語をすべて除くと、英小文字だけのパスワード（"hunter"）を見逃す）
+ */
+const stateWord = (v: string) => /^(?:true|false|yes|no|on|off|[01]|none|null|nil|empty|set|unset|not[-_ ]?set|configured|unconfigured|enabled|disabled|required|optional|present|missing|active|inactive|pending|changed|unchanged|valid|invalid|expired)$/i.test(v);
 // __ で始まるキーは内部属性とみなす。ただし GraphQL の __typename と Mongoose の __v（版の番号）は、ライブラリが必ず付けるもので内部情報ではない
-const INTERNAL_KEY = /(^|[._[\]])(is_?admin|is_?super(user)?|is_?staff|role_?id|internal_\w+|_internal\w*|debug\w*|__(?!(?:typename|v)$)\w+)$/i;
+const INTERNAL_KEY = /(^|[._[\]])(is_?admin|is_?super(user)?|is_?staff|role_?id|internal_\w+|_internal\w*|debug\w*|salt|password_?salt|__(?!(?:typename|v)$)\w+)$/i;
 export const excessiveData: Rule = { id: 'A-07', title: '過剰なデータ露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API3'],
   run(ctx) {
@@ -231,6 +261,7 @@ export const requestContentType: Rule = { id: 'A-08', title: 'リクエストの
       : [mk(requestContentType, ctx, 'ok', 'info', 'pass', `HTTP ${s}`, '')];
   } };
 
+const A11_REC = '認証情報を付けて採取し直す（401・403・ログイン画面への転送では、認証の内側で動くかが分からない）';
 export const methodControl: Rule = { id: 'A-11', title: 'メソッド制御・旧版', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API5・API9'],
   run(ctx) {
@@ -242,13 +273,18 @@ export const methodControl: Rule = { id: 'A-11', title: 'メソッド制御・�
     const ok2xx = s >= 200 && s < 300;
     // HTML の画面の 200（SPA の index.html・ログイン画面）は、そのメソッド・旧版の API が動いたかが分からない
     const page = ok2xx ? htmlPage(ctx) : undefined;
+    if (page === 'unknown') return [mk(methodControl, ctx, 'na', 'info', 'na', `HTTP ${s}（text/html。本文を採取していないので、API が処理したかは分からない）`, NO_BODY_REC)];
     if (page) return [mk(methodControl, ctx, 'na', 'info', 'na', `HTTP ${s}（${page === 'login' ? 'ログイン画面' : 'HTML の画面。どのパスにも同じ画面を返す SPA の可能性'}。API が処理したかは分からない）`, 'API の URL（JSON を返すもの）で採取し直す')];
+    // 合格にするのは、メソッド・版そのものを断った応答だけ（メソッドは 405・501、旧版は 404・410）。401・403（認証で断られた。認証の内側で
+    // 動くかは分からない）、3xx（ログイン画面への転送など）、そのほかの 4xx・5xx は na（A-08 の 401・403・404 と同じ考え方）
     if (l.startsWith('method-')) return ok2xx
       ? [mk(methodControl, ctx, 1, 'medium', 'fail', `想定外のメソッドが HTTP ${s}`, '使わないメソッドは 405 と Allow を返す（権限の確認も行う）')]
-      : [mk(methodControl, ctx, 'ok', 'info', 'pass', `HTTP ${s}${ctx.final?.headers.get('allow') ? ` / Allow: ${ctx.final.headers.get('allow')![0]}` : ''}`, '')];
+      : s === 405 || s === 501 ? [mk(methodControl, ctx, 'ok', 'info', 'pass', `HTTP ${s}${ctx.final?.headers.get('allow') ? ` / Allow: ${ctx.final.headers.get('allow')![0]}` : ''}`, '')]
+      : [mk(methodControl, ctx, 'na', 'info', 'na', `HTTP ${s}（メソッドを断ったかは分からない）`, A11_REC)];
     return ok2xx
       ? [mk(methodControl, ctx, 2, 'medium', 'fail', `旧版のAPIが HTTP ${s}`, '廃止した版は 410 か 404 にする（API一覧で管理する）')]
-      : [mk(methodControl, ctx, 'ok', 'info', 'pass', `HTTP ${s}`, '')];
+      : s === 404 || s === 410 ? [mk(methodControl, ctx, 'ok', 'info', 'pass', `HTTP ${s}`, '')]
+      : [mk(methodControl, ctx, 'na', 'info', 'na', `HTTP ${s}（旧版が動いているかは分からない）`, A11_REC)];
   } };
 
 const normCt = (ct: string) => ct.split(';')[0].trim().toLowerCase() || '(なし)';

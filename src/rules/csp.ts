@@ -58,7 +58,10 @@ function evaluateCspUnsafe(policy: string): CspIssue[] {
       case Type.SCRIPT_ALLOWLIST_BYPASS: out.push({ ...base, item: 'H-04', condition: 4, severity: 'medium' }); break;   // JSONP・AngularJS を置くホスト
       case Type.OBJECT_ALLOWLIST_BYPASS: out.push({ ...base, item: 'H-05', condition: 1, severity: 'medium' }); break;
       case Type.DEPRECATED_DIRECTIVE: out.push({ ...base, item: 'H-07', condition: 1, severity: 'low' }); break;
-      case Type.MISSING_SEMICOLON: case Type.UNKNOWN_DIRECTIVE: case Type.INVALID_KEYWORD: case Type.NONCE_CHARSET:
+      // csp_evaluator が知らない、仕様にある新しいディレクティブ（fenced-frame-src など）は、未知のディレクティブにしない
+      case Type.UNKNOWN_DIRECTIVE: if (NEW_DIRECTIVES.has(f.directive.toLowerCase())) break;
+        out.push({ ...base, item: 'H-07', condition: 4, severity: 'low' }); break;
+      case Type.MISSING_SEMICOLON: case Type.INVALID_KEYWORD: case Type.NONCE_CHARSET:
         out.push({ ...base, item: 'H-07', condition: 4, severity: 'low' }); break;
       case Type.NONCE_LENGTH: case Type.IP_SOURCE: case Type.SCRIPT_UNSAFE_HASHES: case Type.SRC_NO_PROTOCOL:
         if (isScript) out.push({ ...base, item: 'H-04', condition: 6, severity: sevOf(f.severity) });
@@ -68,6 +71,9 @@ function evaluateCspUnsafe(policy: string): CspIssue[] {
   }
   return out;
 }
+
+/** csp_evaluator の一覧にない、CSP の仕様（Level 3 と関連仕様）にあるディレクティブ */
+const NEW_DIRECTIVES = new Set(['fenced-frame-src', 'webrtc', 'trusted-types', 'require-trusted-types-for', 'script-src-attr', 'script-src-elem', 'style-src-attr', 'style-src-elem']);
 
 /** 証跡：ディレクティブと値、csp_evaluator の指摘の種類 */
 export const issueEvidence = (i: CspIssue) => `${i.directive}${i.value ? ` ${i.value}` : ''}（csp_evaluator: ${i.type}）`;

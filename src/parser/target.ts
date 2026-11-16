@@ -26,7 +26,27 @@ export function uniqueLabels(targets: Target[]): ParseWarning[] {
 /** その URL の応答のホップか（1xx、プロキシの応答（CONNECT・407）、curl が認証し直した 401 を除く） */
 export const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
 
-export const finalResponse = (t: Target): HttpResponse | undefined => t.responses.filter(isHop).at(-1);   // -L なら最終ホップ
+/**
+ * 判定に使う応答：-L なら、ターゲットの URL と同じホストの最後のホップ。別のホスト（IdP、legacy.example.net）へ転送した先の応答は、
+ * 対象の URL の応答として判定しない（転送先の HSTS のなさで、対象を H-01①（高）にした。HAR の取り込みも別のホストの転送先をつながない）。
+ * 同じホストのホップがない（URL が分からない）ときは最後のホップ
+ */
+export const finalResponse = (t: Target): HttpResponse | undefined => {
+  const c = t.responses.filter(isHop);
+  const host = hostnameOf(t.url);
+  if (!host) return c.at(-1);
+  // 同じサイト（登録ドメイン。apex と www、example.co.jp の下のホスト）への転送はたどる（curl -L で apex から www へ転送する普通の形を、
+  // 301 で判定して H-01①（高）などの誤検知にした）。https のターゲットは https のホップだけ（途中で http に落とした転送の応答は対象の応答ではない）
+  const site = siteOf(host); const https = /^https:/i.test(t.url ?? '');
+  return c.filter(r => { const h = hostnameOf(r.url); return !r.url || (!!h && siteOf(h) === site && (!https || /^https:/i.test(r.url))); }).at(-1) ?? c.at(-1);
+};
+const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowerCase() : undefined; } catch { return undefined; } };
+/** 登録ドメインの近似（最後の2つのラベル。co.jp・com.au のような2段の国別ドメインは3つ）。IP アドレスはそのまま */
+const siteOf = (h: string): string => {
+  if (/^[\d.]+$|:/.test(h)) return h;
+  const l = h.split('.');
+  return l.slice(l.length >= 3 && /^[a-z]{2}$/.test(l.at(-1)!) && /^(?:co|ne|or|ac|go|ed|lg|gr|ad|com|net|org|gov|edu)$/.test(l.at(-2)!) ? -3 : -2).join('.');
+};
 
 export const chainOf = (t: Target): HttpResponse[] => t.responses.filter(isHop);
 
