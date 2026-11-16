@@ -1,7 +1,7 @@
 // export/csv.ts：第8章の記録様式（BOM付きUTF-8）
 import type { Finding, Target } from '../model';
 import { SEVERITY_LABEL, circled } from '../engine/summarize';
-import { maskCommand, maskText } from '../mask';
+import { summarizeAt, summarizeCommand } from './cmdSummary';
 import { hostOf } from '../parser/target';
 
 // BOM はエスケープで書かない（見えない文字のまま書くと、エディタや整形で消えても気づかない）
@@ -51,7 +51,8 @@ function sourceMeta(f: Finding, ix: MetaIndex): { at: string; cmd: string } {
   }
   const cmds = [...new Set(src.flatMap(t => (t.meta.cmd ?? '').split('・')).filter(Boolean))];
   const at = src.map(t => t.meta.at ?? '').filter(Boolean).sort().at(-1) ?? '';
-  const out = { at: maskText(at), cmd: maskCommand(cmds.join('・')) };
+  // 実施日時と実施コマンドは、残してよい形だけを残す（export/cmdSummary.ts。手で書いた #META の値の秘密を出さない）
+  const out = { at: summarizeAt(at), cmd: summarizeCommand(cmds.join('・')) };
   ix.memo.set(key, out);
   return out;
 }

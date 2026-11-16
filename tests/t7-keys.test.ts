@@ -1,7 +1,8 @@
 // 第28回（T7：突き合わせのキーをマスクから切り離し、性質のテストを加える）で、性質のテスト（tests/properties.test.ts）が見つけた誤りの再現テスト。
 // 性質のテストは入力を毎回作り直すので、見つけた反例はここに例として残す
 import { describe, expect, it } from 'vitest';
-import { maskCommand, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { targetKeys, urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 
@@ -35,117 +36,53 @@ describe('突き合わせのキー', () => {
   });
 });
 
-describe('#META cmd= のコマンドのマスク', () => {
-  it('値を続けて書いた -H（-HAuthorization:…）を、前の --json・-d の値の中に入れない', () => {
-    const out = maskCommand(`curl_--json_{"password":"pw"}_-HAuthorization:_Bearer_${TOKEN}_-u_alice:pw`);
-    expect(out).not.toContain(TOKEN.slice(0, 8));
-    expect(out).toContain('-HAuthorization:_Bearer_****');
-  });
-
-  it('URL のクエリの値のあとに伏せた値が続いても、クエリの値を伏せる', () => {
-    const out = maskCommand(`curl_https://a.example/cb?access_token=${TOKEN}_-L_-F_token=Zq8wErT5yUi9oP3a`);
-    expect(out).not.toContain(TOKEN.slice(0, 8));
-    expect(maskCommand(out)).toBe(out);
-  });
-
-  it('Windows のパスで書いた curl（C:\\Windows\\System32\\curl.exe）のオプションも伏せる', () => {
-    expect(maskCommand(`C:\\Windows\\System32\\curl.exe_-u_alice:${TOKEN}`)).toBe('C:\\Windows\\System32\\curl.exe_-u_****');
-    expect(maskCommand(`C:\\Windows\\System32\\curl.exe -u alice:${TOKEN} https://a.example/`)).toBe('C:\\Windows\\System32\\curl.exe -u **** https://a.example/');
-  });
-
-  it('伏せたあとの -u****・-b**** をもう一度伏せても変わらない（前の -u の値に入れない）', () => {
-    const once = maskCommand(`curl_-u_alice:${TOKEN}_-ualice:${TOKEN}_-u_alice:${TOKEN}`);
-    expect(once).toBe('curl_-u_****_-u****_-u_****');
-    expect(maskCommand(once)).toBe(once);
-  });
-
-  it('引用符で囲まずに空白で書いたヘッダ（-H Authorization: Bearer …、--header=…、-HAuthorization: …、Authorization:Basic …）も伏せる', () => {
-    for (const s of [`curl -H Authorization: Bearer ${TOKEN}`, `curl --header=Authorization: Bearer ${TOKEN}`, `curl -HAuthorization: Bearer ${TOKEN}`,
-      `curl -H Authorization:Basic ${TOKEN}`]) {
-      const out = maskCommand(s);
-      expect(out, s).not.toContain(TOKEN.slice(0, 8));
-      expect(maskCommand(out)).toBe(out);
-    }
-  });
-});
-
-describe('#META cmd= のコマンドのマスク（コミット前のレビューで見つかったもの）', () => {
-  it('値の中の「_-Hz:」（秘密でない名前）では値を切らない（パスワード・Cookie の残りを出さない）', () => {
-    for (const s of [`curl_-u_alice:pa_-Hz:${TOKEN}`, `curl_-b_sid=Ab12_-Hx:${TOKEN}`, `curl_-d_password=pa_-Hz:${TOKEN}`,
-      `curl_-H_Authorization:_Bearer_tok_-Hx:${TOKEN}`]) expect(maskCommand(s), s).not.toContain(TOKEN.slice(0, 8));
-  });
-
-  it('値のないヘッダ（curl でヘッダを消す -H_Authorization:）のあとの URL・オプションを伏せない', () => {
-    for (const s of ['curl_-H_Authorization:_https://a.example/login', 'curl_-H_Cookie:_https://a.example/login', 'curl -H Cookie: -HAuthorization:',
-      'curl_-HAuthorization:_https://a.example/', 'curl_-H_Authorization:_-L_https://a.example/', 'curl -H Authorization: -X POST https://a.example/'])
-      expect(maskCommand(s)).toBe(s);
-    expect(maskCommand('curl_-H_Authorization:_Bearer_https://a.example/login')).toBe('curl_-H_Authorization:_****_https://a.example/login');
-    const s = `curl_-H_Authorization:_--json_{"password":"${TOKEN}"}`;
-    expect(maskCommand(s)).toBe('curl_-H_Authorization:_--json_{"password":"Xk…(20 chars)"}');
-    expect(maskCommand(maskCommand(s))).toBe(maskCommand(s));
-  });
-
-  it('httpie・xh のヘッダの値が「-」で始まっても伏せる', () => {
-    for (const s of [`http_POST_https://x.example/_Authorization:Bearer_-Abc_${TOKEN}`, `xh_https://x.example/_Cookie:-ab_sid=${TOKEN}`, `http POST https://x.example/ X-Api-Key:-Ab${TOKEN}`])
-      expect(maskCommand(s), s).not.toContain(TOKEN.slice(0, 8));
-  });
-
-  it('プログラムは最初の語だけ（値の途中の「_http_」「_curl_」でコマンドを分けて、秘密を2つに切らない）', () => {
-    for (const s of ['curl_https://deploy:my_http_pass@git.example.com/', 'curl_https://x.example/cb?code=ab_http_SECRETTAIL123',
-      'C:\\bin\\curl.exe_https://x.example/cb?token=sk9Xq2Lm_xh_P4vR7tY1wZ', 'curl_https://x.example/reset/Xk9q2LmP4v_curl_R7tY1wZaB3']) {
-      const out = maskCommand(s);
-      for (const secret of ['my_http_pass', 'SECRETTAIL', 'P4vR7tY1wZ', 'R7tY1wZaB3']) expect(out, s).not.toContain(secret);
+describe('#META cmd= の実施コマンド（第28回の反例。第31回から、残してよい形だけを残す要約）', () => {
+  // 第28回に summarizeCommand で見つかった漏れの入力。要約は値を出さないので、どの入力でも秘密は出ない
+  const cases: [string, string[]][] = [
+    [`curl_--json_{"password":"pw"}_-HAuthorization:_Bearer_${TOKEN}_-u_alice:pw`, [TOKEN]],
+    [`curl_https://a.example/cb?access_token=${TOKEN}_-L_-F_token=Zq8wErT5yUi9oP3a`, [TOKEN, 'Zq8wErT5yUi9oP3a']],
+    [`C:\\Windows\\System32\\curl.exe_-u_alice:${TOKEN}`, [TOKEN, 'alice']],
+    [`curl_-u_alice:${TOKEN}_-ualice:${TOKEN}_-u_alice:${TOKEN}`, [TOKEN, 'alice']],
+    [`curl -H Authorization: Bearer ${TOKEN}`, [TOKEN]], [`curl --header=Authorization: Bearer ${TOKEN}`, [TOKEN]],
+    [`curl -HAuthorization: Bearer ${TOKEN}`, [TOKEN]], [`curl -H Authorization:Basic ${TOKEN}`, [TOKEN]],
+    [`curl_-u_alice:pa_-Hz:${TOKEN}`, [TOKEN]], [`curl_-b_sid=Ab12_-Hx:${TOKEN}`, [TOKEN]], [`curl_-d_password=pa_-Hz:${TOKEN}`, [TOKEN]],
+    [`curl_-H_Authorization:_Bearer_tok_-Hx:${TOKEN}`, [TOKEN]], [`curl_-H_Authorization:_--json_{"password":"${TOKEN}"}`, [TOKEN]],
+    [`http_POST_https://x.example/_Authorization:Bearer_-Abc_${TOKEN}`, [TOKEN]], [`xh_https://x.example/_Cookie:-ab_sid=${TOKEN}`, [TOKEN]],
+    [`http POST https://x.example/ X-Api-Key:-Ab${TOKEN}`, [TOKEN]],
+    ['curl_https://deploy:my_http_pass@git.example.com/', ['my_http_pass', 'deploy']], ['curl_https://x.example/cb?code=ab_http_SECRETTAIL123', ['SECRETTAIL']],
+    ['C:\\bin\\curl.exe_https://x.example/cb?token=sk9Xq2Lm_xh_P4vR7tY1wZ', ['P4vR7tY1wZ', 'sk9Xq2Lm']], ['curl_https://x.example/reset/Xk9q2LmP4v_curl_R7tY1wZaB3', ['R7tY1wZaB3', 'Xk9q2LmP4v']],
+    ['curl_--json_{"password":"Hunter2_-bX=9q"}_https://x/', ['Hunter2', '9q']], ['curl_--json_{"password":"Hunter2_-uX:9q"}_https://x/', ['Hunter2', '9q']],
+    [`curl_-H_Cookie:ab…(5 chars)_sid=${TOKEN}_https://x/`, [TOKEN]], [`curl -H "Authorization: Bearer ab…(5 chars) ${TOKEN}"`, [TOKEN]],
+    [`curl_-H_X-Api-Key:ab…(5 chars)${TOKEN}`, [TOKEN]], ['Authorization:_Bearer_abc_-uQw9z=resttokenpart', ['resttokenpart', 'Qw9z']],
+    [`"C:\\Program Files\\curl\\bin\\curl.exe" -u alice:${TOKEN} https://x/`, [TOKEN, 'alice']],
+    [`curl_-v_--data-raw_user=a&token=${TOKEN}_-o_out.txt_-u_alice:pw`, [TOKEN, 'alice']],
+    [`/usr/bin/curl_-H_Authorization:_-X_POST_--http1.1_--cookie_session=${TOKEN}`, [TOKEN]],
+  ];
+  it('どの入力でも秘密を出さず、もう一度かけても変わらない', () => {
+    for (const [s, secrets] of cases) {
+      const out = summarizeCommand(s);
+      for (const x of secrets) expect(out, `${s} → ${out}`).not.toContain(x);
+      expect(summarizeCommand(out), s).toBe(out);
     }
   });
 
-  it('JSON の本文の値の中の「_-bX=」「_-uX:」で値を切らない', () => {
-    expect(maskCommand('curl_--json_{"password":"Hunter2_-bX=9q"}_https://x/')).toBe('curl_--json_{"password":"Hu…(14 chars)"}_https://x/');
-    expect(maskCommand('curl_--json_{"password":"Hunter2_-uX:9q"}_https://x/')).toBe('curl_--json_{"password":"Hu…(14 chars)"}_https://x/');
+  it('コマンドの形（プログラム・オプションの名前・ヘッダの名前・URL のキーの形）は残す', () => {
+    expect(summarizeCommand(`C:\\Windows\\System32\\curl.exe -u alice:${TOKEN} https://a.example/`)).toBe('curl -u **** https://a.example/');
+    expect(summarizeCommand(`curl_https://a.example/cb?access_token=${TOKEN}_-L_-F_token=Zq8wErT5yUi9oP3a`)).toBe('curl https://a.example/cb?access_token -L -F ****');
+    expect(summarizeCommand(`/usr/bin/curl_-H_Authorization:_-X_POST_--http1.1_--cookie_session=${TOKEN}`)).toBe('curl -H Authorization: -X POST --http1.1 --cookie ****');
+    // 値のないヘッダ（curl でヘッダを消す書き方）のあとの URL・オプションはそのまま
+    for (const [s, k] of [['curl_-H_Authorization:_https://a.example/login', 'curl -H Authorization: https://a.example/login'],
+      ['curl_-H_Authorization:_-L_https://a.example/', 'curl -H Authorization: -L https://a.example/'],
+      ['curl -H Authorization: -X POST https://a.example/', 'curl -H Authorization: -X POST https://a.example/']]) expect(summarizeCommand(s)).toBe(k);
   });
 
-  it('伏せ済みとみなすのは値全体が伏せた形のときだけ（印の後ろに続く値は伏せる）', () => {
-    for (const s of [`curl_-H_Cookie:ab…(5 chars)_sid=${TOKEN}_https://x/`, `curl -H "Authorization: Bearer ab…(5 chars) ${TOKEN}"`, `curl_-H_X-Api-Key:ab…(5 chars)${TOKEN}`])
-      expect(maskCommand(s), s).not.toContain(TOKEN.slice(0, 8));
+  it('長い入力でも時間が入力の長さの2乗にならない', () => {
     const t = performance.now();
-    maskCommand(`curl_${'Cookie:a…(1 chars)_'.repeat(8000)}`);
-    maskCommand(`curl_${'-sHCookie:a…(1 chars)_'.repeat(8000)}`);
-    expect(performance.now() - t).toBeLessThan(1500);   // 修正の途中の版は2乗の時間で、約4秒かかった
-  });
-
-  it('クライアントのないコマンドの、値を続けたオプションの後ろも伏せる', () => {
-    expect(maskCommand('Authorization:_Bearer_abc_-uQw9z=resttokenpart')).toBe('Authorization:_Bearer_****');
-  });
-
-  it('引用符で囲んだ Windows のパスの curl を見て、ディレクトリの curl_ はクライアントとみなさない', () => {
-    expect(maskCommand(`"C:\\Program Files\\curl\\bin\\curl.exe" -u alice:${TOKEN} https://x/`)).toBe('"C:\\Program Files\\curl\\bin\\curl.exe" -u **** https://x/');
-    for (const s of ['D:\\tools\\curl_8.5\\bin\\openssl_x509_-subject_-issuer_-in_c.pem', 'D:\\work\\curl_logs\\grep_-E_secretpattern_x.txt']) expect(maskCommand(s)).toBe(s);
-  });
-
-  it('クエリ・オプションの値の中の「秘密らしい語:」から後ろを伏せない（「=」の直後を見るのは --header= だけ）', () => {
-    for (const s of ['curl_https://a.example/search?q=token:abc&page=2_-sS', 'curl -o out=token:x.txt https://a.example/', 'curl_-H_X-Trace:a=Authorization:xyz'])
-      expect(maskCommand(s)).toBe(s);
-  });
-
-  it('値を続けて書いた -H の続く入力でも、時間が入力の長さの2乗にならない', () => {
-    // 修正の途中の版では、-H のたびに値の終わりまで読み、20万文字で約6秒かかった（線形なら数十ミリ秒）
-    const t = performance.now();
-    maskCommand(`curl_-d_${'_-HAuthorization:'.repeat(12000)}`);
-    maskCommand(`curl_-d_x${'_-Hz:a'.repeat(33000)}`);
+    summarizeCommand(`curl_-d_${'_-HAuthorization:'.repeat(12000)}`);
+    summarizeCommand(`curl_-d_x${'_-Hz:a'.repeat(33000)}`);
+    summarizeCommand(`curl_${'Cookie:a…(1 chars)_'.repeat(8000)}`);
+    summarizeCommand(`curl${'_-daaaaa'.repeat(8000)}`);   // 第28回の未対応（summarizeCommand では5万文字で十数秒）
     expect(performance.now() - t).toBeLessThan(1500);
-  });
-
-  it('Windows のパスの「\\http_」をクライアントとみなさない', () => {
-    expect(maskCommand('D:\\logs\\http_dump\\grep_-E_pattern_x.txt')).toBe('D:\\logs\\http_dump\\grep_-E_pattern_x.txt');
-  });
-
-  it('伏せた値のあとに続く引数を、その値に入れて伏せない', () => {
-    expect(maskCommand(`curl_-v_--data-raw_user=a&token=${TOKEN}_-o_out.txt_-u_alice:pw`)).toBe('curl_-v_--data-raw_user=a&token=Xk…(20 chars)_-o_out.txt_-u_****');
-  });
-
-  it('プログラムのパス（/usr/bin/curl）のあとの引数を、パスの部分として伏せない（もう一度かけても変わらない）', () => {
-    const s = `/usr/bin/curl_-H_Authorization:_-X_POST_--http1.1_--cookie_session=${TOKEN}`;
-    expect(maskCommand(s)).toBe('/usr/bin/curl_-H_Authorization:_-X_POST_--http1.1_--cookie_****');
-    expect(maskCommand(maskCommand(s))).toBe(maskCommand(s));
   });
 });
 

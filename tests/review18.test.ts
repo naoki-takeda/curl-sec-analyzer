@@ -1,7 +1,8 @@
 // 18回目のレビュー（リポジトリ全体、独立した3人のレビュアー。直前のコミットの副作用を含む）で見つかった不具合の再現テスト。
 // 入力の多くは tests/golden/cases/15-review18.txt にも入れてある（結果の全体をゴールデンテストで比べる）
 import { describe, expect, it } from 'vitest';
-import { maskCommand, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { parseInput } from '../src/parser/input';
 import { harTargets, importHar } from '../src/parser/har';
 import { urlKey } from '../src/engine/targetKey';
@@ -18,21 +19,21 @@ const ids = (input: string, item: string, target?: string) => evaluate(input).fi
 const v = (label: string, url: string, sent: string[], recv: string[], body = '') =>
   [`#TARGET url=${url} label=${label}`, `* Connected to ${new URL(url).hostname} (192.0.2.1) port 443`, `> GET ${new URL(url).pathname} HTTP/1.1`, ...sent.map(s => `> ${s}`), '>',
     ...recv.map(s => `< ${s}`), '<', body, ''].join('\n');
-const idem = (s: string) => { const once = maskCommand(s); expect(maskCommand(once)).toBe(once); return once; };
+const idem = (s: string) => { const once = summarizeCommand(s); expect(summarizeCommand(once)).toBe(once); return once; };
 
 describe('1〜3・10・16〜20 #META cmd=', () => {
   it('1 引数の中の「;」（Cookie・;jsessionid=・パスワード）ではコマンドを区切らない。伏せ方は冪等', () => {
-    expect(idem('curl_-b_lang=ja;_remember=k3Jx9QpL2mZ7Wv_https://a.example/')).toBe('curl_-b_****_https://a.example/');
-    expect(idem('curl -sS https://a.example/app;jsessionid=ABC -o /dev/null')).toBe('curl -sS https://a.example/app;jsessionid=…(3 chars) -o /dev/null');
+    expect(idem('curl_-b_lang=ja;_remember=k3Jx9QpL2mZ7Wv_https://a.example/')).toBe('curl -b **** https://a.example/');
+    expect(idem('curl -sS https://a.example/app;jsessionid=ABC -o /dev/null')).toBe('curl -sS https://a.example/app;jsessionid -o ****');
     expect(idem('curl_-u_alice:p;ss_https://a.example/')).not.toContain('ss_');
-    expect(idem("curl -sS 'https://a.example/x?a=1;sid=Hunter2pw' -o /dev/null")).toContain('-o /dev/null');
+    expect(idem("curl -sS 'https://a.example/x?a=1;sid=Hunter2pw' -o /dev/null")).toBe('curl -sS https://a.example/x?* -o ****');   // 一覧にないクエリの名前は *（第31回）
     // コマンドが続く「;」「&&」「|」では区切る
-    expect(maskCommand('sleep 2; curl -u alice:hunter2pw https://a.example/')).not.toContain('hunter2pw');
-    expect(maskCommand('curl_-sS_https://a.example/_|_grep_-iE_set-cookie')).toBe('curl_-sS_https://a.example/_|_grep_-iE_set-cookie');
+    expect(summarizeCommand('sleep 2; curl -u alice:hunter2pw https://a.example/')).not.toContain('hunter2pw');
+    expect(summarizeCommand('curl_-sS_https://a.example/_|_grep_-iE_set-cookie')).toBe('curl -sS https://a.example/ | grep -iE ****');
   });
   it('2 パスを付けた curl（./curl、C:\\tools\\curl.exe）もクライアントとみなす', () => {
-    expect(maskCommand('find . -exec ./curl -u alice:hunter2pw https://a.example/ \\;')).not.toContain('hunter2pw');
-    expect(maskCommand('find . -exec C:\\tools\\curl.exe -u alice:hunter2pw https://a.example/')).not.toContain('hunter2pw');
+    expect(summarizeCommand('find . -exec ./curl -u alice:hunter2pw https://a.example/ \\;')).not.toContain('hunter2pw');
+    expect(summarizeCommand('find . -exec C:\\tools\\curl.exe -u alice:hunter2pw https://a.example/')).not.toContain('hunter2pw');
   });
   it('3 -d の値のあとに続けて書いた -dpassword=・-Fpassword= も伏せる', () => {
     expect(idem('curl_-d_user=alice_-dpassword=hunter2pw_https://a.example/')).not.toContain('hunter2pw');
@@ -41,7 +42,7 @@ describe('1〜3・10・16〜20 #META cmd=', () => {
   it('16・17・18 export・env・set・$env: の代入、wget の --post-data、空白のある引用符の値を伏せる', () => {
     for (const c of ['export TOKEN=hunter2pw && curl https://a.example/', 'env API_KEY=hunter2pw curl https://a.example/', 'set TOKEN=hunter2pw && curl https://a.example/',
       '$env:TOKEN="hunter2pw"; curl https://a.example/', 'wget --post-data "password=hunter2pw" https://a.example/', 'wget --body-data=password=hunter2pw https://a.example/'])
-      expect(maskCommand(c)).not.toContain('hunter2pw');
+      expect(summarizeCommand(c)).not.toContain('hunter2pw');
     for (const c of ['curl -d "password=Hunter 2pw" https://a.example/', "curl -F 'password=Hunter 2pw' https://a.example/", 'curl -d password="Hunter 2pw" https://a.example/'])
       expect(idem(c)).not.toMatch(/Hunter| 2pw/);
   });
@@ -49,7 +50,7 @@ describe('1〜3・10・16〜20 #META cmd=', () => {
     expect(idem('http https://a.example/ Authorization:"Bearer hunter2pwTOKEN"')).not.toContain('hunter2pw');
     for (const c of ['echo password=hunter2pw | curl -d @- https://a.example/', 'printf "password=hunter2pw" | curl -d @- https://a.example/',
       'curl --data-binary @- https://a.example/ <<< "password=hunter2pw"'])
-      expect(maskCommand(c)).not.toContain('hunter2pw');
+      expect(summarizeCommand(c)).not.toContain('hunter2pw');
   });
 });
 
@@ -62,7 +63,7 @@ describe('10・15・21・23 maskText', () => {
   it('15・23 pass1・pw1・otp1・userpw・_wpnonce を伏せる（key1 は例にも使うので伏せない）', () => {
     for (const q of ['?pass1=hunter2pw', '?pw1=hunter2pw', '?otp1=hunter2pw', '?userpw=hunter2pw', '?_wpnonce=hunter2pw'])
       expect(maskText(`https://a.example/x${q}`)).not.toContain('hunter2pw');
-    expect(maskCommand('curl -d "pass1=Hunter2pw&pass2=Hunter2pw" https://a.example/')).not.toContain('Hunter2pw');
+    expect(summarizeCommand('curl -d "pass1=Hunter2pw&pass2=Hunter2pw" https://a.example/')).not.toContain('Hunter2pw');
   });
   it('21 英小文字だけで母音の少ないトークンを、画面でもキーでも伏せる。英語の語は残す', () => {
     expect(maskText('https://example.com/reset/kqzvwxmplrtbnhjdq')).not.toContain('kqzvwxmplrtbnhjdq');
@@ -197,11 +198,11 @@ describe('コミット前のレビュー', () => {
     expect(ids(lo + t('after-logout', 'https://a.example/mypage', HTML, '<div id="app"><h1>マイページ</h1><p>山田太郎様のご注文</p></div><script src="/a.js"></script>', 'sensitive=1'), 'C-12', 'after-logout')).toEqual(['C-12.1']);
   });
   it('P5 値のないヘッダ（-H "Authorization:"）のあとの -H・URL を伏せない', () => {
-    expect(idem('curl -H "Authorization:" -H "X-Trace: 1" https://a.example.com/')).toBe('curl -H "Authorization:" -H "X-Trace: 1" https://a.example.com/');
-    expect(idem("curl -H 'Cookie:' -u alice:pw https://a.example.com/")).toBe("curl -H 'Cookie:' -u **** https://a.example.com/");
+    expect(idem('curl -H "Authorization:" -H "X-Trace: 1" https://a.example.com/')).toBe('curl -H Authorization: -H X-Trace:**** https://a.example.com/');
+    expect(idem("curl -H 'Cookie:' -u alice:pw https://a.example.com/")).toBe('curl -H Cookie: -u **** https://a.example.com/');
   });
   it('P6 引数のパスの中の /curl_ をクライアントとみなさない', () => {
-    for (const c of ["grep -E '^HTTP/' /tmp/curl_out.txt", "grep_-E_'^(HTTP|Location)'_./curl_out.txt"]) expect(maskCommand(c)).toBe(c);
+    for (const c of ["grep -E '^HTTP/' /tmp/curl_out.txt", "grep_-E_'^(HTTP|Location)'_./curl_out.txt"]) expect(summarizeCommand(c)).toBe('grep -E ****');
   });
   it('P7 数字の値のセッションCookie（SESSIONID=1234）は C-07①', () => {
     expect(ids(t('login', 'https://a.example/login', 'HTTP/2 302\nlocation: /\nset-cookie: SESSIONID=1234; Path=/; Secure; HttpOnly'), 'C-07', 'login')).toEqual(['C-07.1']);

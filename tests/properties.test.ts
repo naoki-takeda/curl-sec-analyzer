@@ -7,7 +7,8 @@
 import { readFileSync } from 'node:fs';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { clip, maskCommand, maskText } from '../src/mask';
+import { clip, maskText } from '../src/mask';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { legacyHarKey, targetKeys, urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { analyze } from './golden/analyze';
@@ -138,7 +139,7 @@ describe('マスク（mask.ts）の性質', () => {
   });
 });
 
-describe('#META cmd= のコマンド（maskCommand）の性質', () => {
+describe('#META cmd= のコマンド（summarizeCommand）の性質', () => {
   /** 秘密を持つオプション（t が秘密）。#META の値に空白を入れられないので「_」で区切って書く形も作る */
   const secretOpts: ((t: string) => string[])[] = [
     t => ['-u', `alice:${t}`], t => ['--user', `alice:${t}`], t => [`-ualice:${t}`], t => ['-sSu', `alice:${t}`], t => ['--proxy-user', `p:${t}`],
@@ -176,7 +177,7 @@ describe('#META cmd= のコマンド（maskCommand）の性質', () => {
   it('オプションの順番と区切り（空白・「_」）を変えても、秘密を出さない', () => {
     fc.assert(fc.property(cmd, c => {
       const s = render(c);
-      const out = maskCommand(s);
+      const out = summarizeCommand(s);
       for (const [, t] of c.secrets) expect(leaks(out, t), `${s}\n→ ${out}`).toBeUndefined();
       // 秘密を持たない URL は残す（値のないヘッダのあとの URL を、ヘッダの値として伏せない）。前に値を取るオプションがあると、その値になりうるので見ない。
       // 空白で区切ったものだけを見る。「_」で区切った書き方では、URL・ua/1.0 のパスの部分やクエリの値が後ろの引数まで続く
@@ -189,8 +190,8 @@ describe('#META cmd= のコマンド（maskCommand）の性質', () => {
 
   it('もう一度かけても変わらない', () => {
     fc.assert(fc.property(cmd, c => {
-      const once = maskCommand(render(c));
-      expect(maskCommand(once)).toBe(once);
+      const once = summarizeCommand(render(c));
+      expect(summarizeCommand(once)).toBe(once);
     }), RUNS);
   });
 });

@@ -1,7 +1,8 @@
 // 17回目のレビュー（リポジトリ全体、独立した3人のレビュアー。直近2コミットの副作用を含む）で見つかった不具合の再現テスト。
 // 入力の多くは tests/golden/cases/14-review17.txt にも入れてある（結果の全体をゴールデンテストで比べる）
 import { describe, expect, it } from 'vitest';
-import { maskCommand, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { parseInput } from '../src/parser/input';
 import { harTargets, importHar } from '../src/parser/har';
 import { targetKeys, urlKey } from '../src/engine/targetKey';
@@ -23,27 +24,28 @@ describe('1・6・7・10・28・29 #META cmd=', () => {
   it('1 コマンドの名前を認識できなくても、認証の値を伏せる', () => {
     for (const c of ['C3:curl_-u_alice:Hunter2pw_https://a.example/', '[C3]curl_-b_sid=abc_https://a.example/', '-u_alice:Hunter2pw_https://a.example/',
       'curlie_-u_alice:pw_https://a.example/', 'curl-impersonate-chrome -u alice:pw https://a.example/', 'timeout 10 curl -u alice:pw https://a.example/'])
-      expect(maskCommand(c)).not.toMatch(/alice:(?:Hunter2)?pw|sid=abc/);
+      expect(summarizeCommand(c)).not.toMatch(/alice:(?:Hunter2)?pw|sid=abc/);
   });
   it('7 パイプでつないだ grep・openssl と、/var/log/http_access の grep のオプションは伏せない', () => {
-    for (const c of ['curl_-sS_https://a.example/_|_grep_-iE_set-cookie', 'curl_-sS_https://a.example/_|_openssl_x509_-subject_-noout', 'grep_-E_x_/var/log/http_access',
-      'D:\\tools\\curl_8.5\\bin\\openssl_x509_-subject_-issuer_-in_c.pem'])
-      expect(maskCommand(c)).toBe(c);
+    // 第31回から、実施コマンドは残してよい形だけを残す（オプションの名前は残し、値は ****）
+    expect(summarizeCommand('curl_-sS_https://a.example/_|_grep_-iE_set-cookie')).toBe('curl -sS https://a.example/ | grep -iE ****');
+    expect(summarizeCommand('curl_-sS_https://a.example/_|_openssl_x509_-subject_-noout')).toBe('curl -sS https://a.example/ | openssl x509 -subject -noout');
+    expect(summarizeCommand('grep_-E_x_/var/log/http_access')).toBe('grep -E ****');
   });
   it('28・29 -x のユーザー:パスワード@、wget・httpie・xh の認証、Authentication・X-Bearer、先頭の TOKEN= を伏せる', () => {
-    expect(maskCommand('curl_-x_alice:hunter2pw@proxy.example:3128_https://a.example/')).toBe('curl_-x_alice:****@proxy.example:3128_https://a.example/');
-    expect(maskCommand('curl_--proxy_http://alice:pw@proxy.example:3128_https://a.example/')).toBe('curl_--proxy_http://alice:****@proxy.example:3128_https://a.example/');
+    expect(summarizeCommand('curl_-x_alice:hunter2pw@proxy.example:3128_https://a.example/')).toBe('curl -x **** https://a.example/');
+    expect(summarizeCommand('curl_--proxy_http://alice:pw@proxy.example:3128_https://a.example/')).toBe('curl --proxy http://proxy.example:3128/ https://a.example/');
     for (const c of ['wget_--password=hunter2pw_https://a.example/', 'wget_--http-password=hunter2pw_https://a.example/', 'http_-a_alice:hunter2pw_https://a.example/',
       'http_--auth=alice:hunter2pw_https://a.example/', 'xh_--bearer_hunter2pw_https://a.example/', 'http_POST_https://example.com/login_username=alice_password=hunter2pw',
       'curl_-H_Authentication:_hunter2pw_https://a.example/', 'curl_-H_X-Bearer:_hunter2pw_https://a.example/', 'TOKEN=hunter2pw_curl_-sS_https://a.example/'])
-      expect(maskCommand(c)).not.toContain('hunter2pw');
-    expect(maskCommand('LANG=C_curl_-sS_https://a.example/')).toBe('LANG=C_curl_-sS_https://a.example/');
+      expect(summarizeCommand(c)).not.toContain('hunter2pw');
+    expect(summarizeCommand('LANG=C_curl_-sS_https://a.example/')).toBe('LANG=**** curl -sS https://a.example/');
   });
   it('6・10 「_-daaaaa」「Cookie:-H」の繰り返しでも線形の時間。結果はもう一度かけても変わらない', () => {
-    expect(ms(() => maskCommand(`curl${'_-daaaaa'.repeat(20000)}`))).toBeLessThan(1500);
-    expect(ms(() => maskCommand(`curl_${'Cookie:-H'.repeat(8000)}`))).toBeLessThan(1500);
+    expect(ms(() => summarizeCommand(`curl${'_-daaaaa'.repeat(20000)}`))).toBeLessThan(1500);
+    expect(ms(() => summarizeCommand(`curl_${'Cookie:-H'.repeat(8000)}`))).toBeLessThan(1500);
     for (const c of ['C3:curl_-u_alice:Hunter2pw_https://a.example/', 'curl_-x_alice:hunter2pw@proxy.example:3128_https://a.example/', 'http_POST_https://example.com/login_password=hunter2pw']) {
-      const once = maskCommand(c); expect(maskCommand(once)).toBe(once);
+      const once = summarizeCommand(c); expect(summarizeCommand(once)).toBe(once);
     }
   });
 });
@@ -233,12 +235,12 @@ describe('コミット前のレビュー', () => {
   });
   it('P2・P9 前の語に付けた「;」で区切る。引用符の中の「;」では区切らない', () => {
     for (const c of ['sleep 2; curl -u alice:hunter2pw https://a.example/', 'echo start; curl -b sid=hunter2pw https://a.example/', 'date +%s; curl --user alice:hunter2pw https://a.example/'])
-      expect(maskCommand(c)).not.toContain('hunter2pw');
-    expect(maskCommand('curl -H "Cookie: lang=ja ; sid=s3cr3t" https://a.example/path')).toBe('curl -H "Cookie: ****" https://a.example/path');
+      expect(summarizeCommand(c)).not.toContain('hunter2pw');
+    expect(summarizeCommand('curl -H "Cookie: lang=ja ; sid=s3cr3t" https://a.example/path')).toBe('curl -H Cookie:**** https://a.example/path');
   });
   it('P3 伏せなかった -d の値の中の、まとめ書きの -sSLfu と閉じない引用符のあとの -u も伏せる', () => {
-    expect(maskCommand('curl_-d_x=1_-sSLfu_alice:hunter2pw_https://a.example/')).not.toContain('hunter2pw');
-    expect(maskCommand("curl -d 'a=1 -u alice:hunter2pw https://a.example/")).not.toContain('hunter2pw');
+    expect(summarizeCommand('curl_-d_x=1_-sSLfu_alice:hunter2pw_https://a.example/')).not.toContain('hunter2pw');
+    expect(summarizeCommand("curl -d 'a=1 -u alice:hunter2pw https://a.example/")).not.toContain('hunter2pw');
   });
   it('P4 以前の版のキー（* を含む）の例外は、新しいキーにも * で照合する。非 ASCII の大文字・小文字が入れ替わるトークンはキーに入れない', () => {
     const f = { item: 'H-01', ruleId: 'H-01.1', target: 'har-1', targetKey: 'HAR GET https://www.example.jp/お知らせ', url: 'https://www.example.jp/お知らせ' } as Finding;
@@ -269,6 +271,6 @@ describe('コミット前のレビュー', () => {
       expect(maskText(u)).toBe(u);
   });
   it('P11 httpie のクエリの項目（api_key==…）は印の == を残して伏せる', () => {
-    expect(maskCommand('http_GET_https://a.example/_api_key==hunter2pw')).toBe('http_GET_https://a.example/_api_key==****');
+    expect(summarizeCommand('http_GET_https://a.example/_api_key==hunter2pw')).toBe('http GET https://a.example/ api_key==****');
   });
 });

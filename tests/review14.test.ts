@@ -1,7 +1,8 @@
 // 14回目のレビュー（リポジトリ全体、独立した3人のレビュアー。直前の修正の前後の比較を含む）で見つかった不具合の再現テスト。
 // 入力の多くは tests/golden/cases/09-review14.txt・10-har-keys.har にも入れてある（結果の全体をゴールデンテストで比べる）
 import { describe, expect, it } from 'vitest';
-import { maskCommand, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { harTargets, importHar } from '../src/parser/har';
@@ -144,6 +145,6 @@ describe('19・20 解析の速さとマスクの漏れ', () => {
   });
   it('手で書いた #META cmd= の認証情報を CSV に出さない', () => {
     for (const c of ['curl_-u_admin:S3cretPass_https://a.example/', 'curl_-H_Authorization:_Bearer_opaqueT0kenValue_https://a.example/', 'curl_-b_SESSIONID=abc123def_https://a.example/'])
-      expect(maskCommand(c), c).not.toMatch(/S3cretPass|opaqueT0kenValue|abc123def/);
+      expect(summarizeCommand(c), c).not.toMatch(/S3cretPass|opaqueT0kenValue|abc123def/);
   });
 });

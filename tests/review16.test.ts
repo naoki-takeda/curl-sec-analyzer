@@ -2,7 +2,8 @@
 // 入力の多くは tests/golden/cases/13-review16.txt にも入れてある（結果の全体をゴールデンテストで比べる）
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { maskCommand, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { parseInput } from '../src/parser/input';
 import { splitSetCookie } from '../src/parser/setCookie';
 import { harTargets, importHar } from '../src/parser/har';
@@ -21,30 +22,30 @@ const ms = (f: () => void) => { const s = performance.now(); f(); return perform
 
 describe('1・26 #META cmd= の認証情報', () => {
   it('「_」で区切った長いオプションの値を伏せる（--user_…、--header_X-Api-Key:_…、--cookie_…、--oauth2-bearer_…）', () => {
-    expect(maskCommand('curl_-sS_-i_--user_alice:Hunter2Secret_--header_X-Api-Key:_ApiKeyZz9Yy8Xx7_https://example.com/'))
-      .toBe('curl_-sS_-i_--user_****_--header_X-Api-Key:_****_https://example.com/');
-    expect(maskCommand('curl_--cookie_sid=abc_--oauth2-bearer_tok123_https://a.example/')).toBe('curl_--cookie_****_--oauth2-bearer_****_https://a.example/');
+    expect(summarizeCommand('curl_-sS_-i_--user_alice:Hunter2Secret_--header_X-Api-Key:_ApiKeyZz9Yy8Xx7_https://example.com/'))
+      .toBe('curl -sS -i --user **** --header X-Api-Key: **** https://example.com/');
+    expect(summarizeCommand('curl_--cookie_sid=abc_--oauth2-bearer_tok123_https://a.example/')).toBe('curl --cookie **** --oauth2-bearer **** https://a.example/');
   });
   it('値のない長いオプションのあとの -H Cookie と、オプションの外の Authorization（httpie）も伏せる', () => {
-    expect(maskCommand('curl_-sS_--compressed_-H_Cookie:_sid=s3cretVal_https://a.example/')).toBe('curl_-sS_--compressed_-H_Cookie:_****_https://a.example/');
-    expect(maskCommand('http_GET_https://a.example/_Authorization:Bearer_tok123abc')).toBe('http_GET_https://a.example/_Authorization:Bearer_****');
+    expect(summarizeCommand('curl_-sS_--compressed_-H_Cookie:_sid=s3cretVal_https://a.example/')).toBe('curl -sS --compressed -H Cookie: **** https://a.example/');
+    expect(summarizeCommand('http_GET_https://a.example/_Authorization:Bearer_tok123abc')).toBe('http GET https://a.example/ Authorization:****');
   });
   it('まとめ書きの -sSu、値を取るオプションのあとの -uadmin:pw、--url-query・--tlspassword・--variable を伏せる', () => {
-    expect(maskCommand('curl_-sSu_alice:pw_https://a.example/')).toBe('curl_-sSu_****_https://a.example/');
-    expect(maskCommand('curl_-X_POST_-uadmin:pw_https://a.example/')).toBe('curl_-X_POST_-u****_https://a.example/');
-    expect(maskCommand('curl_-H_Accept:*/*_-ualice:pw_https://a.example/')).toBe('curl_-H_Accept:*/*_-u****_https://a.example/');
-    expect(maskCommand('curl_--url-query_access_token=Sk9xAbCdEf_https://a.example/')).not.toContain('Sk9xAbCdEf');
-    expect(maskCommand('curl_--tlspassword_hunter2_https://a.example/')).toBe('curl_--tlspassword_****_https://a.example/');
-    expect(maskCommand('curl_--variable_TOKEN=abcdefgh_https://a.example/')).toBe('curl_--variable_TOKEN=****_https://a.example/');
+    expect(summarizeCommand('curl_-sSu_alice:pw_https://a.example/')).toBe('curl -sSu **** https://a.example/');
+    expect(summarizeCommand('curl_-X_POST_-uadmin:pw_https://a.example/')).toBe('curl -X POST -u**** https://a.example/');
+    expect(summarizeCommand('curl_-H_Accept:*/*_-ualice:pw_https://a.example/')).toBe('curl -H Accept:**** -u**** https://a.example/');
+    expect(summarizeCommand('curl_--url-query_access_token=Sk9xAbCdEf_https://a.example/')).not.toContain('Sk9xAbCdEf');
+    expect(summarizeCommand('curl_--tlspassword_hunter2_https://a.example/')).toBe('curl --tlspassword **** https://a.example/');
+    expect(summarizeCommand('curl_--variable_TOKEN=abcdefgh_https://a.example/')).toBe('curl --variable **** https://a.example/');
   });
   it('伏せた結果はもう一度伏せても変わらず、秘密でないオプションと URL は残す', () => {
     for (const c of ['curl_-sS_-i_-U_proxyuser:pw_-d_password=Hunter2_https://a.example/', 'curl_-XPOST_-H_"Authorization:_Bearer_abc"_https://a.example/',
       'curl_-v_--compressed_https://a.example/path_-H_X-Trace:_abc']) {
-      const once = maskCommand(c);
-      expect(maskCommand(once)).toBe(once);
+      const once = summarizeCommand(c);
+      expect(summarizeCommand(once)).toBe(once);
       expect(once).toContain('https://a.example/');
     }
-    expect(maskCommand('curl_-v_--compressed_https://a.example/path_-H_X-Trace:_abc')).toBe('curl_-v_--compressed_https://a.example/path_-H_X-Trace:_abc');
+    expect(summarizeCommand('curl_-v_--compressed_https://a.example/path_-H_X-Trace:_abc')).toBe('curl -v --compressed https://a.example/path -H X-Trace: ****');
   });
 });
 
@@ -275,14 +276,14 @@ describe('コミット前のレビュー', () => {
     expect(ids(t('top', 'https://a.example/uploads/minutes.20241231.html', HTML, '<p>x</p>'), 'E-11')).toContain('E-11.1');
     expect(ids(t('top', 'https://a.example/uploads/avatar.5f3a9c2e.svg', 'HTTP/2 200\ncontent-type: image/svg+xml', '<svg/>'), 'E-11')).toContain('E-11.1');
   });
-  it('P7 maskCommand は「_-Habcde」の繰り返しでも線形の時間', () => {
-    expect(ms(() => maskCommand(`curl${'_-Habcde'.repeat(25000)}`))).toBeLessThan(1000);
+  it('P7 summarizeCommand は「_-Habcde」の繰り返しでも線形の時間', () => {
+    expect(ms(() => summarizeCommand(`curl${'_-Habcde'.repeat(25000)}`))).toBeLessThan(1000);
   });
-  it('P8 maskCommand：curl 以外のコマンド（openssl・grep）のオプションは伏せない', () => {
+  it('P8 summarizeCommand：curl 以外のコマンド（openssl・grep）のオプションは伏せない', () => {
     const c = 'openssl_x509_-noout_-subject_-issuer_-dates・grep_-qiE_unknown_option';
-    expect(maskCommand(c)).toBe(c);
-    expect(maskCommand('openssl x509 -noout -subject -issuer -dates')).toBe('openssl x509 -noout -subject -issuer -dates');
-    expect(maskCommand('openssl_s_client_-connect_a.example:443・curl_-u_alice:pw_https://a.example/')).toBe('openssl_s_client_-connect_a.example:443・curl_-u_****_https://a.example/');
+    expect(summarizeCommand(c)).toBe('openssl x509 -noout -subject -issuer -dates・grep ****');   // grep などのオプションは2文字まで（第31回）
+    expect(summarizeCommand('openssl x509 -noout -subject -issuer -dates')).toBe('openssl x509 -noout -subject -issuer -dates');
+    expect(summarizeCommand('openssl_s_client_-connect_a.example:443・curl_-u_alice:pw_https://a.example/')).toBe('openssl s_client -connect ****・curl -u **** https://a.example/');
   });
   it('P9 E-01②：<br>・&nbsp; のあとと JSON の配列の要素の無名のフレームも②', () => {
     expect(ids(t('top', 'https://a.example/x', 'HTTP/2 500\ncontent-type: text/html', '<pre>Error: boom<br> &nbsp; &nbsp;at /app/index.js:7:9<br></pre>'), 'E-01')).toContain('E-01.2');

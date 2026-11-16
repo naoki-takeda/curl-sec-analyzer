@@ -1,7 +1,8 @@
 // 15回目のレビュー（リポジトリ全体、独立した3人のレビュアー。直前の修正の前後の比較を含む）で見つかった不具合の再現テスト。
 // 入力の多くは tests/golden/cases/11-review15.txt にも入れてある（結果の全体をゴールデンテストで比べる）
 import { describe, expect, it } from 'vitest';
-import { maskCommand, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { legacyHarKey } from '../src/engine/targetKey';
@@ -77,10 +78,10 @@ describe('6・7 キーとコマンドのマスク', () => {
     }
   });
   it('#META cmd= の -U・-uuser:pass・-d password=・-E・-H X-Api-Key を伏せ、URL は残す', () => {
-    const m = maskCommand('curl_-sS_-i_-U_alice:Hunter2pw_-uBob:S3cretpw_-d_password=Hunter3pw_-E_client.pem:certpw_-H_X-Api-Key:_abc123secret_https://a.example/x');
+    const m = summarizeCommand('curl_-sS_-i_-U_alice:Hunter2pw_-uBob:S3cretpw_-d_password=Hunter3pw_-E_client.pem:certpw_-H_X-Api-Key:_abc123secret_https://a.example/x');
     expect(m).not.toMatch(/Hunter2pw|S3cretpw|Hunter3pw|certpw|abc123secret/);
     expect(m).toContain('https://a.example/x');
-    expect(maskCommand('curl_-u_alice:pw_https://example.com/')).toBe('curl_-u_****_https://example.com/');
+    expect(summarizeCommand('curl_-u_alice:pw_https://example.com/')).toBe('curl -u **** https://example.com/');
   });
 });
 
@@ -165,10 +166,10 @@ describe('コミット前のレビュー', () => {
   });
   it('P2 #META cmd=：_- を含むトークンの残り・空白で区切った Authorization・「・」でつないだコマンド', () => {
     const tok = 'abcDEF_-ghiJKLmnoPQRstuVWXyz0123456789';
-    expect(maskCommand(`curl_-H_Authorization:_Bearer_${tok}_https://a.example/`)).not.toContain('ghiJKL');
-    expect(maskCommand(`curl_-u_alice:Pa55_-word123Secret_https://a.example/`)).not.toContain('word123Secret');
-    expect(maskCommand('curl -H "Authorization: Bearer Zz9Yy8Xx7Ww6Vv5Uu4" https://a.example/')).not.toContain('Zz9Yy8Xx7Ww6Vv5Uu4');
-    expect(maskCommand('curl_-u_a:b・curl_-sS_https://a.example/')).toContain('・curl_-sS_https://a.example/');
+    expect(summarizeCommand(`curl_-H_Authorization:_Bearer_${tok}_https://a.example/`)).not.toContain('ghiJKL');
+    expect(summarizeCommand(`curl_-u_alice:Pa55_-word123Secret_https://a.example/`)).not.toContain('word123Secret');
+    expect(summarizeCommand('curl -H "Authorization: Bearer Zz9Yy8Xx7Ww6Vv5Uu4" https://a.example/')).not.toContain('Zz9Yy8Xx7Ww6Vv5Uu4');
+    expect(summarizeCommand('curl_-u_a:b・curl_-sS_https://a.example/')).toBe('curl -u ****・curl -sS https://a.example/');
   });
   it('P3 E-01：/app のスクリプトの読み込み・JSON・文章は②にしない', () => {
     for (const b of ['<script>navigator.serviceWorker.register("/app/sw.js")</script>', '{"entry":"/app/main.js"}', "<script>new Worker('/app/worker.js')</script>", '<p>Put your code in /app/index.js</p>'])
