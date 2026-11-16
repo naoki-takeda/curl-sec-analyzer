@@ -21,6 +21,7 @@ interface HarEntry {
 export interface HarChain {
   id: number; url: string; method: string; host: string; status: number; hops: number;
   finalUrl?: string;                // 最後のホップのURL（http から https に転送されたチェーンの判定に使う）
+  httpsFrom?: number;               // 最初の https のホップの位置（http から https に転送されたチェーンで、http のホップを判定から除くため）
   responses: HttpResponse[]; sentAuth: boolean; at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
 }
@@ -89,7 +90,8 @@ export function importHar(text: string): HarImport {
     const reqH = (e.request.headers ?? []).map(h => h.name.toLowerCase());
     const sentAuth = reqH.includes('cookie') || reqH.includes('authorization');
     if (sentAuth || hops.some(h => (h.response.headers ?? []).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
-    chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
+    const httpsFrom = hops.findIndex(h => /^https:/i.test(h.request.url));
+    chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, httpsFrom: httpsFrom < 0 ? undefined : httpsFrom, method: e.request.method, host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(toResponse), sentAuth, at: e.startedDateTime,
       suggested: '', label: '', sensitive: undefined, excluded: false });
   });
@@ -132,9 +134,13 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     // http から https に転送されたチェーンは、最後の https の応答を、その URL で判定する（H-01・Cookie の項目は HTTPS の応答が対象）。
     // 最初の http の URL のままだと、HTTPS の項目がすべて適用外になる。http ラベル（T-04）だけは、転送元の http の URL で判定する
     const upgraded = /^http:/i.test(c.url) && /^https:/i.test(c.finalUrl ?? '');
-    const url = upgraded && baseLabel(label) !== 'http' ? c.finalUrl! : c.url;
+    const https = upgraded && baseLabel(label) !== 'http';
+    const url = https ? c.finalUrl! : c.url;
+    // https で判定するときは、http のホップを応答から除く。除かないと、apex の「自身の応答（最初のホップ）」が http の転送になり、
+    // https の apex が HSTS を返していても H-01①（高）にしてしまう
+    const responses = https && c.httpsFrom !== undefined ? c.responses.slice(c.httpsFrom) : c.responses;
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
-      responses: c.responses, sentAuth: c.sentAuth, sentTokens: [], info: [],
+      responses, sentAuth: c.sentAuth, sentTokens: [], info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });

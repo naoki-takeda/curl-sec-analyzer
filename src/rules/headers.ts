@@ -4,7 +4,7 @@ import { header, hstsDirective, mk, parseCsp } from './util';
 import { maskValue } from '../mask';
 import { baseLabel } from '../parser/target';
 import { htmlBody, mixedContent } from './html';
-import { type CspIssue, evaluateCsp, issueEvidence } from './csp';
+import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
 /**
  * 判定に使う HSTS ヘッダ。apex は、apex 自身の応答（転送の最初のホップ）で見る。
@@ -114,28 +114,35 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
 /**
  * 複数の強制モードのポリシーは、すべてを満たすものだけが許される（制限が重なる）。あるポリシーにないディレクティブ（MISSING_DIRECTIVES）や、
  * default-src へのフォールバックの指摘は、別のポリシーがそのディレクティブ（スクリプト・object は default-src でも可）を指定していれば出さない。
- * 例：厳しいポリシーとは別に frame-ancestors だけのヘッダがあっても、H-04②・H-05① にしない。別のポリシー自身の問題は、そのポリシーの評価で出る
+ * 例：厳しいポリシーとは別に frame-ancestors だけのヘッダがあっても、H-04②・H-05① にしない。
+ * ただし、その別のポリシーが同じ項目・条件の指摘を持つ（同じくらい緩い。アプリとプロキシが同じヘッダを2回付けた場合など）なら、制限にならないので出す
  */
-function coveredByOther(i: CspIssue, others: Map<string, string[]>[]): boolean {
+interface Policy { dirs: Map<string, string[]>; issues: CspIssue[]; }
+function coveredByOther(i: CspIssue, others: Policy[]): boolean {
   if (i.type !== 'MISSING_DIRECTIVES' && i.directive !== 'default-src') return false;
   const d = i.item === 'H-04' ? 'script-src' : i.item === 'H-05' ? (i.condition === 1 ? 'object-src' : 'base-uri') : undefined;
-  return !!d && others.some(p => p.has(d) || (d !== 'base-uri' && p.has('default-src')));
+  return !!d && others.some(p => (p.dirs.has(d) || (d !== 'base-uri' && p.dirs.has('default-src')))
+    && !p.issues.some(x => (x.item === i.item && x.condition === i.condition) || x.type === EVALUATOR_ERROR));
 }
 
-/** 強制モードの各ポリシーを csp_evaluator で評価し、指定した項目の指摘だけを返す（同じ条件・ディレクティブ・値は1件にまとめる） */
+/** 強制モードの各ポリシーを csp_evaluator で評価する（ポリシーごとのディレクティブと指摘） */
+const policiesOf = (ctx: RuleContext): Policy[] => header(ctx, 'content-security-policy').map(v => ({ dirs: parseCsp(v), issues: evaluateCsp(v) }));
+
+/** 指定した項目の指摘だけを返す（同じ条件・ディレクティブ・値は1件にまとめる） */
 function cspIssues(ctx: RuleContext, item: CspIssue['item']): CspIssue[] {
   const seen = new Set<string>(); const out: CspIssue[] = [];
-  const policies = header(ctx, 'content-security-policy');
-  const parsed = policies.map(parseCsp);
-  policies.forEach((v, n) => {
-    const others = parsed.filter((_, m) => m !== n);
-    for (const i of evaluateCsp(v)) {
+  const ps = policiesOf(ctx);
+  ps.forEach((p, n) => {
+    const others = ps.filter((_, m) => m !== n);
+    for (const i of p.issues) {
       const k = `${i.item}|${i.condition}|${i.directive}|${i.value ?? ''}|${i.type}`;
       if (i.item === item && !seen.has(k) && !coveredByOther(i, others)) { seen.add(k); out.push(i); }
     }
   });
   return out;
 }
+/** csp_evaluator で評価できなかったポリシーがあるか（H-04 を合格にしない） */
+const unevaluated = (ctx: RuleContext) => policiesOf(ctx).some(p => p.issues.some(i => i.type === EVALUATOR_ERROR));
 const CSP_REC: Record<number, string> = {
   1: "'unsafe-inline' をやめ、nonce か hash を使う",
   2: "* や https: などの広い指定をやめ、nonce＋'strict-dynamic' にする",
@@ -149,6 +156,7 @@ export const cspScript: Rule = { id: 'H-04', title: 'CSP：script-src', appliesT
   run(ctx) {
     if (!enforcedPolicies(ctx).length) return [mk(cspScript, ctx, 'na', 'info', 'na', '強制モードのCSPがない（H-03で判定）', '')];
     const issues = cspIssues(ctx, 'H-04');
+    if (!issues.length && unevaluated(ctx)) return [mk(cspScript, ctx, 'na', 'info', 'na', 'csp_evaluator で解析できないポリシーがある（H-07④）', '')];
     if (!issues.length) return [mk(cspScript, ctx, 'ok', 'info', 'pass', enforcedPolicies(ctx).map(p => `script-src ${(p.get('script-src') ?? p.get('default-src') ?? []).join(' ')}`).join(' / '), '')];
     return issues.map(i => mk(cspScript, ctx, i.condition, i.severity, 'fail', issueEvidence(i), CSP_REC[i.condition]));
   } };

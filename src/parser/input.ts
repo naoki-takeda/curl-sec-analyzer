@@ -6,7 +6,8 @@ import { splitSetCookie } from './setCookie';
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
 const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
 const OPENSSL_START = /^(CONNECTED\(|depth=|Certificate chain|subject=|issuer=|notBefore=|notAfter=)/;
-const VERBOSE_HINT = /^\* (Connected to|Trying|SSL connection|ALPN|Host )/;
+// -v の出力の手がかり。今の curl は「*   Trying」（空白が3つ）や「* Established connection to」とも出すので、空白の数を問わない
+const VERBOSE_HINT = /^\*\s+(Connected to|Established connection to|Trying|SSL connection|ALPN|Host )/;
 const BODY_LIMIT = 64 * 1024;
 
 // key=value を解析。ct= 以降は行末まで1つの値（空白を含むContent-Type対策）
@@ -39,11 +40,14 @@ export function parseInput(input: string): ParseResult {
   let unparsed = 0; const emptyTargets: string[] = [];
   let json: string[] | null = null;                   // C10（%{header_json}）の読み取り中
   let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
+  let connectReq = false;                             // -v で「> CONNECT」を送った（プロキシのトンネル）。その応答のあとは本文がない
   const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; };
   const inBody = () => cur !== null && !inHeaders;
   const flush = () => { if (hasData(t)) targets.push(t); else if (t.label !== 'default') emptyTargets.push(t.label); };
 
-  for (let line of input.replace(/\r\n?/g, '\n').split('\n')) {
+  // 改行をそろえる。Windows の curl の -v（2>&1）は受信ヘッダの行を CR CR LF で終えるため、CR がいくつ続いても1つの改行にする
+  // （CR CR LF を CR LF と CR に分けて読むと、受信ヘッダの各行のあとに空行ができ、ヘッダがすべて失われる）
+  for (let line of input.replace(/\r+\n|\r/g, '\n').split('\n')) {
     const mk = line.match(MARKER_RE);
     if (mk) {                                          // マーカー行は必ず応答を閉じる
       close(); inOpenssl = false; vBody = false; if (json) { unparsed += json.length; json = null; }
@@ -70,12 +74,20 @@ export function parseInput(input: string): ParseResult {
       if (line.startsWith('* ')) { t.info.push(line.slice(2)); continue; }
       if (line.startsWith('> ')) {
         const h = line.slice(2);
+        if (/^CONNECT /i.test(h)) connectReq = true;
         const o = h.match(/^origin:\s*(.*)$/i); if (o) t.sentOrigin = o[1].trim();
         if (/^(cookie|authorization):/i.test(h)) { t.sentAuth = true; t.sentTokens.push(...(h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? [])); }
         continue;
       }
       if (/^>\s*$/.test(line)) continue;               // 送信ヘッダの終端
-      if (/^<\s*$/.test(line)) { close(); vBody = true; continue; }  // 受信ヘッダの終端。-v では本文を解析しない
+      if (/^<\s*$/.test(line)) {
+        // 1xx と、プロキシの CONNECT への応答（トンネル）のあとには本文がなく、本当のリクエスト（* SSL connection、> Cookie、> Origin）が続く。
+        // そこを本文として読み飛ばすと、送信した Origin・Cookie や合意した TLS を失う
+        const st = cur?.status ?? 0;
+        const tunnel = st >= 200 && st < 300 && (connectReq || /connection established/i.test(cur?.reason ?? ''));
+        close(); vBody = st >= 200 && !tunnel; if (tunnel) connectReq = false;
+        continue;
+      }  // 受信ヘッダの終端。-v では本文を解析しない
       if (line.startsWith('< ')) line = line.slice(2);
       else if (/^[{}] \[/.test(line)) continue;
     }

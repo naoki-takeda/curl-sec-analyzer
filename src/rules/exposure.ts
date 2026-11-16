@@ -78,7 +78,8 @@ const docSegment = (p: string) => p.match(DOC_SEGMENT)?.[1].toLowerCase();
 export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API8・API9'],
   run(ctx) {
-    const p = path(ctx); const f = ctx.final;
+    // ステータスは、そのURL自身の応答（転送の最初のホップ）で見る。/actuator からログイン画面に転送した先の 200 で①（高）にしないため
+    const p = path(ctx); const f = ctx.chain[0];
     if (!f || !docSegment(p)) return [];
     const ok200 = f.status >= 200 && f.status < 300;
     const b = body(ctx) ?? '';
@@ -116,6 +117,9 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
   basis: ['OWASP File Upload CS'],
   run(ctx) {
     const f = ctx.final; if (!f) return [];
+    // そのURLがファイルを返した応答だけを見る：転送のない 2xx。404 のエラーページや、ログイン画面への転送先の HTML を、
+    // アップロードしたファイルの inline 配信（①、高）にしないため
+    if (ctx.chain.length !== 1 || f.status < 200 || f.status >= 300) return [];
     const ct = header(ctx, 'content-type')[0] ?? ''; const cd = header(ctx, 'content-disposition')[0] ?? '';
     // アップロードしたファイルの配信らしいURL：アップロード先らしいディレクトリの下で、最後がファイル名（拡張子付き）のもの。
     // ディレクトリ名だけで判定すると、/media/press-releases/ や /download/ のような普通のHTMLページまで①（高）にしてしまう

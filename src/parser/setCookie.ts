@@ -18,10 +18,18 @@ export function parseSetCookie(raw: string): SetCookie {
 /**
  * 1つのヘッダ値にカンマでつないだ複数の Set-Cookie を1件ずつに分ける（プロキシやフレームワークがまとめる場合がある）。
  * 分けるのは「, 名前=」の前だけで、Expires の日付（Expires=Wed, 21 Oct 2026 …）のカンマでは分けない。
- * 分けないと2つ目以降の Cookie を判定せず、証跡（値は先頭の name=value だけをマスクする）に生の値が出る
+ * 分けないと2つ目以降の Cookie を判定せず、証跡（値は先頭の name=value だけをマスクする）に生の値が出る。
+ * 値の中のカンマ（prefs=lang=ja,tz=JST）では分けない：分けるのは、前のかけらがすでに属性（; Path=/ など）を持つときだけ。
+ * 分けなかった場合も、値はカンマのあとまでまとめてマスクされる
  */
-export const splitSetCookie = (v: string): string[] =>
-  v.split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/).map(s => s.trim()).filter(Boolean);
+export function splitSetCookie(v: string): string[] {
+  const out: string[] = [];
+  for (const part of v.split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/)) {
+    if (out.length && !out[out.length - 1].includes(';')) out[out.length - 1] += `,${part}`;
+    else out.push(part);
+  }
+  return out.map(s => s.trim()).filter(Boolean);
+}
 
 /** 削除用のSet-Cookie（空の値、Max-Age<=0、過去のExpires）は判定対象にしない */
 export function isDeletion(c: SetCookie, now = Date.now()): boolean {

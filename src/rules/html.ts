@@ -19,14 +19,25 @@ export function tagEvidence(name: string, attrs: Map<string, string>): string {
   return clip(`<${[name, ...parts].join(' ')}>`, 200);
 }
 
-/** 開始タグを列挙する（属性名は小文字） */
+/**
+ * 属性の値の文字参照（&#61;・&#x3D;・&amp; など）を文字に戻す。ブラウザが解釈するのと同じ値で判定・マスクするため
+ * （Handlebars は = を &#x3D; にするので、戻さないと ?token&#x3D;… のトークンがマスクされない）
+ */
+const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", equals: '=', quest: '?', num: '#', sol: '/', colon: ':', semi: ';' };
+export const decodeEntities = (v: string) => v.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]{2,8}));/g, (all, d: string, h: string, n: string) => {
+  const cp = d ? Number(d) : h ? parseInt(h, 16) : undefined;
+  if (cp !== undefined) return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : all;
+  return NAMED[n.toLowerCase()] ?? all;
+});
+
+/** 開始タグを列挙する（属性名は小文字、値は文字参照を戻したもの） */
 export function tags(html: string, names: string[]): Tag[] {
   // 属性の長さに上限を付ける。上限がないと、> のない本文（<script の繰り返しなど）で毎回末尾まで走査し、時間が本文の長さの2乗になる
   const re = new RegExp(`<(${names.join('|')})\\b([^>]{0,2000})>`, 'gi');
   const out: Tag[] = [];
   for (const m of html.matchAll(re)) {
     const attrs = new Map<string, string>();
-    for (const a of m[2].matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), a[2] ?? a[3] ?? a[4] ?? '');
+    for (const a of m[2].matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), decodeEntities(a[2] ?? a[3] ?? a[4] ?? ''));
     const name = m[1].toLowerCase();
     out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: m.index ?? 0 });
   }

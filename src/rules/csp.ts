@@ -13,8 +13,22 @@ export interface CspIssue {
 const SCRIPT_DIRECTIVES = new Set(['script-src', 'script-src-elem', 'script-src-attr']);
 const sevOf = (s: EvSeverity): Severity => (s === EvSeverity.HIGH ? 'high' : s === EvSeverity.MEDIUM ? 'medium' : 'info');
 
-/** 1つのポリシー（ヘッダ値1つ）を評価する */
+/** csp_evaluator が評価の途中で例外を出したポリシーの指摘の種類（H-07④ として出し、H-04 は合格にしない） */
+export const EVALUATOR_ERROR = 'EVALUATOR_ERROR';
+
+/**
+ * 1つのポリシー（ヘッダ値1つ）を評価する。
+ * csp_evaluator は値を new URL() で解釈するため、`img-src data:image/svg+xml` のような値で例外を出す。
+ * 値は診断対象のサーバが決めるので、例外で判定全体を止めず、H-07④（構文）の指摘にする
+ */
 export function evaluateCsp(policy: string): CspIssue[] {
+  try { return evaluateCspUnsafe(policy); }
+  catch {
+    return [{ item: 'H-07', condition: 4, severity: 'low', directive: '(ポリシー全体)', type: EVALUATOR_ERROR, description: 'csp_evaluator で解析できない値がある' }];
+  }
+}
+
+function evaluateCspUnsafe(policy: string): CspIssue[] {
   const csp = new CspParser(policy).csp;
   const out: CspIssue[] = [];
   // default-src の指摘は、フォールバックする先（script-src・object-src がないとき）の項目にだけ振り分ける。

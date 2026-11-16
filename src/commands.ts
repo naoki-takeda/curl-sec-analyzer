@@ -126,7 +126,9 @@ export function generateScript(o: CommandOptions): string {
   t('after-logout', `${H}${o.mypagePath}`, ' sensitive=1'); L.push(`curl -sS -D - -o /dev/null -b old.txt "$H"${q(o.mypagePath)}`);
 
   L.push('} > out.txt', `echo 'out.txt に書き出しました。ツールで読み込んだら、パスワードやCookieを含むファイルも削除してください：rm -f out.txt login.txt jar.txt old.txt s1.txt s2.txt s3.txt' >&2`);
-  return L.join('\n') + '\n';
+  // -i の出力は本文で終わる。本文が改行で終わらない（JSON の API など）と、次の #TARGET の行が本文の続きになり、
+  // ターゲットが前のものに合わさってしまう。-w で最後に改行を出す（-i のコマンドは -w を使っていない）
+  return L.map(l => l.replace(/^(\s*)curl -sS -i /, "$1curl -sS -i -w '\\n' ")).join('\n') + '\n';
 }
 
 /** ラベルに対応する推奨コマンドのID（#META cmd= に出す） */

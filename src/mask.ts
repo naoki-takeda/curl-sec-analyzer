@@ -25,19 +25,22 @@ export const isSecretParamName = (name: string): boolean => {
   try { n = decodeURIComponent(name); } catch { n = name.replace(/%5[bd]/gi, '_'); }   // 不正なエンコードを含む名前は、角かっこだけ区切りにする
   if (MASK_EXACT.has(n.toLowerCase())) return true;
   const words = n.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[-_.[\]]+/);
-  return words.some(w => MASK_WORDS.has(w));
+  // 区切りのない1語の名前（authtoken、apitoken、secretkey、cftoken、sesskey、passphrase など）は、部分一致でも見る（伏せすぎるほうが安全）
+  return words.some(w => MASK_WORDS.has(w)) || SECRET_PART.test(n.toLowerCase());
 };
-// パラメータの区切り：? & # ; と、そのエンコード（%3F・%26・%23・%3B、JS のエスケープ（\u0026 の6文字、\x26）、HTML の &amp;）。
+const SECRET_PART = /token|secret|passw|passphrase|pwd|apikey|authkey|accesskey|privatekey|sessid|sesskey|credential|signature/;
+// パラメータの区切り：? & # ; と、そのエンコード（%3F・%26・%23・%3B と二重エンコードの %253F など、JS のエスケープ（\u0026 の6文字、\x26）、HTML の文字参照（&amp;・&#38;・&#x3D; など））。
 // エンコードした URL を別のパラメータの値に入れたもの（?next=%2Fcb%3Ftoken%3D…）や、スクリプトの中の URL でも見つけるため
-const SEP = String.raw`[?&#;]|%3[Ff]|%26|%23|%3[Bb]|\\u00(?:26)|\\x26|&amp;`;
-const EQ = String.raw`=|%3[Dd]|\\u003[Dd]|\\x3[Dd]`;
+const SEP = String.raw`[?&#;]|%(?:25)*(?:3[Ff]|26|23|3[Bb])|\\u00(?:26)|\\x26|&amp;|&#0*(?:63|38);|&#[xX]0*(?:3[Ff]|26);|&quest;`;
+const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];|&equals;`;
 // 値はエンコードした区切りの前まで。名前は最短一致（エンコードした = を名前に含めない）
-const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)(${EQ})((?:(?!%26|%23|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]){1,4096})`, 'g');
+const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)(${EQ})((?:(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]){1,4096})`, 'g');
 // JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる
 const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-]))eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 // URL のユーザー情報（スキーム://ユーザー情報@ホスト）。スキームは語の先頭から32文字まで（\w+ だと長い英数字の並びで、入力の長さの2乗の時間がかかる）。
-// ユーザー情報はホストの前の最後の @ まで（パスワードに @ を含む場合も残さない）。パス・クエリ・フラグメントの @ には一致させない
-const URL_CRED = /\b([A-Za-z][\w+.-]{0,31}:\/\/)([^/\s?#<>"']{1,512})@/g;
+// ユーザー情報はホストの前の最後の @ まで（パスワードに @ を含む場合も残さない）。パス・クエリ・フラグメントの @ には一致させない。
+// スキームのない「//ユーザー情報@ホスト」（<script src="//user:pass@cdn…">）も含める
+const URL_CRED = /(\b[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)([^/\s?#<>"']{1,512})@/g;
 /** パスワードがあればユーザー名を残してパスワードを伏せる。ユーザー名だけ（https://<トークン>@host/ の形）なら、それをトークンとしてマスクする */
 const maskUserinfo = (u: string) => { const i = u.indexOf(':'); return i >= 0 ? `${u.slice(0, i)}:****` : maskValue(u); };
 
@@ -45,16 +48,21 @@ export function maskValue(v: string): string {
   const keep = v.length <= 8 ? 0 : v.length <= 20 ? 2 : 4;
   return `${v.slice(0, keep)}…(${v.length} chars)`;
 }
-/** マスク済みの値（「…(N chars)」を含む）。もう一度マスクしても変えない（ルールで切り詰める前にマスクし、engine/run.ts でもマスクするため） */
-const masked = (v: string) => v.includes('…');
+/**
+ * マスク済みの値（maskValue の出力「…(N chars)」で終わる）。もう一度マスクしても変えない（ルールで切り詰める前にマスクし、engine/run.ts でもマスクするため）。
+ * 「…」を含むだけで判定すると、URL の直後に続く日本語の文（?token=…詳しくは担当まで）の値を伏せずに残してしまう
+ */
+const MASKED = /…\(\d+ chars\)$/;
+// パラメータの値は空白の前で切れるので、「…(N」まで取り、直後が「 chars)」かを見る
+const maskedParam = (v: string, rest: string) => /…\(\d+$/.test(v) && rest.startsWith(' chars)');
 
 /** CSP の nonce の値（'nonce-…'）。どの証跡でも同じようにマスクする（H-04⑤ と同じ扱い） */
 const CSP_NONCE = /'nonce-([^']+)'/g;
 
 /** パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る（深さ3まで） */
 function maskParams(s: string, depth = 0): string {
-  return s.replace(ANY_PARAM, (all, sep: string, k: string, eq: string, v: string) => {
-    if (masked(v)) return all;
+  return s.replace(ANY_PARAM, (all: string, sep: string, k: string, eq: string, v: string, offset: number) => {
+    if (maskedParam(v, s.slice(offset + all.length, offset + all.length + 7))) return all;
     if (isSecretParamName(k)) return `${sep}${k}${eq}${maskValue(v)}`;
     return depth < 3 ? `${sep}${k}${eq}${maskParams(v, depth + 1)}` : all;
   });
@@ -62,7 +70,7 @@ function maskParams(s: string, depth = 0): string {
 
 /** ヘッダ以外の文字列（URL、証跡）に含まれるトークン類をマスクする。マスク済みの文字列に使っても結果は変わらない */
 export function maskText(s: string): string {
-  return maskParams(s.replace(CSP_NONCE, (all, v: string) => (masked(v) ? all : `'nonce-${maskValue(v)}'`)))
+  return maskParams(s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${maskValue(v)}'`)))
           .replace(JWT, t => maskValue(t))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u)}@`);
 }

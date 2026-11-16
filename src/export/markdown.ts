@@ -11,8 +11,8 @@ import { recommendationEn } from '../recommendationsEn';
 
 // 証跡には診断対象のHTML（<img src=…> など）がそのまま入る。表示側でタグとして描画されないよう < > を実体参照にする
 // 画像・リンクの記法（![…](…)、[…](…)）とコードの記号もエスケープする。診断対象の応答（server ヘッダなど）に書かれた画像が、
-// レポートを開いたときに外部から読み込まれないようにするため。改行も空白にし、見出しなどを差し込めないようにする
-const cell = (v: unknown) => String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[|[\]!`\\]/g, '\\$&').replace(/\r?\n/g, ' ');
+// レポートを開いたときに外部から読み込まれないようにするため。改行（CR だけの改行も、CommonMark では行の区切り）も空白にし、見出しなどを差し込めないようにする
+const cell = (v: unknown) => String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[|[\]!`\\]/g, '\\$&').replace(/\r\n?|\n/g, ' ');
 const ORDER = ['high', 'medium', 'low', 'info'];
 
 export interface ReportExtras { profile?: Profile; diff?: { rows: DiffRow[]; baselineAt: string; rulesetWarning?: string }; }

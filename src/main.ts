@@ -154,6 +154,11 @@ async function openFile(f: File) {
   refs.input.value = await f.text(); analyze();
 }
 function analyze() {
+  // 判定の途中の例外（想定外の入力）で、前の入力の結果を表示・出力したままにしない
+  try { analyzeUnsafe(); }
+  catch { say(tr().analysisFailed); state.last = null; renderEmpty(); }
+}
+function analyzeUnsafe() {
   const T = tr();
   say('');
   const text = refs.input.value;

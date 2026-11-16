@@ -31,7 +31,7 @@ export function isHttps(t: Target): boolean | undefined {
   const u = t.url ?? t.meta.url_effective;
   if (u) return /^https:\/\//i.test(u);   // スキームは大文字小文字を区別しない（HTTPS://…）
   if (t.info.some(l => /SSL connection using|ALPN:/.test(l))) return true;
-  if (t.info.some(l => /^Connected to .* port 80\b/.test(l))) return false;
+  if (t.info.some(l => /^(?:Connected to|Established connection to) .* port 80\b/.test(l))) return false;   // 今の curl は Established connection to とも出す
   return undefined;
 }
 
