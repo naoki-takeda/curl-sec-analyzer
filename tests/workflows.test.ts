@@ -27,10 +27,14 @@ describe('.github の YAML', () => {
     const runs = steps.flatMap(s => s.run ?? []);
     // インストールスクリプトを動かす前に署名を検証する
     expect(runs.indexOf('npm ci --ignore-scripts')).toBeLessThan(runs.indexOf('npm run audit:signatures'));
-    for (const r of ['npm run audit:deps', 'npm run lint', 'npm test -- --run', 'npx playwright test']) expect(runs).toContain(r);
+    for (const r of ['npm run audit:deps', 'npm run lint', 'npm test', 'npx playwright test']) expect(runs).toContain(r);
     expect(steps.some(s => s.uses?.startsWith('actions/configure-pages'))).toBe(false);   // pages の権限を要する処理を入れない
     expect(steps.find(s => s.run === 'npm run build')?.env?.SITE_URL).toContain('github.io');
     expect(runs.find(r => r.startsWith('npx playwright install'))).toContain('firefox webkit');
+    // E2E のレポートは失敗したときだけ保存する（成功時に成果物を残さない）
+    const report = steps.find(s => s.uses?.startsWith('actions/upload-artifact@')) as Step & { if?: string };
+    expect(report.with?.path).toBe('playwright-report/');
+    expect(report.if).toContain("steps.e2e.outcome == 'failure'");
   });
 
   it('CI はプルリクエストで共通の検査を呼ぶ', () => {

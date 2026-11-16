@@ -9,7 +9,7 @@
 ## 確認したこと
 
 - [ ] `npm run lint`（型チェック・ESLint）が通る
-- [ ] `npm test -- --run`（単体テスト）が通る
+- [ ] `npm test`（単体テスト）が通る
 - [ ] `npm run build` の後、`npm run test:e2e`（本番ビルドのブラウザテスト）が通る
 - [ ] ルール（`src/rules/**`）・パーサ（`src/parser/**`）を変えた場合、対応するテストを追加した
 - [ ] 項目・条件・ラベルを変えた場合、設計書（`docs/design.md`）と変更履歴（`docs/history.md`）を更新した
