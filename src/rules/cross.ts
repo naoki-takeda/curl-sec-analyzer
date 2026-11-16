@@ -1,9 +1,9 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, finalResponse, firstStatus, isHop, isHttps, logoutFailed, ownChain } from '../parser/target';
+import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain } from '../parser/target';
 import { isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp } from './util';
+import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, hstsDirective, parseCsp, splitPolicies } from './util';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
@@ -97,17 +97,24 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
 export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'any', scope: 'cross',
   basis: ['hstspreload.org'],
   runCross(x) {
-    const preload = x.targets.find(t => isHttps(t) && hstsDirective(finalResponse(t)?.headers.get('strict-transport-security')?.[0], 'preload'));
-    if (!preload) return [];                                   // preload を付けていなければ適用外
+    const preloads = x.targets.filter(t => isHttps(t) && hstsDirective(finalResponse(t)?.headers.get('strict-transport-security')?.[0], 'preload'));
+    if (!preloads.length) return [];                           // preload を付けていなければ適用外
     const apex = x.byLabel('apex');
     if (!apex) return na(apexHsts, 'apex', 'apex（https://apexドメイン/）');
+    // preload を付けたのが apex のドメイン（apex 自身かそのサブドメイン）のときだけ比べる。別のサイト（b.example の www）の preload で、
+    // a.example の apex を③にしない
+    const ah = hostOf(apex)?.replace(/:\d+$/, '').toLowerCase();
+    const related = (t: Target) => { const h = hostOf(t)?.replace(/:\d+$/, '').toLowerCase(); return !ah || !h || h === ah || h.endsWith(`.${ah}`); };
+    const preload = preloads.find(related);
+    if (!preload) return [];
     // apex 自身の応答（転送の最初のホップ）で見る。-L や HAR で www への転送をたどった最後の応答は www のもの
+    // max-age=0 は HSTS を解除する指定なので、返していないのと同じ（H-01①と同じ）
     const v = ownChain(apex)[0]?.headers.get('strict-transport-security')?.[0];
-    return v ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
+    return v && Number(v.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? 0) > 0 ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };
 
-const nonceOf = (t: Target) => (finalResponse(t)?.headers.get('content-security-policy') ?? [])
+const nonceOf = (t: Target) => splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? [])
   .flatMap(v => [...parseCsp(v).values()].flat()).map(v => v.match(/^'nonce-([^']+)'$/)?.[1]).filter((v): v is string => !!v);
 export const fixedNonce: Rule = { id: 'H-04', title: 'CSP：script-src', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP CSP CS', 'Google csp_evaluator'],

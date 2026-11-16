@@ -36,10 +36,16 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     if (CREDENTIALS.some(re => re.test(b)))
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
     // 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする
-    const trace = b.match(/\bjdbc:\w+:(?=\S)|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|ORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/);
+    // ORA- は語の境目から（FLORA-12345 のような品番に一致させない）。絶対パスは URL のパスの一部（https://cdn…/opt/app.js、
+    // src="/srv/main.js"、url(/srv/…)）には一致させない（直前が URL の文字か、属性・url() の始まり）
+    const trace = b.match(/\bjdbc:\w+:(?=\S)|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/);
     if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
-    // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る
-    const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Ruby on Rails|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|Express<\/title>|<title>Error \d{3}[^<]*<\/title>/i);
+    // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る。Rails も同じく、既定のエラーページ
+    // （public/404.html・500.html）と開発用の画面の文言で見る（「Ruby on Rails」はブログの記事などにも出る）
+    const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Action Controller: Exception caught|<h1>Routing Error<\/h1>|We're sorry, but something went wrong\.|The page you were looking for doesn't exist\.|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|Express<\/title>/i)
+      // Jetty の既定のエラーページ（<title>Error 404 Not Found</title>）は、本文の「HTTP ERROR 404」「Powered by Jetty」と合わせて見る。
+      // <title>Error 404 - Page not found | MyShop</title> のような独自のエラーページを既定のページとしない
+      ?? (/HTTP ERROR:?\s*\d{3}|Powered by Jetty/i.test(b) ? b.match(/<title>Error \d{3}[^<]*<\/title>/i) : null);
     // <title>Error 401 …</title>（Jetty など）の「…」は自由な文言で、アプリが「Invalid API key sk_live_…」のように秘密を入れうるので出さない
     if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', clip(page[0].replace(/^(<title>Error \d{3})[^<]*/i, '$1 …'), 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
     return out.length ? out : [mk(errorDetail, ctx, 'ok', 'info', 'pass', 'エラーの詳細らしき記述なし', '')];
@@ -55,7 +61,10 @@ export const dirListing: Rule = { id: 'E-02', title: 'ディレクトリリス�
              : [mk(dirListing, ctx, 'ok', 'info', 'pass', '一覧表示なし', '')];
   } };
 
-const ROBOTS_SENSITIVE = /^Disallow:\s*(\/\S*(?:admin|secret|backup|private|internal|staging|dev|test|config|manage|console|phpmyadmin)\S*)/im;
+// 機密らしい語は、英字の語の境目で見る（/devices/ の dev、/latest/ の test、/contest/ に一致させない）。admin・config・manage は
+// 続く語（administrator、configuration、management）も含め、ほかは複数形（tests、internals）を含める。admin の前の語は
+// よく使う接頭辞（sys・my・web・db・site・super）だけを認める（/badminton/ に一致させない）。/wp-admin/、/admin2/ は一致する
+const ROBOTS_SENSITIVE = /^Disallow:\s*(\/\S*?(?<![a-z])(?:phpmyadmin|(?:sys|my|web|db|site|super)?admin[a-z]*|secrets?|backups?|privates?|internals?|staging|devs?|devel|development|tests?|testing|testsite|config[a-z]*|manage[a-z]*|consoles?)(?![a-z])\S*)/im;
 export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・security.txt', appliesTo: 'any', scope: 'target',
   basis: ['RFC 9116', 'OWASP WSTG-INFO-03'],
   run(ctx) {
@@ -120,6 +129,14 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     // introspection が無効かどうかを示さないので合格にしない
     if (docSegment(p) === 'graphql') {
       if (ok200 && /"__schema"/.test(b)) return [mk(apiDocsAdmin, ctx, 3, 'medium', 'fail', 'introspection の応答に __schema がある', '本番では introspection を無効にする')];
+      // HTML は introspection の応答ではない。GraphiQL などの IDE の画面は、JS に introspection の語を含むので、拒否とみなさない。
+      // IDE が未認証で開ける（そこから introspection を試せる）のは、API仕様の公開（②）と同じに扱う
+      const html = /^\s*text\/html/i.test(header(ctx, 'content-type')[0] ?? '') || /^\s*(?:<!doctype html|<html)/i.test(b);
+      if (html) {
+        if (!ok200 || !/graphiql|graphql-playground|graphql playground|apollo sandbox|altair/i.test(b)) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${f.status}（HTML。introspection を試した応答ではない）`, GRAPHQL_REC)];
+        if (ctx.target.sentAuth) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、GraphQL の IDE。Cookie・Authorization を送った応答で、未認証で使えるかは分からない）`, 'Cookie・Authorization を付けずに採取し直す')];
+        return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}、GraphQL の IDE（GraphiQL など）の画面）`, 'GraphQL の IDE は本番で無効にするか、認証の内側に置く（introspection は POST して別に確かめる）')];
+      }
       if (/introspection/i.test(b)) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}（introspection を拒否）`, '')];
       return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${f.status}（introspection を試した応答ではない）`, GRAPHQL_REC)];
     }
@@ -140,7 +157,9 @@ export const jsonp: Rule = { id: 'E-06', title: 'JSONP', appliesTo: 'any', scope
     if (!cb || !ctx.final) return [];
     if (!body(ctx) && ctx.final.status >= 200 && ctx.final.status < 300) return [mk(jsonp, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
     const b = (body(ctx) ?? '').trimStart();
-    const hit = b.startsWith(`${cb}(`) || b.startsWith(`/**/${cb}(`) || b.startsWith(`/**/ ${cb}(`);
+    // 「cb(」「/**/cb(」のほか、Express の res.jsonp の形「/**/ typeof cb === 'function' && cb(」も JSONP とみなす
+    const esc = cb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const hit = new RegExp(`^(?:/\\*\\*/\\s*)?(?:typeof\\s+${esc}\\s*===?\\s*['"]function['"]\\s*&&\\s*)?${esc}\\s*\\(`).test(b.slice(0, 2048));
     if (!hit) return [mk(jsonp, ctx, 'ok', 'info', 'pass', `callback=${cb} は本文に反映されない`, '')];
     // 機密かどうか分からないときは①を判定しない（第0章 0.3）。JSONP があることは確かなので、より弱い②として出す
     if (ctx.sensitive === undefined) return [mk(jsonp, ctx, 2, 'low', 'fail', `本文が ${cb}( で始まる（機密応答かどうか分からない）`, 'JSONP をやめる。機密応答なら①（高）にあたる（#TARGET に sensitive=1 か sensitive=0 を付ける）')];
@@ -171,6 +190,9 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     const uploadPath = /\/(uploads?|files?|attachments?|media|download)\//i.test(p) && /\/[^/]+\.[a-z0-9]{1,10}$/i.test(p)
       && !/\.(?:php\d?|phtml|aspx?|ashx|jspx?|do|action|cgi|pl|cfm|shtml)$|\/index\.html?$/i.test(p);
     if (!DOWNLOAD_CT.test(ct) && !uploadPath && !cd) return [];   // ファイル配信の応答だけ
+    // JSON の API の応答（/api/files/123.json など、パスがアップロード先らしくても）は、ダウンロードではない（DOWNLOAD_CT で +json を除くのと同じ）
+    // Content-Type で見る（kind=api を明示したターゲットの SVG・PDF まで除かないため）
+    if (/^\s*application\/(?:[\w.-]+\+)?json\b/i.test(ct) && !cd) return [];
     if (uploadPath && ACTIVE_CT.test(ct) && !/attachment/i.test(cd))
       return [mk(downloadResponse, ctx, 1, 'high', 'fail', `Content-Type: ${ct} / Content-Disposition: ${cd || '(なし)'}`, '利用者がアップロードしたファイルは別オリジンから attachment で配信する')];
     // ビルドした CSS・JS・フォント（Drupal の /sites/default/files/css/…、Next.js の /_next/static/media/…）は、ページが読み込むもので、ダウンロードではない

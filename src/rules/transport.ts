@@ -24,7 +24,8 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     const ev = `HTTP ${first.status} → ${to.href}`;
     if (to.protocol !== 'https:') return [mk(httpsRedirect, ctx, 2, 'medium', 'fail', ev, rec, { obsId: 'redirection-not-to-https', score: -20 })];
     if (to.hostname !== from.hostname) return [mk(httpsRedirect, ctx, 3, 'low', 'fail', ev, rec, { obsId: 'redirection-off-host-from-http', score: -5 })];
-    if (first.status === 302 || first.status === 307) return [mk(httpsRedirect, ctx, 4, 'info', 'fail', ev, '恒久的な転送（301 または 308）にする')];
+    // 303 See Other も一時的な転送（ブラウザは覚えない）
+    if (first.status === 302 || first.status === 303 || first.status === 307) return [mk(httpsRedirect, ctx, 4, 'info', 'fail', ev, '恒久的な転送（301 または 308）にする')];
     return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', ev, '')];
   } };
 
@@ -37,11 +38,14 @@ export const redirectChain: Rule = { id: 'T-05', title: 'リダイレクトチ�
     if (!hops.length || !ctx.target.url) return [];
     const out = [];
     let cur = ctx.target.url, sawHttps = /^https:\/\//i.test(cur);
+    // 診断した URL 自身のポート（https://a.example:8443/）への転送は、内部のポートの露出ではない
+    const own = (() => { try { return new URL(ctx.target.url!); } catch { return undefined; } })();
     for (const r of hops) {
       let to: URL;
       try { to = new URL(r.headers.get('location')![0], cur); } catch { continue; }
       if (sawHttps && to.protocol === 'http:') out.push(mk(redirectChain, ctx, 1, 'medium', 'fail', `${cur} → ${to.href}`, 'チェーンの途中で http に戻さない'));
-      if (INTERNAL_HOST.test(to.hostname) || (to.port && !['80', '443'].includes(to.port)))
+      const ownPort = !!own && to.hostname === own.hostname && to.port === own.port;   // 同じホストの同じポートだけ（別のホストの同じポートは対象）
+      if (INTERNAL_HOST.test(to.hostname) || (to.port && !['80', '443'].includes(to.port) && !ownPort))
         out.push(mk(redirectChain, ctx, 2, 'low', 'fail', `Location: ${to.href}`, 'Location に内部ホスト名やポートを出さない（リバースプロキシの設定を確認）'));
       sawHttps ||= to.protocol === 'https:'; cur = to.href;
     }

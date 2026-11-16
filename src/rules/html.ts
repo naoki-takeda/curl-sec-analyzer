@@ -148,7 +148,16 @@ const SECRETS: [string, { test(s: string): boolean }][] = [
   ['JWT', /\beyJ[\w-]{10,}\.eyJ[\w-]{10,}\.[\w-]{10,}/],
   ['キー・シークレットの代入', { test: (s: string) => [...s.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2])) }],
 ];
-const INTERNAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[\w-]+\.(?:internal|local|lan|corp|intra))(?![\w.-])[^\s"'<>]*/i;   // ホスト名の最後で区切る（edge01.local.example-cdn.net の .local. には一致させない）
+// ホスト名の最後で区切る（edge01.local.example-cdn.net の .local. には一致させない）。複数のラベルのホスト名（db.prod.internal）も含める
+const INTERNAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|(?:[\w-]+\.)+(?:internal|local|lan|corp|intra))(?![\w.-])[^\s"'<>]*/gi;
+/** 内部URL。診断した URL 自身のホスト（社内のポータル https://portal.corp/、http://localhost:3000/ の自サイトへのリンク）は除く */
+function internalUrl(html: string, own?: string): string | undefined {
+  for (const m of html.matchAll(INTERNAL_URL)) {
+    let host: string | undefined; try { host = new URL(m[0]).host.toLowerCase(); } catch { /* 解釈できなければ内部URLとして出す */ }
+    if (!own || host !== own) return m[0];
+  }
+  return undefined;
+}
 const DEV_WORD = /TODO|FIXME|XXX|HACK|debug|password|パスワード|本番|staging/i;
 /**
  * 閉じたコメント（<!-- … -->）を1つずつ切り出し、その中だけで開発用の語を探す。一致した語を返す。
@@ -172,12 +181,13 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     if (!html) return [];
     const out = [];
     for (const [name, re] of SECRETS) if (re.test(html)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
-    const iu = html.match(INTERNAL_URL)?.[0];
+    const iu = internalUrl(html, hostOf(ctx.target)?.toLowerCase());
     if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
     // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す
     const dc = devCommentWord(html);
     if (dc) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `開発用コメント（「${dc}」を含む。中身は表示しない）`, 'ビルド時にコメントを削除する'));
-    const gen = tags(html, ['meta']).find(t => t.attrs.get('name')?.toLowerCase() === 'generator' && /\d+\.\d+/.test(t.attrs.get('content') ?? ''));
+    // 「Drupal 10 (https://www.drupal.org)」のように主な版だけのものも版とみなす（H-16 の X-Generator と同じ）
+    const gen = tags(html, ['meta']).find(t => t.attrs.get('name')?.toLowerCase() === 'generator' && /\b\d+\b/.test(t.attrs.get('content') ?? ''));
     if (gen) out.push(mk(htmlSecrets, ctx, 3, 'info', 'fail', gen.evidence, 'generator のバージョンを出さない'));
     return out.length ? out : [mk(htmlSecrets, ctx, 'ok', 'info', 'pass', '秘密情報・内部情報らしき記述なし', '')];
   } };

@@ -114,13 +114,25 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   const maps: HostMaps = { hsts: hostHstsMap(targets), sameSite: hostSameSiteMap(targets) };
   // ターゲットごとの文脈・許可・URL・キーは一度だけ作る（ルールごとに作り直すと、ルール数 × ターゲット数の時間がかかる）。
   // 文脈の findings は同じ配列を指すので、依存先のルールの結果も見える
+  // 同じラベルが2つ以上あるラベル（付け直した top#2 があるもの）。付け直しの番号は入力の順番で決まるので、突き合わせには使わない
+  const duplicated = new Set(targets.filter(t => /#\d+$/.test(t.label)).map(t => baseLabel(t.label)));
   const per = targets.map(t => {
     const url = t.url ? maskText(t.url) : undefined;
     // 差分・例外の突き合わせ：HAR のラベル（har-4 など）は記録し直すと番号が変わるため、メソッドとURLで突き合わせる。
-    // URL は、伏せた値を「…」だけにしたもの（maskKey）。伏せた値の先頭の文字や長さは、記録し直すと変わる
-    const targetKey = t.meta.source === 'har' ? `HAR ${t.meta.method ?? 'GET'} ${t.url ? maskKey(t.url) : t.label}` : t.label;
+    // URL は、伏せた値を「…」だけにしたもの（maskKey）。伏せた値の先頭の文字や長さは、記録し直すと変わる。
+    // curl でも、同じラベルが複数あれば「元のラベル＋URL」にする（貼り付けの順番を変えると top と top#2 が入れ替わり、差分と例外がずれるため）
+    const targetKey = t.meta.source === 'har' ? `HAR ${t.meta.method ?? 'GET'} ${t.url ? maskKey(t.url) : t.label}`
+      : duplicated.has(baseLabel(t.label)) && t.url ? `${baseLabel(t.label)} ${maskKey(t.url)}` : t.label;
     return { t, url, targetKey, host: hostOf(t), allow: allowedItems(t.label), ctx: contextOf(t, findings, maps, opt.profile) };
   });
+  // 同じラベルで同じ URL のターゲット（Cookie の有無を変えて2回採取したなど）は、キーが重なるので、2つ目から「 #2」を付ける
+  // （重なったままだと、差分で片方の指摘が消え、例外が両方に効く）。この組だけは貼り付けの順番で決まる
+  const seenKeys = new Map<string, number>();
+  for (const p of per) {
+    if (p.t.meta.source === 'har' || p.targetKey === p.t.label) continue;
+    const n = (seenKeys.get(p.targetKey) ?? 0) + 1; seenKeys.set(p.targetKey, n);
+    if (n > 1) p.targetKey = `${p.targetKey} #${n}`;
+  }
   for (const rule of rules) {                                // ルールごとに全ターゲット（依存先の結果が先にそろう）
     for (const { t, url, targetKey, host, allow, ctx } of per) {
       if (!allow.allowsItem(rule.id)) continue;               // ①

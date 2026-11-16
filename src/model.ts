@@ -65,7 +65,7 @@ export interface Finding {
   condition?: number;               // 例: 1（①）
   obsId?: string; title: string; severity: Severity; status: Status;
   target: string; url?: string; host?: string;
-  targetKey?: string;               // 差分の突き合わせに使う。curl はラベル、HAR は「メソッド＋URL（マスク済み）」
+  targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（マスク済み）」
   evidence: string; recommendation: string; references: string[];
   score: number;                    // obsId があるルール以外は常に0
   suppressedBy?: Suppression;       // 例外に該当したとき

@@ -435,3 +435,50 @@
 | R-10（レビュー、20の誤判定） | 20の対応で、`/actuator`から`/actuator/login`（ログイン画面）への転送も転送先で見て、E-05①（高）にする | 転送元のパスに`/`か`/index.html`を足しただけの転送に限る | 第5章、`src/rules/exposure.ts` |
 | 判断が要るもの | E-11①の「別オリジン」の決め方（アップロードしたファイルを別オリジンから配信していても①になる）、`Verify return code: 20`（手元にCA証明書がない）のT-11①、マスキングを許可リスト方式にするか | 利用者の判断を待つ | — |
 | 未対応 | 第11〜19回の未対応のうち、中・低の判定の誤り、HARとパーサ、性能、画面・例外ファイル、コマンド生成器、CI・ドキュメント、リファクタリング（積み残しの対応の2回目以降で扱う） | 次回以降 | — |
+
+### 積み残しへの対応（第21回、2回目：中・低の判定の誤り）
+
+第10〜19回の「未対応」の欄のうち、中・低の判定の誤り（誤検知・見逃し）を、いまのコードに入力を通して1件ずつ確かめた。31件が再現し、すべてに対応して、ルールセットを`2026.11-v0.4.28`にした。対応のあと、変更を独立したレビュアーが見て、退行・漏れを8件指摘した（うち4件は重要度「高」の誤り）。すべてに対応した（表のR-1〜R-8）。再現テストは`tests/backlog2.test.ts`。修正前のソースでは、すべて失敗することを確かめた（守りのテストの1件も、Railsの既定のエラーページの文言を新しく見るようにしたため失敗する）。`tests/review9.test.ts`のJettyのエラーページの入力は、本物のJettyと同じく本文に`HTTP ERROR 401`と`Powered by Jetty`を加えた（③をJettyの印と合わせて見るようにしたため）。
+
+| 指摘 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 1（第14回） | H-01が`max-age=0`（HSTSを解除する指定）を②（中）にする | ①（高）にする | 第1章、`src/rules/headers.ts` |
+| 2（第14回） | H-06がX-Frame-Optionsの不正な値（`ALLOWALL`、綴りの誤り。ブラウザは無視する）を③（情報）にする。`ALLOW-FROM …, DENY`を②にする | HTML Standardの手順（カンマで分けた小文字の集合）で読み、効かない値は①にする | 第1章、`src/rules/headers.ts` |
+| 3（第14回） | H-08・A-09②が、プロキシが付け足した`nosniff, nosniff`を①②にする | Fetch Standardのとおり、カンマで分けた最初の値で見る（`isNosniff`） | 第1章、`src/rules/util.ts`、`src/rules/headers.ts`、`src/rules/api.ts` |
+| 4（第14回） | 1つのヘッダ値の中のカンマ（ポリシーの区切り）を区切りとして読まず、`…, frame-ancestors 'none'`をH-06①・H-07④にする | ヘッダ値をカンマで分けてからポリシーごとに評価する（`cspPolicies`。H-04⑤も同じ） | ツール設計2「CSPパーサ」、`src/rules/util.ts`、`src/rules/headers.ts`、`src/rules/cross.ts` |
+| 5（第15回） | H-02③が、別のサイト（`www.b.example`）のpreloadで、`a.example`のapexを指摘する | preloadを付けたのがapexのドメイン（apex自身かそのサブドメイン）のときだけ比べる | 第1章、`src/rules/cross.ts` |
+| 6（第15回） | H-06④が、`frame-ancestors *`のポリシーと`'none'`のポリシーが両方あるときに④にする（最初のポリシーだけを見ていた） | すべてのポリシーが広いときだけ④ | 第1章、`src/rules/headers.ts` |
+| 7（第15回） | H-07③が、httpのページの混在コンテンツを指摘する（E-07は対象外にしている） | httpのページは対象外 | 第1章、`src/rules/headers.ts` |
+| 8（第16回） | H-11が、機密応答かどうか分からずCORPもないのに、COOPがあるHTMLを合格にする（カバレッジの水増し） | naにする | 第1章、`src/rules/headers.ts` |
+| 9（第18回） | H-16が`X-Generator: Drupal 10`（主な版だけ）を見逃し、版のない`X-Generator`も出さない。E-09③の`generator`も同じ | `X-Generator`と`generator`は数字があれば版とする。版のない製品のヘッダはすべて② | 第1章、第5章、`src/rules/headers.ts`、`src/rules/html.ts` |
+| 10（第15回） | C-04①が、`-L`で転送した先（www）が発行したCookieを、ターゲットのURLのホスト（apex）と比べて誤検知する | Cookieを発行したホップのホストと比べる | 第2章、`src/rules/cookies.ts` |
+| 11（第10回） | C-04が、ホストと同じ`Domain`（サブドメインにも送られる）を合格にする。空の`Domain=`を①にする | ③（低）を加える。空の`Domain=`は対象外 | 第2章、`src/rules/cookies.ts`、`src/recommendationsEn.ts` |
+| 12（第12回） | C-05が、空の`Max-Age=`を0秒として、`Expires`の長い期限を見逃す | 空や数字でない`Max-Age`は無視し、`Expires`で見る | 第2章、`src/rules/cookies.ts` |
+| 13（第18回） | C-06が、小文字の`__host-`・`__secure-`（今のブラウザは条件を求める）をプレフィックスなし（①）とする | 大文字小文字を区別しない | 第2章、`src/rules/cookies.ts` |
+| 14（第13回） | C-07①が、時刻から作るUUID（v1・v7）を文字種から約216bitと推定して合格にする | 乱数の部分だけで数える（v1・v2・v6は14bit、v7は74bit）。v4は今までどおり（下の「判断が要るもの」） | 第2章、`src/rules/cookies.ts` |
+| 15（第15回） | R-01が、自サイトのOrigin（同じホスト・サブドメイン）の反射を②にする。対象がサブドメイン（`api.a.example`）だと、`a.example.evil.net`をR-03ではなくR-01で判定する | 対象のURL自身のオリジンはna（R-1でしぼった）。似せたOriginは、ホストのドメインに似せたものもR-03にする | 第3章、`src/rules/cors.ts`、`src/recommendationsEn.ts` |
+| 16（第13回） | R-05①が`Access-Control-Allow-Methods: *`を見逃す | ACAC:trueがなければ、すべてのメソッドの許可とする | 第3章、`src/rules/cors.ts` |
+| 17（第13回） | R-06が、Varyの名前の一部（`X-Origin-Id`）を`Origin`とみなす | カンマで区切った1つの値として見る | 第3章、`src/rules/cors.ts` |
+| 18（第13回） | T-04が303を合格にする | 302・307と同じ④ | 第4章、`src/rules/transport.ts` |
+| 19（第17回） | T-05②が、診断したURL自身のポート（`:8443`）への転送を指摘する | 対象外 | 第4章、`src/rules/transport.ts` |
+| 20（第12回） | T-11が、SANのない証明書（CNだけ。今のブラウザは拒否する）を、CNが一致すれば合格にする | `-showcerts`の最初のPEMにSANの拡張がなければ①。PEMがない出力は、SANがあるか分からないので今までどおりCNで比べる | 第4章、`src/parser/openssl.ts`、`src/rules/hostRules.ts`、`tests/fixtures/cert_*.pem` |
+| 21（第18回） | E-01が、品番（`FLORA-12345`）を`ORA-`、URLのパス（`src="/srv/main.js"`）を絶対パス、独自の404のタイトルと本文の「Ruby on Rails」を既定のエラーページとする | `ORA-`は語の境目から、URLのパスは除く。Jettyのタイトルは本文の印と合わせて見る。Railsは既定のエラーページの文言で見る | 第5章、`src/rules/exposure.ts`、`tests/review9.test.ts` |
+| 22（第18回） | E-04①が、robots.txtの語の一部（`/devices/`の`dev`、`/latest/`の`test`）に一致する | 英字の語の境目で見る | 第5章、`src/rules/exposure.ts` |
+| 23（第19回） | E-05が、GraphiQLの画面の200を「introspectionを拒否」と合格にする（IDEのJSがintrospectionの語を含む） | HTMLは合格にしない。IDEの画面が開ければ② | 第5章、`src/rules/exposure.ts`、`src/recommendationsEn.ts` |
+| 24（第13回） | E-06が、Expressの`res.jsonp`の形（`/**/ typeof cb === 'function' && cb(`）を見逃す | この形もJSONPとみなす | 第5章、`src/rules/exposure.ts` |
+| 25（第13回） | E-09②が、複数のラベルの内部ホスト名（`db.prod.internal`）を見逃す | 複数のラベルも見る | 第5章、`src/rules/html.ts` |
+| 26（第17回） | E-09②が、社内のポータル（`https://portal.corp/`）の自サイトへのリンクを内部URLとする | 診断したURL自身のホストは除く | 第5章、`src/rules/html.ts` |
+| 27（第12回） | E-11②が、パスがアップロード先らしいJSONのAPIの応答（`/api/files/123.json`）を指摘する | Content-TypeがJSONの応答は対象外（R-4） | 第5章、`src/rules/exposure.ts` |
+| 28（第10・13回） | A-07②が、GraphQLの`__typename`とMongooseの`__v`を内部属性とする | 除く | 第6章、`src/rules/api.ts` |
+| 29（第18回） | A-10が、付け直したラベル（`error-api#2`）も比べる | 横断の判定と同じく、最初のものだけを使う | 第6章、`src/rules/api.ts` |
+| 30（第15回） | 同じラベルの付け直し（`top`と`top#2`）が入力の順番で決まり、貼り付けの順番を変えると差分と例外がずれる | 同じラベルが複数あるcurlのターゲットは、突き合わせのキー（`targetKey`）を「元のラベル＋URL（`maskKey`）」にする。v0.4.27以前に保存した結果・例外のうち、`top#2`のような付け直したラベルのものは突き合わない | `src/engine/run.ts`、`src/model.ts` |
+| R-1（レビュー、高） | 15の対応で、http のオリジン（`http://a.example`）、サブドメイン（`evil.a.example`）、共用のホスティングの隣のホスト（`evil.herokuapp.com`、`attacker.github.io`）の反射を「自サイト」としてnaにし、R-01①（高）を見逃す | naにするのは、対象のURL自身のオリジン（スキーム・ホスト・ポートが同じ）だけにする | 第3章、`src/rules/cors.ts` |
+| R-2（レビュー、高） | 4の対応で、カンマのあとのかけら（`report-uri`のURLの中のカンマ、`img-src 'self', data:`）を空のポリシーとして、H-03③（高）にする | ヘッダ値のどのポリシーにもディレクティブがないときだけ③。読めないかけらは評価から除く | 第1章、`src/rules/util.ts`、`src/rules/headers.ts` |
+| R-3（レビュー、高） | 20の対応で、切れたPEM・空行が入ったPEM（入力欄がCR CR LFを空行にする）で「SANがない」とし、T-11①（高）にする。空行のあとの中間CAのPEMをリーフとして読む | DERの長さが合わないPEMと、途中で切れたPEMは使わない。見るのは最初のPEMだけ。x509の出力にSANの行があればSANはある | 第4章、`src/parser/openssl.ts` |
+| R-4（レビュー、高） | 27の対応で、`kind=api`を明示したターゲットのE-11をすべて飛ばし、アップロードしたSVGの①（高）を見逃す | ターゲットの種類ではなく、Content-TypeがJSONかで見る | 第5章、`src/rules/exposure.ts` |
+| R-5（レビュー） | 30の対応で、同じラベルの2つ目を足すと、1つ目のキーが`top`から`top https://…`に変わり、差分で「新規」と「再診断していない」になる。v0.4.27以前の結果とも突き合わない | 差分で、キーで突き合わなかった指摘を、ラベルでも突き合わせる（HARは除く） | `src/engine/diff.ts` |
+| R-6（レビュー） | 30の対応で、同じラベルで同じURLの2つ（Cookieの有無を変えて採取したなど）が同じキーになり、差分で片方の指摘が消え、例外が両方に効く | 重なったキーには2つ目から` #2`を付ける（この組だけは貼り付けの順番で決まる） | `src/engine/run.ts` |
+| R-7（レビュー） | 22の対応で、複数形と接頭辞（`/tests/`、`/internals/`、`/sysadmin/`、`/devel/`、`/testsite/`）を見逃す | 複数形と、よく使う接頭辞（sys・my・web・db・site・super）を認める（`/badminton/`は対象外） | 第5章、`src/rules/exposure.ts` |
+| R-8（レビュー） | 1の対応の漏れで、H-02③がapexの`max-age=0`をHSTSありとする。19の対応で、別のホストの同じポートへの転送もT-05②の対象外にする | apexは`max-age`が0より大きいときだけHSTSありとする。T-05②の対象外は同じホストの同じポートだけ | 第1章、第4章、`src/rules/cross.ts`、`src/rules/transport.ts` |
+| 未対応 | A-01の`http`ラベルのカバレッジ（第16回）。何を直すべきかが指摘から読み取れない（`http`のターゲットでBasic認証がなければA-01は何も出さず、カバレッジは`unauth-*`を求める。これは意図どおりとも読める） | 指摘の意図を確かめてから | — |
+| 判断が要るもの | C-07①で、UUID v4（乱数122bit）をASVS 5.0.0 7.2.3の128bitに足りないとして①（高）にするか（今は文字種から約216bitと推定して合格） | 利用者の判断を待つ | — |

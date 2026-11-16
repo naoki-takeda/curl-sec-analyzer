@@ -117,7 +117,11 @@ export const certificate: Rule = { id: 'T-11', title: '証明書', appliesTo: 'a
       const hostname = host.replace(/:\d+$/, '');
       if (info.notAfter && info.notAfter.getTime() < now) out.push(hf(certificate, host, 1, 'high', 'fail', `期限切れ（notAfter: ${info.notAfter.toISOString().slice(0, 10)}${asOf}）`, '証明書を更新する（自動更新を設定する）'));
       else if (info.notAfter && info.notAfter.getTime() - now < 30 * DAY_MS) out.push(hf(certificate, host, 2, 'medium', 'fail', `期限まで${Math.ceil((info.notAfter.getTime() - now) / DAY_MS)}日（notAfter: ${info.notAfter.toISOString().slice(0, 10)}${asOf}）`, '証明書を更新する（自動更新を確認する）'));
-      const names = info.sans.length ? info.sans : info.subjectCN ? [info.subjectCN] : [];
+      // 今のブラウザは CN を見ず、SAN だけでホスト名を確かめる（Chrome 58 以降）。SAN の拡張がないと分かる証明書は、CN が一致しても①。
+      // SAN があるかが分からない出力（s_client だけで x509 -ext subjectAltName がない）では、今までどおり CN で比べる
+      if (info.sanExtension === false && info.subjectCN)
+        out.push(hf(certificate, host, 1, 'high', 'fail', `SAN がない（CN: ${info.subjectCN}。ブラウザは CN を見ない）`, '対象ホストをSANに含む証明書にする'));
+      const names = info.sans.length ? info.sans : info.subjectCN && info.sanExtension !== false ? [info.subjectCN] : [];
       if (names.length && !names.some(n => nameMatches(n, hostname))) out.push(hf(certificate, host, 1, 'high', 'fail', `ホスト名不一致（${hostname} / 証明書: ${names.join(', ')}）`, '対象ホストをSANに含む証明書にする'));
       if (info.verifyCode !== undefined && info.verifyCode !== 0) out.push(hf(certificate, host, 1, 'high', 'fail', `Verify return code: ${info.verifyCode}（${info.verifyText}）`, '信頼できるCAの証明書と、中間証明書を含むチェーンを設定する'));
       if (out.length === before) out.push(hf(certificate, host, 'ok', 'info', 'pass', `notAfter: ${info.notAfter?.toISOString().slice(0, 10) ?? '不明'} / SAN: ${names.join(', ') || '不明'}`, ''));

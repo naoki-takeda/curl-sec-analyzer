@@ -1,6 +1,6 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext } from '../model';
-import { LOGOUT_FAILED_REC, header, hstsDirective, isStaticResource, mk, parseCsp, sensitiveUnlessStatic } from './util';
+import { LOGOUT_FAILED_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, sensitiveUnlessStatic, splitPolicies } from './util';
 import { clip, maskValue } from '../mask';
 import { baseLabel, firstStatus, logoutFailed, ownChain } from '../parser/target';
 import { htmlBody, mixedContent } from './html';
@@ -22,6 +22,8 @@ export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appl
     if (!v) return [mk(hsts, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec, { obsId: 'hsts-not-implemented', score: -20 })];
     const age = Number(v.match(/max-age\s*=\s*"?(\d+)/i)?.[1] ?? NaN);
     if (Number.isNaN(age)) return [mk(hsts, ctx, 3, 'high', 'fail', v, rec, { obsId: 'hsts-header-invalid', score: -20 })];
+    // max-age=0 は、ブラウザに HSTS の記録を消させる指定（RFC 6797 6.1.1）。ヘッダがないのと同じなので①にする（②の「短い」ではない）
+    if (age === 0) return [mk(hsts, ctx, 1, 'high', 'fail', `${v}（max-age=0 は HSTS を解除する指定）`, rec, { obsId: 'hsts-not-implemented', score: -20 })];
     // ②の基準は ASVS 5.0.0 3.4.1 に合わせて1年（31536000秒）。obsId は Observatory の区切り（6か月）のまま付ける
     const obs = age < 15768000 ? { obsId: 'hsts-implemented-max-age-less-than-six-months', score: -10 } : { obsId: 'hsts-implemented-max-age-at-least-six-months' };
     if (age < 31536000) return [mk(hsts, ctx, 2, 'medium', 'fail', v, rec, obs)];
@@ -34,12 +36,14 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
   basis: ['OWASP CSP CS', 'MDN HTTP Observatory'],
   run(ctx) {
     if (!ctx.final) return [mk(cspPresence, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const enforce = header(ctx, 'content-security-policy');
+    const rawEnforce = header(ctx, 'content-security-policy'); const enforce = cspPolicies(ctx);
     const ro = header(ctx, 'content-security-policy-report-only');
     const rec = "Content-Security-Policy: default-src 'self'; script-src 'nonce-…' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
-    if (!enforce.length && !ro.length) return [mk(cspPresence, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
-    if (!enforce.length) return [mk(cspPresence, ctx, 2, 'medium', 'fail', `Report-Onlyのみ: ${ro[0]}`, '確認できたら強制モードの Content-Security-Policy に切り替える')];
-    if (enforce.some(v => parseCsp(v).size === 0)) return [mk(cspPresence, ctx, 3, 'high', 'fail', enforce.join(' / '), rec)];
+    if (!rawEnforce.length && !ro.length) return [mk(cspPresence, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
+    if (!rawEnforce.length) return [mk(cspPresence, ctx, 2, 'medium', 'fail', `Report-Onlyのみ: ${ro[0]}`, '確認できたら強制モードの Content-Security-Policy に切り替える')];
+    // ③は、ヘッダ値のどのポリシーにもディレクティブがないとき。カンマのあとのかけら（report-uri の URL の中のカンマなど）だけが
+    // 読めなくても、前のポリシーは効いているので③にしない（構文の誤りは H-07④）
+    if (rawEnforce.some(v => !splitPolicies([v]).some(p => parseCsp(p).size > 0))) return [mk(cspPresence, ctx, 3, 'high', 'fail', rawEnforce.join(' / '), rec)];
     return [mk(cspPresence, ctx, 'ok', 'info', 'pass', enforce.join(' / '), '')];
   } };
 
@@ -47,25 +51,34 @@ export const clickjacking: Rule = { id: 'H-06', title: 'クリックジャッキ
   basis: ['MDN', 'OWASP Secure Headers'],
   run(ctx) {
     if (!ctx.final) return [mk(clickjacking, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const fa = header(ctx, 'content-security-policy').map(parseCsp).find(m => m.has('frame-ancestors'))?.get('frame-ancestors');
-    const xfo = header(ctx, 'x-frame-options')[0]?.trim();
+    // 複数のポリシーは、すべてを満たすものだけが許される（制限が重なる）。frame-ancestors を指定したポリシーのうち、
+    // 1つでも広くないものがあれば、埋め込みはそれで制限される（* のポリシーと 'none' のポリシーが両方あれば 'none'）
+    const fas = cspPolicies(ctx).map(parseCsp).filter(m => m.has('frame-ancestors')).map(m => m.get('frame-ancestors')!);
     // frame-ancestors は X-Frame-Options より優先されるので、広い指定（*、https: などのスキームだけ、*.example.com）は④にする
-    const broad = fa?.find(s => s === '*' || /^[a-z][\w+.-]*:$/i.test(s) || /^(?:[a-z][\w+.-]*:\/\/)?\*\./i.test(s));
-    if (fa && broad) return [mk(clickjacking, ctx, 4, 'medium', 'fail', `frame-ancestors ${fa.join(' ')}`, "frame-ancestors は 'none' か 'self'（埋め込みを許す相手は個別のオリジン）にする")];
-    if (fa) return [mk(clickjacking, ctx, 'ok', 'info', 'pass', `frame-ancestors ${fa.join(' ')}`, '')];
+    const isBroad = (fa: string[]) => fa.some(s => s === '*' || /^[a-z][\w+.-]*:$/i.test(s) || /^(?:[a-z][\w+.-]*:\/\/)?\*\./i.test(s));
+    const strict = fas.find(fa => !isBroad(fa));
+    if (fas.length && !strict) return [mk(clickjacking, ctx, 4, 'medium', 'fail', fas.map(fa => `frame-ancestors ${fa.join(' ')}`).join(' / '), "frame-ancestors は 'none' か 'self'（埋め込みを許す相手は個別のオリジン）にする")];
+    if (strict) return [mk(clickjacking, ctx, 'ok', 'info', 'pass', `frame-ancestors ${strict.join(' ')}`, '')];
     const rec = "Content-Security-Policy: frame-ancestors 'none'（旧ブラウザ向けに X-Frame-Options: DENY も併用）";
-    if (!xfo) return [mk(clickjacking, ctx, 1, 'medium', 'fail', '(frame-ancestors も X-Frame-Options もない)', rec)];
-    if (/^allow-from/i.test(xfo)) return [mk(clickjacking, ctx, 2, 'medium', 'fail', `X-Frame-Options: ${xfo}`, rec)];
-    return [mk(clickjacking, ctx, 3, 'info', 'fail', `X-Frame-Options: ${xfo}（frame-ancestors なし）`, rec)];
+    // X-Frame-Options は HTML Standard の手順で読む：すべての値をカンマで分けて小文字の集合にし、2つ以上で deny・sameorigin・allowall の
+    // どれかを含めば埋め込みを拒否する。1つなら deny・sameorigin だけが有効で、それ以外（ALLOWALL、綴りの誤りなど）はブラウザが無視する
+    const raw = header(ctx, 'x-frame-options').join(', ').trim();
+    const xfo = new Set(raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+    if (!xfo.size) return [mk(clickjacking, ctx, 1, 'medium', 'fail', '(frame-ancestors も X-Frame-Options もない)', rec)];
+    const one = [...xfo][0];
+    const blocks = xfo.size > 1 ? [...xfo].some(s => ['deny', 'sameorigin', 'allowall'].includes(s)) : one === 'deny' || one === 'sameorigin';
+    if (blocks) return [mk(clickjacking, ctx, 3, 'info', 'fail', `X-Frame-Options: ${raw}（frame-ancestors なし）`, rec)];
+    if (xfo.size === 1 && /^allow-from\b/.test(one)) return [mk(clickjacking, ctx, 2, 'medium', 'fail', `X-Frame-Options: ${raw}`, rec)];
+    return [mk(clickjacking, ctx, 1, 'medium', 'fail', `X-Frame-Options: ${raw}（不正な値。ブラウザは無視する）`, rec)];
   } };
 
 export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS'],
   run(ctx) {
     if (!ctx.final) return [mk(nosniff, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const v = header(ctx, 'x-content-type-options')[0];
-    if (v?.trim().toLowerCase() === 'nosniff') return [mk(nosniff, ctx, 'ok', 'info', 'pass', v, '')];
-    return [mk(nosniff, ctx, 1, 'medium', 'fail', v ?? '(ヘッダなし)', 'X-Content-Type-Options: nosniff')];
+    const v = header(ctx, 'x-content-type-options').join(', ');
+    if (isNosniff(ctx)) return [mk(nosniff, ctx, 'ok', 'info', 'pass', v, '')];
+    return [mk(nosniff, ctx, 1, 'medium', 'fail', v || '(ヘッダなし)', 'X-Content-Type-Options: nosniff')];
   } };
 
 export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesTo: 'any', scope: 'target',
@@ -94,7 +107,7 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
 
 // ---- 以下 MVP で追加（H-02、H-04、H-05、H-07、H-09〜H-11、H-13〜H-17） ----
 
-const enforcedPolicies = (ctx: RuleContext) => header(ctx, 'content-security-policy').map(parseCsp);
+const enforcedPolicies = (ctx: RuleContext) => cspPolicies(ctx).map(parseCsp);
 
 export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'any', scope: 'target',
   basis: ['hstspreload.org', 'MDN'],
@@ -123,7 +136,7 @@ function coveredByOther(i: CspIssue, others: Policy[]): boolean {
 }
 
 /** 強制モードの各ポリシーを csp_evaluator で評価する（ポリシーごとのディレクティブと指摘） */
-const policiesOf = (ctx: RuleContext): Policy[] => header(ctx, 'content-security-policy').map(v => ({ dirs: parseCsp(v), issues: evaluateCsp(v) }));
+const policiesOf = (ctx: RuleContext): Policy[] => cspPolicies(ctx).map(v => ({ dirs: parseCsp(v), issues: evaluateCsp(v) }));
 
 /** 指定した項目の指摘だけを返す（同じ条件・ディレクティブ・値は1件にまとめる） */
 function cspIssues(ctx: RuleContext, item: CspIssue['item']): CspIssue[] {
@@ -154,7 +167,7 @@ export const cspScript: Rule = { id: 'H-04', title: 'CSP：script-src', appliesT
     if (!enforcedPolicies(ctx).length) return [mk(cspScript, ctx, 'na', 'info', 'na', '強制モードのCSPがない（H-03で判定）', '')];
     const issues = cspIssues(ctx, 'H-04');
     if (!issues.length && unevaluated(ctx)) return [mk(cspScript, ctx, 'na', 'info', 'na', 'csp_evaluator で解析できないポリシーがある（H-07④）', '')];
-    if (!issues.length) return [mk(cspScript, ctx, 'ok', 'info', 'pass', enforcedPolicies(ctx).map(p => `script-src ${(p.get('script-src') ?? p.get('default-src') ?? []).join(' ')}`).join(' / '), '')];
+    if (!issues.length) return [mk(cspScript, ctx, 'ok', 'info', 'pass', enforcedPolicies(ctx).filter(p => p.has('script-src') || p.has('default-src')).map(p => `script-src ${(p.get('script-src') ?? p.get('default-src') ?? []).join(' ')}`).join(' / '), '')];
     return issues.map(i => mk(cspScript, ctx, i.condition, i.severity, 'fail', issueEvidence(i), CSP_REC[i.condition]));
   } };
 
@@ -184,7 +197,8 @@ export const cspDeprecated: Rule = { id: 'H-07', title: 'CSP：非推奨ディ�
     const old = [...new Set([...['block-all-mixed-content', 'referrer', 'plugin-types'].filter(d => ps.some(p => p.has(d))), ...ev.filter(i => i.condition === 1).map(i => i.directive)])];
     if (old.length) out.push(mk(cspDeprecated, ctx, 1, 'low', 'fail', old.join(', '), '非推奨のディレクティブを削除する'));
     if (ps.some(p => p.has('report-uri')) && !ps.some(p => p.has('report-to'))) out.push(mk(cspDeprecated, ctx, 2, 'info', 'fail', 'report-uri のみ', 'report-to（Reporting API）を併記する'));
-    const html = htmlBody(ctx);                                // ③は E-07 と同じ判定で混在コンテンツを見る
+    // ③は E-07 と同じ判定で混在コンテンツを見る。http のページには「混在」がなく、upgrade-insecure-requests も要らない（E-07 と同じく適用外）
+    const html = ctx.isHttps === false ? undefined : htmlBody(ctx);
     if (html && !ps.some(p => p.has('upgrade-insecure-requests'))) {
       const m = mixedContent(html);
       if (m.active.length + m.passive.length) out.push(mk(cspDeprecated, ctx, 3, 'low', 'fail', `混在コンテンツ${m.active.length + m.passive.length}件、upgrade-insecure-requests なし`, 'http:// の資源を直すまで upgrade-insecure-requests を付ける'));
@@ -232,7 +246,9 @@ export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CO
     if (ctx.responseKind === 'html' && !header(ctx, 'cross-origin-opener-policy').length)
       out.push(mk(crossOriginIsolation, ctx, 2, 'info', 'fail', 'Cross-Origin-Opener-Policy なし', 'Cross-Origin-Opener-Policy: same-origin'));
     if (out.length) return out;
-    if (sensitive === undefined && ctx.responseKind !== 'html') return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', '機密応答かどうか分からない', 'sensitive=1 を付ける')];
+    // 機密かどうか分からず CORP もなければ、①を判定していない。COOP（②）があっても合格にしない（カバレッジの水増しになる）
+    if (sensitive === undefined && !header(ctx, 'cross-origin-resource-policy').length)
+      return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（CORP なし${ctx.responseKind === 'html' ? '、COOP あり' : ''}）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
     return [mk(crossOriginIsolation, ctx, 'ok', 'info', 'pass', [...header(ctx, 'cross-origin-opener-policy'), ...header(ctx, 'cross-origin-resource-policy')].join(' / ') || '(該当なし)', '')];
   } };
 
@@ -282,8 +298,10 @@ export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン�
     if (!ctx.final) return [mk(productInfo, ctx, 'na', 'info', 'na', '応答がない', '')];
     const out = [];
     for (const h of PRODUCT_HEADERS) for (const v of header(ctx, h)) {
-      if (/\d+\.\d+/.test(v)) out.push(mk(productInfo, ctx, 1, 'low', 'fail', `${h}: ${v}`, 'バージョン番号を出さない（可能ならヘッダごと削除）'));
-      else if (h === 'server' || h === 'x-powered-by') out.push(mk(productInfo, ctx, 2, 'info', 'fail', `${h}: ${v}`, '製品名も出さないか、汎用的な値にする'));
+      // X-Generator は「Drupal 10 (https://www.drupal.org)」のように主な版だけを出す。Server・X-Powered-By は「AmazonS3」の
+      // ような製品名の数字があるので、「1.2」の形だけを版とみなす
+      if (h === 'x-generator' ? /\b\d+\b/.test(v) : /\d+\.\d+/.test(v)) out.push(mk(productInfo, ctx, 1, 'low', 'fail', `${h}: ${v}`, 'バージョン番号を出さない（可能ならヘッダごと削除）'));
+      else out.push(mk(productInfo, ctx, 2, 'info', 'fail', `${h}: ${v}`, '製品名も出さないか、汎用的な値にする'));
     }
     // 値はマスクする（トークンと、記録したリクエスト（Cookie を含む）を見られるプロファイラのURL）
     for (const h of ['x-debug-token', 'x-debug-token-link']) for (const v of header(ctx, h))

@@ -104,7 +104,7 @@ describe('マスク：パスのトークン・属性の > ・長い値・エラ�
     expect(maskText(`https://app.example/cb#id_token=${jwt}`)).not.toContain('SIGNATUREtail123');
   });
   it('E-01③：エラーページのタイトルの文言を出さない', () => {
-    const r = evaluate(t('t', 'https://a.example/x', 'HTTP/2 401\ncontent-type: text/html', '<title>Error 401 Invalid API key sk_live_51HtitleECHOkey</title>'));
+    const r = evaluate(t('t', 'https://a.example/x', 'HTTP/2 401\ncontent-type: text/html', '<title>Error 401 Invalid API key sk_live_51HtitleECHOkey</title>\n<h2>HTTP ERROR 401 Invalid API key sk_live_51HtitleECHOkey</h2>\n<hr><a href="https://eclipse.org/jetty">Powered by Jetty:// 9.4.53</a>'));   // Jetty の既定のエラーページ（第21回から、本文の HTTP ERROR・Powered by Jetty と合わせて見る）
     const fs = r.findings.filter(f => f.ruleId === 'E-01.3');
     expect(fs).toHaveLength(1);
     expect(exportsOf(r)).not.toContain('sk_live_51HtitleECHOkey');

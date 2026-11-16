@@ -2,7 +2,7 @@
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
 import { baseLabel, finalResponse, ownChain, responseKind } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { header, isLabelText, isPublicClientValue, mk } from './util';
+import { header, isLabelText, isNosniff, isPublicClientValue, mk } from './util';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
   basis: ['OWASP REST Security CS', 'OWASP Secure Headers'],
@@ -19,7 +19,7 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     const out = [];
     // kind=api を明示したターゲットでも、text/html で返していれば①（自動判定では text/html は API 応答にならないため、上の分岐で見る）
     if (/^\s*text\/html/i.test(ct)) out.push(mk(jsonHeaders, ctx, 1, 'medium', 'fail', `Content-Type: ${ct}（API応答）`, 'JSONは application/json で返す（text/html だとXSSの原因になる）'));
-    if (header(ctx, 'x-content-type-options')[0]?.trim().toLowerCase() !== 'nosniff') out.push(mk(jsonHeaders, ctx, 2, 'medium', 'fail', 'nosniff なし', 'X-Content-Type-Options: nosniff'));
+    if (!isNosniff(ctx)) out.push(mk(jsonHeaders, ctx, 2, 'medium', 'fail', 'nosniff なし', 'X-Content-Type-Options: nosniff'));
     if (!header(ctx, 'content-security-policy').length) out.push(mk(jsonHeaders, ctx, 3, 'info', 'fail', 'CSPなし', "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"));
     return out.length ? out : [mk(jsonHeaders, ctx, 'ok', 'info', 'pass', ct, '')];
   } };
@@ -163,7 +163,8 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   return out;
 }
 const SECRET_KEY = /(^|[._[\]])(password|passwd|password_?hash|pass_?hash|secret|client_?secret|api_?key|private_?key|salt|otp_?secret|mfa_?secret)$/i;
-const INTERNAL_KEY = /(^|[._[\]])(is_?admin|is_?super(user)?|is_?staff|role_?id|internal_\w+|_internal\w*|debug\w*|__\w+)$/i;
+// __ で始まるキーは内部属性とみなす。ただし GraphQL の __typename と Mongoose の __v（版の番号）は、ライブラリが必ず付けるもので内部情報ではない
+const INTERNAL_KEY = /(^|[._[\]])(is_?admin|is_?super(user)?|is_?staff|role_?id|internal_\w+|_internal\w*|debug\w*|__(?!(?:typename|v)$)\w+)$/i;
 export const excessiveData: Rule = { id: 'A-07', title: '過剰なデータ露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API3'],
   run(ctx) {
@@ -217,7 +218,8 @@ export const errorFormat: Rule = { id: 'A-10', title: 'エラー形式', applies
   runCross(x: CrossContext): Finding[] {
     // error-* ラベルの、ステータス400以上で HTML 以外の応答だけを比べる。
     // ブラウザ向けのHTMLのエラーページ（error-url など）は対象外（情報の露出は E-01 で判定）。unauth-* の 401 なども含めない
-    const errs = x.targets.filter(t => { const f = finalResponse(t); return t.label.startsWith('error-') && f && f.status >= 400 && responseKind(t, f) !== 'html'; });
+    // 付け直したラベル（error-api#2）は除く。横断の判定には最初のものだけを使う（parser/target.ts の uniqueLabels）
+    const errs = x.targets.filter(t => { const f = finalResponse(t); return t.label.startsWith('error-') && !/#\d+$/.test(t.label) && f && f.status >= 400 && responseKind(t, f) !== 'html'; });
     const base = { item: 'A-10', title: errorFormat.title, target: 'error-*', references: errorFormat.basis, score: 0 };
     if (errs.length < 2) return [{ ...base, ruleId: 'A-10.na', severity: 'info', status: 'na', evidence: '', recommendation: '必要なラベル: error-*（APIのエラー応答を2つ以上）' }];
     const types = new Map<string, string[]>();

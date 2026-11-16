@@ -13,13 +13,38 @@ const sameHostOrigin = (ctx: RuleContext): boolean => {
 const acaoOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-origin')?.[0]?.trim();
 const credOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-credentials')?.[0]?.trim().toLowerCase() === 'true';
 
-/** 送信したOriginが「対象ホストに似せた偽物」か（R-03 のテスト値：example.com.evil.net、evilexample.com など） */
+/**
+ * ホスト名の「サイト」（登録したドメイン）の目安。公開接尾辞の一覧は持たないので、最後の2つのラベル（example.com）とし、
+ * 国別の第2レベル（co.jp、com.au など）なら3つ（example.co.jp）にする。IP アドレスと1つのラベル（localhost）はそのまま
+ */
+export function siteOf(host: string): string {
+  const h = host.toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  if (/^[\d.]+$/.test(h) || h.includes(':')) return h;
+  const p = h.split('.');
+  if (p.length >= 3 && p.at(-1)!.length === 2 && /^(?:co|or|ne|ac|go|ed|lg|gr|ad|com|net|org|gov|edu)$/.test(p.at(-2)!)) return p.slice(-3).join('.');
+  return p.slice(-2).join('.');
+}
+const originHost = (origin?: string) => { try { return origin ? new URL(origin).hostname.toLowerCase() : undefined; } catch { return undefined; } };
+/**
+ * 送信した Origin が、対象の URL 自身のオリジン（スキーム・ホスト・ポートが同じ）か。自分のオリジンへの ACAO は正しい動作で、
+ * 許可外の Origin を反射するかは分からない。サブドメインや http のオリジン（http://a.example）は含めない：
+ * http は経路上の誰でも偽れ、サブドメインは共用のホスティング（*.herokuapp.com、*.github.io）では他人のものでありうる
+ */
+export function isOwnOrigin(ctx: RuleContext, origin?: string): boolean {
+  try { return !!origin && !!ctx.target.url && new URL(origin).origin === new URL(ctx.target.url).origin; } catch { return false; }
+}
+/**
+ * 送信したOriginが「対象ホストに似せた偽物」か（R-03 のテスト値：example.com.evil.net、evilexample.com など）。
+ * 対象がサブドメイン（api.example.com）でも、そのサイト（example.com）に似せたもの（example.com.evil.net）を R-03 で判定する。
+ * 同じサイトのサブドメイン（app.example.com）は、似せたものではない（R-01 で判定する）
+ */
 export function isLookalike(ctx: RuleContext, origin?: string): boolean {
-  const host = hostOf(ctx.target)?.replace(/:\d+$/, '').replace(/^www\./, '');
-  if (!host || !origin) return false;
-  let h: string;
-  try { h = new URL(origin).hostname; } catch { return false; }
-  return h.includes(host) && h !== host && !h.endsWith(`.${host}`);   // 例：example.com.evil.net、evilexample.com
+  const host = hostOf(ctx.target)?.replace(/:\d+$/, '').toLowerCase();
+  const h = originHost(origin);
+  if (!host || !h) return false;
+  const site = siteOf(host);
+  if (h === site || h.endsWith(`.${site}`)) return false;
+  return [...new Set([host.replace(/^www\./, ''), siteOf(host)])].some(c => h.includes(c));   // 例：example.com.evil.net、evilexample.com
 }
 
 export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo: 'any', scope: 'target',
@@ -28,6 +53,9 @@ export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo:
     if (!ctx.final) return [mk(corsReflect, ctx, 'na', 'info', 'na', '応答がない', '')];
     const acao = acaoOf(ctx);
     if (isLookalike(ctx, ctx.target.sentOrigin)) return [];   // 似せたOriginのテストは R-03 で判定する
+    // 対象の URL 自身のオリジンを送った応答では、許可外の Origin を反射するかは分からない（反射しても正しい動作）
+    if (isOwnOrigin(ctx, ctx.target.sentOrigin))
+      return [mk(corsReflect, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin}（自サイトの Origin。許可外の Origin では試していない）`, 'C6 のとおり許可外の Origin（https://evil.example）で採取し直す')];
     const ok = () => [mk(corsReflect, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     if (!acao || acao === '*' || acao === 'null') return ok();   // * は R-04、null は R-02 で判定する
     const sent = ctx.target.sentOrigin ?? (TEST_ORIGINS.includes(acao) ? acao : undefined);
@@ -83,7 +111,10 @@ export const corsPreflight: Rule = { id: 'R-05', title: 'プリフライト応�
     const out = [];
     const acao = acaoOf(ctx); const sent = ctx.target.sentOrigin;
     const foreign = acao === '*' || (!!sent && acao === sent && (TEST_ORIGINS.includes(sent) || isLookalike(ctx, sent)));
-    if (methods && foreign && /\b(PUT|DELETE|PATCH)\b/i.test(methods))
+    // Allow-Methods: * は、資格情報（Cookie）を伴わないリクエストではすべてのメソッドを許す（Fetch Standard）。ACAC: true のときは
+    // 「*」という名前のメソッドの意味になるので、状態を変えるメソッドの許可にはしない
+    const anyMethod = !!methods && /(?:^|,)\s*\*\s*(?:,|$)/.test(methods) && !credOf(ctx);
+    if (methods && foreign && (/\b(PUT|DELETE|PATCH)\b/i.test(methods) || anyMethod))
       out.push(mk(corsPreflight, ctx, 1, 'medium', 'fail', `ACAO: ${acao} / Allow-Methods: ${methods}`, '許可外のOriginに状態を変えるメソッドを許可しない'));
     if (maxAge && Number(maxAge) > 7200) out.push(mk(corsPreflight, ctx, 2, 'info', 'fail', `Access-Control-Max-Age: ${maxAge}`, 'Chromeは7200秒で打ち切る。必要な長さにする'));
     return out.length ? out : [mk(corsPreflight, ctx, 'ok', 'info', 'pass', `Allow-Methods: ${methods ?? '-'} / Max-Age: ${maxAge ?? '-'}`, '')];
@@ -95,7 +126,8 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
     const acao = acaoOf(ctx);
     if (!ctx.final || !acao || acao === '*') return [];       // Origin によって ACAO を変える応答だけ
     const vary = (ctx.final.headers.get('vary') ?? []).join(',').toLowerCase();
-    return /\borigin\b|\*/.test(vary) ? [mk(corsVary, ctx, 'ok', 'info', 'pass', `Vary: ${vary}`, '')]
+    // 名前の一部（X-Origin-Id）ではなく、カンマで区切った1つの値として Origin か * があるか
+    return vary.split(',').some(s => ['origin', '*'].includes(s.trim())) ? [mk(corsVary, ctx, 'ok', 'info', 'pass', `Vary: ${vary}`, '')]
       : [mk(corsVary, ctx, 1, 'low', 'fail', `ACAO: ${acao} / Vary: ${vary || '(なし)'}`, 'Origin によって ACAO を変えるなら Vary: Origin を付ける（キャッシュ汚染の防止）')];
   } };
 

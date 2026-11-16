@@ -9,6 +9,24 @@ export function mk(rule: Rule, ctx: RuleContext, cond: number | 'ok' | 'na', sev
 
 export const header = (ctx: RuleContext, name: string): string[] => ctx.final?.headers.get(name) ?? [];
 
+/**
+ * CSP のヘッダ値を、ポリシーごとに分ける。1つのヘッダ値の中のカンマは、ポリシーの区切り（CSP3 の serialized-policy-list）。
+ * プロキシが2つのヘッダを「a, b」にまとめた場合も同じ。分けないと、カンマのあとのディレクティブ（, frame-ancestors 'none'）を
+ * 前のディレクティブの値として読み、H-06① などを誤検知する
+ */
+export const splitPolicies = (values: string[]): string[] => values.flatMap(v => v.split(',')).map(s => s.trim()).filter(Boolean);
+/**
+ * 強制モードの CSP（ポリシーごと）。ディレクティブが1つもないかけら（report-uri の URL の中のカンマのあとの「2」、
+ * 「img-src 'self', data:」の「data:」）は、ブラウザも何も制限しないポリシーとして扱うので除く（H-03③ は rules/headers.ts でヘッダ値ごとに見る）
+ */
+export const cspPolicies = (ctx: RuleContext): string[] => splitPolicies(header(ctx, 'content-security-policy')).filter(p => parseCsp(p).size > 0);
+/**
+ * X-Content-Type-Options が nosniff か。Fetch Standard の「determine nosniff」のとおり、すべての値をカンマで分けた最初の値で見る
+ * （プロキシが付け足した「nosniff, nosniff」も nosniff。H-08 と A-09② で同じ読み方にする）
+ */
+export const isNosniff = (ctx: RuleContext): boolean =>
+  header(ctx, 'x-content-type-options').join(',').split(',')[0].trim().toLowerCase() === 'nosniff';
+
 // 静的リソース（JS・CSS・画像・フォント）と、誰にでも同じ内容を返す公開ファイル（robots.txt、sitemap.xml、/.well-known/ の下など）
 // 拡張子はパスの末尾だけで見る（クエリの ?avatar=me.png・?format=x.css で、利用者ごとの API を静的リソースとし、H-12①（高）を見逃さない）
 const STATIC_RE = /\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|map)$/i;

@@ -81,27 +81,40 @@ export const cookieSameSite: Rule = { id: 'C-03', title: 'Cookie の SameSite �
   } };
 
 // ---- 以下 MVP で追加（C-04〜C-10、C-12②、C-13） ----
+// C-04 は、Cookie を発行したホップのホストと比べるため、perCookie を使わない
 
 export const cookieDomain: Rule = { id: 'C-04', title: 'Domain・Path', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS', 'RFC 6265'],
   run(ctx) {
-    const host = hostOf(ctx.target)?.replace(/:\d+$/, '');
-    return perCookie(cookieDomain, ctx, c => {
+    if (ctx.isHttps === false) return [];                // HTTP応答のCookieは C-10 で扱う（perCookie と同じ）
+    // Cookie ごとに、それを発行したホップのホストと比べる。-L で a.example から www.a.example に転送し、www が
+    // Domain=www.a.example で発行した Cookie を、ターゲットの URL のホスト（a.example）と比べて①にしないため
+    const targetHost = hostOf(ctx.target)?.replace(/:\d+$/, '');
+    const hopHost = (u?: string) => { try { return u ? new URL(u).hostname : undefined; } catch { return undefined; } };
+    const cs = ctx.target.responses.flatMap(r => { const host = hopHost(r.url) ?? targetHost;
+      return (r.headers.get('set-cookie') ?? []).map(raw => ({ c: parseSetCookie(raw), host })); }).filter(x => !isDeletion(x.c, ctx.now));
+    if (!cs.length) return [];
+    const fails = cs.flatMap(({ c, host }) => {
       const d = c.attrs.get('domain');
-      if (typeof d !== 'string' || !host || isInfraCookie(c.name)) return undefined;   // CDN の Cookie（__cf_bm など）は CDN が Domain を決める
+      if (typeof d !== 'string' || !host || isInfraCookie(c.name)) return [];   // CDN の Cookie（__cf_bm など）は CDN が Domain を決める
       const dom = d.replace(/^\./, '').toLowerCase();
-      return dom !== host.toLowerCase()
-        ? mk(cookieDomain, ctx, 1, 'medium', 'fail', `${cookieEvidence(c)}（ホスト ${host}）`, 'Domain 属性を付けない（発行したホストだけに送られる）')
-        : undefined;
+      if (!dom) return [];                                  // 空の Domain はブラウザが無視する（ホストだけに送られる）
+      if (dom !== host.toLowerCase()) return [mk(cookieDomain, ctx, 1, 'medium', 'fail', `${cookieEvidence(c)}（ホスト ${host}）`, 'Domain 属性を付けない（発行したホストだけに送られる）')];
+      // ホストと同じ値でも、Domain を付けるとサブドメインにも送られる（付けなければ発行したホストだけ）
+      return [mk(cookieDomain, ctx, 3, 'low', 'fail', `${cookieEvidence(c)}（ホスト ${host}。サブドメインにも送られる）`, 'Domain 属性を付けない（ホストと同じ値でもサブドメインに送られる）')];
     });
+    return fails.length ? fails : [mk(cookieDomain, ctx, 'ok', 'info', 'pass', cs.map(x => cookieName(x.c)).join(', '), '')];
   } };
 
 export const cookieLifetime: Rule = { id: 'C-05', title: 'Expires・Max-Age', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS'],
   run(ctx) {
     return perCookie(cookieLifetime, ctx, c => {
+      // 空や数字でない Max-Age はブラウザが無視し、Expires が効く（RFC 6265 5.2.2。parser/setCookie.ts の isDeletion と同じ）
       const ma = c.attrs.get('max-age'), ex = c.attrs.get('expires');
-      const sec = typeof ma === 'string' ? Number(ma) : typeof ex === 'string' ? (Date.parse(ex) - ctx.now) / 1000 : 0;
+      const validMa = typeof ma === 'string' && /^-?\d+$/.test(ma.trim());
+      const exSec = typeof ex === 'string' ? (Date.parse(ex) - ctx.now) / 1000 : NaN;
+      const sec = validMa ? Number(ma) : Number.isNaN(exSec) ? 0 : exSec;
       const limit = sessionConfig.maxAgeHours * 3600;
       return sec > limit
         ? mk(cookieLifetime, ctx, 1, 'medium', 'fail', `${cookieEvidence(c)}（期限 約${Math.round(sec / 3600)}時間、基準 ${sessionConfig.maxAgeHours}時間）`, 'セッションIDに長い期限を付けない（基準は組織プロファイルの sessionMaxAgeHours で変えられる）')
@@ -114,11 +127,12 @@ export const cookiePrefix: Rule = { id: 'C-06', title: '__Host-・__Secure-プ�
   run(ctx) {
     return perCookie(cookiePrefix, ctx, c => {
       const ev = cookieEvidence(c);
-      if (c.name.startsWith('__Host-')) {
+      // プレフィックスは大文字小文字を区別しない（RFC 6265bis。今の Chrome・Firefox は __host-sid にも __Host- の条件を求め、満たさなければ拒否する）
+      if (/^__host-/i.test(c.name)) {
         const ok = c.attrs.has('secure') && c.attrs.get('path') === '/' && !c.attrs.has('domain');
         return ok ? undefined : mk(cookiePrefix, ctx, 2, 'low', 'fail', ev, '__Host- には Secure・Path=/ が必要で、Domain は付けられない（ブラウザが拒否する）');
       }
-      if (c.name.startsWith('__Secure-')) return c.attrs.has('secure') ? undefined : mk(cookiePrefix, ctx, 2, 'low', 'fail', ev, '__Secure- には Secure が必要（ブラウザが拒否する）');
+      if (/^__secure-/i.test(c.name)) return c.attrs.has('secure') ? undefined : mk(cookiePrefix, ctx, 2, 'low', 'fail', ev, '__Secure- には Secure が必要（ブラウザが拒否する）');
       return looksLikeSession(c, ctx.now) ? mk(cookiePrefix, ctx, 1, 'info', 'fail', ev, 'セッションCookieには __Host- プレフィックスを付ける') : undefined;
     });
   } };
@@ -128,12 +142,23 @@ export function estimateBits(v: string): number {
   const size = /^[0-9]+$/.test(v) ? 10 : /^[0-9a-f]+$/i.test(v) ? 16 : /^[0-9A-Za-z]+$/.test(v) ? 62 : 64;
   return Math.floor(v.length * Math.log2(size));
 }
+/**
+ * 時刻から作る UUID の版と、乱数の部分のビット数。v1・v2・v6 は時刻とノード（MAC アドレス）から作り、乱数はクロックシーケンスの14bitだけ。
+ * v7 は先頭48bitが時刻で、乱数は74bit。文字種から推定すると、どれも約216bitになり、推測できる値を合格にしてしまう。
+ * v4（乱数122bit）は今までどおり文字種で推定する（ASVS の128bitとの差をどう扱うかは別に決める）
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-([0-9a-f])[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export function timeBasedUuid(v: string): { version: number; bits: number } | undefined {
+  const ver = Number.parseInt(v.match(UUID)?.[1] ?? '', 16);
+  return ver === 1 || ver === 2 || ver === 6 ? { version: ver, bits: 14 } : ver === 7 ? { version: 7, bits: 74 } : undefined;
+}
 export const sessionIdStrength: Rule = { id: 'C-07', title: 'セッションIDの長さ・推測可能性', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS'],
   run(ctx) {
     return perCookie(sessionIdStrength, ctx, c => {
-      const bits = estimateBits(c.value);
-      return bits < 128 ? mk(sessionIdStrength, ctx, 1, 'high', 'fail', `${cookieEvidence(c)}（推定 約${bits}bit）`, '128bit以上のエントロピーを持つ乱数をセッションIDにする（ASVS 5.0.0 7.2.3）') : undefined;
+      const uuid = timeBasedUuid(c.value);
+      const bits = uuid?.bits ?? estimateBits(c.value);
+      return bits < 128 ? mk(sessionIdStrength, ctx, 1, 'high', 'fail', `${cookieEvidence(c)}（推定 約${bits}bit${uuid ? `。時刻から作る UUID v${uuid.version}` : ''}）`, '128bit以上のエントロピーを持つ乱数をセッションIDにする（ASVS 5.0.0 7.2.3）') : undefined;
     }, c => looksLikeSession(c, ctx.now));
   } };
 
