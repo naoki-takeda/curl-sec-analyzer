@@ -1,7 +1,6 @@
 // engine/diff.ts：前回の結果（JSONエクスポート）との差分（v0.4）
 import type { Finding, Profile, Severity } from '../model';
 import { parseProfile } from './profile';
-import { maskKey } from '../mask';
 
 export type DiffKind = 'new' | 'resolved' | 'continuing' | 'severity-changed' | 'not-rechecked' | 'suppressed';
 export interface DiffRow { kind: DiffKind; ruleId: string; item: string; condition?: number; title: string; target: string; severity: Severity; before?: Severity; }
@@ -49,16 +48,6 @@ const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
  * - 今回 fail：前回なしなら「新規」。前回 suppressed（例外の期限切れなど）は既知の指摘なので「継続」か「重要度の変化」
  * - 前回の指摘が今回ない場合、同じターゲットで同じ項目を判定していれば「解消」、判定していなければ「再診断していない」とする
  */
-/**
- * 以前の版の形式のキー。今のキーは maskKey の出力なので、キーの URL の部分にもう一度 maskKey をかけても変わらない。変わるものは以前の形式
- * （v0.4.26〜v0.4.28：伏せた値の「…」やクエリの値、v0.4.29：パス引数の値や並べ替えていない名前、v0.4.30：残す形が違うパスの部分）。
- * 形式ごとに見分けると、パスの部分の伏せ方が変わったキーを見逃し、黙って突き合わなくなった。読み込んだときに件数を知らせる
- */
-export function legacyHarKey(k?: string): boolean {
-  const m = k?.match(/^(?:HAR \S+|\S+) ((?:https?:\/\/|\/)\S*)/);
-  return !!m && maskKey(m[1]) !== m[1];
-}
-
 export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   const prev = new Map(before.filter(isOpen).map(f => [key(f), f]));
   const now = new Map(after.filter(isOpen).map(f => [key(f), f]));

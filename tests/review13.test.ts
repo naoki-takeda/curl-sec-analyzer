@@ -1,10 +1,12 @@
 // 13回目のレビュー（リポジトリ全体、独立した3人のレビュアー。直前の修正の前後の比較、回帰テストのコミットの確認を含む）で見つかった不具合の再現テスト
 import { describe, expect, it } from 'vitest';
-import { maskKey, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { harTargets, importHar } from '../src/parser/har';
 import { runAll } from '../src/engine/run';
-import { diff, legacyHarKey } from '../src/engine/diff';
+import { diff } from '../src/engine/diff';
+import { legacyHarKey } from '../src/engine/targetKey';
 import { coverage } from '../src/engine/coverage';
 import { IMPLEMENTED } from '../src/rules/ruleset';
 import { toJson } from '../src/export/json';
@@ -25,15 +27,15 @@ const har = (...entries: unknown[]) => {
 
 describe('1・9 突き合わせのキーに秘密を入れない', () => {
   it('パス引数の値・%2B を含むトークン・記号の付いたトークン・JWT の名前を * にし、パラメータの名前を並べ替える', () => {
-    expect(maskKey('https://www.example.com/app/index.jsp;jsessionid=CANARY0SESSION1A2B3C4D5E6F7A8B9')).toBe('https://www.example.com/app/index.jsp;jsessionid');
+    expect(urlKey('https://www.example.com/app/index.jsp;jsessionid=CANARY0SESSION1A2B3C4D5E6F7A8B9')).toBe('https://www.example.com/app/index.jsp;jsessionid');
     for (const u of ['https://a.example/reset/Zx8Kq2Lm9Np4Rt7W%2B%2Fabc%3D%3D', 'https://a.example/a/Zq8xLr2Nw7Kp4Ty9Bv1H,v2', 'https://a.example/auth?eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln'])
-      expect(maskKey(u), u).not.toMatch(/Zx8K|Zq8x|eyJ/);
-    expect(maskKey('https://a.example/x?token=x&page=1')).toBe(maskKey('https://a.example/x?page=1&token=y'));
+      expect(urlKey(u), u).not.toMatch(/Zx8K|Zq8x|eyJ/);
+    expect(urlKey('https://a.example/x?token=x&page=1')).toBe(urlKey('https://a.example/x?page=1&token=y'));
   });
   it('普通の名前は残し、別のファイル・別のページは別のキーにする', () => {
-    expect(maskKey('https://a.example/news/2026-annual-report-v2/index.html')).toBe('https://a.example/news/2026-annual-report-v2/index.html');
-    expect(maskKey('https://a.example/assets/AdminDashboard-Dk3x9Lq2.js')).not.toBe(maskKey('https://a.example/assets/UserProfile-CkL3x9aB.js'));
-    expect(maskKey('https://a.example/x?page=1')).not.toBe(maskKey('https://a.example/x?page=2'));
+    expect(urlKey('https://a.example/news/2026-annual-report-v2/index.html')).toBe('https://a.example/news/2026-annual-report-v2/index.html');
+    expect(urlKey('https://a.example/assets/AdminDashboard-Dk3x9Lq2.js')).not.toBe(urlKey('https://a.example/assets/UserProfile-CkL3x9aB.js'));
+    expect(urlKey('https://a.example/x?page=1')).not.toBe(urlKey('https://a.example/x?page=2'));
   });
   it('HAR の JSON のエクスポートにセッションIDを出さない', () => {
     const r = har(entry('https://www.example.com/shop/cart.do;jsessionid=A1b2C3d4CANARYxyz0123456789', 200, [{ name: 'content-type', value: 'text/html' }]));
@@ -102,7 +104,7 @@ describe('8 以前の形式のキー', () => {
     expect(legacyHarKey('HAR GET https://a.example/app;jsessionid=ABC')).toBe(true);
     expect(legacyHarKey('HAR GET https://a.example/x?token&page')).toBe(true);
     expect(legacyHarKey('HAR GET https://a.example/cb?code=…&state=s')).toBe(true);
-    expect(legacyHarKey(`HAR GET ${maskKey('https://a.example/x?token=1&page=2')}`)).toBe(false);
+    expect(legacyHarKey(`HAR GET ${urlKey('https://a.example/x?token=1&page=2')}`)).toBe(false);
   });
 });
 

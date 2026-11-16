@@ -2,7 +2,8 @@
 // ①ラベル対応表で項目を絞る → ②ターゲット単位 → ③ホスト単位 → ④横断（各スコープ内は dependsOn の順に並べてある）
 // → ⑤条件単位の絞り込み（ターゲット単位の結果）→ ⑥API応答での重要度の引き下げ → ⑦例外の適用
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
-import { maskKey, maskText } from '../mask';
+import { maskText } from '../mask';
+import { targetKeys } from './targetKey';
 import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isSensitive, ownChain, responseKind } from '../parser/target';
 import { looksLikeSession, parseSetCookie, sentAuthOf } from '../parser/setCookie';
 import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../rules/ruleset';
@@ -114,33 +115,10 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   const maps: HostMaps = { hsts: hostHstsMap(targets), sameSite: hostSameSiteMap(targets) };
   // ターゲットごとの文脈・許可・URL・キーは一度だけ作る（ルールごとに作り直すと、ルール数 × ターゲット数の時間がかかる）。
   // 文脈の findings は同じ配列を指すので、依存先のルールの結果も見える
-  // 同じラベルが2つ以上あるラベル（付け直した top#2 があるもの）。付け直しの番号は入力の順番で決まるので、突き合わせには使わない
-  const duplicated = new Set(targets.filter(t => /#\d+$/.test(t.label)).map(t => baseLabel(t.label)));
-  const per = targets.map(t => {
-    const url = t.url ? maskText(t.url) : undefined;
-    // 差分・例外の突き合わせ：HAR のラベル（har-4 など）は記録し直すと番号が変わるため、メソッドとURLで突き合わせる。
-    // URL は、マスクと切り離して URL の形だけで作る（maskKey。パラメータは名前だけ、パスのトークンは *）。マスクの一覧を変えてもキーは変わらない。
-    // curl でも、同じラベルが複数あれば「元のラベル＋URL」にする（貼り付けの順番を変えると top と top#2 が入れ替わり、差分と例外がずれるため）
-    const targetKey = t.meta.source === 'har' ? `HAR ${t.meta.method ?? 'GET'} ${t.url ? maskKey(t.url) : t.label}`
-      : duplicated.has(baseLabel(t.label)) && t.url ? `${baseLabel(t.label)} ${maskKey(t.url)}` : t.label;
-    return { t, url, targetKey, host: hostOf(t), allow: allowedItems(t.label), ctx: contextOf(t, findings, maps, opt.profile) };
-  });
-  // キーが重なるターゲットには、2つ目から「 #2」を付ける（重なったままだと、差分で片方の指摘が消え、例外が両方に効く）：
-  // - curl の同じラベルで同じ URL（Cookie の有無を変えて2回採取したなど）
-  // - HAR で、URL は違うがキーが同じになるもの（値を持たないパラメータの値だけが違う ?q=a と ?q=b）
-  // HAR で URL まで同じもの（ポーリングで同じ URL を何度も取得した）には付けない。同じページなので、例外はすべてに効き、記録し直して回数が
-  // 変わっても差分がずれない。番号は貼り付け・記録の順番で決まるので、付けるのは見分けられないときだけにする
-  const seenKeys = new Map<string, number>(); const seenUrls = new Map<string, Set<string>>();
-  for (const p of per) {
-    if (p.targetKey === p.t.label) continue;
-    if (p.t.meta.source === 'har') {
-      const urls = seenUrls.get(p.targetKey) ?? new Set<string>(); seenUrls.set(p.targetKey, urls);
-      if (urls.has(p.t.url ?? '')) continue;
-      urls.add(p.t.url ?? '');
-    }
-    const n = (seenKeys.get(p.targetKey) ?? 0) + 1; seenKeys.set(p.targetKey, n);
-    if (n > 1) p.targetKey = `${p.targetKey} #${n}`;
-  }
+  // 差分・例外の突き合わせのキーは、マスクと切り離して engine/targetKey.ts で作る
+  const keys = targetKeys(targets);
+  const per = targets.map((t, i) => ({ t, url: t.url ? maskText(t.url) : undefined, targetKey: keys[i], host: hostOf(t), allow: allowedItems(t.label),
+                                       ctx: contextOf(t, findings, maps, opt.profile) }));
   for (const rule of rules) {                                // ルールごとに全ターゲット（依存先の結果が先にそろう）
     for (const { t, url, targetKey, host, allow, ctx } of per) {
       if (!allow.allowsItem(rule.id)) continue;               // ①

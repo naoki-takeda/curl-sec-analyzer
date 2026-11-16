@@ -1,9 +1,10 @@
 // 15回目のレビュー（リポジトリ全体、独立した3人のレビュアー。直前の修正の前後の比較を含む）で見つかった不具合の再現テスト。
 // 入力の多くは tests/golden/cases/11-review15.txt にも入れてある（結果の全体をゴールデンテストで比べる）
 import { describe, expect, it } from 'vitest';
-import { maskCommand, maskKey, maskText } from '../src/mask';
+import { maskCommand, maskText } from '../src/mask';
+import { urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
-import { legacyHarKey } from '../src/engine/diff';
+import { legacyHarKey } from '../src/engine/targetKey';
 import { coverage } from '../src/engine/coverage';
 import { IMPLEMENTED } from '../src/rules/ruleset';
 import { evaluate } from './helpers';
@@ -68,10 +69,10 @@ describe('5・12 C-12①', () => {
 });
 
 describe('6・7 キーとコマンドのマスク', () => {
-  it('maskKey は冪等で、この版のキーを以前の形式と知らせない', () => {
+  it('urlKey は冪等で、この版のキーを以前の形式と知らせない', () => {
     for (const u of ['https://a.example/(S(lit3py55t21z5v55vlm25s55))/default.aspx', 'https://a.example/x?=x&q=1', 'https://a.example/reset/t2ybctp03i2b8ehtsq04ttsmgdmq4qdl?page=2']) {
-      const k = maskKey(u);
-      expect(maskKey(k), u).toBe(k);
+      const k = urlKey(u);
+      expect(urlKey(k), u).toBe(k);
       expect(legacyHarKey(`HAR GET ${k}`), u).toBe(false);
     }
   });

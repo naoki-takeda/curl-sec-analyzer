@@ -2,7 +2,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { Rule } from '../src/model';
-import { maskKey, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { assignHopUrls, isHttps } from '../src/parser/target';
 import { harTargets, importHar } from '../src/parser/har';
@@ -62,12 +63,12 @@ describe('3 退行：URL 欄で補った URL', () => {
 
 describe('4 突き合わせのキー', () => {
   it('伏せた値は「…」だけにし、記録し直しても変わらない', () => {
-    expect(maskKey('https://a.example/cb?code=Splx0123abcdefgh&state=xyz')).toBe(maskKey('https://a.example/cb?code=Qx9v9876zyxwvuts1&state=xyz'));
-    expect(maskKey('https://a.example/reset/AbCdEfGh1234567890XyZ')).toBe(maskKey('https://a.example/reset/ZyXwVuTs0987654321AbC'));
+    expect(urlKey('https://a.example/cb?code=Splx0123abcdefgh&state=xyz')).toBe(urlKey('https://a.example/cb?code=Qx9v9876zyxwvuts1&state=xyz'));
+    expect(urlKey('https://a.example/reset/AbCdEfGh1234567890XyZ')).toBe(urlKey('https://a.example/reset/ZyXwVuTs0987654321AbC'));
   });
   it('ダイジェスト付きのファイル名は、名前の語を残して区別する', () => {
     const d = 'a1'.repeat(32);
-    expect(maskKey(`/assets/application-${d}.js`)).not.toBe(maskKey(`/assets/vendor-${d}.js`));
+    expect(urlKey(`/assets/application-${d}.js`)).not.toBe(urlKey(`/assets/vendor-${d}.js`));
     const shown = maskText(`/assets/application-${d}.js`);
     expect(shown).toBe('/assets/application-…(64 chars).js');
     expect(maskText(shown)).toBe(shown);

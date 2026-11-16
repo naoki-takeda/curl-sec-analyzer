@@ -1,11 +1,12 @@
 // 12回目のレビュー（リポジトリ全体、独立した3人のレビュアー。直前のコミットの前後を比べたもの、実物の curl 8.22・OpenSSL 3.5 の出力を含む）で見つかった不具合の再現テスト
 import { describe, expect, it } from 'vitest';
-import { maskKey, maskText } from '../src/mask';
+import { maskText } from '../src/mask';
+import { urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { harTargets, importHar } from '../src/parser/har';
 import { runAll } from '../src/engine/run';
 import { coverage } from '../src/engine/coverage';
-import { legacyHarKey } from '../src/engine/diff';
+import { legacyHarKey } from '../src/engine/targetKey';
 import { IMPLEMENTED } from '../src/rules/ruleset';
 import { toCsv } from '../src/export/csv';
 import { toJson } from '../src/export/json';
@@ -34,10 +35,10 @@ const har = (...entries: unknown[]) => {
 
 describe('1 突き合わせのキーをマスクから切り離す', () => {
   it('キーはスキーム・ホスト・パス（トークンは *）とパラメータの名前だけ。値もマスクの一覧も入らない', () => {
-    expect(maskKey('https://a.example/reset?hash=9f86d081884c7d65&pin=4821')).toBe('https://a.example/reset?hash&pin');
-    expect(maskKey('https://a.example/list?postal_code=1000001&state=af0ifjsldkj7Xyz#frag')).toBe('https://a.example/list?postal_code&state');
-    expect(maskKey('https://user:pw@a.example/reset/AbCdEfGh1234567890XyZ/x?code=1')).toBe('https://a.example/reset/*/x?code');
-    expect(maskKey('https://a.example/(S(lit3py55t21z5v55vlm25s55))/default.aspx')).toBe('https://a.example/(*)/default.aspx');
+    expect(urlKey('https://a.example/reset?hash=9f86d081884c7d65&pin=4821')).toBe('https://a.example/reset?hash&pin');
+    expect(urlKey('https://a.example/list?postal_code=1000001&state=af0ifjsldkj7Xyz#frag')).toBe('https://a.example/list?postal_code&state');
+    expect(urlKey('https://user:pw@a.example/reset/AbCdEfGh1234567890XyZ/x?code=1')).toBe('https://a.example/reset/*/x?code');
+    expect(urlKey('https://a.example/(S(lit3py55t21z5v55vlm25s55))/default.aspx')).toBe('https://a.example/(*)/default.aspx');
   });
   it('HAR の targetKey は新しい形で、以前の形（値を伏せた「…」や「=」を含む）は見分けられる', () => {
     const r = har(entry('https://a.example/cb?code=Splx0123abcdefghij&state=s', 200, [{ name: 'content-type', value: 'text/html' }]));
@@ -105,7 +106,7 @@ describe('6 マスクは冪等', () => {
 describe('7 ビルドしたファイルの名前', () => {
   it('Vite・webpack のハッシュ付きの名前は伏せず、別のファイルは別のキーになる。トークンは伏せる', () => {
     for (const n of ['/assets/AdminDashboard-Dk3x9Lq2.js', '/assets/vendor-react-BxYz12Ab.js', '/static/js/main-3f8a9c2e1b4d5f6a7b8c.js']) expect(maskText(n)).toBe(n);
-    expect(maskKey('https://a.example/assets/AdminDashboard-Dk3x9Lq2.js')).not.toBe(maskKey('https://a.example/assets/UserProfile-CkL3x9aB.js'));
+    expect(urlKey('https://a.example/assets/AdminDashboard-Dk3x9Lq2.js')).not.toBe(urlKey('https://a.example/assets/UserProfile-CkL3x9aB.js'));
     expect(maskText('/reset/AbCdEfGh1234567890XyZ')).not.toContain('AbCdEfGh1234567890XyZ');
   });
 });

@@ -1,11 +1,12 @@
 // 14回目のレビュー（リポジトリ全体、独立した3人のレビュアー。直前の修正の前後の比較を含む）で見つかった不具合の再現テスト。
 // 入力の多くは tests/golden/cases/09-review14.txt・10-har-keys.har にも入れてある（結果の全体をゴールデンテストで比べる）
 import { describe, expect, it } from 'vitest';
-import { maskCommand, maskKey, maskText } from '../src/mask';
+import { maskCommand, maskText } from '../src/mask';
+import { urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { harTargets, importHar } from '../src/parser/har';
 import { runAll } from '../src/engine/run';
-import { legacyHarKey } from '../src/engine/diff';
+import { legacyHarKey } from '../src/engine/targetKey';
 import { coverage } from '../src/engine/coverage';
 import { IMPLEMENTED } from '../src/rules/ruleset';
 import { toJson } from '../src/export/json';
@@ -21,11 +22,11 @@ const v = (label: string, url: string, sent: string[], recv: string[]) =>
 describe('1 突き合わせのキー：残してよい形だけを残す', () => {
   it('小文字と数字だけのトークン・大文字の base32・接頭辞付きのトークンをキーに入れない', () => {
     for (const tok of ['t2ybctp03i2b8ehtsq04ttsmgdmq4qdl', 'ap0b254fyhcvu5wnat476dkfetk7a1kz', 'MFRGGZDFMZTWQ2LKNNWG23TPOBYXE4DS', 'sk_live_51HxYzabc123def456ghi789jkl', 'ghp_abcdef0123456789abcdef0123456789abcd'])
-      expect(maskKey(`https://a.example/reset/${tok}`), tok).not.toContain(tok.slice(-12));
+      expect(urlKey(`https://a.example/reset/${tok}`), tok).not.toContain(tok.slice(-12));
   });
   it('普通の名前は残し、別のファイルは別のキーにする', () => {
-    expect(maskKey('https://a.example/news/2026-annual-report-v2/index.html')).toBe('https://a.example/news/2026-annual-report-v2/index.html');
-    expect(maskKey('https://a.example/assets/AdminDashboard-Dk3x9Lq2.js')).not.toBe(maskKey('https://a.example/assets/UserProfile-CkL3x9aB.js'));
+    expect(urlKey('https://a.example/news/2026-annual-report-v2/index.html')).toBe('https://a.example/news/2026-annual-report-v2/index.html');
+    expect(urlKey('https://a.example/assets/AdminDashboard-Dk3x9Lq2.js')).not.toBe(urlKey('https://a.example/assets/UserProfile-CkL3x9aB.js'));
   });
   it('HAR の JSON のエクスポートに、画面で伏せたトークンを出さない', () => {
     const imp = importHar(JSON.stringify({ log: { entries: [{ request: { method: 'GET', url: 'https://www.example.com/password/reset/t2ybctp03i2b8ehtsq04ttsmgdmq4qdl', headers: [] },
@@ -39,11 +40,11 @@ describe('5・8・9 以前の形式のキーとパラメータの値', () => {
   it('作り方が変わったキーは、どの部分が変わっても以前の形式と見分ける', () => {
     expect(legacyHarKey('HAR GET https://a.example/docs/GettingStartedV2Guide')).toBe(true);
     expect(legacyHarKey('HAR GET https://a.example/assets/index-*.js')).toBe(false);
-    expect(legacyHarKey(`HAR GET ${maskKey('https://a.example/x/t2ybctp03i2b8ehtsq04ttsmgdmq4qdl?page=2&token=1')}`)).toBe(false);
+    expect(legacyHarKey(`HAR GET ${urlKey('https://a.example/x/t2ybctp03i2b8ehtsq04ttsmgdmq4qdl?page=2&token=1')}`)).toBe(false);
   });
   it('配布ごとに変わる ?v= と ?p= の値はキーに残さない', () => {
-    expect(maskKey('https://a.example/app.js?v=20261116')).toBe(maskKey('https://a.example/app.js?v=20261201'));
-    expect(maskKey('https://a.example/x?p=hunter2password')).not.toContain('hunter2');
+    expect(urlKey('https://a.example/app.js?v=20261116')).toBe(urlKey('https://a.example/app.js?v=20261201'));
+    expect(urlKey('https://a.example/x?p=hunter2password')).not.toContain('hunter2');
   });
 });
 
