@@ -1,7 +1,7 @@
 // rules/hostRules.ts：ホスト単位のルール（T-09〜T-11、E-03）。同じホストの全ターゲットをまとめて判定する
-import type { Finding, Rule, Severity, Status } from '../model';
+import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { probePattern } from '../mask';
-import { hasCertificate, nameMatches, parseOpenssl } from '../parser/openssl';
+import { hasCertificate, nameMatches, parseOpenssl, type TlsInfo } from '../parser/openssl';
 import { capturedAt } from '../parser/target';
 import { PROBE_UNREACHED_REC } from './util';
 
@@ -65,13 +65,27 @@ const AEAD = /GCM|CHACHA20|CCM|^TLS_AES/i;
 const FORWARD_SECRET = /^(?:ECDHE|DHE|EDH|TLS_AES|TLS_CHACHA20|TLS_ECDHE|TLS_DHE)/i;
 const modern = (c: string) => AEAD.test(c) && FORWARD_SECRET.test(c);
 const T10_REC = 'C23（暗号ごとの接続の確認）と C11（証明書の取得）を採取する';
+/**
+ * 同じホストの openssl の出力（tls のターゲットなど）が複数あるときの順番。入力の順番によらず決める（最初のものを使うと、ターゲットの
+ * 順番を入れ替えるだけで T-10・T-11 の結果が変わった）：証明書の情報があるもの → 採取した時刻（#META at）が新しいもの（時刻のないものは最後。
+ * capturedAt は時刻がなければ判定した時刻を返すので、それで比べると時刻のない古い出力をいちばん新しいとみなした） → ラベルの順
+ */
+function opensslCaptures(ts: Target[]): { t: Target; info: TlsInfo }[] {
+  const at = (t: Target) => { const v = t.meta.at ? Date.parse(t.meta.at) : NaN; return Number.isNaN(v) ? -Infinity : v; };
+  return ts.filter(t => t.openssl.length).map(t => ({ t, info: parseOpenssl(t.openssl), at: at(t) }))
+    .filter((c): c is { t: Target; info: TlsInfo; at: number } => !!c.info)
+    .sort((a, b) => Number(hasCertificate(b.info)) - Number(hasCertificate(a.info)) || (b.at === a.at ? 0 : b.at > a.at ? 1 : -1)
+      || (a.t.label < b.t.label ? -1 : a.t.label > b.t.label ? 1 : 0));
+}
 export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵', appliesTo: 'any', scope: 'host',
   basis: ['Mozilla Server Side TLS', 'IPA TLS暗号設定ガイドライン'],
   runCross(x) {
     const out: Finding[] = [];
     for (const [host, ts] of x.byHost()) {
       const probes = ts.flatMap(t => t.cipherProbes);
-      const info = ts.map(t => parseOpenssl(t.openssl)).find(Boolean);
+      // 鍵・署名の分かる出力を使う（x509 -noout だけの出力より、s_client -showcerts の出力）
+      const caps = opensslCaptures(ts);
+      const info = (caps.find(c => c.info.keyBits || c.info.sigalgs.length) ?? caps[0])?.info;
       const negotiated = ts.flatMap(t => t.info).map(l => l.match(/SSL connection using (TLSv[\d.]+) \/ (\S+)/)).filter((m): m is RegExpMatchArray => !!m);
       if (!probes.length && !info && !negotiated.length) continue;
       const before = out.length;
@@ -115,9 +129,9 @@ export const certificate: Rule = { id: 'T-11', title: '証明書', appliesTo: 'a
   runCross(x) {
     const out: Finding[] = [];
     for (const [host, ts] of x.byHost()) {
-      const src = ts.find(t => t.openssl.length);
-      const info = src && parseOpenssl(src.openssl);
-      if (!src || !info) continue;
+      const cap = opensslCaptures(ts)[0];
+      if (!cap) continue;
+      const { t: src, info } = cap;
       if (!hasCertificate(info)) { out.push(hf(certificate, host, 'na', 'info', 'na', '証明書の情報がない（ハンドシェイクに失敗した可能性）', 'C11 の出力にエラーがないか確認して採取し直す')); continue; }
       // 期限は採取した時刻（#META at）を基準にする。古い出力を読み直しても、採取時の状態で判定する
       const now = capturedAt(src);

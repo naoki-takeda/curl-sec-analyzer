@@ -6,8 +6,11 @@ import { cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
 const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
 const OPENSSL_START = /^(CONNECTED\(|depth=|Certificate chain|subject=|issuer=|notBefore=|notAfter=)/;
-// -v の出力の手がかり。今の curl は「*   Trying」（空白が3つ）や「* Established connection to」とも出すので、空白の数を問わない
-const VERBOSE_HINT = /^\*\s+(Connected to|Established connection to|Trying|SSL connection|ALPN|Host )/;
+// OpenSSL 3.5 は CONNECTED( の前に「Connecting to 127.0.0.1」を出す（読まないと、C11 の採取のたびに解析できない行の警告が出た）
+const CONNECTING = /^Connecting to \S+\s*$/;
+// -v の出力の手がかり。今の curl は「*   Trying」（空白が3つ）や「* Established connection to」とも出すので、空白の数を問わない。
+// プロキシを使うと、最初の行が「* Uses proxy env variable https_proxy == …」になる（-v の行と分からず、解析できない行の警告が出た）
+const VERBOSE_HINT = /^\*\s+(Connected to|Established connection to|Trying|SSL connection|ALPN|Host |Uses proxy env variable )/;
 const BODY_LIMIT = 64 * 1024;
 // 改行のない本文（手で書いた curl -i の JSON・HTML）の直後にくっついたマーカー（{"id":1}#TARGET url=…）。分けないと、次のターゲットが
 // 前の本文に吸い込まれて黙って消える。本文がたまたま「}#TARGET url=」を含むことはまずないので、JSON・HTML の閉じの直後だけを分ける
@@ -65,7 +68,11 @@ export function parseInput(input: string): ParseResult {
 
   // 改行をそろえる。Windows の curl の -v（2>&1）は受信ヘッダの行を CR CR LF で終えるため、CR がいくつ続いても1つの改行にする
   // （CR CR LF を CR LF と CR に分けて読むと、受信ヘッダの各行のあとに空行ができ、ヘッダがすべて失われる）
-  for (let line of input.replace(/\r+\n|\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').split('\n')) {
+  // CR の並びの先頭でだけ LF を探す（/\r+\n|\r/ は、LF の付かない長い CR の並びで、位置ごとに並びの終わりまで読み直し、入力の長さの2乗の時間がかかった）。
+  // LF の付かない CR は1つずつ改行にする（古い Mac の改行。CR CR は空行）。結果は /\r+\n|\r/ と同じ
+  const lines = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').split('\n');
+  for (let li = 0; li < lines.length; li++) {
+    let line = lines[li];
     if (METER_LINE.test(line)) continue;
     line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
@@ -96,7 +103,9 @@ export function parseInput(input: string): ParseResult {
       if ((/^< HTTP\//.test(line) && (!prev || nextHopAfter(prev.status))) || /^\* Issue another request/.test(line) || /^> [A-Z]+ \S+ HTTP\/[\d.]+\s*$/.test(line)) vBody = false;
       else continue;
     }
-    if (!inBody() && OPENSSL_START.test(line)) { close(); inOpenssl = true; }
+    // 「Connecting to」は、次の行が CONNECTED( のときだけ openssl の出力の始まりとする（ほかの場所の同じ文言で、普通のターゲットを
+    // openssl の出力とみなし、T-10・T-11 を「ハンドシェイクに失敗した可能性」にした）
+    if (!inBody() && (OPENSSL_START.test(line) || (CONNECTING.test(line) && /^CONNECTED\(/.test(lines[li + 1] ?? '')))) { close(); inOpenssl = true; }
     if (inOpenssl && !STATUS_RE.test(line) && !/^[*<>] /.test(line)) { t.openssl.push(line); continue; }
     inOpenssl = false;
     if (!inBody() && VERBOSE_HINT.test(line)) t.verbose = true;

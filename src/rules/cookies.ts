@@ -208,6 +208,12 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
     const csd = ctx.target.responses.flatMap(r => r.headers.get('clear-site-data') ?? []).join(',');
     if (/"(?:cookies|\*)"/i.test(csd)) return [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', `Clear-Site-Data: ${csd}`, '')];
     const sessionDel = del.filter(c => looksLikeSessionName(c.name));
+    // セッションを作り直すログアウト（Laravel の invalidate、Rails の reset_session）は、セッションCookie を消さずに新しい値で発行し直す（②にしていた）。
+    // 値を持たないので、新しい値か（期限を延ばしただけの同じ値か）は分からない。合格にも不合格にもせず、古いセッションの無効化は①で確かめる
+    const sent = ctx.target.sentCookieNames;
+    const reissued = sessionDel.length ? [] : cookiesOf(ctx).filter(c => c.value && looksLikeSessionName(c.name) && (!sent?.length || sent.includes(c.name)));
+    if (reissued.length)
+      return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `${[...new Set(reissued.map(cookieName))].join(', ')} を削除せずに発行し直した（新しい値かは分からない）`, 'after-logout を採取し、古いセッションCookieが使えないかを C-12① で確かめる')];
     if (del.length && !sessionDel.length)
       return [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', `削除したのは ${del.map(c => c.name).join(', ')} だけ（セッションCookieらしい名前ではない）`, 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];
     return del.length ? [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', sessionDel.map(cookieEvidence).join(' / '), '')]

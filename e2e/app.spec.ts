@@ -238,3 +238,13 @@ test('読み上げる件数は画面の件数と同じで、言語を切り替�
   await page.getByRole('button', { name: 'English' }).click();
   await expect(page.getByRole('status')).toHaveText(new RegExp(`: ${n} findings?, [0-9]+ high`));
 });
+
+test('件数以外の状態のメッセージも、言語を切り替えるとその言語で出し直す', async ({ page }) => {
+  await page.goto('/?lang=ja');
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(page.getByRole('status')).toHaveText('curlの出力を貼り付けてから「判定する」を押してください。');
+  await page.getByRole('button', { name: 'English' }).click();
+  await expect(page.getByRole('status')).toHaveText('Paste curl output, then select Analyze.');
+  await page.getByRole('button', { name: '日本語' }).click();
+  await expect(page.getByRole('status')).toHaveText('curlの出力を貼り付けてから「判定する」を押してください。');
+});

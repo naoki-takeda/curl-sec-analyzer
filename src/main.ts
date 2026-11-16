@@ -13,7 +13,7 @@ import { IMPLEMENTED, RULESET_VERSION, TOOL_VERSION } from './rules/ruleset';
 import { type Lang, getLang, setLang, tr } from './i18n';
 import sample from './sample';
 import { BTN, LINK, PRIMARY, button, download, el, fileInput as hidden, labelFor, link, reducedMotion } from './ui/dom';
-import { actions, refs, state } from './ui/state';
+import { type Message, actions, refs, state } from './ui/state';
 import { render, renderEmpty } from './ui/results';
 import { cancelHarLoad, loadHar, renderHar } from './ui/har';
 import { commandGenerator } from './ui/generator';
@@ -62,20 +62,20 @@ function buildShell() {
     const { list, errors } = parseSuppressions(await f.text());
     state.suppressions = list;
     const legacy = list.filter(s => legacyHarKey(s.target)).length;
-    refresh(errors.length ? T.readErrors(T.suppressionsFile, joinMessages(errors, getLang())) : legacy ? T.legacyHarKeys(legacy) : '');
+    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors, getLang())) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
   const profIn = hidden('.json,application/json', async f => {
     const { profile: p, errors } = parseProfile(await f.text());
     if (p) state.profile = p;
     // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）
     if (p && state.har) { const chains = state.har.imp.chains; withProfile(p, () => suggestLabels(chains, true)); renderHar(); }
-    refresh(errors.length ? T.readErrors(T.loadProfile, joinMessages(errors, getLang())) : '');
+    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.loadProfile, joinMessages(errors, getLang())) : ''; });
   });
   const baseIn = hidden('.json,application/json', async f => {
     const { baseline: b, error, skipped } = parseBaseline(await f.text());
     if (b) state.baseline = b;
     const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
-    refresh(error ? joinMessages([error], getLang()) : skipped ? T.baselineSkipped(skipped) : legacy ? T.legacyHarKeys(legacy) : '');
+    refresh(() => { const t = tr(); return error ? joinMessages([error], getLang()) : skipped ? t.baselineSkipped(skipped) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
 
   app.replaceChildren(
@@ -84,7 +84,7 @@ function buildShell() {
         el('div', 'flex flex-wrap items-baseline gap-x-4',
           el('h1', 'text-2xl font-bold tracking-tight', 'curl-sec-analyzer'),
           el('span', 'num text-sm text-muted', T.versions(TOOL_VERSION, RULESET_VERSION)),
-          button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const s = summary; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); if (s) saySummary(s); })),
+          button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const m = current; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); if (m) say(m); })),
         el('p', 'mt-1 text-muted', T.tagline),
         el('ul', 'mt-2 list-disc pl-5 text-sm text-muted', el('li', '', T.notice1), el('li', '', T.notice2), el('li', '', T.notice3),
           T.englishNote ? el('li', '', T.englishNote) : null),
@@ -118,16 +118,17 @@ function buildShell() {
   if (state.last) render(); else renderEmpty();
 }
 function keepDraft() { state.draft = { input: refs.input.value, url: refs.urlInput.value, message: refs.message.textContent ?? '' }; }
-// 判定のあとの件数。言語を切り替えたら、その言語で出し直す（文字列のまま残すと、英語の画面に日本語の件数が残る）
-let summary: [number, number, number] | undefined;
-function say(m: string) { refs.message.textContent = m; summary = undefined; }
-function saySummary(s: [number, number, number]) { say(tr().analyzed(...s)); summary = s; }
+// 状態のメッセージ（件数、入力がない、読み込みのエラーなど）は、文言を作る関数で受け取る。言語を切り替えたら、その言語で出し直す
+// （文字列のまま残すと、英語の画面に日本語のメッセージが残る。件数だけを出し直していたので、ほかのメッセージは前の言語のままだった）
+let current: (() => string) | undefined;
+function say(m: Message) { current = typeof m === 'function' ? m : undefined; refs.message.textContent = typeof m === 'function' ? m() : m; }
+function saySummary(s: [number, number, number]) { say(() => tr().analyzed(...s)); }
 /** 設定を読み込んだあとに判定し直す。読み込みのエラーは判定のあとに表示する（analyze は最初に表示を消すため、先に出すと消えてしまう） */
-function refresh(msg = '') {
+function refresh(msg: () => string = () => '') {
   renderSettings();
   const again = !!(state.last || state.har);
   if (again) analyze();
-  if (msg || !again) say(msg);
+  if (msg() || !again) say(msg);
 }
 function renderSettings() {
   const T = tr();
@@ -157,23 +158,21 @@ function openGenerator() {
   refs.genDetails.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
 }
 async function openFile(f: File) {
-  const T = tr();
   if (/\.har$/i.test(f.name) || isHar(await f.slice(0, 400).text())) { loadHar(f); return; }
-  if (f.size > MAX_BYTES) { say(T.fileTooLarge); return; }
+  if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge); return; }
   refs.input.value = await f.text(); analyze();
 }
 function analyze() {
   // 判定の途中の例外（想定外の入力）で、前の入力の結果を表示・出力したままにしない
   try { analyzeUnsafe(); }
-  catch { say(tr().analysisFailed); state.last = null; renderEmpty(); }
+  catch { say(() => tr().analysisFailed); state.last = null; renderEmpty(); }
 }
 function analyzeUnsafe() {
-  const T = tr();
   say('');
   const text = refs.input.value;
-  if (!text.trim() && !state.har) { say(T.emptyInput); state.last = null; renderEmpty(); return; }
+  if (!text.trim() && !state.har) { say(() => tr().emptyInput); state.last = null; renderEmpty(); return; }
   // 判定できなかったときは前の結果を消す（残すと、言語の切り替えなどで別の入力の結果が表示・出力される）
-  if (new Blob([text]).size > MAX_BYTES) { say(T.tooLarge); state.last = null; renderEmpty(); return; }
+  if (new Blob([text]).size > MAX_BYTES) { say(() => tr().tooLarge); state.last = null; renderEmpty(); return; }
   const parsed = text.trim() ? parseInput(text) : { targets: [], warnings: [] };
   const fromHar = state.har ? withProfile(state.profile, () => harTargets(state.har!.imp, state.har!.hosts)) : { targets: [], warnings: [] };
   const targets = [...parsed.targets, ...fromHar.targets];
@@ -181,7 +180,7 @@ function analyzeUnsafe() {
   const u = refs.urlInput.value.trim();
   // URL 欄で補ったターゲットにも、各ホップの URL を付け直す（-L で http から https に転送されたかを判定するため。parseInput の中では URL が分からない）
   if (u) for (const t of targets) if (!t.url && t.label === 'default') { t.url = u; assignHopUrls(t); }
-  if (!targets.length) { say(T.noResponse); state.last = null; renderEmpty(); return; }
+  if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return; }
   const warnings = [...parsed.warnings, ...fromHar.warnings, ...merged].filter(w => !(u && w.kind === 'unknown-url' && w.label === 'default'));   // URL欄で補ったのは default だけ
   const findings = runAll(targets, { suppressions: state.suppressions, profile: state.profile });
   state.last = { targets, warnings, findings, cov: coverage(findings, IMPLEMENTED, ITEMS, state.profile?.exclude), diff: state.baseline ? diff(state.baseline.findings, findings) : undefined };

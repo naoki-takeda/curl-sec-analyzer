@@ -302,6 +302,8 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
   } };
 
 const PRODUCT_HEADERS = ['server', 'x-powered-by', 'x-aspnet-version', 'x-aspnetmvc-version', 'x-generator'];
+// プロトコルの名前（HTTP・HTTPS・SPDY・S-HTTP）と版は製品の版ではない
+const VIA_PRODUCT = /(?<![\w.-])(?!(?:HTTPS?|SPDY|SHTTP)\/)[A-Za-z][\w.-]*\/\d+\.\d+/i;
 // 内部のホスト名は、ホスト名の最後が internal・local などのもの（edge01.local.example-cdn.net の .local. は公開のホスト名）
 const INTERNAL = /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|127\.0\.0\.1|localhost)\b|\b[\w-]+\.(?:internal|local|lan|corp|intra)(?![\w.-])/i;
 // CDN が付ける Server-Timing の項目（Cloudflare の cfL4・cfExtPri、CloudFront の cdn-*、Akamai の edge・origin・ak_p、Fastly）。アプリの内部処理ではない
@@ -333,6 +335,9 @@ export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン�
     // 値はマスクする（トークンと、記録したリクエスト（Cookie を含む）を見られるプロファイラのURL）
     for (const h of ['x-debug-token', 'x-debug-token-link']) for (const v of header(ctx, h))
       out.push(mk(productInfo, ctx, 3, 'medium', 'fail', `${h}: ${maskValue(v.trim())}`, '本番でデバッグ用のヘッダ・プロファイラを無効にする'));
+    // Via の製品の版（1.1 varnish (Varnish/7.4)、squid/4.10）。先頭のプロトコルの版（1.1、HTTP/1.1）は製品の版ではないので、「名前/版」の形だけを見る。
+    // 製品名だけ（1.1 vegur、(CloudFront)）は②にしない（ほとんどの CDN・プロキシが付けるので、指摘しても対処できない）
+    for (const v of header(ctx, 'via')) if (VIA_PRODUCT.test(v)) out.push(mk(productInfo, ctx, 1, 'low', 'fail', `via: ${v}`, 'バージョン番号を出さない（可能ならヘッダごと削除）'));
     for (const h of ['via', 'x-backend-server', 'x-served-by', 'x-host']) for (const v of header(ctx, h))
       if (INTERNAL.test(v)) out.push(mk(productInfo, ctx, 4, 'low', 'fail', `${h}: ${v}`, '内部ホスト名・IPアドレスを出さない'));
     // Server-Timing の証跡は項目の名前だけにする（desc に SQL・メールアドレス・キーを入れる実装がある）

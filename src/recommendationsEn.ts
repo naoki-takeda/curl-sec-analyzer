@@ -110,6 +110,7 @@ const EXACT: Record<string, string> = {
   'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない': 'Do not include stack traces, SQL statements, connection strings or absolute paths in responses',
   'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）': 'Check the network and run C13 again (HTTP 000 means the connection failed)',
   '-L を付けて、転送先まで採取し直す': 'Capture again with -L to follow the redirect',
+  'after-logout を採取し、古いセッションCookieが使えないかを C-12① で確かめる': 'Capture after-logout and use C-12① to check that the old session cookie no longer works',
   'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）': 'Capture again including the status line (for C10, also add #META response_code=)',
   'Cookie・Authorization を付けずに採取し直す': 'Capture again without Cookie or Authorization',
   'C16 のとおり許可外の Origin（https://evil.example）で採取し直す': 'Capture again with a disallowed Origin (https://evil.example), as in C16',

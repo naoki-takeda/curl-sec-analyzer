@@ -33,6 +33,10 @@ function pemHasSan(b64: string): boolean | undefined {
 /** 証明書の情報が1つでもあるか。ハンドシェイクに失敗した出力では false（T-11 は na にする） */
 export const hasCertificate = (i: TlsInfo) => !i.noPeerCert && !!(i.notAfter || i.sans.length || i.subjectCN || i.chainDepth);
 
+/** OpenSSL 3.5 が長さの代わりに出す曲線の名前と、その鍵の長さ（T-10② は長さで RSA と EC を見分けるので、EC だと分かれば十分） */
+const CURVE_BITS: Record<string, number> = { prime256v1: 256, secp256r1: 256, secp384r1: 384, secp521r1: 521, secp224r1: 224, x25519: 253, ed25519: 253, x448: 456, ed448: 456,
+  brainpoolp256r1: 256, brainpoolp384r1: 384, brainpoolp512r1: 512 };
+
 const date = (s: string) => { const d = new Date(s.replace(/\s+/g, ' ').trim()); return Number.isNaN(d.getTime()) ? undefined : d; };
 
 export function parseOpenssl(lines: string[]): TlsInfo | undefined {
@@ -66,11 +70,12 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
     else if ((m = l.match(/^i:(.*)$/)) && info.certs.length) info.certs[info.certs.length - 1].issuer = m[1].trim();
     else if (/no peer certificate available/i.test(l)) info.noPeerCert = true;
     // OpenSSL 3 の -showcerts。鍵の種類には id-ecPublicKey・RSASSA-PSS のようにハイフンを含むものがある。
+    // OpenSSL 3.5 は EC 鍵の長さを出さず、曲線の名前を出す（a:PKEY: EC, (prime256v1); sigalg: …）。読めないと署名がずれ、ルートの SHA-1 を T-10② にした。
     // 署名は証明書の番号の位置に入れる（読めない行があっても、ルート証明書の判定（T-10②）がずれないように）
-    else if ((m = l.match(/^a:PKEY: ([\w-]+), (\d+) \(bit\); sigalg: (\S+)/))) {
+    else if ((m = l.match(/^a:PKEY: ([\w-]+), (?:(\d+) \(bit\)|\(([\w-]+)\)); sigalg: (\S+)/))) {
       const i = cur >= 0 ? cur : info.sigalgs.length;
-      if (i === 0) { info.keyType = m[1]; info.keyBits = Number(m[2]); }
-      info.sigalgs[i] = m[3];
+      if (i === 0) { info.keyType = m[1]; info.keyBits = m[2] ? Number(m[2]) : CURVE_BITS[m[3].toLowerCase()]; }
+      info.sigalgs[i] = m[4];
     }
     else if ((m = l.match(/^Server public key is (\d+) bit/))) info.keyBits ??= Number(m[1]);
   }

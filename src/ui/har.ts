@@ -5,10 +5,11 @@ import { tr } from '../i18n';
 import { maskText } from '../mask';
 import { BTN, button, el, labelFor, options, table, td } from './dom';
 import HarWorker from '../worker.ts?worker&inline';
-import { actions, refs, state } from './state';
+import { type Message, actions, refs, state } from './state';
 import { renderEmpty } from './results';
 
-const say = (m: string) => actions.say(m);
+// メッセージは文言を作る関数で渡す（言語を切り替えたら、その言語で出し直すため。main.ts の say）
+const say = (m: Message) => actions.say(m);
 
 // ---- HAR（v0.3） ----
 // 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外すを押したりしたら、前の読み込みの結果は使わない
@@ -16,9 +17,8 @@ let harLoad = 0;
 export const cancelHarLoad = () => { harLoad++; };
 
 export function loadHar(f: File) {
-  const T = tr().har;
-  if (f.size > HAR_MAX_BYTES) { say(T.tooLarge); return; }
-  say(T.loading);
+  if (f.size > HAR_MAX_BYTES) { say(() => tr().har.tooLarge); return; }
+  say(() => tr().har.loading);
   // Worker は blob: URL で作る（?worker&inline）。別ファイルの Worker には、そのファイルの HTTP 応答の CSP が使われ、
   // GitHub Pages は CSP ヘッダを返さないため、生の HAR（Cookie・パスワード）を持つ Worker から通信できてしまう。
   // blob: の Worker はページの CSP（connect-src 'none'）を引き継ぐ。メタCSPの worker-src blob: で許可する
@@ -26,16 +26,16 @@ export function loadHar(f: File) {
   w.onmessage = (e: MessageEvent<{ ok: boolean; result?: HarImport; error?: string }>) => {
     w.terminate();
     if (gen !== harLoad) return;                     // 古い読み込みの結果
-    if (!e.data.ok || !e.data.result) { say(T.failed(e.data.error === 'JSON' ? T.invalidJson : e.data.error ?? '?')); return; }
+    if (!e.data.ok || !e.data.result) { const err = e.data.error; say(() => { const t = tr().har; return t.failed(err === 'JSON' ? t.invalidJson : err ?? '?'); }); return; }
     const imp = e.data.result;
     // Worker の中では組織プロファイルが分からないため、プロファイルがあればセッションCookieの名前を反映して候補を作り直す
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));
     state.har = { imp, hosts: defaultHarHosts(imp), name: f.name };
     renderHar(); say('');
     if (state.last) actions.analyze();              // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない
-    if (!refs.message.textContent) say(T.loaded(f.name, imp.chains.length));   // 判定し直してエラーが出たら、そちらを残す
+    if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直してエラーが出たら、そちらを残す
   };
-  w.onerror = () => { w.terminate(); if (gen === harLoad) say(T.failed('worker')); };
+  w.onerror = () => { w.terminate(); if (gen === harLoad) say(() => tr().har.failed('worker')); };
   f.text().then(t => w.postMessage(t));
 }
 /** HAR を外す。判定結果に HAR のターゲットが残らないよう、貼り付けがあれば判定し直し、なければ結果を消す */

@@ -20,7 +20,10 @@ export const refs = {} as {
   settingsStatus: HTMLUListElement; dialog: HTMLDialogElement;
 };
 
+/** 状態のメッセージ。文言を作る関数なら、言語を切り替えたときにその言語で出し直す */
+export type Message = string | (() => string);
+
 /** 循環する依存を避けるため、main.ts が登録する操作 */
 export const actions = {
-  analyze: () => {}, say: (_m: string) => {}, renderSettings: () => {}, openGenerator: () => {}, loadSample: () => {},
+  analyze: () => {}, say: (_m: Message) => {}, renderSettings: () => {}, openGenerator: () => {}, loadSample: () => {},
 };

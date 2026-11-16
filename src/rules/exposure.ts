@@ -87,13 +87,20 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
         : [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `${probe.path}（HTTP ${probe.code}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
     }
-    if (/\/robots\.txt$/.test(p) && b) {
-      const m = b.match(ROBOTS_SENSITIVE);
+    // 本文を取得したターゲット（一般のターゲット）。2xx でなければファイルがない（404 のエラーページの本文を、ファイルの中身として読まない）
+    const st = ctx.final?.status ?? 0; const got = !st || (st >= 200 && st < 300);
+    if (/\/robots\.txt$/.test(p) && (b || !got)) {
+      if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
+      const m = b!.match(ROBOTS_SENSITIVE);
       return m ? [mk(robotsSecurityTxt, ctx, 1, 'low', 'fail', `Disallow: ${m[1]}`, 'robots.txt に機密パスを書かない（アクセス制御で守る）')]
                : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', 'robots.txt に機密パスらしき記述なし', '')];
     }
-    if (/\/security\.txt$/.test(p) && b) {
-      const ex = b.match(/^Expires:\s*(.+)$/im)?.[1]; const contact = /^Contact:/im.test(b);
+    if (/\/security\.txt$/.test(p) && (b || !got)) {
+      if (!got) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `security.txt を取得できない（HTTP ${st}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
+      // どのパスにも index.html を返す SPA の 200 は、security.txt ではない
+      if (/^\s*text\/html/i.test(header(ctx, 'content-type')[0] ?? '') || /^\s*(?:<!doctype html|<html)/i.test(b!))
+        return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `HTML の画面が返った（security.txt ではない。HTTP ${st || '不明'}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
+      const ex = b!.match(/^Expires:\s*(.+)$/im)?.[1]; const contact = /^Contact:/im.test(b!);
       if (!contact || !ex) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Contact: ${contact ? 'あり' : 'なし'} / Expires: ${ex ?? 'なし'}`, 'Contact と Expires を書く')];
       if (Date.parse(ex) < ctx.now) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Expires: ${ex}（期限切れ）`, 'Expires を更新する')];
       return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `Expires: ${ex}`, '')];
