@@ -1,7 +1,7 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、#META、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
 import { assignHopUrls, baseLabel, uniqueLabels } from './target';
-import { cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
+import { autoAuthScheme, cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
 
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
 // #BODY：生成スクリプトが、ヘッダ（-D）のあと・本文（-o）の前に出す印。ここから次のマーカーまでを、直前の応答の本文としてそのまま読む
@@ -60,9 +60,11 @@ export function attrs(s: string): Record<string, string> {
  */
 // 引用符で囲んだラベルの中の空白（label="top page"）は認める（第29回）
 const LABEL_OK = /^[\p{L}\p{N}_.*-](?:[\p{L}\p{N}_.* -]{0,62}[\p{L}\p{N}_.*-])?$/u;
+const SENS_TRUE = /^(?:1|true|yes)$/i, SENS_FALSE = /^(?:0|false|no)$/i;
 const newTarget = (a: Record<string, string>): Target => ({
   label: a.label === undefined ? 'default' : LABEL_OK.test(a.label) ? a.label : 'invalid-label', url: a.url, kind: (['html', 'api'].includes(a.kind) ? a.kind : 'auto') as Target['kind'],
-  sensitive: a.sensitive === '1' ? true : a.sensitive === '0' ? false : undefined,
+  // sensitive は 1・true・yes と 0・false・no を受け付ける。ほかの値は読まずに警告する（黙って無視すると、機密応答の項目が na や弱い判定になった）
+  sensitive: SENS_TRUE.test(a.sensitive ?? '') ? true : SENS_FALSE.test(a.sensitive ?? '') ? false : undefined,
   verbose: false, responses: [], sentAuth: false, sentTokens: [], info: [], meta: {}, probes: [], tlsProbes: [], cipherProbes: [], openssl: [],
 });
 const hasData = (t: Target) =>
@@ -107,6 +109,7 @@ export function parseInput(input: string): ParseResult {
     // 先読みの正規表現で分けると、本文の1行に「#META 」が続く入力で、位置ごとに行の終わりまで読み直し、入力の長さの2乗の時間がかかった）
     ? splitRunMarkers(normalized, runId)
     : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
+  const badSensitive: Target[] = [];                   // sensitive= の値を読めなかったターゲット（ラベルは付け直したあとのものを出す）
   let ignoredMarkers = 0;                              // 印のない（違う）#TARGET の行の数。本文として読んだことを知らせる
   let inRaw = false;                                   // #BODY のあと：次のマーカーまでを本文としてそのまま読む（ステータス行・openssl の行・-v の行として読まない）
   let rawBody: HttpResponse | undefined;              // 本文を足す応答。#BODY の前に応答がない（curl が失敗した、curl は受け付けるがここでは読めないステータス行
@@ -132,7 +135,7 @@ export function parseInput(input: string): ParseResult {
       close(); inOpenssl = false; vBody = false; connectReq = false; inRaw = false; rawBody = undefined; if (json) { unparsed += json.length; json = null; }
       const [, tag] = mk;
       if (tag === 'BODY') { inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
-      if (tag === 'TARGET') { flush(); t = newTarget(a); pendingJson.length = 0; }
+      if (tag === 'TARGET') { flush(); t = newTarget(a); pendingJson.length = 0; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t); }
       else if (tag === 'META') {
         Object.assign(t.meta, a);
         // %{header_json} のあとに出した response_code（-w '%{header_json}' のあとの #META）も、その応答のステータスにする
@@ -177,7 +180,7 @@ export function parseInput(input: string): ParseResult {
         const h = line.slice(2);
         if (/^CONNECT /i.test(h)) connectReq = true;
         const o = h.match(/^origin:\s*(.*)$/i); if (o) t.sentOrigin = o[1].trim();
-        const ck = h.match(/^cookie:\s*(.*)$/i), au = /^authorization:/i.test(h);
+        const ck = h.match(/^cookie:\s*(.*)$/i), auv = h.match(/^authorization:(.*)$/i), au = !!auv;
         // 名前は増えた分だけを見る（行ごとに全体をコピーして推定し直すと、Cookie の行が多い -v で2乗の時間がかかった）
         const added: string[] = [];
         if (ck) {
@@ -185,7 +188,7 @@ export function parseInput(input: string): ParseResult {
           let seen = sentNames.get(t); if (!seen) { seen = new Set(names); sentNames.set(t, seen); }
           for (const n of cookieNames(ck[1])) if (!seen.has(n)) { seen.add(n); names.push(n); added.push(n); }
         }
-        if (au) t.sentAuthorization = true;
+        if (auv) { t.sentAuthorization = true; if (autoAuthScheme(auv[1])) t.sentAutoAuth = true; }
         if (ck || au) { t.sentAuth = t.sentAuth || sentAuthOf(au, added); for (const tok of h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) t.sentTokens.push(tok); }
         continue;
       }
@@ -270,7 +273,8 @@ export function parseInput(input: string): ParseResult {
   const dup = uniqueLabels(targets);
   const ignored: ParseWarning[] = ignoredMarkers ? [{ kind: 'ignored-marker',
     detail: `採取の印（run=）が最初の #TARGET と違う #TARGET の行が${ignoredMarkers}行あり、応答の本文として読みました（診断対象が本文に書いたもの、または別の採取の出力を付け足したもの。付け足した出力は別に判定してください）` }] : [];
-  return { targets, warnings: [...dup, ...ignored, ...collectWarnings(targets, unparsed, emptyTargets)] };
+  const badAttr: ParseWarning[] = badSensitive.length ? [{ kind: 'invalid-attr', detail: `sensitive= の値を読めませんでした（${badSensitive.slice(0, 5).map(x => x.label).join(', ')}${badSensitive.length > 5 ? ' など' : ''}）。1（機密）か 0（機密でない）を指定してください` }] : [];
+  return { targets, warnings: [...dup, ...ignored, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets)] };
 }
 
 // %{header_json} にほぼ必ずある応答ヘッダ。どれもない JSON（{"tags":["a"]} など）はヘッダとみなさない

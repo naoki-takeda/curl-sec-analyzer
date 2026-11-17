@@ -1,6 +1,6 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
+import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
@@ -316,25 +316,37 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
     if (!preload) return [];
     // apex 自身の応答（転送の最初のホップ）で見る。-L や HAR で www への転送をたどった最後の応答は www のもの
     // max-age=0 は HSTS を解除する指定なので、返していないのと同じ（H-01①と同じ）
-    const v = ownChain(apex)[0]?.headers.get('strict-transport-security')?.[0];
+    // apex 自身の https の応答で見る。http で採取して https の apex に転送したもの（http://a.example → https://a.example → www）は、その https の
+    // ホップ。https の apex の応答がなければ、HSTS を返すかは分からない（「HSTSを返さない」とは言わない。http の応答の HSTS はブラウザが無視する）
+    const httpsHop = /^https:/i.test(apex.url ?? '') ? ownChain(apex)[0]
+      : chainOf(apex).find(r => { try { const u = new URL(r.url ?? ''); return u.protocol === 'https:' && u.hostname.toLowerCase() === ah; } catch { return false; } });
+    if (!httpsHop && isHttps(apex) !== undefined) return [cf(apexHsts, 'apex', 'na', 'info', 'na', 'apex の https の応答がない（http の応答の HSTS はブラウザが無視する）', 'apex の https の URL（https://apexドメイン/）で採取する')];
+    const v = (httpsHop ?? ownChain(apex)[0])?.headers.get('strict-transport-security')?.[0];
     return v && parseHsts(v).maxAge > 0 ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };
 
-// ヘッダの CSP と、HTML の <head> の <meta> の CSP（H-04 と同じ。meta の CSP の nonce が固定でも⑤）
-const nonceOf = (t: Target) => [...splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? []), ...metaCspFromHtml(finalResponse(t)?.body ?? '')]
-  .flatMap(v => [...parseCsp(v).values()].flat()).map(v => v.match(/^'nonce-([^']+)'$/)?.[1]).filter((v): v is string => !!v);
+// ヘッダの CSP と、HTML の <head> の <meta> の CSP（H-04 と同じ。meta の CSP の nonce が固定でも⑤）。スクリプトに効くディレクティブ
+// （<script> の要素に効くもの）の nonce だけ。どのディレクティブでも最初の nonce を
+// 比べると、style-src の固定の nonce で⑤（高）を出し、script-src の固定の nonce を見逃した
+// <script> の要素に効くのは、CSP3 のとおり script-src-elem、なければ script-src、なければ default-src（script-src があるときの default-src の
+// nonce は、スクリプトには効かない）。'nonce-' の部分は大文字・小文字を区別しない（値は区別する）
+const nonceOf = (t: Target) => new Set([...splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? []), ...metaCspFromHtml(finalResponse(t)?.body ?? '')]
+  .flatMap(v => { const d = parseCsp(v); return d.get('script-src-elem') ?? d.get('script-src') ?? d.get('default-src') ?? []; })
+  .map(v => v.match(/^'nonce-([^']+)'$/i)?.[1]).filter((v): v is string => !!v));
 export const fixedNonce: Rule = { id: 'H-04', title: 'CSP：script-src', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP CSP CS', 'Google csp_evaluator'],
   runCross(x) {
     const samples = x.withPrefix('csp-sample-');
     if (samples.length < 2) return na(fixedNonce, 'csp-sample-*', 'csp-sample-1, csp-sample-2（同じURLを2回取得）');
     const nonces = samples.map(nonceOf);
-    if (nonces.some(n => !n.length)) return [cf(fixedNonce, 'csp-sample-*', 'na', 'info', 'na', 'CSPにnonceがない', '')];
-    const firsts = nonces.map(n => n[0]);
-    return new Set(firsts).size < firsts.length
-      ? [cf(fixedNonce, 'csp-sample-*', 5, 'high', 'fail', `応答ごとに同じnonce（${maskValue(firsts[0])}）`, 'nonce は応答ごとに新しい乱数で生成する')]
-      : [cf(fixedNonce, 'csp-sample-*', 'ok', 'info', 'pass', `${firsts.length}件のnonceはすべて異なる`, '')];
+    if (nonces.some(n => !n.size)) return [cf(fixedNonce, 'csp-sample-*', 'na', 'info', 'na', 'CSPのスクリプトのディレクティブにnonceがない', '')];
+    // 2つ以上の応答に現れた nonce（同じ応答の中で同じ nonce を繰り返すのは固定ではない）
+    const seen = new Set<string>();
+    const fixed = nonces.flatMap(n => { const dup = [...n].filter(v => seen.has(v)); n.forEach(v => seen.add(v)); return dup; });
+    return fixed.length
+      ? [cf(fixedNonce, 'csp-sample-*', 5, 'high', 'fail', `応答ごとに同じnonce（${maskValue(fixed[0])}）`, 'nonce は応答ごとに新しい乱数で生成する')]
+      : [cf(fixedNonce, 'csp-sample-*', 'ok', 'info', 'pass', `${nonces.length}件の応答のnonceはすべて異なる`, '')];
   } };
 
 export const CROSS_RULES: Rule[] = [sessionFixation, sessionPredictable, logoutInvalidation, apexHsts, fixedNonce];

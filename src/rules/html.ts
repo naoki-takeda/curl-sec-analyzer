@@ -6,7 +6,8 @@ import { isLabelText, isPlaceholderValue, isPublicClientValue, mk } from './util
 import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
-export interface Tag { name: string; attrs: Map<string, string>; evidence: string; index: number; }
+/** inert：<script> などテキストの要素の中身か <template> の中のタグ（ブラウザは文書の要素として使わない。H-09 の meta の referrer など） */
+export interface Tag { name: string; attrs: Map<string, string>; evidence: string; index: number; inert?: boolean; }
 
 /**
  * 証跡に値を出す属性。判定に使う属性（読み込み先・送信先・種類）だけにする。
@@ -98,6 +99,8 @@ export function tags(html: string, names: string[]): Tag[] {
   const raw = /<(script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)(?=[\s/>])/iy;
   let lower: string | undefined;                       // 閉じタグを探すため（初めて要るときに一度だけ小文字にする。タグごとに小文字にすると、<script の多い本文で2乗の時間になる）
   let rawEnd = -1;                                     // <script> などの中身（コメントにならない）の終わり
+  let templateEnd = -1;                                // <template> の中身の終わり（中のタグは inert）
+  const template = /<template(?=[\s/>])/iy;
   const commentEnd = commentEndFinder(html);
   for (let i = html.indexOf('<'); i >= 0; i = html.indexOf('<', i + 1)) {
     // コメント（<!-- … -->）の中のタグは、ブラウザが読まない（コメントアウトしたフォーム・スクリプトで E-10①（高）・E-07① などを誤って出した）。
@@ -113,6 +116,8 @@ export function tags(html: string, names: string[]): Tag[] {
       raw.lastIndex = i;
       const r = raw.exec(html);
       if (r) { lower ??= html.toLowerCase(); const close = lower.indexOf(`</${r[1].toLowerCase()}`, i + r[0].length); rawEnd = close < 0 ? html.length : close; }
+      template.lastIndex = i;
+      if (i > templateEnd && template.test(html)) { lower ??= html.toLowerCase(); const close = lower.indexOf('</template', i + 9); templateEnd = close < 0 ? html.length : close; }
     }
     start.lastIndex = i;
     const m = start.exec(html);
@@ -127,7 +132,7 @@ export function tags(html: string, names: string[]): Tag[] {
     const attrs = new Map<string, string>();
     for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), decodeEntities(a[2] ?? a[3] ?? a[4] ?? ''));
     const name = m[1].toLowerCase();
-    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i });
+    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i, ...(!outside || i < templateEnd ? { inert: true } : {}) });
     i = end;                                         // 属性の中の < をタグの始まりとして読まない（正規表現の matchAll と同じ）
   }
   return out;

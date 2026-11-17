@@ -111,6 +111,8 @@ export const looksLikeSessionName = (name: string): boolean =>
  * Authorization か、セッションCookieらしい名前（組織プロファイルの指定があればそれ）の Cookie を送ったときだけ数える。curl と HAR で同じ判定にする
  */
 export const sentAuthOf = (authorization: boolean, cookieNames: string[]) => authorization || cookieNames.some(looksLikeSessionName);
+/** ブラウザが自動で送る（クロスサイトのリクエストにも付く）認証の方式か。Authorization の値の最初の語で見る */
+export const autoAuthScheme = (authorization: string) => /^\s*(?:basic|digest|negotiate|ntlm)\b/i.test(authorization);
 /** リクエストの Cookie ヘッダの値から名前だけを取り出す */
 export const cookieNames = (v: string) => v.split(';').map(c => c.split('=')[0].trim()).filter(Boolean);
 

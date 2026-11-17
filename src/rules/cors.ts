@@ -1,6 +1,7 @@
 // rules/cors.ts：第3章 CORS・WebSocket（R-01〜R-09）
 import type { Rule, RuleContext } from '../model';
 import { baseLabel, hostOf } from '../parser/target';
+import { looksLikeSessionName } from '../parser/setCookie';
 import { mk, sensitiveUnlessStatic } from './util';
 
 const TEST_ORIGINS = ['https://evil.example'];        // 既知のテスト値（ツール設計1）
@@ -155,12 +156,16 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
     const vary = (ctx.final.headers.get('vary') ?? []).join(',').toLowerCase();
     // 名前の一部（X-Origin-Id）ではなく、カンマで区切った1つの値として Origin か * があるか
     if (vary.split(',').some(s => ['origin', '*'].includes(s.trim()))) return [mk(corsVary, ctx, 'ok', 'info', 'pass', `Vary: ${vary}`, '')];
+    // プリフライト（OPTIONS）の応答は HTTP のキャッシュに保存されない（RFC 9110 9.3.7）ので、Vary: Origin は要らない
+    if (baseLabel(ctx.target.label) === 'cors-preflight') return [];
     // Vary がなく、送った Origin が分からない（-i。送信ヘッダの見えない採取）ときは、ACAO が Origin によって変わる値かが分からないので na
-    if (!ctx.target.verbose && !ctx.target.sentOrigin && ctx.target.meta.source !== 'har') return [mk(corsVary, ctx, 'na', 'info', 'na', `ACAO: ${acao}（送った Origin が分からない）`, '-v を付けて、Origin を送って採取し直す')];
+    // ただし ACAO が既知のテスト値（https://evil.example）なら、R-01 と同じく送った Origin を反射した値とみなす（R-01 が反射を指摘しても na にした）
+    if (!ctx.target.verbose && !ctx.target.sentOrigin && ctx.target.meta.source !== 'har' && !TEST_ORIGINS.includes(acao)) return [mk(corsVary, ctx, 'na', 'info', 'na', `ACAO: ${acao}（送った Origin が分からない）`, '-v を付けて、Origin を送って採取し直す')];
     return [mk(corsVary, ctx, 1, 'low', 'fail', `ACAO: ${acao} / Vary: ${vary || '(なし)'}`, 'Origin によって ACAO を変えるなら Vary: Origin を付ける（キャッシュ汚染の防止）')];
   } };
 
-const SENSITIVE_EXPOSE = /\b(authorization|set-cookie|x-auth[\w-]*|[\w-]*token[\w-]*|x-internal[\w-]*|x-debug[\w-]*)\b/i;
+// Set-Cookie・Set-Cookie2 は禁止された応答ヘッダで、Access-Control-Expose-Headers に書いてもスクリプトには公開されない（数えない）
+const SENSITIVE_EXPOSE = /\b(authorization|x-auth[\w-]*|[\w-]*token[\w-]*|x-internal[\w-]*|x-debug[\w-]*)\b/i;
 // 名前に token を含んでも、認証のトークンではないヘッダ（CSRF 対策のトークンは SPA が読むために公開する。ページ送りのトークンも秘密ではない）。
 // token を含む名前だけに使う（X-Debug-Async-Trace、X-Internal-Pagecache-Node のような内部ヘッダまで除かないため）
 // レート制限の項目（x-ratelimit-remaining-tokens など。LLM の API は消費したトークン数を返す）も認証のトークンではない
@@ -204,6 +209,12 @@ export const websocketOrigin: Rule = { id: 'R-09', title: 'WebSocketのOrigin検
     if (noOriginSent(ctx)) return [mk(websocketOrigin, ctx, 'na', 'info', 'na', '101 Switching Protocols（Origin を送っていない）', 'C16 のとおり許可外の Origin（https://evil.example）で採取し直す')];
     // -v で送信ヘッダが見えていて Cookie・Authorization を送っていないなら、認証なしの WebSocket（②）
     const sensitive = ctx.sensitive ?? (ctx.target.verbose && !ctx.target.sentAuth ? false : undefined);
+    // 送った認証が Bearer などのトークンだけ（-v・HAR で送信ヘッダが見え、セッションCookie もブラウザが自動で送る方式の Authorization もない）なら、
+    // 攻撃者のページからのハンドシェイクにはトークンが付かないので、クロスサイトの乗っ取りにならない（①（高）にしない）。
+    // sensitive=1 の明示があれば従う（セッションCookie の名前の推定から漏れた Cookie で認証する WebSocket を②にしない）
+    const t = ctx.target;
+    const tokenOnly = t.sensitive === undefined && (t.verbose || t.meta.source === 'har') && !!t.sentAuthorization && !t.sentAutoAuth && !(t.sentCookieNames ?? []).some(looksLikeSessionName);
+    if (tokenOnly) return [mk(websocketOrigin, ctx, 2, 'info', 'fail', `Origin: ${t.sentOrigin ?? '(不明)'} で 101 Switching Protocols（Bearer などのトークンの認証。ブラウザはクロスサイトで送らない）`, 'Cookie で認証しないなら乗っ取りにはならない。Origin の許可リストでの照合も行う')];
     if (sensitive === undefined) return [mk(websocketOrigin, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin ?? '(不明)'} で 101 Switching Protocols（Cookie認証かどうか分からない）`, '認証後に使う WebSocket なら #TARGET に sensitive=1、公開用なら sensitive=0 を付ける')];
     return sensitive
       ? [mk(websocketOrigin, ctx, 1, 'high', 'fail', `Origin: ${ctx.target.sentOrigin ?? '(不明)'} で 101 Switching Protocols（Cookie認証）`, 'ハンドシェイクで Origin を許可リストと照合し、許可外は 403 で拒否する')]

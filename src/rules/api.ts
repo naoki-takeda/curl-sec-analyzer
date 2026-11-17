@@ -245,7 +245,9 @@ const NOT_SECRET_LAST = new Set(['policy', 'policies', 'updated', 'changed', 'at
   'uri', 'path', 'route', 'endpoint', 'page', 'encoder', 'encoding', 'algorithm', 'algo', 'complexity', 'pattern', 'regex', 'regexp', 'format', 'validator',
   'validation', 'validators', 'field', 'label', 'placeholder', 'input', 'form', 'mode', 'prompt', 'message', 'msg', 'text', 'title', 'error', 'errors', 'help', 'requirements', 'options', 'config', 'settings',
   // ハッシュの方式・変更した人（passwordScheme・password_hasher・password_changed_by・passwordRounds）
-  'scheme', 'schemes', 'hasher', 'kdf', 'cost', 'rounds', 'iterations', 'by']);
+  'scheme', 'schemes', 'hasher', 'kdf', 'cost', 'rounds', 'iterations', 'by',
+  // password_salt は②（内部属性。INTERNAL_KEY）で数える（salt は秘密ではない）
+  'salt']);
 // 操作と password の2語の名前（forgotPassword・lostPassword：画面・API のパスを入れる）。resetPassword・changePassword・updatePassword は、
 // 管理者がリセットした仮のパスワードや、送ったパスワードを返す API があるので①のまま。resetAdminPassword・forgotPasswordToken も①のまま
 const PASSWORD_ACTION = new Set(['forgot', 'forgotten', 'lost', 'recover', 'show', 'toggle', 'request']);
@@ -260,8 +262,13 @@ const SECRET_KEY = { test: (path: string): boolean => {
   const j = words.join('_');
   if (words.length === 2 && PASSWORD_ACTION.has(words[0]) && /^pass(?:word|wd|phrase)$/.test(words[1])) return false;
   if (/(?:^|_)(?:api_?key|apikey)$/.test(j) && (words.some(w => PUBLIC_KEY_WORD.has(w)) || SEARCH_ONLY_KEY.test(j))) return false;
-  return words.some(w => w === 'password' || w === 'passwd' || w === 'passphrase')
-    || /(?:^|_)(?:pass_?hash|secret|api_?key|apikey|private_?key|secret_?key|secret_access_key|access_secret|otp_secret|mfa_secret)$/.test(j);
+  // Django のフォームの password1・password2・new_password1、db_pwd・user_pwd（pwd だけの名前は、環境変数の PWD（作業ディレクトリ）と区別できないので見ない）、
+  // WordPress の user_pass などのアカウントの _pass
+  return words.some(w => w === 'password' || w === 'passwd' || w === 'passphrase' || /^pass(?:word|wd)\d$/.test(w)) || (words.length > 1 && words.includes('pwd'))
+    || /(?:^|_)(?:pass_?hash|secret|api_?key|apikey|private_?key|secret_?key|secret_access_key|access_secret|otp_secret|mfa_secret)$/.test(j)
+    // Rails の secret_key_base・secret_token、Laravel の remember_token（APP_KEY は Pusher の公開の app_key と区別できないので見ない）、Rails の master_key、Supabase の service_role_key（service_role だけはロールの名前（"viewer"）と区別できないので見ない）
+    || /(?:^|_)(?:secret_key_base|secret_token|master_key|service_role_key|remember_token)$/.test(j)
+    || /^(?:user|db|database|smtp|mail|ftp|login|admin)_pass$/.test(j);
 } };
 /**
  * 状態を表す短い語・真偽値の文字列（{"password":"set"}、{"otp_secret":"configured"}、{"password":"true"}）。値を出していないので①にしない。

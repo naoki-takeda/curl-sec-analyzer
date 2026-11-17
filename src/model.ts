@@ -14,7 +14,7 @@ export interface HttpResponse {
   url?: string;                     // そのホップのリクエストのURL（HAR は記録から、curl はターゲットの URL から Location をたどって付ける）
 }
 export interface ParseWarning {
-  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'proxy-only';
+  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'proxy-only' | 'invalid-attr';
   detail: string;
   label?: string;                   // unknown-url：URLが分からないターゲットのラベル（画面のURL欄で補ったものだけ警告を消すため）
 }
@@ -29,6 +29,8 @@ export interface Target {
   /** 機密応答の推定（第0章 0.3②）：Authorization か、セッションCookieらしい名前の Cookie を送った。組織プロファイルの名前で engine/run.ts が作り直す */
   sentAuth: boolean;
   sentAuthorization?: boolean; sentCookieNames?: string[];   // 送った Authorization の有無と Cookie の名前（値は持たない。-v と HAR だけ）
+  /** ブラウザが自動で送る方式（Basic・Digest・Negotiate・NTLM）の Authorization を送った。Bearer はページのスクリプトが付けるので、クロスサイトで送られない（R-09） */
+  sentAutoAuth?: boolean;
   sentTokens: string[];             // -v の送信ヘッダにあったJWT。A-03 のデコードにだけ使い、画面・エクスポートには出さない
   meta: Record<string, string>; probes: Probe[]; tlsProbes: TlsProbe[]; cipherProbes: CipherProbe[]; openssl: string[];
 }

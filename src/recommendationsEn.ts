@@ -194,6 +194,9 @@ const EXACT: Record<string, string> = {
   'エラー応答を1つの形式（例：application/problem+json）にそろえる': 'Use one format for error responses (for example application/problem+json)',
   // ホスト単位・横断
   'apex ドメインもHSTS（includeSubDomains; preload）を返す': 'The apex domain must also send HSTS (includeSubDomains; preload)',
+  'apex の https の URL（https://apexドメイン/）で採取する': 'Capture the https URL of the apex domain (https://apex-domain/)',
+  'Cookie で認証しないなら乗っ取りにはならない。Origin の許可リストでの照合も行う': 'Without cookie authentication this is not hijackable; still check Origin against an allowlist',
+  '<meta name="referrer"> を削除するか strict-origin-when-cross-origin にする': 'Remove <meta name="referrer"> or set it to strict-origin-when-cross-origin',
   'nonce は応答ごとに新しい乱数で生成する': 'Generate a new random nonce for every response',
 };
 
@@ -207,6 +210,7 @@ Object.assign(EXACT, {
   '機密応答かどうか分からない': 'Unknown whether the response is sensitive',
   'ログイン前にセッションCookieが発行されていない': 'No session cookie was set before login',
   'CSPにnonceがない': 'The CSP has no nonce',
+  'CSPのスクリプトのディレクティブにnonceがない': 'The CSP script directives (script-src, script-src-elem, script-src-attr, default-src) have no nonce',
   '比較できるセッションCookieがない': 'No session cookies to compare',
   'HTTPのバージョンが分からない': 'Unknown HTTP version',
   'JSONを解析できない（64KBを超えて切れた可能性）': 'Cannot parse the JSON (it may have been cut off at 64 KB)',

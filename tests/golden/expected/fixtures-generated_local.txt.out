@@ -66,7 +66,7 @@ cors-reflect | R-01.ok | info | pass | (ACAOなし)
 cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）
 cors-reflect | R-04.ok | info | pass | (ACAOなし)
 crlf | T-08.ok | info | pass | 注入したヘッダは応答に現れない
-csp-sample-* | H-04.na | info | na | CSPにnonceがない
+csp-sample-* | H-04.na | info | na | CSPのスクリプトのディレクティブにnonceがない
 csp-sample-1 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 csp-sample-1 | H-01.1 | high | fail | (ヘッダなし)
 csp-sample-1 | H-02.na | info | na | HSTSがない（H-01で判定）
@@ -234,7 +234,7 @@ www.example.com | T-11.2 | medium | fail | 期限まで30日（notAfter: 2026-12
 H-01 | evaluated | fails=14
 H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
 H-03 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
-H-04 | missing-input | fails=0 | CSPにnonceがない
+H-04 | missing-input | fails=0 | CSPのスクリプトのディレクティブにnonceがない
 H-05 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
 H-06 | missing-input | fails=0 | 必要なラベル: （一般）, error-*
 H-07 | missing-input | fails=0 | 必要なラベル: （一般）, error-*

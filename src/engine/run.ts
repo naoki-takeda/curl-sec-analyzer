@@ -4,7 +4,7 @@
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
 import { showText } from '../shownText';
 import { targetKeys, urlKey } from './targetKey';
-import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isRedirectWithLocation, isSensitive, ownChain, responseKind } from '../parser/target';
+import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isRedirectWithLocation, isSensitive, ownChain, responseKind, siteResponses } from '../parser/target';
 import { looksLikeSession, parseSetCookie, sentAuthOf } from '../parser/setCookie';
 import { parseHsts } from '../rules/util';
 import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../rules/ruleset';
@@ -54,7 +54,8 @@ export function hostSameSiteMap(targets: Target[]): Map<string, boolean> {
   for (const t of targets) {
     const host = hostOf(t); if (!host) continue;
     const now = capturedAt(t);
-    for (const raw of t.responses.flatMap(r => r.headers.get('set-cookie') ?? [])) {
+    // 同じサイトの応答だけ（-L で転送した先の IdP などの Cookie の SameSite で、対象のホストを決めない。C-01〜C-07 と同じ siteResponses）
+    for (const raw of siteResponses(t).flatMap(r => r.headers.get('set-cookie') ?? [])) {
       const c = parseSetCookie(raw);
       if (!looksLikeSession(c, now)) continue;
       const ss = String(c.attrs.get('samesite') ?? '').toLowerCase();

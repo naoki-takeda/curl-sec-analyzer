@@ -2,7 +2,7 @@
 // - request.postData（ログインのパスワードなど）は読まない。本文は HTML と JSON の先頭64KBだけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
-import { cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
+import { autoAuthScheme, cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
 import { baseLabel } from './target';
 
@@ -24,6 +24,7 @@ export interface HarChain {
   responses: HttpResponse[];        // 各応答の url はそのホップのリクエストのURL（parser/target.ts の ownChain が使う）
   sentAuth: boolean;                // 一覧の表示用の推定（Authorization か、セッションCookieらしい名前の Cookie を送った）
   sentAuthorization: boolean; sentCookieNames: string[];   // 全ホップのリクエストで送った Authorization の有無と Cookie の名前（値は持たない）
+  sentAutoAuth?: boolean;           // ブラウザが自動で送る方式（Basic など）の Authorization を送った
   sentOrigin?: string;              // 最後のホップのリクエストで送った Origin（R-06：Origin を送らずに返した ACAO は固定の値。curl の -v と同じ）
   sentTokens: string[];             // Authorization・Cookie で送った JWT。A-03 のデコードにだけ使い、画面・エクスポートには出さない（curl の -v と同じ）
   at?: string;
@@ -132,12 +133,13 @@ export function importHar(text: string): HarImport {
     // 送った認証情報は全ホップのリクエストから見る。Secure の Cookie は https のホップでしか送らないため、最初の http のリクエストだけでは分からない
     const reqHeaders = hops.flatMap(h => named(h.request.headers));
     const sentAuthorization = reqHeaders.some(h => h.name.toLowerCase() === 'authorization');
+    const sentAutoAuth = reqHeaders.some(h => h.name.toLowerCase() === 'authorization' && autoAuthScheme(String(h.value ?? '')));
     const sentCookieNames = [...new Set(reqHeaders.filter(h => h.name.toLowerCase() === 'cookie').flatMap(h => cookieNames(String(h.value ?? ''))))];
     const sentAuth = sentAuthOf(sentAuthorization, sentCookieNames);
     if (sentAuthorization || sentCookieNames.length || hops.some(h => named(h.response.headers).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
     chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(h => ({ ...toResponse(h), url: h.request.url })),
-      sentAuth, sentAuthorization, sentCookieNames, sentTokens: jwtsIn(reqHeaders), at: e.startedDateTime,
+      sentAuth, sentAuthorization, sentAutoAuth, sentCookieNames, sentTokens: jwtsIn(reqHeaders), at: e.startedDateTime,
       sentOrigin: named(cur.request.headers).find(h => h.name.toLowerCase() === 'origin')?.value?.toString().trim() || undefined,
       // 304（ブラウザのキャッシュの再検証）は、サーバがセキュリティヘッダを付け直さなくてよい応答（RFC 9110 15.4.5）。
       // 通常の応答として判定すると H-01①（高）などの誤検知になるので、既定で除外する（画面でラベルを選べば判定する）
@@ -200,7 +202,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ（parser/target.ts の ownChain）
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
       // 送った認証情報の推定は、組織プロファイルのセッションCookieの名前で作り直す（Worker の中ではプロファイルが分からない）
-      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentOrigin: c.sentOrigin, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens.filter(tok => !tokensSeen.has(tok) && !!tokensSeen.add(tok)), info: [],
+      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentAutoAuth: c.sentAutoAuth, sentOrigin: c.sentOrigin, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens.filter(tok => !tokensSeen.has(tok) && !!tokensSeen.add(tok)), info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });

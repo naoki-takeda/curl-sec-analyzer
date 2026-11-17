@@ -3,7 +3,7 @@ import type { Rule, RuleContext } from '../model';
 import { LOGOUT_FAILED_REC, NO_BODY_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, parseHsts, sensitiveUnlessStatic, splitPolicies } from './util';
 import { clip, maskValue } from '../mask';
 import { baseLabel, firstStatus, logoutFailed, ownChain, siteResponses } from '../parser/target';
-import { htmlBody, metaCspPolicies, mixedContent } from './html';
+import { htmlBody, metaCspPolicies, mixedContent, tags } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
 /**
@@ -40,7 +40,9 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
     const ro = header(ctx, 'content-security-policy-report-only');
     const rec = "Content-Security-Policy: default-src 'self'; script-src 'nonce-…' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
     // ヘッダがなくても <meta http-equiv> の CSP があれば、ブラウザは強制するので①②にしない（frame-ancestors などは meta では効かないことを証跡に書く）
-    const meta = rawEnforce.length ? [] : metaCspPolicies(ctx);
+    // ヘッダがあっても、どのポリシーにもディレクティブがない（空の Content-Security-Policy: ）なら、効くのは meta の CSP だけ（③にしない）
+    const headerEffective = rawEnforce.some(v => splitPolicies([v]).some(p => parseCsp(p).size > 0));
+    const meta = headerEffective ? [] : metaCspPolicies(ctx);
     if (meta.length) return [mk(cspPresence, ctx, 'ok', 'info', 'pass', `<meta http-equiv> の CSP: ${meta.join(' / ')}（frame-ancestors・report-uri・sandbox は meta では効かない）`, '')];
     // ヘッダがなく本文も採取していない（-D - -o /dev/null、-v）なら、<meta> の CSP があるかが分からないので①にしない（同じ URL を -i で採取すると
     // meta の CSP で合格になり、採取の方法で結果が食い違った）
@@ -104,7 +106,12 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
     if (!ctx.final) return [mk(cacheControl, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (NO_CONTENT(ctx)) return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const cc = header(ctx, 'cache-control').join(', ').toLowerCase();
-    const dirs = new Set(cc.split(',').map(s => s.trim().split('=')[0]).filter(Boolean));
+    // カンマで区切る（引用符の中のカンマ（private="Set-Cookie, X-A"）では区切らない）
+    const parts = (cc.match(/(?:[^,"]|"[^"]*"?)+/g) ?? []).map(s => s.trim()).filter(Boolean);
+    const dirs = new Set(parts.map(s => s.split('=')[0].trim()));
+    // 値のある private（private="Set-Cookie"）は、仕様では、そのヘッダだけを除いて共有キャッシュに本文を保存してよい指定（RFC 9111 5.2.2.7）。
+    // ただし多くのキャッシュは値を無視して値のない private として扱う（同じ節の注記）ので、②のまま証跡に書く
+    const qualifiedPrivate = parts.some(p => /^private\s*=/.test(p));
     const ev = cc || (header(ctx, 'pragma').length ? `(Cache-Controlなし、Pragma: ${header(ctx, 'pragma')[0]})` : '(ヘッダなし)');
     const isStatic = isStaticResource(ctx);
     if (dirs.has('no-store')) return [mk(cacheControl, ctx, 'ok', 'info', 'pass', cc, '')];
@@ -128,7 +135,7 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
       if (isStatic && !cc) return [limited(mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する'))];
       return [limited(mk(cacheControl, ctx, 'ok', 'info', 'pass', ev || '(機密でない応答)', ''))];
     }
-    if (dirs.has('private') && !dirs.has('public')) return [mk(cacheControl, ctx, 2, 'medium', 'fail', ev, 'Cache-Control: no-store')];
+    if (dirs.has('private') && !dirs.has('public')) return [mk(cacheControl, ctx, 2, 'medium', 'fail', qualifiedPrivate ? `${ev}（値のある private は、仕様では本文を共有キャッシュに保存してよい）` : ev, 'Cache-Control: no-store')];
     return [mk(cacheControl, ctx, 1, 'high', 'fail', ev, 'Cache-Control: no-store')];
   } };
 
@@ -219,6 +226,10 @@ export const cspObjectBase: Rule = { id: 'H-05', title: 'CSP：object-src・base
     else if (obj) out.push(mk(cspObjectBase, ctx, 1, 'medium', 'fail', issueEvidence(obj), "object-src 'none'"));
     // ②：base-uri は default-src にフォールバックしないため、常に確認する
     if (!ps.some(p => p.has('base-uri'))) out.push(mk(cspObjectBase, ctx, 2, 'medium', 'fail', 'base-uri がない（default-src にはフォールバックしない）', "base-uri 'none'（または 'self'）"));
+    // csp_evaluator が解析できなかったポリシーがあれば、object-src の問題を見逃しているかもしれないので合格にしない（H-04 と同じ）
+    // ただし object-src 'none' と base-uri のあるポリシーが1つでもあれば、ほかのポリシーによらず満たしている（ポリシーは重ねて効く）
+    const solid = ps.some(p => p.get('object-src')?.join(' ') === "'none'" && p.has('base-uri'));
+    if (!out.length && !solid && unevaluated(ctx)) return [mk(cspObjectBase, ctx, 'na', 'info', 'na', 'csp_evaluator で解析できないポリシーがある（H-07④）', '')];
     return out.length ? out : [mk(cspObjectBase, ctx, 'ok', 'info', 'pass', 'object-src・base-uri あり', '')];
   } };
 
@@ -248,9 +259,26 @@ export const referrerPolicy: Rule = { id: 'H-09', title: 'Referrer-Policy', appl
   basis: ['MDN', 'OWASP HTTP Headers CS'],
   run(ctx) {
     if (!ctx.final) return [mk(referrerPolicy, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const raw = header(ctx, 'referrer-policy').join(',');
-    if (!raw) return [mk(referrerPolicy, ctx, 3, 'info', 'fail', '(ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)', 'Referrer-Policy: strict-origin-when-cross-origin')];
+    // <meta name="referrer"> は、文書の方針をその位置から上書きする（ヘッダが no-referrer でも meta の unsafe-url が効く。meta より前に読み込んだ
+    // 画像・スクリプトにはヘッダや前の meta の方針が効く）。ヘッダと、<script> などの中身・<template> の中でない meta のうち、最も弱いもので判定する
+    // （最後の meta だけで見ると、スクリプトの文字列の meta や、本文の最後の meta で合格にできた）。古い値（never・always・default・
+    // origin-when-crossorigin）は HTML の仕様どおりに読み替える
+    const LEGACY: Record<string, string> = { never: 'no-referrer', always: 'unsafe-url', default: 'strict-origin-when-cross-origin', 'origin-when-crossorigin': 'origin-when-cross-origin' };
     const known = [...RP_GOOD, ...RP_WEAK, 'unsafe-url'];
+    const lastKnown = (v: string) => v.toLowerCase().split(',').map(s => s.trim()).map(s => LEGACY[s] ?? s).filter(s => known.includes(s)).at(-1);
+    const html = htmlBody(ctx);
+    const metas = html ? tags(html, ['meta']).filter(t => !t.inert && t.attrs.get('name')?.toLowerCase() === 'referrer')
+      .map(t => lastKnown(t.attrs.get('content') ?? '')).filter((v): v is string => !!v) : [];
+    const raw = header(ctx, 'referrer-policy').join(',');
+    if (metas.length) {
+      const all = [...(lastKnown(raw) ? [lastKnown(raw)!] : []), ...metas];
+      const worst = all.includes('unsafe-url') ? 'unsafe-url' : all.find(v => RP_WEAK.includes(v)) ?? metas[0];
+      const ev = `${metas.map(v => `<meta name="referrer" content="${v}">`).join(' ')}${raw ? `（ヘッダ: ${raw}）` : ''}`;
+      if (worst === 'unsafe-url') return [mk(referrerPolicy, ctx, 1, 'medium', 'fail', ev, '<meta name="referrer"> を削除するか strict-origin-when-cross-origin にする')];
+      if (RP_WEAK.includes(worst)) return [mk(referrerPolicy, ctx, 2, 'low', 'fail', ev, '<meta name="referrer"> を削除するか strict-origin-when-cross-origin にする')];
+      return [mk(referrerPolicy, ctx, 'ok', 'info', 'pass', ev, '')];
+    }
+    if (!raw) return [mk(referrerPolicy, ctx, 3, 'info', 'fail', '(ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)', 'Referrer-Policy: strict-origin-when-cross-origin')];
     const toks = raw.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
     const eff = toks.filter(t => known.includes(t)).at(-1);         // 認識できる最後の値が有効
     if (!eff) return [mk(referrerPolicy, ctx, 4, 'low', 'fail', raw, 'Referrer-Policy: strict-origin-when-cross-origin')];
