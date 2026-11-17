@@ -181,9 +181,10 @@ describe('#META cmd= のコマンド（summarizeCommand）の性質', () => {
       for (const [, t] of c.secrets) expect(leaks(out, t), `${s}\n→ ${out}`).toBeUndefined();
       // 秘密を持たない URL は残す（値のないヘッダのあとの URL を、ヘッダの値として伏せない）。前に値を取るオプションがあると、その値になりうるので見ない。
       // 空白で区切ったものだけを見る。「_」で区切った書き方では、URL・ua/1.0 のパスの部分やクエリの値が後ろの引数まで続く
-      // （伏せすぎで、漏れはしない。第28回の「未対応」）。前にクエリのある URL があるときも見ない
+      // （伏せすぎで、漏れはしない。第28回の「未対応」）。前にクエリのある URL があるときも見ない。
+      // URL のあとに @ があるとき（https://alice:…@a.example/ をあとに置いたもの）は、ユーザー情報の途中で切れた URL と見分けないので伏せる（第33回）
       const i = s.indexOf('https://a.example/login');
-      if (c.sep === ' ' && i > 0 && !/[?&]/.test(s.slice(0, i)) && /(?:^|[\s_])(?:curl|curl\.exe|\\curl\.exe)[\s_]$|[\s_]-H[\s_](?:Authorization|Cookie):[\s_]$|[\s_]-(?:sS|L|k|i|v)[\s_]$|--(?:compressed|http1\.1)[\s_]$|(?:POST|10|ua\/1\.0|\*\/\*|out\.txt|%\{http_code\})[\s_]$/.test(s.slice(0, i)))
+      if (c.sep === ' ' && i > 0 && !s.slice(i).includes('@') && !/[?&]/.test(s.slice(0, i)) &&/(?:^|[\s_])(?:curl|curl\.exe|\\curl\.exe)[\s_]$|[\s_]-H[\s_](?:Authorization|Cookie):[\s_]$|[\s_]-(?:sS|L|k|i|v)[\s_]$|--(?:compressed|http1\.1)[\s_]$|(?:POST|10|ua\/1\.0|\*\/\*|out\.txt|%\{http_code\})[\s_]$/.test(s.slice(0, i)))
         expect(out, `${s}\n→ ${out}`).toContain('https://a.example/login');
     }), { numRuns: 1000 * MULT });
   });

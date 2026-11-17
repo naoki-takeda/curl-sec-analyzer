@@ -38,11 +38,18 @@ const METER_PREFIX = new RegExp(String.raw`${METER}(?=(?:< )?HTTP\/[\d.]+ \d{3}|
 // key=value を解析。ct= 以降は行末まで1つの値（空白を含むContent-Type対策）
 export function attrs(s: string): Record<string, string> {
   const out: Record<string, string> = {};
+  const line = s;
   const ct = s.match(/(?:^|\s)ct=(.*)$/);
   if (ct) { out.ct = ct[1].trim(); s = s.slice(0, ct.index); }
   // 値は引用符で囲んでもよい（url="https://…"、label="top page"）。引用符をそのまま値にすると、url が URL として読めず、警告なしで
   // HTTPS ではないものとして扱った
-  for (const m of s.matchAll(/(?:^|\s)([^\s=]+)=(?:"([^"]*)"|'([^']*)'|(\S*))/g)) out[m[1]] = m[2] ?? m[3] ?? m[4] ?? '';
+  for (const m of s.matchAll(/(?:^|\s)([^\s=]+)=(?:"([^"]*)"|'([^']*)'|(\S*))/g)) {
+    out[m[1]] = m[2] ?? m[3] ?? m[4] ?? '';
+    // cmd= の値が引用符・空白で切れ、行のあとに @ が残ったもの（cmd="curl 'https://first.last:'"$PASS"'@host/'"）は、値の終わりに「 @」を付ける。
+    // CSV の実施コマンドの要約は、URL のあとの @ で URL を伏せる（export/cmdSummary.ts）。付けないと、ユーザー情報の終わりの @ が値から外れ、
+    // 切れる前のユーザー名と数字のパスワードがホストとポートとして出た（第33回）
+    if (m[1] === 'cmd' && line.slice(m.index + m[0].length).includes('@')) out.cmd += ' @';
+  }
   return out;
 }
 

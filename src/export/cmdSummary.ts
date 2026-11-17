@@ -13,7 +13,7 @@
 // このファイルは mask.ts を読み込まない（tests/cmd-summary.test.ts で確かめる）
 import { urlKey } from '../engine/targetKey';
 
-const ID = /^(?:C\d{1,2}|HAR|-)$/;
+const ID = /^(?:C(?:[1-9]|1\d|2[0-6])|HAR|-)$/;   // コマンド生成器の C1〜C26 だけ（C0・C99 を通さない）
 type Family = 'curl' | 'wget' | 'httpie' | 'openssl' | 'ps' | 'other';
 const FAMILY: Record<string, Family> = {
   curl: 'curl', wget: 'wget', http: 'httpie', https: 'httpie', xh: 'httpie', xhs: 'httpie', httpie: 'httpie', openssl: 'openssl',
@@ -110,13 +110,24 @@ const NAME_SHAPE = /^(?=.{1,40}$)[A-Za-z]+(?:[0-9][0-9.]{0,3}[A-Za-z]{0,2})?(?:[
 const nameLike = (x: string) => NAME_SHAPE.test(x) && x.split(/[-_.\d]+/).every(p => p.length <= 24 && (p.match(/[a-z]+|[A-Z]+/g) ?? []).length <= 4);
 const MAX = 200;
 
-/** 1つの語。引用符で囲んだもの、URL（「_」を含む）、それ以外（空白と「_」で区切る）。閉じない引用符で残り全部を取らないよう、行の中に限る */
+/**
+ * 1つの語。引用符で囲んだもの、URL（「_」を含む）、それ以外。閉じない引用符で残り全部を取らないよう、行の中に限る（"…" の中の \" でも閉じる。
+ * \" で閉じないようにすると、閉じない引用符と \" の繰り返しで、引用符ごとに行の終わりまで読み、入力の長さの2乗の時間がかかった）。
+ * 空白で区切ったコマンドでは「_」で区切らない（値の Bearer_abc_-iLkvH… を「_」で分けると、かけら -iLkvH をオプションとして出した）。
+ * 空白を含まないコマンド（#META の値）だけ、「_」を区切りとする
+ */
 // URL は、空白・引用符・次のオプション（_-）・次の URL・シェルの区切り（_|）・httpie のヘッダとクエリの項目（_Name:・_api_key==）の前まで。
 // 「_name=」では止めない（?access_token=… の「_token=」で止まり、クエリの名前が切れた）。環境変数の指定（HTTPS_PROXY=…・https_proxy=…）と
 // httpie の項目（api_key==…）、openssl の s_client・-tls1_2 は、名前に「_」を含むので1つの語として読む。
 // 繰り返しは長さを区切る（区切らないと、「A_」の繰り返しで語の始まりごとに終わりまで読み、入力の長さの2乗の時間がかかった）
 const URL_SCHEME = String.raw`(?:[hH][tT][tT][pP][sS]?|[wW][sS][sS]?|[fF][tT][pP])`;
 const URL_STOPS = String.raw`-|(?:https?|wss?|ftp):|[|;<>]|&&|[A-Za-z][\w-]{0,40}(?::|==)`;
+/**
+ * ユーザー情報（@ まで）。「_」を含むもの（svc_account:…@）も読む。「_」で区切ったコマンドで「_」を含むユーザー情報は、次の引数（_-u_・_-d_・
+ * _email=・_cv@・_2>）を越えて読んだものと見分けられないので、URL を **** にする（cutInUserinfo）。越えないように読むと、ユーザー情報の中の「_-x」で
+ * 切れて、ユーザー名と数字のパスワードがホストとポートとして出た（curl_https://john.doe:2024_-x@…）
+ */
+const USERINFO = String.raw`(?:[^\s/?#@]{0,200}@)?`;
 /**
  * 空白を含まないコマンド（#META の値は空白を入れられないので「_」で区切る）では、URL のパスの部分を「_」で終える。「_」で区切った URL のあとの値
  * （login__w-2-bL_…）がパスの続きとして読まれ、キーの形でも英字・数字のかけらが残った。パスに「_」を含む URL（/api/user_info）は
@@ -128,28 +139,49 @@ const buildToken = (underscoreForm: boolean) => new RegExp([
   // クエリ（? のあと）では止めない（?access_token=… の「_token=」で止まり、クエリの名前が切れた。クエリの値はキーに残らない）
   // ユーザー情報（@ まで）は先に読む（「_」「\」を含むユーザー名 svc_account:…@ で URL が切れ、前半がホストとして出た）
   underscoreForm
-    ? String.raw`${URL_SCHEME}:\/\/(?:[^\s/?#@]{0,200}@)?[^\s"'?#_]*(?:[?#][^\s"']*?(?=[\s"']|_(?:${URL_STOPS})|$))?`
-    : String.raw`${URL_SCHEME}:\/\/(?:[^\s/?#@]{0,200}@)?[^\s"'?#]*?(?:(?=[\s"']|_(?:${URL_STOPS}|[A-Za-z][\w-]{0,40}=)|$)|[?#][^\s"']*?(?=[\s"']|_(?:${URL_STOPS})|$))`,
+    ? String.raw`${URL_SCHEME}:\/\/${USERINFO}[^\s"'?#_]*(?:[?#][^\s"']*?(?=[\s"']|_(?:${URL_STOPS})|$))?`
+    : String.raw`${URL_SCHEME}:\/\/${USERINFO}[^\s"'?#]*?(?:(?=[\s"']|_(?:${URL_STOPS}|[A-Za-z][\w-]{0,40}=)|$)|[?#][^\s"']*?(?=[\s"']|_(?:${URL_STOPS})|$))`,
   String.raw`[A-Za-z][A-Za-z0-9]{0,40}(?:_[A-Za-z0-9]{1,40}){1,6}(?:==|:=|=)[^\s_]*`,
   String.raw`s_(?:client|server|time)(?![A-Za-z])`, String.raw`-(?:no_)?tls1_[1-3](?![\w-])`,
   String.raw`-(?:verify_return_error|sess_out|sess_in|ign_eof|ocsp_uri|legacy_renegotiation)(?![\w-])`,
-  String.raw`[^\s_]+`,
+  underscoreForm ? String.raw`[^\s_"']+` : String.raw`[^\s"']+`,
 ].join('|'), 'y');
 const TOKEN_SPACED = buildToken(false);
 const TOKEN_UNDERSCORE = buildToken(true);
-const SEP = /[\s_]+/y;
+const SEP_SPACED = /\s+/y;
+const SEP_UNDERSCORE = /[\s_]+/y;
 
-/** 語を順に返す（出力が上限を超えたら、それ以上は読まない） */
-function* tokenize(s: string): Generator<string> {
-  const TOKEN = /\s/.test(s) ? TOKEN_SPACED : TOKEN_UNDERSCORE;
+/** 語と、語の終わりの位置を順に返す（出力が上限を超えたら、それ以上は読まない） */
+function* tokenize(s: string, underscoreForm: boolean): Generator<[string, number]> {
+  const TOKEN = underscoreForm ? TOKEN_UNDERSCORE : TOKEN_SPACED;
+  const SEP = underscoreForm ? SEP_UNDERSCORE : SEP_SPACED;
   let i = 0;
   while (i < s.length) {
     SEP.lastIndex = i; const sep = SEP.exec(s); if (sep) { i += sep[0].length; continue; }
     TOKEN.lastIndex = i; const t = TOKEN.exec(s);
-    if (!t || !t[0]) { yield s[i]; i++; continue; }   // 閉じていない引用符の1文字など
-    yield t[0]; i += t[0].length;
+    // 閉じていない引用符は区切りとして読み飛ばす（引用符から「_」までを1つの語として URL と読むと、"https://john.doe_svc:…@ のユーザー名を
+    // ホストとして出した。読み飛ばすと、次の位置から URL をユーザー情報ごと読む）
+    if (!t || !t[0]) { if (!/["']/.test(s[i])) yield [s[i], i + 1]; i++; continue; }
+    i += t[0].length; yield [t[0], i];
   }
 }
+
+/**
+ * URL のユーザー情報の途中で切れたかもしれない URL（**** にする）：URL の始まりから、コマンドの値（#META cmd= の1つの値）の終わりまでに @ があるもの。
+ * ただし、URL の語の中のユーザー情報の @ が1つだけのもの（https://alice:pw@host/）は除く。
+ * URL は引用符・\"・\ ・・・改行・閉じない引用符・「_」・200文字を超えるユーザー情報などで、ユーザー情報の途中で切れる。切れると、切れる前のユーザー名と
+ * 数字のパスワードがホストとポートに見える（'https://first.last:'"$PASS"'@host/・https://first.last:1234・abc@host/）。切れ方を数え上げて見分ける作りは、
+ * 第33回のコミット前のレビューで3回続けて別の切れ方が見つかった。ユーザー情報の終わりの @ は、どこで切れても必ず URL のあとにあるので、@ があるかだけを見る。
+ * @ のあとに値を書いた URL（?email=alice@example.com、/@alice、-u alice@corp のあとの URL ではない、前の URL）も **** になる（伏せすぎを選ぶ）。
+ * 「_」で区切ったコマンドで「_」を含むユーザー情報も、次の引数（_-u_・_email=・_cv@）を越えて読んだものと見分けられないので **** にする
+ */
+const ambiguousUrl = (t: string, start: number, end: number, lastAt: number, underscoreForm: boolean): boolean => {
+  const u = unquote(t).replace(/^[A-Za-z][\w+.-]*:\/\//, '');
+  const userinfo = u.match(/^([^\s/?#@]*)@/);
+  if (underscoreForm && userinfo?.[1].includes('_')) return true;
+  if (lastAt < start) return false;
+  return !(lastAt < end && /^[^\s/?#@]*@[^@]*$/.test(u));
+};
 
 const unquote = (t: string) => t.replace(/^["']|["']$/g, '');
 const programName = (t: string): string => unquote(t).split(/[\\/]/).pop()!.replace(/\.exe$/i, '').toLowerCase();
@@ -190,13 +222,14 @@ const url = (raw: string): string => {
  * それ以外は ****。形だけで判断すると、値のかけら「_-H」のあとのユーザー名（-H alice:x）をヘッダの名前として出した
  */
 const HEADER_PREFIX = /^(?:x|sec|accept|content|if|access-control-request|cf|cdn|ocp-apim|proxy)-/i;
-const headerName = (n: string) => nameLike(n) && (HTTPIE_HEADERS.has(n.toLowerCase()) || (HEADER_PREFIX.test(n) && n.includes('-') && n.length > 2));
+// 「_」を含む名前（X-Foo_Bar）は出さない（「_」で区切って読むと、もう一度かけたときに結果が変わった）
+const headerName = (n: string) => !n.includes('_') && nameLike(n) && (HTTPIE_HEADERS.has(n.toLowerCase()) || (HEADER_PREFIX.test(n) && n.includes('-') && n.length > 2));
 const header = (t: string): string => {
   const inner = unquote(t);
   const m = inner.match(/^([^:\s]+):/);
   return m && headerName(m[1]) ? `${m[1]}:${inner.length > m[0].length ? '****' : ''}` : '****';
 };
-/** 短いオプションのまとめ書き：決まった文字だけ（値を取らない文字を5文字まで、同じ文字は1回）。値を取る文字の後ろは **** */
+/** 短いオプションのまとめ書き：決まった文字だけ（値を取らない文字を4文字まで、同じ文字は1回）。値を取る文字の後ろは **** */
 const shortOption = (t: string, fam: Family): { text: string; takesValue: boolean } => {
   const [flags, withValue] = SHORT[fam];
   const body = t.slice(1); let k = 0; const seen = new Set<string>();
@@ -205,15 +238,23 @@ const shortOption = (t: string, fam: Family): { text: string; takesValue: boolea
   while (k < body.length && k < most && flags.includes(body[k]) && !seen.has(body[k])) seen.add(body[k++]);
   if (k < body.length && withValue.includes(body[k])) {
     const name = `-${body.slice(0, k + 1)}`;
-    return k + 1 < body.length ? { text: `${name}****`, takesValue: false } : { text: name, takesValue: true };
+    // 値を続けて書いたもの（-ualice:pw）は、値を取る文字1つのときだけ名前を出す（-ILkT…・-iLkvH… のようなトークンのかけらの文字を出さない）
+    if (k + 1 < body.length) return { text: k === 0 ? `${name}****` : '****', takesValue: false };
+    return { text: name, takesValue: true };
   }
   if (k === 0 || k < body.length) return { text: '****', takesValue: false };
   return { text: `-${body}`, takesValue: false };
 };
 
 /** 1つのコマンド（・・改行で区切ったもの）を要約する */
-function summarizeOne(raw: string): string {
+function summarizeOne(raw: string, lastAt: number): string {
   const s = raw.trim();
+  // 空白を含まないコマンド（引用符の中の空白は数えない。数えると、curl_-H_"X-Note: a b"_https://… を空白で区切ったコマンドと読み、「_」で区切らずに
+  // すべて **** にした）
+  const underscoreForm = !/\s/.test(s.replace(/"[^"\n]*"|'[^'\n]*'/g, ''));
+  // 最後の @ の位置（s の中の位置にする。s は raw の先頭の空白を除いたもの）
+  const at = lastAt - (raw.length - raw.trimStart().length);
+  const urlAt = (t: string, end: number) => (ambiguousUrl(t, end - t.length, end, at, underscoreForm) ? '****' : url(unquote(t)));
   if (!s) return '';
   if (ID.test(s)) return s;
   const out: string[] = []; let len = 0;
@@ -223,7 +264,7 @@ function summarizeOne(raw: string): string {
     if (merge && x === '****' && out[out.length - 1]?.endsWith('****')) return;
     out.push(x); len += x.length + 1;
   };
-  for (const t of tokenize(s)) {
+  for (const [t, end] of tokenize(s, underscoreForm)) {
     if (len > MAX) break;
     if (t === '…') { push('…'); continue; }   // 切り詰めの印（もう一度かけても変わらないように残す）
     if (OPERATOR.test(t)) { push(t); atProgram = true; expect = undefined; continue; }
@@ -248,12 +289,12 @@ function summarizeOne(raw: string): string {
     }
     if (expect) {
       const e = expect; expect = undefined;
-      if (/^["']?(?:https?|wss?|ftp):\/\//i.test(t)) { push(url(unquote(t))); continue; }
+      if (/^["']?(?:https?|wss?|ftp):\/\//i.test(t)) { push(urlAt(t, end)); continue; }
       if (e === 'header') { push(header(t)); continue; }
       if (e === 'method' && METHODS.test(t) && /^[A-Za-z]+$/.test(t)) { push(t); continue; }
       push('****'); continue;
     }
-    if (/^["']?(?:https?|wss?|ftp):\/\//i.test(t)) { push(url(unquote(t))); continue; }
+    if (/^["']?(?:https?|wss?|ftp):\/\//i.test(t)) { push(urlAt(t, end)); continue; }
     if (METHODS.test(t) && /^[A-Za-z]+$/.test(t)) { push(t); continue; }
     if (prog === 'openssl' && SUBCOMMANDS.test(t)) { push(t); continue; }
     // 長いオプション（--name、--name=値。PowerShell・openssl は -Name）
@@ -297,9 +338,23 @@ function summarizeOne(raw: string): string {
 }
 
 /** #META cmd= の値を要約する（・と改行で区切ったコマンドごと。区切りの「・」は残す） */
-export const summarizeCommand = (s: string): string =>
-  s.split(/・|\r?\n/).map(summarizeOne).filter(Boolean).join('・');
+export const summarizeCommand = (s: string): string => {
+  // コマンドごとに、値の中の最後の @ の位置を渡す（・・改行がユーザー情報の中にあっても、あとの @ で URL を伏せるように）
+  const lastAt = s.lastIndexOf('@');
+  const out: string[] = []; const sep = /・|\r?\n/g; let start = 0;
+  for (;;) {
+    const m = sep.exec(s); const stop = m ? m.index : s.length;
+    const one = summarizeOne(s.slice(start, stop), lastAt - start);
+    if (one) out.push(one);
+    if (!m) break;
+    start = m.index + m[0].length;
+  }
+  return out.join('・');
+};
 
-/** #META at= の値：日時の形だけをそのまま出し、それ以外は **** */
-const DATE_TIME = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)?(?:Z|[+-]\d{2}:?\d{2})?$/;
-export const summarizeAt = (s: string): string => (!s ? '' : DATE_TIME.test(s.trim()) ? s.trim() : '****');
+/**
+ * #META at= の値：ありうる日時だけをそのまま出し、それ以外は ****。年は1900〜2099、月・日・時・分・秒と時差（±14時間、分は00・15・30・45）は
+ * 範囲の中だけ（形だけを見ると、9999-99-99 や 4111-11-11T11:11:11.111111+1111 のような任意の数字を出した）。秒の小数は3桁までにする
+ */
+const DATE_TIME = /^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?)?(?:Z|[+-](?:0\d|1[0-4]):?(?:00|15|30|45))?$/;
+export const summarizeAt = (s: string): string => (!s ? '' : DATE_TIME.test(s.trim()) ? s.trim().replace(/(\.\d{3})\d+/, '$1') : '****');
