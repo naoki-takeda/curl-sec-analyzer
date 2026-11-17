@@ -1,0 +1,72 @@
+#TARGET url=https://www.example.com/api/me label=cors-reflect sensitive=1
+#META at=2026-11-01T10:00:00 cmd=C6
+* Connected to www.example.com (192.0.2.1) port 443
+> GET /api/me HTTP/2
+> Host: www.example.com
+> Origin: https://evil.example
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: https://evil.example
+< access-control-allow-origin: https://evil.example
+< access-control-allow-credentials: true
+<
+
+#TARGET url=https://www.example.com/api/me label=cors-null sensitive=1
+#META at=2026-11-01T10:00:00 cmd=C7
+* Connected to www.example.com (192.0.2.1) port 443
+> GET /api/me HTTP/2
+> Host: www.example.com
+> Origin: null
+>
+< HTTP/2 200
+< content-type: application/json
+< access-control-allow-origin: null
+< access-control-allow-credentials: TRUE
+<
+
+#TARGET url=https://www.example.com/mypage label=mypage sensitive=1
+#META at=2026-11-01T10:00:00 cmd=C2
+* Connected to www.example.com (192.0.2.1) port 443
+> GET /mypage HTTP/2
+> Host: www.example.com
+>
+< HTTP/2 200
+HTTP/2 200
+< content-type: text/html; charset=utf-8
+content-type: text/html; charset=utf-8
+< cross-origin-resource-policy: cross-origin
+cross-origin-resource-policy: cross-origin
+< cross-origin-opener-policy: unsafe-none
+cross-origin-opener-policy: unsafe-none
+< set-cookie: sessionid=AbCdEf0123456789CANARYmy01234; Path=/; Max-Age=3600; Expires=Thu, 01 Jan 1970 00:00:00 GMT
+set-cookie: sessionid=AbCdEf0123456789CANARYmy01234; Path=/; Max-Age=3600; Expires=Thu, 01 Jan 1970 00:00:00 GMT
+<
+
+<p>x</p>
+
+#TARGET url=https://example.com/ label=page
+#META at=2026-11-01T10:00:00 cmd=C2
+HTTP/1.1 301 Moved Permanently
+location: https://www.example.com/
+
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><script src="https://www.example.com/wp-includes/js/jquery.min.js"></script><script src="https://cdn.other.example/x.js"></script></html>
+
+#TARGET url=https://www.example.com/api/me label=unauth-api
+#META at=2026-11-01T10:00:00 cmd=C2
+HTTP/2 200
+content-type: application/json
+
+{"success":false,"error":"Unauthorized","message":"Please log in"}
+
+#TARGET url=https://www.example.com/ label=tls
+#META at=2026-11-01T10:00:00 cmd=C11・C12・C23
+#TLSPROBE v=tls1 ok=err
+#TLSPROBE v=tls1_1 ok=0
+#TLSPROBE v=tls1_2 ok=1
+#TLSPROBE v=tls1_3 ok=1
+#CIPHERPROBE c=DES-CBC-SHA ok=1
+#CIPHERPROBE c=AES128-SHA ok=1

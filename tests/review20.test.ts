@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { applySuppressions } from '../src/engine/suppress';
 import { isCurrentKey, urlKey } from '../src/engine/targetKey';
 import { isDeletion, parseSetCookie } from '../src/parser/setCookie';
+import { parseProfile } from '../src/engine/profile';
+import { importHar } from '../src/parser/har';
+import { parseInput } from '../src/parser/input';
+import { messageEn } from '../src/messagesEn';
 import type { Finding } from '../src/model';
 import { evaluate } from './helpers';
 
@@ -76,5 +80,97 @@ describe('4 T-09：旧バージョンの一部が ok=err なら合格にしな�
   it('どちらも拒否されたら合格、どちらかで接続できたら①（確認用）', () => {
     expect(tls('0', '0')).toContain('T-09.ok');
     expect(tls('err', '1')).toContain('T-09.1');
+  });
+});
+
+// ---- 中程度の指摘 ----
+
+describe('5 端末で採取した curl -iv（-v の「< 」の行と -i の行が交互に並ぶ）', () => {
+  const lines = ['#TARGET url=https://a.example/ label=top', AT, '* Connected to a.example (192.0.2.1) port 443', '> GET / HTTP/2', '> Host: a.example', '>',
+    '< HTTP/2 200', 'HTTP/2 200', '< content-type: text/html', 'content-type: text/html', '< set-cookie: sessionid=AbCdEf0123456789AbCdEf0123456789; Path=/',
+    'set-cookie: sessionid=AbCdEf0123456789AbCdEf0123456789; Path=/', '<', '', '<p>x</p>', ''];
+  it('応答は1つで、ヘッダは二重にならない', () => {
+    const t = parseInput(lines.join('\n')).targets[0];
+    expect(t.responses.map(r => [r.status, r.kind])).toEqual([[200, 'final']]);
+    expect(t.responses[0].headers.get('set-cookie')).toHaveLength(1);
+  });
+  it('C-06 を2回出さない', () => {
+    expect(evaluate(lines.join('\n')).ids('top').filter(x => x === 'C-06.1')).toHaveLength(1);
+  });
+});
+
+describe('6 E-08・E-09 は、-L の転送先（HTML を返したページ）のホストと比べる', () => {
+  const page = (script: string) => evaluate(['#TARGET url=https://a.example/ label=page', AT,
+    'HTTP/1.1 301 Moved Permanently', 'location: https://www.a.example/', '', 'HTTP/2 200', 'content-type: text/html', '',
+    `<html><script src="${script}"></script></html>`, ''].join('\n')).ids('page').filter(x => x.startsWith('E-08'));
+  it('転送先と同じホストのスクリプトは第三者のものとしない', () => {
+    expect(page('https://www.a.example/wp-includes/js/jquery.min.js')).toEqual(['E-08.ok']);
+  });
+  it('ほかのホストのスクリプトは①（確認用）', () => {
+    expect(page('https://cdn.other.example/x.js')).toContain('E-08.1');
+  });
+});
+
+describe('7 A-01：200 で返したエラーだけの JSON は保護データとしない', () => {
+  const unauth = (body: string) => evaluate(`#TARGET url=https://a.example/api/me label=unauth-api\n${AT}\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`)
+    .ids('unauth-api').filter(x => x.startsWith('A-01'));
+  it('success:false とエラーの文言だけなら na', () => {
+    expect(unauth('{"success":false,"error":"Unauthorized","message":"Please log in"}')).toEqual(['A-01.na']);
+    expect(unauth('{"error":{"code":401,"message":"Login required"},"data":null}')).toEqual(['A-01.na']);
+  });
+  it('エラーの項目のほかにデータがあれば①（確認用）', () => {
+    expect(unauth('{"success":false,"error":"x","user":{"email":"a@example.com"}}')).toContain('A-01.1');
+    expect(unauth('{"success":true,"name":"alice"}')).toContain('A-01.1');
+  });
+});
+
+describe('8 組織プロファイル：配列でない値と知らない項目はエラーにする', () => {
+  it('文字列で書いた exclude・sessionCookieNames・trustedScriptOrigins と、配列の severity', () => {
+    const { errors } = parseProfile('{"exclude":"T-12","sessionCookieNames":"APPSESSION","trustedScriptOrigins":"https://cdn.example.com","severity":["H-10"]}');
+    expect(errors).toHaveLength(4);
+    for (const e of errors) expect(messageEn(e)).not.toMatch(/[ぁ-んァ-ヶ一-龠]/);
+  });
+  it('綴りを誤った項目を知らせる。ひな形と正しい項目はエラーにしない', () => {
+    const { errors } = parseProfile('{"excludes":["T-12"],"sessionCookieName":["APPSESSION"]}');
+    expect(errors.map(e => messageEn(e))).toEqual(['"excludes" is not a profile setting', '"sessionCookieName" is not a profile setting']);
+    expect(parseProfile('{"name":"x","severity":{"H-10":"low"},"exclude":["T-12"],"sessionCookieNames":["A"],"sessionMaxAgeHours":12,"trustedScriptOrigins":["cdn.example.com"]}').errors).toEqual([]);
+  });
+});
+
+describe('9 T-10：単一 DES・EXP1024・匿名の鍵交換は①', () => {
+  const t10 = (c: string) => evaluate(`#TARGET url=https://a.example/ label=tls\n${AT}\n#CIPHERPROBE c=${c} ok=1\n`).findings.filter(f => f.item === 'T-10').map(f => f.ruleId);
+  it.each(['DES-CBC-SHA', 'EXP1024-DES-CBC-SHA', 'EDH-RSA-DES-CBC-SHA', 'TLS_DH_anon_WITH_AES_128_CBC_SHA', 'TLS_RSA_WITH_DES_CBC_SHA'])('%s', c => {
+    expect(t10(c)).toContain('T-10.1');
+  });
+  it('前方秘匿性のない AES は③のまま（確認用）', () => {
+    expect(t10('AES128-SHA')).toContain('T-10.3');
+    expect(t10('AES128-SHA')).not.toContain('T-10.1');
+  });
+});
+
+describe('10 H-11：守りにならない CORP・COOP の値は、ないのと同じ', () => {
+  const h11 = (head: string, label = 'api', extra = 'sensitive=1') => evaluate(`#TARGET url=https://a.example/x label=${label} ${extra}\n${AT}\nHTTP/2 200\n${head}\n\n<p>x</p>\n`)
+    .ids(label).filter(x => x.startsWith('H-11'));
+  it('機密応答の CORP: cross-origin は①', () => {
+    expect(h11('content-type: application/json\ncross-origin-resource-policy: cross-origin')).toContain('H-11.1');
+    expect(h11('content-type: application/json\ncross-origin-resource-policy: same-site')).toEqual(['H-11.ok']);
+  });
+  it('COOP: unsafe-none は②。report-to の付いた same-origin は合格', () => {
+    expect(h11('content-type: text/html\ncross-origin-resource-policy: same-origin\ncross-origin-opener-policy: unsafe-none', 'page')).toContain('H-11.2');
+    expect(h11('content-type: text/html\ncross-origin-resource-policy: same-origin\ncross-origin-opener-policy: same-origin; report-to="coop"', 'page')).toEqual(['H-11.ok']);
+  });
+});
+
+describe('11 HAR：URL の書き方の違いと、文字列の状態コード', () => {
+  const entry = (url: string, status: number | string, headers: { name: string; value: string }[] = []) =>
+    ({ startedDateTime: '2026-11-01T01:00:00Z', request: { method: 'GET', url, headers: [] }, response: { status, statusText: '', httpVersion: 'HTTP/2', headers, content: { mimeType: 'text/html', text: '' } } });
+  it('http から https への転送は、転送先が :443 付きで記録されていてもつなぐ', () => {
+    const imp = importHar(JSON.stringify({ log: { entries: [entry('http://a.example/', 301, [{ name: 'location', value: 'https://a.example/' }]), entry('https://a.example:443/', 200)] } }));
+    expect(imp.chains.map(c => c.hops)).toEqual([2]);
+  });
+  it('文字列の "304" も 304 として除外し、数値にそろえる', () => {
+    const imp = importHar(JSON.stringify({ log: { entries: [entry('https://a.example/', '304')] } }));
+    expect(imp.chains[0].excluded).toBe(true);
+    expect(imp.chains[0].status).toBe(304);
   });
 });

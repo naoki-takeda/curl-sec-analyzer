@@ -4,26 +4,33 @@ import { sessionConfig } from '../parser/setCookie';
 
 const SEV: Severity[] = ['high', 'medium', 'low', 'info'];
 const ID = /^[HCRTEA]-\d\d(\.\d+)?$/;
+const PROFILE_KEYS = ['name', 'severity', 'exclude', 'sessionCookieNames', 'sessionMaxAgeHours', 'trustedScriptOrigins'];
+// 配列にする項目が配列でない（"exclude": "T-12"）なら、黙って空にせずエラーにする（既定の設定のまま判定したことに気づけなかった）
+const notArray = (v: unknown) => v !== undefined && !Array.isArray(v);
 
 export function parseProfile(text: string): { profile?: Profile; errors: string[] } {
   let d: Record<string, unknown>;
   try { d = JSON.parse(text); } catch { return { errors: ['JSONとして読めません'] }; }
   if (!d || typeof d !== 'object' || Array.isArray(d)) return { errors: ['オブジェクトが必要です'] };
   const errors: string[] = [];
+  // 知らない項目（綴りの誤りの excludes・sessionCookieName など）も知らせる
+  for (const k of Object.keys(d)) if (!PROFILE_KEYS.includes(k)) errors.push(`「${k.slice(0, 40)}」は組織プロファイルの項目ではありません`);
   const severity: Record<string, Severity> = {};
-  for (const [k, v] of Object.entries((d.severity as Record<string, unknown>) ?? {})) {
+  const sevOk = d.severity === undefined || (!!d.severity && typeof d.severity === 'object' && !Array.isArray(d.severity));
+  if (!sevOk) errors.push('severity：項目ID（例：H-10）と重要度の組のオブジェクトにしてください');
+  for (const [k, v] of Object.entries(sevOk ? (d.severity as Record<string, unknown> | undefined) ?? {} : {})) {
     if (!ID.test(k)) errors.push(`severity：「${k}」は項目IDではありません`);
     else if (!SEV.includes(v as Severity)) errors.push(`severity：「${k}」の重要度は high・medium・low・info のいずれか`);
     else severity[k] = v as Severity;
   }
   const exclude = Array.isArray(d.exclude) ? (d.exclude as unknown[]).filter((x): x is string => typeof x === 'string' && /^[HCRTEA]-\d\d$/.test(x)) : [];
-  if (Array.isArray(d.exclude) && exclude.length !== d.exclude.length) errors.push('exclude：項目ID（例：H-17）の配列にしてください');
+  if (notArray(d.exclude) || (Array.isArray(d.exclude) && exclude.length !== d.exclude.length)) errors.push('exclude：項目ID（例：H-17）の配列にしてください');
   const names = Array.isArray(d.sessionCookieNames) ? (d.sessionCookieNames as unknown[]).filter((x): x is string => typeof x === 'string' && /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(x)) : [];
   const ORIGIN = /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d+)?$/i;
   const rawOrigins = Array.isArray(d.trustedScriptOrigins) ? d.trustedScriptOrigins as unknown[] : [];
   const origins = rawOrigins.filter((x): x is string => typeof x === 'string' && ORIGIN.test(x));
-  if (origins.length !== rawOrigins.length) errors.push('trustedScriptOrigins：https://cdn.example.com や *.example.com の形の配列にしてください');
-  if (Array.isArray(d.sessionCookieNames) && names.length !== d.sessionCookieNames.length) errors.push('sessionCookieNames：Cookie名（英数字と記号）の配列にしてください');
+  if (notArray(d.trustedScriptOrigins) || origins.length !== rawOrigins.length) errors.push('trustedScriptOrigins：https://cdn.example.com や *.example.com の形の配列にしてください');
+  if (notArray(d.sessionCookieNames) || (Array.isArray(d.sessionCookieNames) && names.length !== d.sessionCookieNames.length)) errors.push('sessionCookieNames：Cookie名（英数字と記号）の配列にしてください');
   const hours = d.sessionMaxAgeHours === undefined ? 24 : Number(d.sessionMaxAgeHours);
   const hoursOk = hours > 0 && hours <= 24 * 400;
   if (!hoursOk) errors.push('sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）');

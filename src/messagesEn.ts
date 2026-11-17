@@ -9,7 +9,8 @@ const EXACT: Record<string, string> = {
   'exclude：項目ID（例：H-17）の配列にしてください': 'exclude: use an array of check IDs (such as H-17)',
   'trustedScriptOrigins：https://cdn.example.com や *.example.com の形の配列にしてください': 'trustedScriptOrigins: use an array of origins such as https://cdn.example.com or *.example.com',
   'sessionCookieNames：Cookie名（英数字と記号）の配列にしてください': 'sessionCookieNames: use an array of cookie names (letters, digits and symbols)',
-  'sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）': 'sessionMaxAgeHours must be a number of hours from 1 to 9600 (the default of 24 hours is used)',
+  'severity：項目ID（例：H-10）と重要度の組のオブジェクトにしてください': 'severity: use an object that maps check IDs (such as H-10) to severities',
+  'sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）':'sessionMaxAgeHours must be a number of hours from 1 to 9600 (the default of 24 hours is used)',
   'ホスト名は英数字・ハイフン・ドット（必要なら :ポート）だけで書いてください': 'Use only letters, digits, hyphens and dots in the host name (plus :port if needed)',
   'apexドメインの書き方が正しくありません': 'The apex domain is not valid',
 };
@@ -21,7 +22,8 @@ const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：reason（理由）がありません$/, m => `Entry ${m[1]}: reason is missing`],
   [/^(\d+)件目：approver は文字列で書きます$/, m => `Entry ${m[1]}: approver must be a string`],
   [/^(\d+)件目：until は YYYY-MM-DD で書きます$/, m => `Entry ${m[1]}: until must be YYYY-MM-DD`],
-  [/^severity：「(.*)」は項目IDではありません$/s, m => `severity: "${m[1]}" is not a check ID`],
+  [/^「(.*)」は組織プロファイルの項目ではありません$/s, m => `"${m[1]}" is not a profile setting`],
+  [/^severity：「(.*)」は項目IDではありません$/s,m => `severity: "${m[1]}" is not a check ID`],
   [/^severity：「(.*)」の重要度は high・medium・low・info のいずれか$/s, m => `severity: the severity for "${m[1]}" must be high, medium, low or info`],
   [/^(.+)のパスは \/ で始まる英数字と - \. _ ~ % \/ で書いてください$/, m => `${FIELD[m[1]] ?? m[1]} path: start with / and use only letters, digits and - . _ ~ % /`],
 ];

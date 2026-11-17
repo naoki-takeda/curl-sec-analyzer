@@ -74,6 +74,8 @@ const JWT_IN_HEADER = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 const named = (hs: (HarHeader | null | undefined)[] | undefined): HarHeader[] => (Array.isArray(hs) ? hs : []).filter((h): h is HarHeader => typeof h?.name === 'string');
 const jwtsIn = (hs: HarHeader[]) => [...new Set(hs.filter(h => /^(?:authorization|cookie)$/i.test(h.name)).flatMap(h => String(h.value ?? '').match(JWT_IN_HEADER) ?? []))];
 const hostOfUrl = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
+/** 突き合わせ用の URL（フラグメントを除き、URL として読み直した形） */
+const normalizedUrl = (u: string) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return withoutHash(u); } };
 
 /** HAR の JSON を読み、チェーンにまとめる。request.postData はここで捨てる */
 export function importHar(text: string): HarImport {
@@ -83,11 +85,15 @@ export function importHar(text: string): HarImport {
   // ブラウザが内部で作った転送（HSTS・HTTPS-Upgrades の 307 Internal Redirect。Non-Authoritative-Reason ヘッダが付く）も、サーバの応答では
   // ないので除く（http のラベルで T-04・C-10 を、http で接続していないのに判定した）
   const internal = (e: HarEntry) => /internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name));
-  const entries = all.filter(e => Number(e.response.status) > 0 && !internal(e));
+  // 状態コードは数値にそろえる（文字列の "304" を書き出すツールがあり、そのままだと 304 の除外や === 401 などの比べ方が効かなかった）
+  for (const e of all) { const st = Number(e.response.status); e.response.status = Number.isInteger(st) ? st : 0; }
+  const entries = all.filter(e => e.response.status > 0 && !internal(e));
   const used = new Set<number>(); const chains: HarChain[] = [];
-  // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）
+  // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）。
+  // 表のキーも、引くときと同じく URL として読み直した形（new URL().href）にする。書き方の違い（https://a.example:443/、エンコードしていない
+  // /日本）で転送先が見つからず、http から https への転送の連なりが切れた
   const byUrl = new Map<string, number[]>();
-  entries.forEach((x, k) => { const u = withoutHash(x.request.url); (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
+  entries.forEach((x, k) => { const u = normalizedUrl(x.request.url); (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
   // URL ごとに、使い済みの先頭を読み飛ばす位置を持つ（同じ URL へ転送する 3xx が多い HAR で、毎回先頭からなめて2乗の時間がかかった）
   const firstUnused = new Map<string, number>();
   const nextEntry = (href: string, from: number): number => {

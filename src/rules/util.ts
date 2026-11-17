@@ -106,7 +106,21 @@ export const noDataJson = (body: string | undefined): boolean => {
   // false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
   const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
     || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
-  return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)));
+  return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && (Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)) || errorEnvelope(j as Record<string, unknown>, blank)));
+};
+/**
+ * エラーだけを返した JSON（200 で {"success":false,"error":"Unauthorized","message":"Please log in"}）。エラーの項目（error・errors など）か
+ * success:false・ok:false があり、ほかの項目がエラーの包みの決まった名前（message・code・status・timestamp など。値は文字・数値・真偽値）だけで、
+ * data・result は空のもの。エラーの文言はデータではないので、空でない値があっても保護データとしない（A-01①（高）にした）
+ */
+const ERROR_KEYS = /^(?:error|errors|err|fault|error_?(?:code|message|description|type)|errorcode|errormessage)$/i;
+const ENVELOPE_KEYS = /^(?:message|msg|status|status_?code|statuscode|code|success|ok|timestamp|time|path|request_?id|trace_?id|correlation_?id|detail|title|type|instance)$/i;
+const errorEnvelope = (j: Record<string, unknown>, blank: (v: unknown, k?: string) => boolean): boolean => {
+  const entries = Object.entries(j);
+  const failed = entries.some(([k, v]) => (ERROR_KEYS.test(k) && !blank(v)) || (/^(?:success|ok)$/i.test(k) && v === false));
+  return failed && entries.every(([k, v]) => ERROR_KEYS.test(k)
+    || (/^(?:data|result)$/i.test(k) && blank(v))
+    || (ENVELOPE_KEYS.test(k) && (v === null || ['string', 'number', 'boolean'].includes(typeof v))));
 };
 /**
  * GraphQL のエラーの応答（200 で {"errors":[…],"data":null}）。errors があり、data が null か値がすべて null のもの。

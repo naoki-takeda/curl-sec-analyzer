@@ -78,7 +78,8 @@ export function parseInput(input: string): ParseResult {
   const pendingJson: HttpResponse[] = [];            // ステータスがまだない %{header_json} の応答（あとの #META response_code= で補う）   // 送った Cookie の名前（重なりを除くため）
   let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
   let connectReq = false;                             // -v で「> CONNECT」を送った（プロキシのトンネル）。その応答のあとは本文がない
-  const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; };
+  let vHeaders = false;                               // 読み中の応答を -v の「< 」のステータス行で始めた
+  const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; vHeaders = false; };
   const inBody = () => cur !== null && !inHeaders;
   const flush = () => { if (hasData(t)) targets.push(t); else if (t.label !== 'default') emptyTargets.push(t.label); };
 
@@ -88,7 +89,7 @@ export function parseInput(input: string): ParseResult {
   // LF の付かない CR は1つずつ改行にする（古い Mac の改行。CR CR は空行）。結果は /\r+\n|\r/ と同じ
   const lines = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
   for (let li = 0; li < lines.length; li++) {
-    let line = lines[li];
+    let line = lines[li]; let fromV = false;   // fromV：-v の「< 」の行（受信ヘッダ）
     if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;
     line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
@@ -161,11 +162,15 @@ export function parseInput(input: string): ParseResult {
         close(); vBody = st >= 200 && !tunnel; if (tunnel || (connectReq && st >= 200)) connectReq = false;
         continue;
       }  // 受信ヘッダの終端。-v では本文を解析しない
-      if (line.startsWith('< ')) line = line.slice(2);
+      // -i（-D -）と -v を一緒に端末で採取すると、-v の「< 」の行（標準エラー）と -i の同じ行（標準出力）が1行ずつ交互に並ぶ。
+      // 「< 」の行で始めた応答のヘッダの途中にある「< 」のない行は、-i の写しとして読まない（読むと、写しのステータス行で応答を閉じて
+      // 中身のない応答を作り、ヘッダをすべて二重に入れて、C-06 などを2回出した）
+      if (vHeaders && cur && inHeaders && !line.startsWith('< ')) continue;
+      if (line.startsWith('< ')) { line = line.slice(2); fromV = true; }
       else if (/^[{}] \[/.test(line)) continue;
     }
     const sm = line.match(STATUS_RE);
-    if (sm && !inBody()) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue; }
+    if (sm && !inBody()) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; vHeaders = fromV; continue; }
     // 本文の直前の行が空行かは、本文の末尾だけを見る（本文全体を split すると、本文の中のステータス行らしい行ごとに64KBを分けることになり、入力の長さの2乗の時間がかかる）
     if (sm && inBody() && (cur!.body === undefined || nextHopAfter(cur!.status)) && /^\s*$/.test(lastLine(cur!.body ?? ''))) {   // -L で次のホップが続く場合
       close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue;

@@ -76,6 +76,16 @@ export function tags(html: string, names: string[]): Tag[] {
 
 /** HTML本文があるか（-i・C2 で取得したもの） */
 export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ctx.final?.body?.trim() ? ctx.final.body : undefined);
+/**
+ * HTML を返したページの URL とホスト。-L で別のホスト（apex から www など）に転送されたときは、ターゲットの URL ではなく転送先（最後のホップ）。
+ * ターゲットのホストと比べると、転送先と同じホストのスクリプト（WordPress の絶対 URL）を第三者のもの（E-08）とし、相対の src も違う基準で解決した
+ */
+const pageUrlOf = (ctx: RuleContext) => ctx.final?.url ?? ctx.target.url;
+const pageHostOf = (ctx: RuleContext): string | undefined => {
+  const u = pageUrlOf(ctx);
+  try { if (u) return new URL(u).host; } catch { /* 読めなければターゲットのホスト */ }
+  return hostOf(ctx.target);
+};
 
 /**
  * HTML の <meta http-equiv="Content-Security-Policy"> の CSP（ポリシーごと）。ヘッダを付けられない GitHub Pages・S3 などの配信では普通の形で、
@@ -141,7 +151,7 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
   run(ctx) {
     const html = htmlBody(ctx);
     if (!html) return [];
-    const host = hostOf(ctx.target);
+    const host = pageHostOf(ctx);
     const trusted = ctx.profile?.trustedScriptOrigins ?? [];
     // 外部オリジンの script を配信元（オリジン）ごとにまとめる。組織プロファイルで自社の配信元とした所は対象外
     const byOrigin = new Map<string, { total: number; missing: Tag[] }>();
@@ -149,7 +159,7 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
     for (const t of tags(html, ['script'])) {
       const src = t.attrs.get('src');
       if (!src || !/^(https?:)?\/\//i.test(src)) continue;
-      let u: URL; try { u = new URL(src, ctx.target.url ?? 'https://invalid.invalid/'); } catch { continue; }
+      let u: URL; try { u = new URL(src, pageUrlOf(ctx) ?? 'https://invalid.invalid/'); } catch { continue; }
       if (u.host === host) continue;
       if (isTrustedOrigin(u, trusted)) { skipped++; continue; }
       const g = byOrigin.get(u.origin) ?? { total: 0, missing: [] };
@@ -244,7 +254,7 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
       .map(i => [i.index, html.indexOf('>', i.index) + 1] as const).filter(([, e]) => e > 0).sort((a, b) => b[0] - a[0]);
     const scan = posted.reduce((h, [s, e]) => h.slice(0, s) + h.slice(e), html);
     for (const [name, re] of SECRETS) if (re.test(scan)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
-    const iu = internalUrl(html, hostOf(ctx.target)?.toLowerCase());
+    const iu = internalUrl(html, pageHostOf(ctx)?.toLowerCase());
     if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
     // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す
     const dc = devCommentWord(html);

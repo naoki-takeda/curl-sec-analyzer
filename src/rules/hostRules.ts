@@ -75,7 +75,9 @@ export const knownFiles: Rule = { id: 'E-03', title: '既知ファイル（/.git
   } };
 
 // ---- 以下 v0.2 で追加（T-10、T-11） ----
-const WEAK = /RC4|DES-CBC3|3DES|EXPORT|EXP-|NULL|aNULL|ADH|AECDH|MD5/i;
+// 単一 DES（DES-CBC-SHA、IANA 名の _DES_）、EXP1024-… の輸出用、RC2、IANA 名の匿名の鍵交換（TLS_DH_anon_…・TLS_ECDH_anon_…）も①にする
+// （一覧になかったので③（中）にした。設計書は EXPORT・aNULL を①に置く）
+const WEAK = /RC4|RC2|DES-CBC|_DES_|3DES|EXPORT|EXP-|EXP1024|NULL|ADH|AECDH|_anon_|MD5/i;
 const AEAD = /GCM|CHACHA20|CCM|^TLS_AES/i;
 // 前方秘匿性のある鍵交換（ECDHE・DHE）か、TLS 1.3 の暗号。AES128-GCM-SHA256 のような静的 RSA の鍵交換は、GCM でも③（AEAD だけを見ると見逃した）
 const FORWARD_SECRET = /^(?:ECDHE|DHE|EDH|TLS_AES|TLS_CHACHA20|TLS_ECDHE|TLS_DHE)/i;

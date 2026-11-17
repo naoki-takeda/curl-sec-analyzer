@@ -274,10 +274,18 @@ export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CO
     if (!ctx.final) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (NO_CONTENT(ctx)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const out = []; const sensitive = sensitiveUnlessStatic(ctx);
-    if (sensitive && !header(ctx, 'cross-origin-resource-policy').length)
+    // 守りにならない値は、ないのと同じ：CORP の cross-origin（どのサイトからも読み込める）、COOP の unsafe-none（既定の動作）と、
+    // 知らない値・2つ以上の値（ブラウザは読めずに無視する）。あるだけで合格にすると、cross-origin を付けた機密応答を見逃した
+    const policy = (name: string) => { const v = header(ctx, name); return v.length === 1 ? v[0].split(';')[0].trim().toLowerCase() : v.length ? 'invalid' : undefined; };
+    const corp = policy('cross-origin-resource-policy'), coop = policy('cross-origin-opener-policy');
+    if (sensitive && corp === undefined)
       out.push(mk(crossOriginIsolation, ctx, 1, 'low', 'fail', '機密応答に Cross-Origin-Resource-Policy なし', 'Cross-Origin-Resource-Policy: same-origin'));
-    if (ctx.responseKind === 'html' && !header(ctx, 'cross-origin-opener-policy').length)
+    else if (sensitive && corp !== 'same-origin' && corp !== 'same-site')
+      out.push(mk(crossOriginIsolation, ctx, 1, 'low', 'fail', `機密応答の Cross-Origin-Resource-Policy が ${header(ctx, 'cross-origin-resource-policy').join(', ')}（ほかのサイトから読み込める・無効な値）`, 'Cross-Origin-Resource-Policy: same-origin'));
+    if (ctx.responseKind === 'html' && coop === undefined)
       out.push(mk(crossOriginIsolation, ctx, 2, 'info', 'fail', 'Cross-Origin-Opener-Policy なし', 'Cross-Origin-Opener-Policy: same-origin'));
+    else if (ctx.responseKind === 'html' && !['same-origin', 'same-origin-allow-popups', 'noopener-allow-popups'].includes(coop!))
+      out.push(mk(crossOriginIsolation, ctx, 2, 'info', 'fail', `Cross-Origin-Opener-Policy が ${header(ctx, 'cross-origin-opener-policy').join(', ')}（分離しない・無効な値）`, 'Cross-Origin-Opener-Policy: same-origin'));
     if (out.length) return out;
     // 機密かどうか分からず CORP もなければ、①を判定していない。COOP（②）があっても合格にしない（カバレッジの水増しになる）
     if (sensitive === undefined && !header(ctx, 'cross-origin-resource-policy').length)
