@@ -157,7 +157,7 @@ describe('束5 A-07 の見逃していた秘密のキー', () => {
 
 describe('束6 マスクの残り', () => {
   it('全角・ゼロ幅の文字を含むパラメータ名の値を伏せる', () => {
-    for (const u of ['https://x.example/?ｐａｓｓｗｏｒｄ=hunter22', `https://x.example/?pass${'​'}word=hunter22`, `https://x.example/?pass${'­'}word=hunter22`])
+    for (const u of ['https://x.example/?ｐａｓｓｗｏｒｄ=hunter22', `https://x.example/?pass${'\u200b'}word=hunter22`, `https://x.example/?pass${'\u00ad'}word=hunter22`])
       expect(showText(u), u).not.toContain('hunter22');
   });
   it('パスワードの名前では、Cookie の属性の語も伏せる（ほかの名前の secret: none、XSRF-TOKEN: Secure は残す）', () => {
@@ -188,20 +188,46 @@ describe('束6 security.txt のプローブ', () => {
   it('先頭がコメントだけなら na（Contact・Expires があるかは分からない）', () => {
     expect(probe('# This file is served for every path\n# nothing here\n')).toEqual(['E-04.na']);
   });
+  it('コメントのあとの Contact と、小文字の contact も合格。# だけの行で始まるコメントは na', () => {
+    expect(probe('# Our security policy\nContact: mailto:s@a.example\n')).toEqual(['E-04.ok']);
+    expect(probe('contact: mailto:s@a.example\n')).toEqual(['E-04.ok']);
+    expect(probe('#\n#Comment only\n')).toEqual(['E-04.na']);
+  });
   it('Contact・Expires があれば合格', () => {
     expect(probe('Contact: mailto:security@a.example\nExpires: 2027-01-01T00:00:00Z\n')).toEqual(['E-04.ok']);
   });
 });
 
-describe('束6 差分の突き合わせ', () => {
-  const f = (evidence: string): Finding => ({ ruleId: 'A-01.2', item: 'A-01', title: '', severity: 'low', status: 'fail', target: 'unauth-api', evidence, recommendation: '', references: [], score: 0 });
-  it('同じサイトの別のサーバに変わっただけなら「継続」', () => {
-    const rows = diff([f('HTTP 302 → https://web-03.example.com/login')], [f('HTTP 302 → https://web-07.example.com/login')]);
-    expect(rows.map(r => r.kind)).not.toContain('new');
-    expect(rows.map(r => r.kind)).not.toContain('resolved');
+describe('束6 差分の突き合わせ（束6のレビューで、ホスト名をサイトにまとめるのを戻した）', () => {
+  const f = (evidence: string, ruleId = 'E-08.1'): Finding => ({ ruleId, item: ruleId.slice(0, 4), title: '', severity: 'medium', status: 'fail', target: 'top', evidence, recommendation: '', references: [], score: 0 });
+  it('同じサイトの別の配信元のスクリプトが増えたら「新規」（まとめると、継続の1行にして新規を落とした）', () => {
+    const rows = diff([f('https://ajax.googleapis.com/x.js')], [f('https://ajax.googleapis.com/x.js'), f('https://storage.googleapis.com/evil/x.js')]);
+    expect(rows.map(r => r.kind).sort()).toEqual(['continuing', 'new']);
   });
-  it('別のサイトの配信元は別の指摘（cdn-a を直して cdn-b が増えた）', () => {
-    const rows = diff([f('https://cdn-a.example/x.js')], [f('https://cdn-b.example/x.js')]);
-    expect(rows.map(r => r.kind).sort()).toEqual(['new', 'resolved']);
+  it('別の持ち主のサブドメイン（*.github.io）は別の指摘', () => {
+    expect(diff([f('https://alice.github.io/a.js')], [f('https://mallory.github.io/a.js')]).map(r => r.kind).sort()).toEqual(['new', 'resolved']);
   });
 });
+
+describe('束6 束のレビューの指摘（マスク）', () => {
+  it('個人の番号の名前は、JSON の数値と名前を付けた値でも伏せる', () => {
+    for (const s of ['{"ssn":123456789}', '{"cvv":123}', '"CVV2": 123', 'ssn: 123456789', 'SSN=123456789', 'cvv=123'])
+      expect(showText(s), s).not.toMatch(/123456789|123(?!\d)/);
+  });
+  it('全角・ゼロ幅の文字を含む JSON のキーの値を伏せる', () => {
+    for (const s of ['{"ｐａｓｓｗｏｒｄ":"hunter22"}', `{"pass${'\u200b'}word": "hunter22"}`])
+      expect(showText(s), s).not.toContain('hunter22');
+  });
+  it('American Express の 4-6-5 と . で区切ったカード番号も伏せる', () => {
+    for (const s of ['n 3782 822463 10005 x', 'n 4111.1111.1111.1111 x']) expect(showText(s), s).not.toMatch(/10005|4111\.1111/);
+  });
+  it('パスのトークンの途中の番号の形で、トークンを分けない', () => {
+    expect(maskText('https://a.example/reset/ab12cd34ef56gh123-45-6789ij78kl90mn12op')).not.toContain('ij78kl90mn12op');
+  });
+  it('cc だけの名前と、pass を語として含まない名前は伏せすぎない', () => {
+    expect(showText('mailto:security@a.example?cc=US')).toContain('cc=US');
+    expect(showText('compass_token: none')).toBe('compass_token: none');
+    expect(showText('passport_api_key: secure')).toBe('passport_api_key: secure');
+  });
+});
+

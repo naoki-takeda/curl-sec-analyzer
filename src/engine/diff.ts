@@ -1,7 +1,6 @@
 // engine/diff.ts：前回の結果（JSONエクスポート）との差分（v0.4）
 import type { Finding, Profile, Severity } from '../model';
 import { parseProfile } from './profile';
-import { siteOf } from '../parser/target';
 
 export type DiffKind = 'new' | 'resolved' | 'continuing' | 'severity-changed' | 'not-rechecked' | 'suppressed';
 export interface DiffRow { kind: DiffKind; ruleId: string; item: string; condition?: number; title: string; target: string; severity: Severity; before?: Severity; }
@@ -48,8 +47,9 @@ const tkey = (f: Finding) => f.targetKey ?? f.target;
  * E-07 の読み込み先）を別の指摘として突き合わせる（ルールとターゲットだけで突き合わせると、cdn-a を直して cdn-b が増えても「継続」の1行になった）。
  * ホスト名だけを使うのは、証跡のほかの部分は画面のマスク（mask.ts・shownText.ts）で形が変わるため（突き合わせのキーはマスクに依存しない。
  * 証跡の全体で比べると、マスクの規則を変えただけで、変わらない指摘を新規と解消にした）。ホスト名はマスクしない。
- * ホスト名はサイト（登録ドメインの近似）にまとめる（A-01② の転送先が web-03.example.com と web-07.example.com のように、同じサイトの別の
- * サーバに変わっただけで、同じ指摘を「解消」と「新規」に分けた）
+ * ホスト名はサイトにまとめない（まとめると、ajax.googleapis.com に storage.googleapis.com のスクリプトが増えたことや、*.github.io・
+ * *.cloudfront.net の別の持ち主の配信元を、1つの「継続」にして新規を黙って落とした）。そのため、A-01② の転送先が同じサイトの別のサーバ
+ * （web-03 → web-07）に変わっただけでも「解消」と「新規」に分かれる（見逃すより安全なので、そのままにする）
  */
 // 「//」の位置ごとに、その後ろの決まった長さだけを見る（正規表現の任意のスキームの部分が、長い英数字の並びで位置ごとに読み直し、
 // 入力の長さの2乗の時間がかかった。40KB の証跡で4秒）
@@ -59,7 +59,7 @@ const evidenceKey = (e: unknown): string => {
   const hosts = new Set<string>();
   for (let i = s.indexOf('//'); i >= 0; i = s.indexOf('//', i + 2)) {
     const m = AFTER_SLASHES.exec(s.slice(i + 2, i + 600));
-    if (m) hosts.add(siteOf(m[1].toLowerCase()));
+    if (m) hosts.add(m[1].toLowerCase());
   }
   return [...hosts].sort().join(',');
 };

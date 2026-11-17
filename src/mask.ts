@@ -17,7 +17,8 @@ const MASK_PARAM_NAMES = [...TOKEN_PARAM_NAMES, ...SESSION_PARAM_NAMES, 'code', 
   // 略したパスワードの名前（pswd・psw、フランス語の mdp）と、暗証番号（pin_number）
   'pswd', 'psw', 'mdp', 'pin_number', 'pinnumber',
   // 個人の番号（米国の社会保障番号、カード番号とセキュリティコード）。値の形でも伏せる（SSN・CARD）
-  'ssn', 'cc', 'ccnum', 'cc_number', 'cardnumber', 'card_number', 'creditcard', 'credit_card', 'cvv', 'cvv2', 'cvc'];
+  // cc だけの名前は、mailto の宛先（?cc=team@…）や国のコード（?cc=US）と区別できないので含めない
+  'ssn', 'ccnum', 'cc_number', 'cardnumber', 'card_number', 'creditcard', 'credit_card', 'cvv', 'cvv2', 'cvc'];
 const alt = (names: string[]) => names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 /** クエリ（?・&）、フラグメント（#）、パス引数（;）のどれに置かれても一致する */
 export const paramRegex = (names: string[], flags = 'i') => new RegExp(`([?&#;](?:${alt(names)})=)([^&\\s#;"'<>]+)`, flags);
@@ -245,14 +246,16 @@ const bareNonce = (all: string, q: string | undefined, v: string, h: Hider) =>
  * 値は閉じの引用符まで（長さの上限は付けない。繰り返しは入れ子でないので線形）。グループは「値の前・名前・値・値の後」
  */
 const Q = '%(?:25)*22', SP = '(?:%(?:25)*20|\\+)*';
+// キーは全角の英数字・ゼロ幅の文字を含んでよい（{"ｐａｓｓｗｏｒｄ":"…"}。secretParam が正規化してから照合する。ANY_PARAM と同じ）
 const JSON_PAIRS: RegExp[] = [
-  /("([\w.$-]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
-  /(\\"([\w.$-]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
+  /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
+  /(\\"([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
   new RegExp(`(${Q}([\\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}${Q})((?:(?!${Q})[^&\\s"'<>#])*)(${Q})`, 'g'),
 ];
-// 数値の値は、ワンタイムの番号・パスワードらしい名前だけ（"code":404・"status":500 のようなエラーの番号は残す）
-const JSON_NUMBER = /("([\w.$-]{1,64})"\s*:\s*)(\d{4,})(?![\d.])()/g;
-const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token/i;
+// 数値の値は、ワンタイムの番号・パスワード・個人の番号らしい名前だけ（"code":404・"status":500 のようなエラーの番号は残す）。
+// 3桁から（カードのセキュリティコード "cvv":123）
+const JSON_NUMBER = /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})"\s*:\s*)(\d{3,})(?![\d.])()/g;
+const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token|ssn|cvv|cvc|card|ccnum/i;
 const maskJsonPairs = (s: string, h: Hider) => {
   const rep = (all: string, pre: string, k: string, v: string, close: string) => (v && secretParam(k, v) && !/…\(\d+/.test(v) ? `${pre}${h.value(v)}${close}` : all);
   return JSON_PAIRS.reduce((acc, re) => acc.replace(re, rep), s)
@@ -265,7 +268,7 @@ const maskJsonPairs = (s: string, h: Hider) => {
  * password・secret・token・api_key などのものだけ（Access-Control-Allow-Credentials・token_type は対象外）。値は ASCII の文字だけ
  */
 // 名前の前置きは64文字まで（SPRING_DATASOURCE_PRIMARY_CONNECTIONPOOL_PASSWORD）
-const FREE_NAME = String.raw`(?:[A-Za-z][\w-]{0,62}[_-])?(?:password|passwd|passphrase|pwd|pass|secret|api[_-]?key|apikey|token|private[_-]?key)`;
+const FREE_NAME = String.raw`(?:[A-Za-z][\w-]{0,62}[_-])?(?:password|passwd|passphrase|pwd|pass|secret|api[_-]?key|apikey|token|private[_-]?key|ssn|cvv2?|cvc|card[_-]?number|ccnum)`;
 // 名前と値の区切り：= : と、PHP の配列の =>、define('DB_PASSWORD', '…') のカンマ（値が引用符で囲まれているときだけ）
 const FREE_SEP = String.raw`\s*(?:=>|[:=]|,(?=\s*["']))\s*`;
 // 引用符で囲んだ値は、閉じの引用符まで（secret="Tr0ub4dor&3" の & で切って、残りを出した）
@@ -277,8 +280,8 @@ const FREE_KEY_VALUE = new RegExp(String.raw`(\bkey\s*=\s*(["'])${FREE_NAME}\2\s
 // 状態を表す語・Cookie の属性（secret: none、XSRF-TOKEN: Secure）は秘密ではないので伏せない（証跡が読めなくなった）
 const FREE_PLAIN = /^(?:true|false|yes|no|none|null|nil|empty|set|unset|required|optional|enabled|disabled|secure|httponly|samesite|lax|strict|present|missing|n\/a|-)$/i;
 // パスワードの名前（password: secure）では、Cookie の属性の語（secure・strict・lax など）も値として伏せる（弱いパスワードがその語のことがある）。
-// 残すのは真偽値・空の値だけ
-const PASSWORD_NAME = /pass|pwd|psw/i;
+// 残すのは真偽値・空の値だけ。名前は語（_ - とキャメルケースの境目で区切る）として見る（compass_token・passport_api_key・bypass_secret は対象外）
+const PASSWORD_NAME = { test: (pre: string) => /(?:^|[^a-z])(?:pass(?:word|wd|phrase|code)?|pwd|psw)(?:[^a-z]|$)/i.test(pre.replace(/([a-z\d])([A-Z])/g, '$1_$2')) };
 const PASSWORD_PLAIN = /^(?:true|false|null|nil|empty|n\/a|-)$/i;
 const freeValue = (all: string, pre: string, v: string, h: Hider, post = '') =>
   (v.includes('…') || (PASSWORD_NAME.test(pre) ? PASSWORD_PLAIN : FREE_PLAIN).test(v) || !/^[\x21-\x7e][\x20-\x7e]*$/.test(v) ? all : `${pre}${h.value(v)}${post}`);
@@ -304,10 +307,12 @@ function maskParams(s: string, h: Hider, depth = 0): string {
 
 /**
  * 名前によらず値の形で伏せる個人の番号：米国の社会保障番号（123-45-6789）と、Luhn の検査に通るカード番号（4つずつ空白か - で区切ったもの
- * （4111 1111 1111 1111、0738-9781-0828-3555）と、区切りのない15・16桁で 3〜6 で始まるもの）。13桁のミリ秒の時刻などは対象外
+ * （4111 1111 1111 1111、0738-9781-0828-3555。. で区切ったものと、American Express の 4-6-5 の区切り 3782 822463 10005 も）と、
+ * 区切りのない15・16桁で 3〜6 で始まるもの）。13桁のミリ秒の時刻などは対象外。
+ * 前後が英数字・_・- のもの（パスのトークンの途中 ab12…123-45-6789ij…）は対象外（途中を伏せると、残りのかけらが短くなり、パスの部分として伏せられなくなった）
  */
-const SSN = /(?<![\d-])\d{3}-\d{2}-\d{4}(?![\d-])/g;
-const CARD = /(?<![\d-])(?:\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|[3-6]\d{14,15})(?![\d-])/g;
+const SSN = /(?<![\w-])\d{3}-\d{2}-\d{4}(?![\w-])/g;
+const CARD = /(?<![\w.-])(?:\d{4}([ .-])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ .-])\d{6}\2\d{5}|[3-6]\d{14,15})(?![\w-]|\.\d)/g;
 const luhn = (d: string) => {
   let sum = 0;
   for (let i = 0; i < d.length; i++) { let x = d.charCodeAt(d.length - 1 - i) - 48; if (i % 2) { x *= 2; if (x > 9) x -= 9; } sum += x; }
@@ -373,11 +378,11 @@ const PROBE_PATTERNS: [string, string, RegExp, RegExp][] = [
   ['phpinfo',       'E-03', /\/phpinfo\.php$/,       /phpinfo\(\)|PHP Version/],
   ['server-status', 'E-03', /\/server-status$/,      /Apache Server Status|Server Version:/],
   // security.txt はコメント（# で始まる行）から始めてよい（先頭の64バイトがコメントだけのものを「ない」とした）。HTML・JSON のエラー画面は # で始まらない
-  // コメントで始まるのは、ファイルの先頭が「# 」のときだけ（行の始めの # を見ると、CSS の #app{ を含む HTML の画面まで security.txt とした）
+  // コメントで始まるのは、ファイルの先頭が「#」のときだけ（行の始めの # を見ると、CSS の #app{ を含む HTML の画面まで security.txt とした）
   // 先頭の64バイトに Contact・Expires がなくコメントだけのもの（security-txt-comment）は、本当の security.txt かが分からない（どのパスにも
   // 「# …」の平文を返すサーバもある）ので、E-04 は合格にせず na にする
-  ['security-txt',  'E-04', /\/security\.txt$/,      /^(Contact|Expires):/m],
-  ['security-txt-comment', 'E-04', /\/security\.txt$/, /(?<![\s\S])#[ \t]/],
+  ['security-txt',  'E-04', /\/security\.txt$/,      /^(Contact|Expires):/im],   // フィールド名は大文字・小文字を区別しない（RFC 9116）
+  ['security-txt-comment', 'E-04', /\/security\.txt$/, /(?<![\s\S])#/],
   ['robots',        'E-04', /\/robots\.txt$/,        /^(User-agent|Disallow|Allow|Sitemap):/im],
   // XSSI 対策の前置き（)]}' の行）を付けたソースマップもある（ブラウザの開発ツールは読む。前置きがあると「取得できない」とした）
   ['source-map',    'E-13', /\.map$/,                /^(?:\)\]\}'[^\n]*\n)?\s*\{\s*"(?:version|file|sources|sourceRoot|mappings|names|sections)"\s*:/]];

@@ -19,7 +19,9 @@ const fill = (p: string) => p.repeat(Math.ceil(N / p.length)).slice(0, N);
 /** 繰り返しの形（正規表現の位置ごとの読み直し・閉じのない区切り・入れ子を起こしやすいもの） */
 const PATTERNS = ['<!--', '<!-- x', '<script ', '<a href="', '<form ', '<input type=password ', '"', "'", '\\', '[', '{"a":', '-', '_', 'a.', 'ab.', 'a@', '//a@',
   '%2B', '%25', '&', ';', '=', ':', 'eyJ', 'eyJa.', 'nonce-', "'nonce-a", 'https://', 'http://evil.example/', '#META ', '#TARGET ', 'password=', '"password":"',
-  'aaaa', 'A1b2', ' ', '\t', '…(1 chars)', 'a-', 'a_b', 'x:y@', '?a=', '/a', 'a/', '(S(', 'sha256-', 'pass ', 'CONNECTED(1)\n', 'HTTP/1.1 200 OK\n'];
+  'aaaa', 'A1b2', ' ', '\t', '…(1 chars)', 'a-', 'a_b', 'x:y@', '?a=', '/a', 'a/', '(S(', 'sha256-', 'pass ', 'CONNECTED(1)\n', 'HTTP/1.1 200 OK\n',
+  // 第40回の束6：全角・ゼロ幅の名前、番号の形、パスワードの名前の値
+  '?ａ', '&ｐａｓｓ\u200b', '\u200b', '1234 ', '1234-', '1234.', '123-45-', '4111 1111 1111 1111 ', 'password: secure ', '"cvv":1'];
 
 describe('2乗の時間にならない', () => {
   it.each(PATTERNS)('本文・ヘッダに「%s」の繰り返し', p => {

@@ -56,7 +56,7 @@ export const siteResponses = (t: Target): HttpResponse[] => {
   return t.responses.filter(r => { const h = hostnameOf(r.url); return !r.url || !h || siteOf(h) === site; });
 };
 /** 登録ドメインの近似（最後の2つのラベル。co.jp・com.au のような2段の国別ドメインは3つ）。IP アドレスはそのまま */
-export const siteOf = (h: string): string => {
+const siteOf = (h: string): string => {
   if (/^[\d.]+$|:/.test(h)) return h;
   const l = h.split('.');
   return l.slice(l.length >= 3 && /^[a-z]{2}$/.test(l.at(-1)!) && /^(?:co|ne|or|ac|go|ed|lg|gr|ad|com|net|org|gov|edu)$/.test(l.at(-2)!) ? -3 : -2).join('.');
