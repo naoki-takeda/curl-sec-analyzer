@@ -44,7 +44,7 @@ export const isSecretParamName = (name: string): boolean => {
   let n: string;
   try { n = decodeURIComponent(name); } catch { n = name.replace(/%5[bd]/gi, '_'); }   // 不正なエンコードを含む名前は、角かっこだけ区切りにする
   // 全角の英数字（ｐａｓｓｗｏｒｄ）は半角にし、ゼロ幅の文字・ソフトハイフンと、末尾の + と空白（password+= は「password 」と読まれる）は除く
-  n = n.normalize('NFKC').replace(/[­​-‏⁠﻿]/g, '').replace(/[+\s]+$/, '');
+  n = n.normalize('NFKC').replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, '').replace(/[+\s]+$/, '');
   // 語の末尾の数字は外して照合する（WordPress のパスワードの再設定の pass1・pass2、pw1・otp1・key1 を伏せなかった）
   if (MASK_EXACT.has(n.toLowerCase()) || STRIP_DIGIT_WORDS.has(n.toLowerCase().replace(/\d+$/, ''))) return true;
   // 語の末尾の数字は外す（otp1・pw2_hash の otp・pw を語として見る）
