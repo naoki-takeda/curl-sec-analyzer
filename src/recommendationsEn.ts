@@ -210,6 +210,7 @@ Object.assign(EXACT, {
   '機密応答かどうか分からない': 'Unknown whether the response is sensitive',
   'ログイン前にセッションCookieが発行されていない': 'No session cookie was set before login',
   'CSPにnonceがない': 'The CSP has no nonce',
+  '本文を取得して（C2）、Contact と Expires があるか確かめる': 'Fetch the body (C2) and check that it has Contact and Expires',
   'CSPのスクリプトのディレクティブにnonceがない': 'The CSP script directives (script-src, script-src-elem, script-src-attr, default-src) have no nonce',
   '比較できるセッションCookieがない': 'No session cookies to compare',
   'HTTPのバージョンが分からない': 'Unknown HTTP version',

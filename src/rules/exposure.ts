@@ -119,6 +119,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     if (probe) {                                              // C13 の存在確認（probes ラベル）
       if (!probe.code) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP 000、接続できなかった）`, PROBE_UNREACHED_REC)];
       const hit = probePattern(probe.path, probe.headB64, probe.code);
+      if (hit?.name === 'security-txt-comment') return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。先頭の64バイトがコメントだけで、Contact・Expires があるかは分からない）`, '本文を取得して（C2）、Contact と Expires があるか確かめる')];
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
         : [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `${probe.path}（HTTP ${probe.code}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
     }

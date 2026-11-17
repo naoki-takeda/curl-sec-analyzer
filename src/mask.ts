@@ -15,7 +15,9 @@ const MASK_PARAM_NAMES = [...TOKEN_PARAM_NAMES, ...SESSION_PARAM_NAMES, 'code', 
   'ticket', 'oauth_verifier', 'SAMLResponse', 'SAMLart', 'SAMLAssertion', 'accesskey', 'nonce', 'passcode', 'pin', 'hash', 'client_assertion',
   'mac',   // mac は名前全体が mac のときだけ（mac_address・isMac は残す）
   // 略したパスワードの名前（pswd・psw、フランス語の mdp）と、暗証番号（pin_number）
-  'pswd', 'psw', 'mdp', 'pin_number', 'pinnumber'];
+  'pswd', 'psw', 'mdp', 'pin_number', 'pinnumber',
+  // 個人の番号（米国の社会保障番号、カード番号とセキュリティコード）。値の形でも伏せる（SSN・CARD）
+  'ssn', 'cc', 'ccnum', 'cc_number', 'cardnumber', 'card_number', 'creditcard', 'credit_card', 'cvv', 'cvv2', 'cvc'];
 const alt = (names: string[]) => names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 /** クエリ（?・&）、フラグメント（#）、パス引数（;）のどれに置かれても一致する */
 export const paramRegex = (names: string[], flags = 'i') => new RegExp(`([?&#;](?:${alt(names)})=)([^&\\s#;"'<>]+)`, flags);
@@ -77,7 +79,9 @@ const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];
 // 伏せ済みの値（先頭の4文字までと印。nonce- を先に伏せたものを含む）は、印の終わりで値を終える（続けて読むと、#META cmd= の
 // &token=00…(16 chars)_-o_out.txt_https://… の後ろの引数まで値に入れて伏せた）
 // 名前は + を含んでよい（password+= は、フォームの読み方で「password 」という名前になる。+ で名前が切れて、値を伏せなかった）
-const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%+[\]-]{1,100}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|\\\/)+)`, 'g');
+// 名前は全角の英数字・記号（ｐａｓｓｗｏｒｄ）とゼロ幅の文字・ソフトハイフン（pass<U+200B>word）を含んでよい（含めないと、isSecretParamName の
+// 正規化を通らず、値を伏せなかった）
+const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%+[\]\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,100}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|\\\/)+)`, 'g');
 // JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる。
 // 「Bearer_eyJ…」「access_token_eyJ…」のように語と _ でつないだものも含める（直前の語は _ を含めて40文字までで、その前が語の外のときだけ。
 // 「_eyJ」の繰り返しで2乗の時間にしない）。JWE（5つの部分。鍵の部分が空の dir 形式「eyJ….. iv.暗号文.タグ」を含む）は5つ目まで、JWS は3つ目まで伏せる
@@ -272,8 +276,12 @@ const FREE_XML = new RegExp(String.raw`(<(${FREE_NAME})>)([^<]{1,512})(<\/\2>)`,
 const FREE_KEY_VALUE = new RegExp(String.raw`(\bkey\s*=\s*(["'])${FREE_NAME}\2\s+value\s*=\s*(["']))([^"']{1,512})(?=\3)`, 'gi');
 // 状態を表す語・Cookie の属性（secret: none、XSRF-TOKEN: Secure）は秘密ではないので伏せない（証跡が読めなくなった）
 const FREE_PLAIN = /^(?:true|false|yes|no|none|null|nil|empty|set|unset|required|optional|enabled|disabled|secure|httponly|samesite|lax|strict|present|missing|n\/a|-)$/i;
+// パスワードの名前（password: secure）では、Cookie の属性の語（secure・strict・lax など）も値として伏せる（弱いパスワードがその語のことがある）。
+// 残すのは真偽値・空の値だけ
+const PASSWORD_NAME = /pass|pwd|psw/i;
+const PASSWORD_PLAIN = /^(?:true|false|null|nil|empty|n\/a|-)$/i;
 const freeValue = (all: string, pre: string, v: string, h: Hider, post = '') =>
-  (v.includes('…') || FREE_PLAIN.test(v) || !/^[\x21-\x7e][\x20-\x7e]*$/.test(v) ? all : `${pre}${h.value(v)}${post}`);
+  (v.includes('…') || (PASSWORD_NAME.test(pre) ? PASSWORD_PLAIN : FREE_PLAIN).test(v) || !/^[\x21-\x7e][\x20-\x7e]*$/.test(v) ? all : `${pre}${h.value(v)}${post}`);
 const maskFreePairs = (s: string, h: Hider) => s
   .replace(FREE_XML, (all, open: string, _n: string, v: string, close: string) => freeValue(all, open, v, h, close))
   .replace(FREE_KEY_VALUE, (all, pre: string, _q1: string, _q2: string, v: string) => freeValue(all, pre, v, h))
@@ -294,12 +302,25 @@ function maskParams(s: string, h: Hider, depth = 0): string {
   });
 }
 
+/**
+ * 名前によらず値の形で伏せる個人の番号：米国の社会保障番号（123-45-6789）と、Luhn の検査に通るカード番号（4つずつ空白か - で区切ったもの
+ * （4111 1111 1111 1111、0738-9781-0828-3555）と、区切りのない15・16桁で 3〜6 で始まるもの）。13桁のミリ秒の時刻などは対象外
+ */
+const SSN = /(?<![\d-])\d{3}-\d{2}-\d{4}(?![\d-])/g;
+const CARD = /(?<![\d-])(?:\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|[3-6]\d{14,15})(?![\d-])/g;
+const luhn = (d: string) => {
+  let sum = 0;
+  for (let i = 0; i < d.length; i++) { let x = d.charCodeAt(d.length - 1 - i) - 48; if (i % 2) { x *= 2; if (x > 9) x -= 9; } sum += x; }
+  return d.length >= 13 && sum % 10 === 0;
+};
 function mask(s: string, h: Hider): string {
   // 順序：nonce → JSON の組（値の中の JSON を、パラメータの区切りで分ける前に見る） → パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる）
   // → ユーザー情報 → ASP.NET のセッション → パスの部分
   const nonce = s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${h.value(v)}'`)).replace(BARE_NONCE, (all, q: string | undefined, v: string) => bareNonce(all, q, v, h));
   return maskFreePairs(maskParams(maskJsonPairs(nonce, h), h), h)
           .replace(JWT, t => h.value(t))
+          .replace(SSN, v => h.bare(v))
+          .replace(CARD, v => (luhn(v.replace(/\D/g, '')) ? h.bare(v) : v))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
           .replace(URL_CRED_ENCODED, (_, sc: string, user: string) => `${sc}${user}%3A****%40`)
           .replace(ASPNET_COOKIELESS, (_, inner: string) => `/(${inner.replace(/([A-Z])\(([^()]+)\)/g, (__, k: string, v: string) => `${k}(${h.value(v)})`)})`)
@@ -353,7 +374,10 @@ const PROBE_PATTERNS: [string, string, RegExp, RegExp][] = [
   ['server-status', 'E-03', /\/server-status$/,      /Apache Server Status|Server Version:/],
   // security.txt はコメント（# で始まる行）から始めてよい（先頭の64バイトがコメントだけのものを「ない」とした）。HTML・JSON のエラー画面は # で始まらない
   // コメントで始まるのは、ファイルの先頭が「# 」のときだけ（行の始めの # を見ると、CSS の #app{ を含む HTML の画面まで security.txt とした）
-  ['security-txt',  'E-04', /\/security\.txt$/,      /^(Contact|Expires):|(?<![\s\S])#[ \t]/m],
+  // 先頭の64バイトに Contact・Expires がなくコメントだけのもの（security-txt-comment）は、本当の security.txt かが分からない（どのパスにも
+  // 「# …」の平文を返すサーバもある）ので、E-04 は合格にせず na にする
+  ['security-txt',  'E-04', /\/security\.txt$/,      /^(Contact|Expires):/m],
+  ['security-txt-comment', 'E-04', /\/security\.txt$/, /(?<![\s\S])#[ \t]/],
   ['robots',        'E-04', /\/robots\.txt$/,        /^(User-agent|Disallow|Allow|Sitemap):/im],
   // XSSI 対策の前置き（)]}' の行）を付けたソースマップもある（ブラウザの開発ツールは読む。前置きがあると「取得できない」とした）
   ['source-map',    'E-13', /\.map$/,                /^(?:\)\]\}'[^\n]*\n)?\s*\{\s*"(?:version|file|sources|sourceRoot|mappings|names|sections)"\s*:/]];

@@ -1,7 +1,11 @@
-// 第40回の束5（第1〜3章のルールの誤判定）の再現テスト
+// 第40回の束5（第1〜3章のルールの誤判定）と束6（マスクの残り・プローブ・差分）の再現テスト
 import { describe, expect, it } from 'vitest';
 import { hostSameSiteMap } from '../src/engine/run';
 import { parseInput } from '../src/parser/input';
+import { diff } from '../src/engine/diff';
+import type { Finding } from '../src/model';
+import { maskText } from '../src/mask';
+import { showText } from '../src/shownText';
 import { evaluate } from './helpers';
 
 const ids = (input: string, item: string, target?: string) =>
@@ -148,5 +152,56 @@ describe('束5 A-07 の見逃していた秘密のキー', () => {
   it('password_salt は②、app_key（Pusher の公開キー）は①にしない', () => {
     expect(a07('password_salt')).toEqual(['A-07.2']);
     for (const k of ['app_key', 'pwd', 'PWD', 'service_role']) expect(a07(k), k).not.toContain('A-07.1');
+  });
+});
+
+describe('束6 マスクの残り', () => {
+  it('全角・ゼロ幅の文字を含むパラメータ名の値を伏せる', () => {
+    for (const u of ['https://x.example/?ｐａｓｓｗｏｒｄ=hunter22', `https://x.example/?pass${'​'}word=hunter22`, `https://x.example/?pass${'­'}word=hunter22`])
+      expect(showText(u), u).not.toContain('hunter22');
+  });
+  it('パスワードの名前では、Cookie の属性の語も伏せる（ほかの名前の secret: none、XSRF-TOKEN: Secure は残す）', () => {
+    expect(showText('password: secure')).not.toMatch(/password: secure/);
+    expect(showText('pwd=strict')).not.toMatch(/pwd=strict/);
+    expect(showText('password: true')).toBe('password: true');
+    expect(showText('secret: none')).toBe('secret: none');
+  });
+  it('社会保障番号とカード番号の形は、名前によらず伏せる', () => {
+    for (const s of ['https://x.example/?q=123-45-6789', 'https://x.example/?q=4111 1111 1111 1111', 'card 0738-9781-0828-3555 x', 'id=4111111111111111'])
+      expect(showText(s), s).not.toMatch(/6789|1111 1111|3555|4111111111111111/);
+    expect(showText('https://x.example/?ssn=12345')).not.toContain('12345');
+  });
+  it('Luhn に通らない番号・ミリ秒の時刻・日付は残す', () => {
+    expect(maskText('t=1700000000000')).toBe('t=1700000000000');   // 値の形で伏せる段（showText の許可リストは長い数字を別に短くする）
+    expect(maskText('n=4111 1111 1111 1112')).toBe('n=4111 1111 1111 1112');
+    expect(showText('2026-11-17')).toBe('2026-11-17');
+  });
+  it('showText は、もう一度かけても変わらない', () => {
+    for (const s of ['zxqvbnmt//%2B@', 'https://u:p@x.example/?code=abc&state=xyzxyzxyzxyzxyzxyz', 'a 123-45-6789 b'])
+      expect(showText(showText(s)), s).toBe(showText(s));
+  });
+});
+
+describe('束6 security.txt のプローブ', () => {
+  const probe = (head: string) => evaluate(`#TARGET url=https://a.example/ label=probes\n#PROBE path=/.well-known/security.txt head=${Buffer.from(head).toString('base64')} code=200 size=100 ct=text/plain\n`)
+    .findings.filter(f => f.item === 'E-04').map(f => f.ruleId);
+  it('先頭がコメントだけなら na（Contact・Expires があるかは分からない）', () => {
+    expect(probe('# This file is served for every path\n# nothing here\n')).toEqual(['E-04.na']);
+  });
+  it('Contact・Expires があれば合格', () => {
+    expect(probe('Contact: mailto:security@a.example\nExpires: 2027-01-01T00:00:00Z\n')).toEqual(['E-04.ok']);
+  });
+});
+
+describe('束6 差分の突き合わせ', () => {
+  const f = (evidence: string): Finding => ({ ruleId: 'A-01.2', item: 'A-01', title: '', severity: 'low', status: 'fail', target: 'unauth-api', evidence, recommendation: '', references: [], score: 0 });
+  it('同じサイトの別のサーバに変わっただけなら「継続」', () => {
+    const rows = diff([f('HTTP 302 → https://web-03.example.com/login')], [f('HTTP 302 → https://web-07.example.com/login')]);
+    expect(rows.map(r => r.kind)).not.toContain('new');
+    expect(rows.map(r => r.kind)).not.toContain('resolved');
+  });
+  it('別のサイトの配信元は別の指摘（cdn-a を直して cdn-b が増えた）', () => {
+    const rows = diff([f('https://cdn-a.example/x.js')], [f('https://cdn-b.example/x.js')]);
+    expect(rows.map(r => r.kind).sort()).toEqual(['new', 'resolved']);
   });
 });

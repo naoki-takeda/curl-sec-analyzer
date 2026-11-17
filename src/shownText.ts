@@ -134,4 +134,10 @@ function allowRun(run: string): string {
 export const allowText = (s: string): string => s.replace(WORDS, (w: string, keep: string | undefined) => (keep ? w : allowRun(w)));
 
 /** 画面・エクスポートに出す文字列（証跡・URL）：名前による伏せ方（maskText）のあとに、許可リストを通す */
-export const showText = (s: string): string => allowText(maskText(s));
+// もう一度かけても変わらないようにする（伏せた語「…(8 chars)」の直後の「//…@」をユーザー情報として伏せ直すなど、1回目の結果が2回目の手がかりを変える）。
+// ふつうは2回で止まる
+export const showText = (s: string): string => {
+  let out = allowText(maskText(s));
+  for (let i = 0; i < 4; i++) { const next = allowText(maskText(out)); if (next === out) break; out = next; }
+  return out;
+};
