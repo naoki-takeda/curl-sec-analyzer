@@ -13,7 +13,7 @@ import { toCsv } from '../export/csv';
 import { ITEM_COMMANDS, ITEM_COMMANDS_EN } from '../commands';
 import { hstsDirective } from '../rules/util';
 import { covLabel, diffLabel, getLang, sevLabel, statusLabel, tr } from '../i18n';
-import { maskText } from '../mask';
+import { showText } from '../shownText';
 import { recommendationEn } from '../recommendationsEn';
 import { BTN, type Child, LINK, PRIMARY, SEV_BORDER, SEV_TEXT, button, chapterOf, disclosure, download, el, options, sevCell, table, td, titleCell } from './dom';
 import { actions, refs, state } from './state';
@@ -123,7 +123,7 @@ export function targetSummary(targets: Target[], byTarget: Map<string, Finding[]
     const f = finalResponse(t); const s = isSensitive(t);
     const fails = (byTarget.get(t.label) ?? []).filter(x => x.status === 'fail');
     return el('tr', '',
-      td('whitespace-nowrap font-bold', t.label), td('break-all text-muted', t.url ? maskText(t.url) : T.urlUnknown),
+      td('whitespace-nowrap font-bold', t.label), td('break-all text-muted', t.url ? showText(t.url) : T.urlUnknown),
       td('whitespace-nowrap', `${T.kinds[responseKind(t, f)]}（${getLang() === 'en' ? labelRow(t.label).nameEn : labelRow(t.label).name}）`),
       td('whitespace-nowrap', s === undefined ? T.unknown : s ? T.yes : T.no),
       ...SEVERITIES.map(sv => { const n = fails.filter(x => x.severity === sv).length; return td(`num ${n ? SEV_TEXT[sv] + ' font-bold' : 'text-muted'}`, String(n)); }));
@@ -158,7 +158,7 @@ export function targetBlock(t: Target, fs: Finding[]) {
   const d = el('details', 'mt-3 rounded-md border border-line bg-surface',
     el('summary', 'summary-custom flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2',
       disclosure(), el('span', 'font-bold', t.label),
-      el('span', 'text-sm text-muted break-all', `${t.url ? maskText(t.url) : T.urlUnknown} / ${f ? `HTTP ${f.status}` : T.noResp}`), counts(fs)),
+      el('span', 'text-sm text-muted break-all', `${t.url ? showText(t.url) : T.urlUnknown} / ${f ? `HTTP ${f.status}` : T.noResp}`), counts(fs)),
     el('div', 'border-t border-line p-2', findingsTable(fs, T.tables.target(t.label))));
   d.open = state.view.showAll || fs.some(x => x.status === 'fail' && x.severity !== 'info');   // 情報以外の指摘があるものだけ開く
   return d;

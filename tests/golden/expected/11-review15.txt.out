@@ -83,7 +83,7 @@ login | C-09.ok | info | pass | URLにセッションIDなし
 login | C-11.ok | info | pass | .AspNetCore.Identity.ApplicationC1
 login | C-13.ok | info | pass | 共有キャッシュの指定なし
 login | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
-logout | C-12.ok | info | pass | wordpress_logged_in_0123456789abcdef0123456789abcdef=…(1 chars); expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+logout | C-12.ok | info | pass | wordpress_logged_in_…(32 chars)=…(1 chars); expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
 logout | H-15.1 | info | fail | (ヘッダなし)
 mypage | A-02.ok | info | pass | URL・Location・本文にトークンなし
 mypage | E-01.ok | info | pass | エラーの詳細らしき記述なし

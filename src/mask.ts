@@ -248,6 +248,16 @@ const maskJsonPairs = (s: string, h: Hider) => {
 };
 
 /**
+ * URL・JSON の外で名前を付けた秘密（コメントの password=hunter2、JS の password: "hunter2"・{'password': 'x'}、X-Auth-Token: x）。
+ * 短い合言葉は形では見分けられない（shownText.ts の許可リストは hunter2 を語として残す）ので、名前で伏せる。名前は、最後の語が
+ * password・secret・token・api_key などのものだけ（Access-Control-Allow-Credentials・token_type は対象外）。値は ASCII の文字だけ
+ */
+const FREE_NAME = String.raw`(?:[A-Za-z][\w-]{0,30}[_-])?(?:password|passwd|passphrase|pwd|pass|secret|api[_-]?key|apikey|token|private[_-]?key)`;
+const FREE_PAIR = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*[:=]\s*(["']?))([^\s"'<>,;&)}\]\\]+)`, 'gi');
+const maskFreePairs = (s: string, h: Hider) => s.replace(FREE_PAIR, (all, pre: string, _q1: string, _q2: string, v: string) =>
+  (/…\(\d+ chars\)/.test(v) || v.includes('…') || !/^[\x21-\x7e]+$/.test(v) ? all : `${pre}${h.value(v)}`));
+
+/**
  * パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る。
  * 入れ子は深さ10まで見て、それより深い値も、秘密の名前のパラメータは伏せる（入れ子に戻らないだけ）。
  * 深さで打ち切って値をそのまま返すと、?next=/a?r=/b?r=/c?r=/d?access_token=… のトークンが A-02①（高）の証跡に出た
@@ -265,7 +275,7 @@ function mask(s: string, h: Hider): string {
   // 順序：nonce → JSON の組（値の中の JSON を、パラメータの区切りで分ける前に見る） → パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる）
   // → ユーザー情報 → ASP.NET のセッション → パスの部分
   const nonce = s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${h.value(v)}'`)).replace(BARE_NONCE, (all, q: string | undefined, v: string) => bareNonce(all, q, v, h));
-  return maskParams(maskJsonPairs(nonce, h), h)
+  return maskFreePairs(maskParams(maskJsonPairs(nonce, h), h), h)
           .replace(JWT, t => h.value(t))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
           .replace(URL_CRED_ENCODED, (_, sc: string, user: string) => `${sc}${user}%3A****%40`)

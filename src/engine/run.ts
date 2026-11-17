@@ -2,7 +2,7 @@
 // ①ラベル対応表で項目を絞る → ②ターゲット単位 → ③ホスト単位 → ④横断（各スコープ内は dependsOn の順に並べてある）
 // → ⑤条件単位の絞り込み（ターゲット単位の結果）→ ⑥API応答での重要度の引き下げ → ⑦例外の適用
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
-import { maskText } from '../mask';
+import { showText } from '../shownText';
 import { targetKeys, urlKey } from './targetKey';
 import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isRedirectWithLocation, isSensitive, ownChain, responseKind } from '../parser/target';
 import { looksLikeSession, parseSetCookie, sentAuthOf } from '../parser/setCookie';
@@ -118,7 +118,7 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   // 文脈の findings は同じ配列を指すので、依存先のルールの結果も見える
   // 差分・例外の突き合わせのキーは、マスクと切り離して engine/targetKey.ts で作る
   const keys = targetKeys(targets);
-  const per = targets.map((t, i) => ({ t, url: t.url ? maskText(t.url) : undefined, keyUrl: t.url ? urlKey(t.url) : undefined, targetKey: keys[i], host: hostOf(t), allow: allowedItems(t.label),
+  const per = targets.map((t, i) => ({ t, url: t.url ? showText(t.url) : undefined, keyUrl: t.url ? urlKey(t.url) : undefined, targetKey: keys[i], host: hostOf(t), allow: allowedItems(t.label),
                                        ctx: contextOf(t, findings, maps, opt.profile) }));
   for (const rule of rules) {                                // ルールごとに全ターゲット（依存先の結果が先にそろう）
     for (const { t, url, keyUrl, targetKey, host, allow, ctx } of per) {
@@ -129,7 +129,7 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
       if (rule.appliesTo === 'html' && rule.id !== 'E-09' && isRedirectWithLocation(ctx.final)) continue;
       if (rule.appliesTo === 'api' && ctx.responseKind !== 'api') continue;
       for (const f of safeRun(rule, () => rule.run?.(ctx), t.label).filter(x => allow.allowsFinding(x))) {   // ②⑤
-        const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: maskText(f.evidence) };
+        const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: showText(f.evidence) };
         if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') g.severity = 'info';   // ⑥
         findings.push(g);
       }
@@ -138,6 +138,6 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   const x = crossContext(targets, findings);
   for (const rule of [...hostRules, ...crossRules])           // ③④
     // 横断・ホスト単位のルールの na は、その条件だけが入力不足（ほかの条件はターゲット単位で判定しているかもしれない）。カバレッジで示すため印を付ける
-    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: maskText(f.evidence), ...(f.status === 'na' ? { partial: true } : {}) });
+    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: showText(f.evidence), ...(f.status === 'na' ? { partial: true } : {}) });
   return findings;
 }

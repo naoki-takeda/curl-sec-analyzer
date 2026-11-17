@@ -13,7 +13,13 @@ const COMMON_BIGRAMS = new Set(('th he in er an re on at en nd ti es or te of ed
 export function lowerToken(x: string): boolean {
   if (x.length < 16 || !/^[a-z]+$/.test(x)) return false;
   if ((x.match(/[aeiouy]/g) ?? []).length / x.length < 0.25) return true;
+  return rareBigrams(x) >= 0.35;
+}
+
+/** 英小文字の並びのうち、よく現れる2文字の並びにないものの割合（2文字未満は0）。画面の許可リスト（shownText.ts）も使う */
+export function rareBigrams(x: string): number {
+  if (x.length < 2) return 0;
   let rare = 0;
   for (let i = 0; i + 1 < x.length; i++) if (!COMMON_BIGRAMS.has(x.slice(i, i + 2))) rare++;
-  return rare / (x.length - 1) >= 0.35;
+  return rare / (x.length - 1);
 }
