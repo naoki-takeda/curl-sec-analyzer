@@ -146,11 +146,15 @@ export const isSensitive = (t: Target): boolean | undefined => t.sensitive ?? (t
 export function capturedAt(t: Target): number {
   const at = t.meta.at ? Date.parse(t.meta.at) : NaN;   // 「2026-11-12T10:00:00」（タイムゾーンなし）は手元の時刻として読む
   if (!Number.isNaN(at)) return at;
+  // 未来の Date（時計のずれの5分より先）は使わない。Date は診断対象のサーバが書くので、Date: 2030 として、Expires=2031 の Cookie の期限を短く
+  // 見せ、C-05①（中）を合格にできた（1日まで認めると、C-05 の既定の基準の24時間と同じ幅で期限を短く見せられた）。過去の Date は、前に採取した
+  // 出力を読み直したときの正しい基準（期限を長く見せる向きにはならない）
+  const now = Date.now();
   for (const r of t.responses) {
     const d = Date.parse(r.headers.get('date')?.[0] ?? '');
-    if (!Number.isNaN(d)) return d;
+    if (!Number.isNaN(d) && d <= now + 5 * 60e3) return d;
   }
-  return Date.now();
+  return now;
 }
 
 export function hostOf(t: Target): string | undefined {

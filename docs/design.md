@@ -339,7 +339,7 @@ APIでは、未認証アクセス、トークンの露出、過剰なデータ�
 - 対象環境（本番・検証）、実施者、許可範囲は、表の上にまとめて記載します。
 - 「該当条件」列には条件番号（①②…）を書きます。ツールのルールID（例：H-01.1）の末尾の数字と一致します。
 - 「実施日時」と「実施コマンド」は、各ターゲットに`#META at=2026-10-13T10:00 cmd=C1`のように付けるとツールが転記します。付けない場合は空欄で出力します。コマンド生成器のID（`C1`など）以外の手で書いたコマンドは、プログラム・オプション・ヘッダの名前とURLの形だけを残し、値は`****`にして出します（秘密を出さないため。ツール設計3「マスキングの対象」）。
-- `#META at`（HARは`startedDateTime`）は、期限の判定（証明書のnotAfter、CookieのExpires、security.txtのExpires）の基準にも使います。前に採取した出力を読み直しても、採取時の状態で判定するためです。ない場合は応答の`Date`ヘッダ（サーバが応答した時刻）を、それもなければ判定した時刻を使います。例外の期限（until）は手元の日付で比べます。
+- `#META at`（HARは`startedDateTime`）は、期限の判定（証明書のnotAfter、CookieのExpires、security.txtのExpires）の基準にも使います。前に採取した出力を読み直しても、採取時の状態で判定するためです。ない場合は応答の`Date`ヘッダ（サーバが応答した時刻）を、それもなければ判定した時刻を使います。判定した時刻より5分以上先の`Date`は使いません（`Date`は診断対象のサーバが書くので、未来の時刻にしてCookieの期限を短く見せ、C-05①を合格にできたため）。例外の期限（until）は手元の日付で比べます。
 - 再診断では同じコマンドを実行し、前回の結果と比べます（ツールの差分表示はv0.4）。
 
 ## ツール設計1：入力モデル・推奨コマンド・パース
@@ -459,37 +459,41 @@ C13の`#PROBE`は、HTTP 2xxで取得でき、パスと先頭64バイトの両�
 
 ```sh
 # C11: 証明書とTLS情報
+# サーバはハンドシェイクのあとに任意のデータを送れ、s_client はそれを標準出力に出す。データは最初の Verify return code: の行より後にしか
+# 出ないので、そこで切る（切らないと、サーバが notAfter=・DNS:・a:PKEY: を書いて T-10・T-11 を変えられる）。x509 の出力は最初の証明書から作る
 echo "#TARGET url=https://HOST/ label=tls"
-openssl s_client -connect HOST:443 -servername HOST -showcerts </dev/null 2>&1
+openssl s_client -connect HOST:443 -servername HOST -showcerts </dev/null 2>&1 | sed '/^ *Verify return code:/q'
 openssl s_client -connect HOST:443 -servername HOST </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
 
 # C12: プロトコルごとの接続可否（OpenSSL 3系は SECLEVEL=0 が必要）
-#   ok=1   : ハンドシェイク成功（終了コードが0で、かつ Protocol 行がある）
-#   ok=0   : サーバが拒否
-#   ok=err : 手元のOpenSSLがそのプロトコルに非対応 → ツールでは na
+#   ok=1   : ハンドシェイク成功（終了コードが0で、要約の中に「New, <版>, Cipher is <暗号>」の行がある。版は問わない）
+#   ok=0   : サーバが拒否（unsupported protocol を含む）
+#   ok=err : 手元のOpenSSLがそのプロトコルに非対応（標準エラーの unknown option・no protocols available だけで見る）→ ツールでは na
+tout=$(mktemp); terr=$(mktemp)
 for v in tls1 tls1_1 tls1_2 tls1_3; do
-  out=$(openssl s_client -connect HOST:443 -servername HOST -$v -cipher 'DEFAULT@SECLEVEL=0' </dev/null 2>&1); rc=$?
-  if printf '%s' "$out" | grep -qiE 'unknown option|no protocols available|unsupported protocol'; then r=err
-  elif [ $rc -eq 0 ] && printf '%s' "$out" | grep -qE 'Protocol *: *TLS'; then r=1
+  openssl s_client -connect HOST:443 -servername HOST -$v -cipher 'DEFAULT@SECLEVEL=0' </dev/null >"$tout" 2>"$terr"; rc=$?
+  if grep -qiE 'unknown option|no protocols available' "$terr"; then r=err
+  elif [ $rc -eq 0 ] && sed '/^ *Verify return code:/q' "$tout" | grep -qE '^New, [^(,][^,]*, Cipher is [^(]'; then r=1
   else r=0; fi
   printf '#TLSPROBE v=%s ok=%s\n' "$v" "$r"
 done
 ```
 
 ```sh
-# C23: 弱い暗号・鍵交換を個別に試す（T-10①③、v0.2）。TLS 1.2で確認する
+# C23: 弱い暗号・鍵交換を個別に試す（T-10①③、v0.2）。TLS 1.2で確認する（C12 の tout・terr を使う）
 #   ok=1   : その暗号で接続できた（サーバが受け入れる）
 #   ok=0   : サーバが拒否
-#   ok=err : 手元のOpenSSLがその暗号に非対応 → ツールでは na
+#   ok=err : 手元のOpenSSLがその暗号に非対応（OpenSSL 1.1以降の RC4・3DES）→ ツールでは「試していない」と書く
 # RC4-SHA・DES-CBC3-SHA・NULL-SHA256 は T-10①、AES128-SHA（静的RSA＋CBC）・ECDHE-RSA-AES128-SHA（CBC）は T-10③
 echo "#TARGET url=https://HOST/ label=tls"
 for c in RC4-SHA DES-CBC3-SHA NULL-SHA256 AES128-SHA ECDHE-RSA-AES128-SHA; do
-  out=$(openssl s_client -connect HOST:443 -servername HOST -tls1_2 -cipher "$c:@SECLEVEL=0" </dev/null 2>&1); rc=$?
-  if printf '%s' "$out" | grep -qiE 'no cipher match|unknown option'; then r=err
-  elif [ $rc -eq 0 ] && printf '%s' "$out" | grep -qE "Cipher *: *$c"; then r=1
+  openssl s_client -connect HOST:443 -servername HOST -tls1_2 -cipher "$c:@SECLEVEL=0" </dev/null >"$tout" 2>"$terr"; rc=$?
+  if grep -qiE 'no cipher match|unknown option' "$terr"; then r=err
+  elif [ $rc -eq 0 ] && sed '/^ *Verify return code:/q' "$tout" | grep -qE "^New, [^(,][^,]*, Cipher is $c\$"; then r=1
   else r=0; fi
   printf '#CIPHERPROBE c=%s ok=%s\n' "$c" "$r"
 done
+rm -f "$tout" "$terr"
 ```
 
 これらを`#TARGET`付きでまとめて実行する場合は、次のようなラッパーを使います。出力ファイルをそのままツールに読み込めます。
@@ -519,10 +523,10 @@ t mypage "$H/mypage"     1  -v -o /dev/null -b jar.txt >> out.txt
 | `-v`のプレフィックス | ` >  `送信、` <  `受信、` *  `情報、`{ [n bytes data]`本文。本文にも` *  `や` >  `で始まる行（箇条書きや引用）がある | verboseモードのターゲットで、かつ本文の読み取り中でないときだけ解釈する。verboseモードかは、curlの情報行（`* Connected to`・`* Trying`・`* SSL connection`など。プロキシを使うと最初の行になる`* Uses proxy env variable`も）で見分ける。` >  `行には送信したCookieやAuthorizationも含まれるためマスキング対象にする |
 | `-v`のヘッダ終端 | 終端は` <  `だが、貼り付けで末尾の空白が落ちて`<`だけになることがある | `^<\s*$`を終端として扱い、その応答を閉じる（-vの出力では本文を解析せず、本文はC2で取る）。`-o /dev/null`がなく本文も出力した場合は、次の`< HTTP/`の行（`-L`の次の応答）までを読み飛ばす。本文の中の`HTTP/1.1 200 OK`や、`* `・`> `で始まる行を、応答・情報行・送信ヘッダとして読まないため |
 | ブロック境界 | ステータス行`HTTP/(1.0・1.1・2・3) コード`。HTTP/2と3はreason phraseなし | ステータス行から空行までを1応答とする |
-| 応答の閉じ忘れ | 本文の後に別コマンドの出力が続くと、本文に混入する | マーカー行とopensslの開始行（`CONNECTED(`、`depth=`、`subject=`、`notAfter=`など。OpenSSL 3.5が`CONNECTED(`の前に出す`Connecting to <アドレス>`も。次の行が`CONNECTED(`のときだけ）で応答を閉じる（`CONNECTED(`の行と、`Connecting to`の次の行が`CONNECTED(`のものは、応答の本文の中でも閉じる。同じターゲットでHTTPの応答に続けたopensslの出力を本文に入れないため）。本文は64KBで打ち切る。`#TARGET`・`#META`の値は引用符で囲んでもよい（`url="https://…"`）。`url=`がスキームのあるURLとして読めないときは警告する |
+| 応答の閉じ忘れ | 本文の後に別コマンドの出力が続くと、本文に混入する | マーカー行とopensslの開始行（`CONNECTED(`、`depth=`、`subject=`、`notAfter=`など。OpenSSL 3.5が`CONNECTED(`の前に出す`Connecting to <アドレス>`も。次の行が`CONNECTED(`のときだけ）で応答を閉じる（`CONNECTED(`の行と、`Connecting to`の次の行が`CONNECTED(`のものは、応答の本文の中でも閉じる。同じターゲットでHTTPの応答に続けたopensslの出力を本文に入れないため。ただし生成スクリプトの出力（印のある入力）では、本文の中で閉じるのは`tls`のラベルだけ。診断対象のサーバが本文に`CONNECTED(n)`を書くと、そのあとの本文がopensslの出力になり、E-07〜E-09・E-12が消えたため）。本文は64KBで打ち切る。`#TARGET`・`#META`の値は引用符で囲んでもよい（`url="https://…"`）。`url=`がスキームのあるURLとして読めないときは警告する |
 | `#PROBE`の属性 | Content-Typeは`text/html; charset=utf-8`のように空白を含む | `ct=`は行末に置き、`ct=`以降を行末まで値とする。`=`を含まない語は無視する |
 | `-L`の複数応答 | すべてのホップのヘッダが順に出る | `responses[]`で保持し、`kind`（final・redirect・informational・connect）を付与。各ホップには、ターゲットのURLから`Location`をたどったURLを持たせる（HARと同じ）。`url=`がhttpで、`-L`で同じホストのhttpsに転送されたターゲットは、`http`ラベル以外ならHTTPSの応答として判定する（URLがhttpのままだと、H-・C-の項目がすべて黙って適用外になる）。httpのホップで発行したCookieも判定する |
-| 1xx・CONNECT・認証のやり直し | 100 Continue、103 Early Hints、プロキシの`200 Connection established`、プロキシの認証要求`407`（`-x … -U`）、curlが認証し直す`401`（`--digest`・`--ntlm`・`--negotiate`・`--anyauth`） | 評価対象から除外。理由句が違うプロキシもあるため、本文のない2xxのあとに応答が続く場合もCONNECTの応答とみなす。`-v`では、1xxと、`> CONNECT`への2xxの応答のあとを本文として読み飛ばさない（そのあとに本当のリクエストの`* SSL connection`・`> Origin`・`> Cookie`が続く）。407と、あとに応答が続く401も、その URL 自身の応答ではないので評価対象から除く（407を最初の応答にすると、T-04が「HTTPを拒否」と合格にし、A-01①を見逃す） |
+| 1xx・CONNECT・認証のやり直し | 100 Continue、103 Early Hints、プロキシの`200 Connection established`、プロキシの認証要求`407`（`-x … -U`）、curlが認証し直す`401`（`--digest`・`--ntlm`・`--negotiate`・`--anyauth`） | 評価対象から除外。理由句が違うプロキシもあるため、本文のない2xxのあとに応答が続く場合もCONNECTの応答とみなす（`-i`の出力では、本文と次の応答を見分けられないので、本文が「HTTP/1.1 200 OK」と偽のヘッダで始まると、次の応答として読む。ヘッダの形でプロキシを見分ける作りは、ヘッダを足す本物のプロキシを壊すので採らない。生成スクリプトは、ヘッダと本文を分けて採取する）。`-v`では、1xxと、`> CONNECT`への2xxの応答のあとを本文として読み飛ばさない（そのあとに本当のリクエストの`* SSL connection`・`> Origin`・`> Cookie`が続く）。407と、あとに応答が続く401も、その URL 自身の応答ではないので評価対象から除く（407を最初の応答にすると、T-04が「HTTPを拒否」と合格にし、A-01①を見逃す） |
 | `-v`の本文の中の`< HTTP/` | `-v`で本文も出力すると、本文に`< HTTP/1.1 200 OK`のような行（curlの出力を載せたページ）がありうる | 次の応答とみなすのは、前の応答のあとに次の応答が続きうる（転送・1xx・401・407）ときだけ。`#TARGET`ごとにCONNECTの状態を初期化する |
 | 本文にくっついたマーカー | 改行のない本文（手で書いた`curl -i`のJSON）の直後に`#TARGET`が続く（`{"id":1}#TARGET url=…`） | JSON・HTMLの閉じ（`}`・`]`・`>`）の直後の`#TARGET url=`などで行を分ける（分けないと、次のターゲットが前の本文に吸い込まれて黙って消える）。`#TARGET url=`・`label=`は、空白・引用符以外のどの文字の直後でも分ける（`Unauthorized`のような平文の本文のあと。本文の文中の`… #TARGET url=`と、`set -x`の`+ echo '#TARGET …'`は分けない）。生成スクリプトも`#TARGET`の前に改行を出す |
 | 進捗表示 | `-s`を付けずに`2>&1`にすると、curlの進捗表示が出る。遅い応答では、進捗表示とステータス行が同じ行になる | 見出しの行と数字の行（数字の欄と時刻の欄`--:--:--`）を読み飛ばし、応答の行の前にくっついた部分を取り除く。時刻の欄は curl の版で違う（`--:--:--`、`0:00:02`、curl 8.22 の`00:02`や空欄）。数字の欄の並び（%の欄は0〜100）で見分け、進捗表示だけの行は時刻の欄が1つ以上あるものだけを読み飛ばす（本文の数字の行を消さない）。時刻の欄が空欄の行（数字の欄のあいだに10個以上の空白）は、応答の本文の外のときだけ読み飛ばす（本文の桁をそろえた数値の表を消さない） |
@@ -538,7 +542,7 @@ t mypage "$H/mypage"     1  -v -o /dev/null -b jar.txt >> out.txt
 - **判別と結合**：HARはファイル読込で受け、JSONとして解釈できて`log.entries`を持てばHARとして扱う。テキストエリアの入力はこれまでどおり`#TARGET`形式で解析し、両方から作ったターゲットを結合して評価する。
 - **変換**：`log.entries`の1件を1ターゲットにする。URLは`request.url`、応答は`response.status`、`response.httpVersion`、`response.headers`（nameとvalueの配列）から作る。HTTPバージョンは、ブラウザごとの表記（h2、HTTP/2.0など）を1.1・2・3に正規化する。名前が`:`で始まるHTTP/2の疑似ヘッダ（`:status`など）は除外する。1つのヘッダに複数の`Set-Cookie`を改行でつないで書き出すものがあるため、`Set-Cookie`は改行で1件ずつに分ける（分けないと2つ目以降のCookieを判定せず、証跡に生の値が出る）。本文は`response.content.text`のうちHTMLとJSONだけを先頭64KBまで残す（`encoding: base64`ならデコード）。リクエスト側は、全ホップのリクエストからAuthorizationの有無とCookieの名前（値は持たない）だけを取り出す。ブラウザは解析用・同意用のCookieも送るので、機密応答の推定（`sentAuth`、第0章 0.3）には、Authorizationか、セッションCookieらしい名前（組織プロファイルの指定があればそれ）のCookieを送ったときだけを数える。Secure の Cookie は https のホップでしか送られないため、最初の http のリクエストだけでは分からない。
 - **由来の記録**：HAR由来のターゲットには`meta.source = 'har'`と`meta.cmd = 'HAR'`を設定する。診断カバレッジの理由（HARに機密情報が含まれないなど）と、第8章の「実施コマンド」列に使う。除外したエントリの数（har-excluded）と、機密情報が除かれたHARの検出（har-sanitized）は、解析警告としても表示する。
-- **リダイレクト**：HARではリダイレクトの各ホップが別のエントリになる。ブラウザが内部で作った転送（HSTS・HTTPS-Upgradesの`307 Internal Redirect`、`Non-Authoritative-Reason`のあるエントリ）は、サーバの応答ではないので取り込まない。`response.redirectURL`と次のエントリのURLでつなぎ、1つのターゲットの応答チェーンに組み直す。ブラウザはフラグメントを除いたURLでリクエストを記録するので、`Location`のフラグメント（`/app/#/home`）は除いて比べる。つなぐのは同じホスト名への転送だけで、別のホスト（IdP、apexからwwwなど）への転送先はつながない（つなぐと、対象外のホストの応答を、選んだホストのURLの結果として判定してしまう）。httpからhttpsに転送されたチェーンは、最後のhttpsのURLをターゲットのURLにする（HTTPSの応答が対象のH-01やCookieの項目を判定するため）。httpのホップは応答に残し、そこで発行したCookieも判定する。各応答にはそのホップのURLを持たせ、apexの「自身の応答」や、E-05・E-11・A-01の「そのURLの応答」には、最初のhttpsのホップを使う（`parser/target.ts`の`ownChain`）。`http`ラベルを付けたチェーンだけは、T-04のために転送元のhttpのURLのままにする。
+- **リダイレクト**：HARではリダイレクトの各ホップが別のエントリになる。ブラウザが内部で作った転送（HSTS・HTTPS-Upgradesの`307 Internal Redirect`）は、サーバの応答ではないので取り込まず、件数を警告する。内部の転送とするのは、307で、ネットワークに出ていない（`serverIPAddress`がない）うえに、理由句が`Internal Redirect`か`Non-Authoritative-Reason`ヘッダがあるものだけ（理由句とヘッダはサーバも返せるので、それだけで除くと、診断対象のサーバがログインのPOSTやhttpからhttpsへの転送を判定から外せた）。`response.redirectURL`と次のエントリのURLでつなぎ、1つのターゲットの応答チェーンに組み直す。ブラウザはフラグメントを除いたURLでリクエストを記録するので、`Location`のフラグメント（`/app/#/home`）は除いて比べる。つなぐのは同じホスト名への転送だけで、別のホスト（IdP、apexからwwwなど）への転送先はつながない（つなぐと、対象外のホストの応答を、選んだホストのURLの結果として判定してしまう）。httpからhttpsに転送されたチェーンは、最後のhttpsのURLをターゲットのURLにする（HTTPSの応答が対象のH-01やCookieの項目を判定するため）。httpのホップは応答に残し、そこで発行したCookieも判定する。各応答にはそのホップのURLを持たせ、apexの「自身の応答」や、E-05・E-11・A-01の「そのURLの応答」には、最初のhttpsのホップを使う（`parser/target.ts`の`ownChain`）。`http`ラベルを付けたチェーンだけは、T-04のために転送元のhttpのURLのままにする。
 - **304**：ブラウザがキャッシュを再検証した304の応答は、サーバがセキュリティヘッダを付け直さなくてよい（RFC 9110 15.4.5）ので、既定で除外し、件数を解析警告に出す（通常の応答として判定するとH-01①（高）などの誤検知になる）。開発者ツールで「キャッシュを無効にする」を選んで記録し直すよう案内する。一覧でラベルを選べば判定する。
 - **対象ホストの選択**：解析の前に対象ホストを選ばせ、それ以外（解析タグ、CDN、外部APIなど）のエントリは既定で除外する。
 - **ラベルの付与**：HARにはラベルがないため、取り込んだ後にエントリ一覧で付ける。一覧はリダイレクトを組み直した後のチェーン単位で表示し、ラベルはチェーン（1つのターゲット）に付ける。ツールは候補を示し、診断者が確定する。候補の例：パスワード入力欄のあるページのGET→`pre-login`、新しいセッションCookieを発行したPOSTか、パスが`login`・`signin`のPOST→`login`（セッションIDを再発行しない（C-09①の）ログインは新しいCookieを発行しないので、パスでも見る）、パスにlogoutを含む→`logout`。`sensitive`は送信側のCookie・Authorizationの有無で自動で決め、一覧で上書きできる。次の制約を設ける。

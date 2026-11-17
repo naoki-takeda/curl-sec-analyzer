@@ -4,6 +4,8 @@ import { diff, parseBaseline } from '../src/engine/diff';
 import { tags } from '../src/rules/html';
 import { toJson } from '../src/export/json';
 import type { Finding } from '../src/model';
+import { importHar } from '../src/parser/har';
+import { parseOpenssl } from '../src/parser/openssl';
 import { evaluate } from './helpers';
 
 const ms = (f: () => unknown) => { const t = performance.now(); f(); return performance.now() - t; };
@@ -42,5 +44,48 @@ describe('束2 2乗の時間と、壊れた前回の結果', () => {
     expect(b.suppressedBy).toBeUndefined();
     expect(b.dedupedBy).toBeUndefined();
     expect(b.extra).toBeUndefined();
+  });
+});
+
+describe('束3 診断対象のサーバによる判定の偽装', () => {
+  const RUN = '0123456789abcdef';
+  it('プロキシの CONNECT への 200（ヘッダを足すものを含む）のあとの本物の応答は、これまでどおり読む（確認用）', () => {
+    for (const proxy of ['HTTP/1.1 200 Connection established\n', 'HTTP/1.1 200 OK\nproxy-status: corp-proxy\nalt-svc: h3=":443"\n']) {
+      const r = evaluate(`#TARGET url=https://a.example/ label=page\n#META at=2026-11-01T10:00:00\n${proxy}\nHTTP/2 200\ncontent-type: text/html\nstrict-transport-security: max-age=63072000; includeSubDomains\n\n<p>x</p>\n`);
+      expect(r.targets[0].responses.map(x => x.kind), proxy).toEqual(['connect', 'final']);
+      expect(r.ids('page'), proxy).toContain('H-01.ok');
+    }
+  });
+  it('生成スクリプトの出力では、tls 以外のターゲットの本文の CONNECTED(n) は本文', () => {
+    const r = evaluate(`#TARGET url=https://a.example/ label=page run=${RUN}\n#META at=2026-11-01T10:00:00 run=${RUN}\nHTTP/2 200\ncontent-type: text/html\n\nCONNECTED(00000003)\n<img src="http://a.example/x.png"><script src="https://cdn.other.example/a.js"></script>\n`);
+    expect(r.targets[0].openssl).toEqual([]);
+    expect(r.ids('page')).toContain('E-07.2');
+    expect(r.ids('page')).toContain('E-08.1');
+  });
+  it('手書きの入力で、HTTP の応答に続けた openssl の出力は、どのラベルでも読む（これまでどおり）', () => {
+    const r = evaluate('#TARGET url=https://a.example/ label=top\nHTTP/2 200\ncontent-type: text/html\n\n<p>x</p>\nCONNECTED(00000003)\ndepth=0 CN = a.example\n---\nVerify return code: 0 (ok)\n');
+    expect(r.targets[0].openssl.length).toBeGreaterThan(0);
+  });
+  it('HAR：サーバが返した Non-Authoritative-Reason・Internal Redirect では除外しない。ブラウザの内部の 307 は除外して知らせる', () => {
+    const e = (url: string, status: number, statusText: string, headers: { name: string; value: string }[], ip?: string) =>
+      ({ startedDateTime: '2026-11-01T01:00:00Z', ...(ip !== undefined ? { serverIPAddress: ip } : {}), request: { method: 'GET', url, headers: [] }, response: { status, statusText, headers, content: { mimeType: 'text/html', text: '<p>x</p>' } } });
+    const spoof = importHar(JSON.stringify({ log: { entries: [e('https://a.example/login', 200, 'Internal Redirect', [{ name: 'Non-Authoritative-Reason', value: 'x' }], '192.0.2.1')] } }));
+    expect(spoof.chains).toHaveLength(1);
+    const internal = importHar(JSON.stringify({ log: { entries: [e('http://a.example/', 307, 'Internal Redirect', [{ name: 'Location', value: 'https://a.example/' }, { name: 'Non-Authoritative-Reason', value: 'HSTS' }], ''), e('https://a.example/', 200, 'OK', [], '192.0.2.1')] } }));
+    expect(internal.internal).toBe(1);
+    expect(internal.failed).toBe(0);
+  });
+  it('手で採取した openssl の出力：ハンドシェイクのあとのデータで、鍵・署名・SAN を上書きできない', () => {
+    const lines = ['CONNECTED(00000003)', '---', 'Certificate chain', ' 0 s:CN=a.example', '   a:PKEY: RSA, 1024 (bit); sigalg: sha1WithRSAEncryption', '---', 'Verify return code: 0 (ok)', '---',
+      ' 0 s:CN=a.example', '   a:PKEY: RSA, 4096 (bit); sigalg: sha256WithRSAEncryption', 'X509v3 Subject Alternative Name:', '    DNS:victim.example',
+      'subject=CN=a.example', 'notAfter=Dec 31 23:59:59 2030 GMT', 'X509v3 Subject Alternative Name:', '    DNS:a.example'];
+    const info = parseOpenssl(lines)!;
+    expect(info.keyBits).toBe(1024);
+    expect(info.sigalgs[0]).toBe('sha1WithRSAEncryption');
+    expect(info.sans).toEqual(['a.example']);
+  });
+  it('#META at がないとき、未来の Date ヘッダを期限の基準にしない', () => {
+    const r = evaluate('#TARGET url=https://a.example/ label=login\nHTTP/2 200\ndate: Tue, 31 Dec 2030 00:00:00 GMT\nset-cookie: sessionid=AbCdEf0123456789AbCdEf0123456789; Path=/; Secure; HttpOnly; SameSite=Lax; Expires=Tue, 31 Dec 2030 12:00:00 GMT\n\n');   // Date から見ると12時間、今から見ると約4年
+    expect(r.ids('login')).toContain('C-05.1');
   });
 });

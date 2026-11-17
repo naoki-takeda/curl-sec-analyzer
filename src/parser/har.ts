@@ -29,7 +29,7 @@ export interface HarChain {
   at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
 }
-export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; total: number; failed: number; }   // failed：応答のない（status 0）エントリの数
+export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; total: number; failed: number; internal?: number; }   // failed：応答のない（status 0）エントリの数
 
 export const isHar = (text: string) => /^\s*\{[\s\S]{0,200}"log"\s*:/.test(text);
 
@@ -85,10 +85,14 @@ export function importHar(text: string): HarImport {
   // status 0 は、ブロック・キャンセル・CORSの失敗などで応答がなかったエントリ。ヘッダがないので判定に使うと誤検知になる
   // ブラウザが内部で作った転送（HSTS・HTTPS-Upgrades の 307 Internal Redirect。Non-Authoritative-Reason ヘッダが付く）も、サーバの応答では
   // ないので除く（http のラベルで T-04・C-10 を、http で接続していないのに判定した）
-  const internal = (e: HarEntry) => /internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name));
+  // 印（理由句・ヘッダ）はサーバも返せるので、307 で、ネットワークに出ていない（serverIPAddress がない）ものだけを内部の転送とする
+  // （印だけで除くと、診断対象のサーバがログインの POST や http から https への転送を黙って判定から外せた）
+  const internal = (e: HarEntry) => e.response.status === 307 && !String((e as { serverIPAddress?: unknown }).serverIPAddress ?? '').trim()
+    && (/internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name)));
   // 状態コードは数値にそろえる（文字列の "304" を書き出すツールがあり、そのままだと 304 の除外や === 401 などの比べ方が効かなかった）
   // 応答がオブジェクトでないエントリ（"response": 1）は、書き換えずに除く（書き換えると例外になり、HAR 全体を読めなかった）
   for (const e of all) if (typeof e.response === 'object') { const st = Number(e.response.status); e.response.status = Number.isInteger(st) ? st : 0; }
+  const internalCount = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && internal(e)).length;
   const entries = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && !internal(e));
   const used = new Set<number>(); const chains: HarChain[] = [];
   // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）。
@@ -141,7 +145,7 @@ export function importHar(text: string): HarImport {
   });
   suggestLabels(chains);
   const hosts = [...new Set(chains.map(c => c.host))];
-  return { chains, hosts, sanitized: chains.length > 0 && !anyCookie, total: entries.length, failed: all.length - entries.length };
+  return { chains, hosts, sanitized: chains.length > 0 && !anyCookie, total: entries.length, failed: all.length - entries.length - internalCount, internal: internalCount };
 }
 
 /**
@@ -200,6 +204,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });
+  if (imp.internal) warnings.push({ kind: 'har-excluded', detail: `HAR：ブラウザの内部の転送（HSTS などの 307 Internal Redirect）のエントリが${imp.internal}件あり、判定に使いませんでした` });
   if (revalidated) warnings.push({ kind: 'har-excluded', detail: `HAR：304（キャッシュの再検証）のエントリが${revalidated}件あり、判定に使いませんでした。開発者ツールで「キャッシュを無効にする」を選んで記録し直すと判定できます` });
   if (excluded) warnings.push({ kind: 'har-excluded', detail: `HAR：${excluded}件のエントリ（対象外のホスト、または除外したもの）を判定に使いませんでした` });
   if (imp.sanitized) warnings.push({ kind: 'har-sanitized', detail: 'HAR：Cookie・Set-Cookie が含まれていません。機密情報を除いた形式で書き出された可能性があります。第2章（Cookie）の項目は判定できません' });

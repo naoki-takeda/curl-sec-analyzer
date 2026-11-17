@@ -1,6 +1,6 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、#META、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
-import { assignHopUrls, uniqueLabels } from './target';
+import { assignHopUrls, baseLabel, uniqueLabels } from './target';
 import { cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
 
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
@@ -146,7 +146,10 @@ export function parseInput(input: string): ParseResult {
     // 同じターゲットで HTTP の応答に続けた openssl の出力（CONNECTED( の行、Connecting to と CONNECTED( の2行）は、応答の本文の中でも
     // openssl の出力の始まりとして応答を閉じる（本文に入れると t.openssl が空になり、T-10・T-11 で使えなかった）。ほかの始まりの行（depth= など）は本文の外だけ
     const opensslHead = /^CONNECTED\(\d+\)\s*$/.test(line) || (CONNECTING.test(line) && /^CONNECTED\(/.test(lines[li + 1] ?? ''));
-    if ((!inBody() && (OPENSSL_START.test(line) || opensslHead)) || (inBody() && opensslHead)) { close(); inOpenssl = true; }
+    // 生成スクリプトの出力（印のある入力）では、本文の中の「CONNECTED(n)」を openssl の出力の始まりとするのは tls のラベルだけ（生成スクリプトは
+    // tls 以外で openssl を実行しない。診断対象のサーバが本文に書くと、そのあとの本文がすべて openssl の出力になり、E-07〜E-09・E-12 が消えた）。
+    // 手書きの入力は、HTTP の応答に続けた openssl の出力をどのラベルでも読む（これまでどおり）
+    if ((!inBody() && (OPENSSL_START.test(line) || opensslHead)) || (inBody() && opensslHead && (!runId || baseLabel(t.label) === 'tls'))) { close(); inOpenssl = true; }
     if (inOpenssl && !STATUS_RE.test(line) && !/^[*<>] /.test(line)) { t.openssl.push(line); continue; }
     inOpenssl = false;
     if (!inBody() && VERBOSE_HINT.test(line)) t.verbose = true;
@@ -193,6 +196,9 @@ export function parseInput(input: string): ParseResult {
     const sm = line.match(STATUS_RE);
     if (sm && !inBody()) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; vHeaders = fromV; continue; }
     // 本文の直前の行が空行かは、本文の末尾だけを見る（本文全体を split すると、本文の中のステータス行らしい行ごとに64KBを分けることになり、入力の長さの2乗の時間がかかる）
+    // -i の出力では、本文と次の応答を見分けられない（本文が「HTTP/1.1 200 OK」と偽のヘッダで始まると、次の応答として読む）。ヘッダの形で
+    // プロキシの応答を見分ける作りは、本物のプロキシの応答（ヘッダを足すもの）を壊し、3xx・401 の本文からの偽装も止められなかったのでやめた。
+    // 生成スクリプトは、ヘッダ（-D）と本文（-o）を分けて採取し、#BODY の印のあとを本文として読む（この分かれ目はサーバが作れない）
     if (sm && inBody() && (cur!.body === undefined || nextHopAfter(cur!.status)) && /^\s*$/.test(lastLine(cur!.body ?? ''))) {   // -L で次のホップが続く場合
       close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue;
     }
