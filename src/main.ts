@@ -1,7 +1,7 @@
 // main.ts：画面の入口（ツール設計3「画面設計」）。描画の部品は ui/ の下にある
 import './styles.css';
 import { parseInput } from './parser/input';
-import { harTargets, isHar, suggestLabels } from './parser/har';
+import { HAR_MAX_BYTES, harTargets, isHar, suggestLabels } from './parser/har';
 import { assignHopUrls, uniqueLabels } from './parser/target';
 import { runAll } from './engine/run';
 import { countBySeverity, overall } from './engine/summarize';
@@ -59,13 +59,16 @@ function buildShell() {
   refs.genDetails = commandGenerator();
 
   const fileIn = hidden('.txt,.log,.har,text/plain,application/json', openFile);
+  // 設定ファイル（例外・組織プロファイル・前回の結果）も、貼り付けと同じ大きさまでにする（上限がないと、大きなファイルで画面が止まった）
   const supIn = hidden('.json,application/json', async f => {
+    if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge); return; }
     const { list, errors } = parseSuppressions(await f.text());
     state.suppressions = list;
     const legacy = list.filter(s => legacyHarKey(s.target)).length;
     refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors, getLang())) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
   const profIn = hidden('.json,application/json', async f => {
+    if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge); return; }
     const { profile: p, errors } = parseProfile(await f.text());
     if (p) state.profile = p;
     // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）
@@ -73,6 +76,8 @@ function buildShell() {
     refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.loadProfile, joinMessages(errors, getLang())) : ''; });
   });
   const baseIn = hidden('.json,application/json', async f => {
+    // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超える。貼り付けと同じ上限では、自分のエクスポートを読めなかった）
+    if (f.size > HAR_MAX_BYTES) { say(() => tr().fileTooLarge); return; }
     const { baseline: b, error, skipped } = parseBaseline(await f.text());
     if (b) state.baseline = b;
     const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;

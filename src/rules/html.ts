@@ -62,11 +62,18 @@ export function tags(html: string, names: string[]): Tag[] {
   const raw = /<(script|style|textarea|title)\b/iy;
   let lower: string | undefined;                       // 閉じタグを探すため（初めて要るときに一度だけ小文字にする。タグごとに小文字にすると、<script の多い本文で2乗の時間になる）
   let rawEnd = -1;                                     // <script> などの中身（コメントにならない）の終わり
+  let noCommentClose = Infinity;                       // ここより後ろに「-->」はない
   for (let i = html.indexOf('<'); i >= 0; i = html.indexOf('<', i + 1)) {
     // コメント（<!-- … -->）の中のタグは、ブラウザが読まない（コメントアウトしたフォーム・スクリプトで E-10①（高）・E-07① などを誤って出した）。
     // <script>・<style>・<textarea>・<title> の中身の「<!--」（var s='<!--'）はコメントではない。閉じのない「<!--」は、コメントとして
     // 読み飛ばさない（読み飛ばすと、後ろのタグをすべて見逃し、E-08・E-10① を合格にした）。「<!-->」「<!--->」は空のコメント
-    if (i > rawEnd && html.startsWith('<!--', i)) { const e = html.indexOf('-->', i + 2); if (e >= 0) { i = e + 2; continue; } }
+    // 閉じの「-->」がないと分かった位置より後ろは探し直さない（閉じのない「<!--」の繰り返しで、位置ごとに本文の終わりまで探し、
+    // 入力の長さの2乗の時間がかかった。64KB で1回1.4秒）
+    if (i > rawEnd && html.startsWith('<!--', i) && i + 2 < noCommentClose) {
+      const e = html.indexOf('-->', i + 2);
+      if (e >= 0) { i = e + 2; continue; }
+      noCommentClose = i + 2;
+    }
     if (i > rawEnd) {
       raw.lastIndex = i;
       const r = raw.exec(html);

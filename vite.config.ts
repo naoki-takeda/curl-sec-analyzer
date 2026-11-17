@@ -56,5 +56,11 @@ export default defineConfig({
   build: { target: 'es2022', sourcemap: false },
   // タイムゾーンを固定する。#META at= はタイムゾーンを持たず手元の時刻として読むので、CI（UTC）と手元（JST）で期限の時間が変わり、
   // ゴールデンテストが CI でだけ失敗した。期待結果は JST で作ってある
-  test: { include: ['tests/**/*.test.ts'], environment: 'node', env: { TZ: 'Asia/Tokyo' } },
+  // 2乗の時間の見張り（tests/adversarial-perf.test.ts）は重いので、ほかのテストが終わってから別に流す（同時に流すと、時間を測るほかのテストが
+  // CPU を取り合って上限を超えた）
+  test: { environment: 'node', env: { TZ: 'Asia/Tokyo' },
+    projects: [
+      { extends: true, test: { name: 'unit', include: ['tests/**/*.test.ts'], exclude: ['tests/adversarial-perf.test.ts'], sequence: { groupOrder: 0 } } },
+      { extends: true, test: { name: 'perf', include: ['tests/adversarial-perf.test.ts'], sequence: { groupOrder: 1 } } },
+    ] },
 });
