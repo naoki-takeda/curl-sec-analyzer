@@ -106,18 +106,27 @@ export function generateScript(o: CommandOptions): string {
   L.push('', '# ---- 第4章：TLS（C11・C12・C23） ----');
   t('tls', `${H}/`);
   const hp = o.host.includes(':') ? o.host : `${o.host}:443`, sni = o.host.replace(/:\d+$/, '');
-  L.push(`openssl s_client -connect ${q(hp)} -servername ${q(sni)} -showcerts </dev/null 2>&1`,
+  // 診断対象のサーバは、ハンドシェイクのあとに任意のデータを送れ、s_client はそれを標準出力に出す（「unsupported protocol」「DNS:…」
+  // 「notAfter=…」「New, TLSv1, Cipher is …」を書いて、T-09・T-10・T-11 の判定を変えられた）。サーバのデータは、ハンドシェイクの要約の
+  // 最初の「Verify return code:」の行より後にしか出ないので、そこで切る。エラーは手元の openssl が標準エラーに出すものだけを見る
+  const cut = `sed '/^ *Verify return code:/q'`;
+  L.push(`openssl s_client -connect ${q(hp)} -servername ${q(sni)} -showcerts </dev/null 2>&1 | ${cut}`,
     `openssl s_client -connect ${q(hp)} -servername ${q(sni)} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName`,
+    'tout=$(mktemp); terr=$(mktemp)',
     'for v in tls1 tls1_1 tls1_2 tls1_3; do',
-    `  out=$(openssl s_client -connect ${q(hp)} -servername ${q(sni)} -$v -cipher 'DEFAULT@SECLEVEL=0' </dev/null 2>&1); rc=$?`,
-    `  if printf '%s' "$out" | grep -qiE 'unknown option|no protocols available|unsupported protocol'; then r=err`,
-    `  elif [ $rc -eq 0 ] && printf '%s' "$out" | grep -qE 'Protocol *: *TLS'; then r=1`, '  else r=0; fi',
+    `  openssl s_client -connect ${q(hp)} -servername ${q(sni)} -$v -cipher 'DEFAULT@SECLEVEL=0' </dev/null >"$tout" 2>"$terr"; rc=$?`,
+    // 手元の openssl がそのプロトコルに対応していない（no protocols available・unknown option）ときだけ err。「unsupported protocol」は、
+    // サーバが別のバージョンを選んだ（このバージョンを拒否した）ときにも出るので、拒否として扱う
+    `  if grep -qiE 'unknown option|no protocols available' "$terr"; then r=err`,
+    // 「New, <版>, Cipher is <暗号>」の版は、OpenSSL 1.1 以降は暗号の最低の版（AES128-SHA は SSLv3）を出す。版は問わず、失敗したとき
+    // の「New, (NONE), Cipher is (NONE)」だけを除く（TLS で始まるものだけにすると、TLS 1.0 の AES128-SHA を「拒否」とした）
+    `  elif [ $rc -eq 0 ] && ${cut} "$tout" | grep -qE '^New, [^(,][^,]*, Cipher is [^(]'; then r=1`, '  else r=0; fi',
     `  printf '#TLSPROBE run=%s v=%s ok=%s\\n' "$RUN" "$v" "$r"`, 'done',
     'for c in RC4-SHA DES-CBC3-SHA NULL-SHA256 AES128-SHA ECDHE-RSA-AES128-SHA; do',
-    `  out=$(openssl s_client -connect ${q(hp)} -servername ${q(sni)} -tls1_2 -cipher "$c:@SECLEVEL=0" </dev/null 2>&1); rc=$?`,
-    `  if printf '%s' "$out" | grep -qiE 'no cipher match|unknown option'; then r=err`,
-    `  elif [ $rc -eq 0 ] && printf '%s' "$out" | grep -qE "Cipher *: *$c"; then r=1`, '  else r=0; fi',
-    `  printf '#CIPHERPROBE run=%s c=%s ok=%s\\n' "$RUN" "$c" "$r"`, 'done');
+    `  openssl s_client -connect ${q(hp)} -servername ${q(sni)} -tls1_2 -cipher "$c:@SECLEVEL=0" </dev/null >"$tout" 2>"$terr"; rc=$?`,
+    `  if grep -qiE 'no cipher match|unknown option' "$terr"; then r=err`,
+    `  elif [ $rc -eq 0 ] && ${cut} "$tout" | grep -qE "^New, [^(,][^,]*, Cipher is $c\\$"; then r=1`, '  else r=0; fi',
+    `  printf '#CIPHERPROBE run=%s c=%s ok=%s\\n' "$RUN" "$c" "$r"`, 'done', 'rm -f "$tout" "$terr"');
 
   if (o.dangerous) {
     L.push('', '# ---- 検証環境でだけ実行する試験（C20・C21・C17） ----');

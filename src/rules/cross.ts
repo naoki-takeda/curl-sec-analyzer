@@ -214,7 +214,12 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
       const name = rawName || '（名前なし）';   // 値だけの Set-Cookie（rules/cookies.ts の cookieName と同じ表示）
       // 署名付きのトークン（JWT・Flask・Django）がすべて同じ値なのは、同じ秒に同じ内容で署名したため（HS256 は同じ入力から同じ署名になる）。
       // 署名の鍵がなければ作れないので、推測できる（②（高））とはしない
-      if (new Set(vals).size === 1 && JWT_VALUE.test(vals[0])) {
+      // 採取の時刻（#META at）が分かり、60秒より離れているときは②（時刻を見ずに na にすると、15分おきに採取した同じ JWT も「同じ秒」とした）。
+      // #META at は手元の時刻で、トークンの iat はサーバの時刻なので、同じ秒かどうかでは比べない（秒をまたいだ採取を②（高）にした）。
+      // 署名付きの形は、JWT・itsdangerous と、署名が20文字以上の Django の形（固定の値 guest:1:admin は署名付きではない）
+      const times = samples.map(t => (t.meta.at ? Date.parse(t.meta.at.replace(' ', 'T')) : NaN));
+      const far = times.every(v => !Number.isNaN(v)) && Math.max(...times) - Math.min(...times) > 60e3;
+      if (new Set(vals).size === 1 && !far && /^(?:(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.[\w-]+|\.?[\w-]+:[\w-]+:[\w-]{20,})$/.test(vals[0])) {
         out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：署名付きのトークンが同じ値（同じ秒に同じ内容で署名した可能性）`, '秒をまたいで session-sample を採取し直す'));
         continue;
       }

@@ -143,7 +143,7 @@ top | E-01.ok | info | pass | エラーの詳細らしき記述なし
 top | E-02.ok | info | pass | 一覧表示なし
 top | E-07.ok | info | pass | http:// の資源なし
 top | E-08.ok | info | pass | 外部オリジンのscriptなし
-top | E-09.2 | low | fail | 開発用コメント（「pass admin123」を含む。中身は表示しない）
+top | E-09.2 | low | fail | 開発用コメント（「pass」を含む。中身は表示しない）
 top | H-01.4 | low | fail | max-age=31536000
 top | H-02.2 | info | fail | max-age=31536000
 top | H-03.ok | info | pass | default-src 'self'; frame-ancestors 'none'

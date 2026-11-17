@@ -38,7 +38,14 @@ export function parseBaseline(text: string): { baseline?: Baseline; error?: stri
 
 /** 突き合わせのキー。targetKey がない以前のJSONはラベルで突き合わせる */
 const tkey = (f: Finding) => f.targetKey ?? f.target;
-const key = (f: Finding) => `${f.ruleId}\u0000${tkey(f)}`;
+/**
+ * 証跡の突き合わせの形：証跡に出てくるホスト名（URL・CSP の配信元）の一覧。同じルール・ターゲットで別の配信元の指摘（E-08 の cdn-a と cdn-b、
+ * E-07 の読み込み先）を別の指摘として突き合わせる（ルールとターゲットだけで突き合わせると、cdn-a を直して cdn-b が増えても「継続」の1行になった）。
+ * ホスト名だけを使うのは、証跡のほかの部分は画面のマスク（mask.ts・shownText.ts）で形が変わるため（突き合わせのキーはマスクに依存しない。
+ * 証跡の全体で比べると、マスクの規則を変えただけで、変わらない指摘を新規と解消にした）。ホスト名はマスクしない
+ */
+const evidenceKey = (e: string) => [...new Set([...(e ?? '').matchAll(/(?:[a-z][a-z0-9+.-]*:)?\/\/(?:[^/\s@]*@)?([a-z0-9.-]+\.[a-z]{2,})/gi)].map(m => m[1].toLowerCase()))].sort().join(',');
+const key = (f: Finding) => `${f.ruleId}\u0000${tkey(f)}\u0000${evidenceKey(f.evidence)}`;
 /** 指摘として残っているもの。例外を適用した指摘（suppressed）も、直ってはいないので含める */
 const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
 
@@ -62,10 +69,11 @@ export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   // HAR のラベル（har-4）は記録し直すと別の応答を指すので、ラベルでは突き合わせない
   const isHar = (f: Finding) => tkey(f).startsWith('HAR ');
   const byLabel = new Map<string, string>();
-  for (const [k, f] of prev) if (!used.has(k) && !isHar(f)) { const l = `${f.ruleId}\u0000${f.target}`; if (!byLabel.has(l)) byLabel.set(l, k); }
+  const labelKey = (f: Finding) => `${f.ruleId}\u0000${f.target}\u0000${evidenceKey(f.evidence)}`;
+  for (const [k, f] of prev) if (!used.has(k) && !isHar(f)) { const l = labelKey(f); if (!byLabel.has(l)) byLabel.set(l, k); }
   for (const [k, f] of now) {
     if (pairs.has(k)) continue;
-    const pk = isHar(f) ? undefined : byLabel.get(`${f.ruleId}\u0000${f.target}`);
+    const pk = isHar(f) ? undefined : byLabel.get(labelKey(f));
     if (pk && !used.has(pk)) { pairs.set(k, prev.get(pk)); used.add(pk); } else pairs.set(k, undefined);
   }
   for (const [k, f] of now) {

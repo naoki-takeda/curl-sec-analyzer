@@ -41,7 +41,8 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     if (!b) return [];
     const out = [];
     // E-09 に任せるのは、そのラベルで E-09 を判定するときだけ（error-* のラベルは E-01 と A-10 だけを判定するので、任せると見逃した）
-    const e09 = ctx.responseKind === 'html' && allowedItems(ctx.target.label).allowsItem('E-09');
+    // 組織プロファイルで E-09 を対象外にしたときも任せない（任せると、HTML の AWS のキーをどの項目でも指摘しなかった）
+    const e09 = ctx.responseKind === 'html' && allowedItems(ctx.target.label).allowsItem('E-09') && !ctx.profile?.exclude.includes('E-09');
     const cred = CREDENTIALS.some(re => re.test(b)) || (!e09 && AWS_KEY.test(b));
     if (cred)
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
@@ -84,7 +85,8 @@ function actuatorDefault(p: string, b: string): boolean {
   let j: unknown; try { j = JSON.parse(b); } catch { return false; }
   if (!j || typeof j !== 'object' || Array.isArray(j)) return false;
   const o = j as Record<string, unknown>;
-  if (/\/actuator\/(?:health|info)\/?$/i.test(p))
+  // ヘルスのグループ（Kubernetes の /actuator/health/liveness・readiness。Spring Boot が既定で公開する）も、状態だけなら既定の応答
+  if (/\/actuator\/(?:health(?:\/[\w-]+)?|info)\/?$/i.test(p))
     return Object.entries(o).every(([k, v]) => (k === 'status' && typeof v === 'string' && /^[A-Z_]+$/.test(v)) || (k === 'groups' && Array.isArray(v) && v.every(x => typeof x === 'string')));
   if (/\/actuator\/?$/i.test(p) && Object.keys(o).length === 1 && o._links && typeof o._links === 'object')
     return Object.keys(o._links as object).length > 0 && Object.keys(o._links as object).every(k => /^(?:self|health|health-path|info)$/.test(k));
@@ -123,6 +125,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     // 本文を取得したターゲット（一般のターゲット）。2xx でなければファイルがない（404 のエラーページの本文を、ファイルの中身として読まない）
     const st = ctx.final?.status ?? 0; const got = !st || (st >= 200 && st < 300);
     if (/\/robots\.txt$/.test(p) && (b || !got)) {
+      // 転送（3xx）を -L なしで採取したものは、転送先の robots.txt を見ていない（「なし」として合格にした）
+      if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
       // どのパスにも index.html を返す SPA の 200 は、robots.txt ではない（security.txt と同じ扱い）
       // HTML かは本文で見る（robots.txt を text/html で返すサーバの User-agent・Disallow の行を見逃さない。robots.txt は < で始まらない）

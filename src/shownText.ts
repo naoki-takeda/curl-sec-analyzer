@@ -22,7 +22,7 @@ const STEM_DIGITS = /^([a-z]{1,10})(\d{1,5})(?:([a-z]{1,2})\d{1,3})?$/i;
 const DATE_OR_UNIT = /^(?:x25519|x448|\d{1,2}T\d{1,2}|\d{1,6}(?:ms|s|m|h|d|w|y|kb|mb|gb|tb|px|em|rem|vh|vw|x|xx|st|nd|rd|th|k)|\d{1,3}(?:ubuntu|deb|el|fc|build|beta|alpha|rc|dev|p|pl)\d{1,3})$/i;
 
 /** 語として残す、英語の読み方の規則に当たらない名前（製品・プロトコル） */
-const KNOWN_WORDS = new Set(['xmlrpc', 'nginx', 'lighttpd', 'nodejs', 'nextjs', 'nuxtjs', 'webpack', 'fastly', 'varnish', 'wsgi', 'cgi', 'fcgi', 'grpc', 'hsts', 'csrf', 'xsrf', 'jwks']);
+const KNOWN_WORDS = new Set(['xmlrpc', 'nginx', 'lighttpd', 'nodejs', 'nextjs', 'nuxtjs', 'webpack', 'fastly', 'varnish', 'wsgi', 'cgi', 'fcgi', 'grpc', 'hsts', 'csrf', 'xsrf', 'jwks', 'jsdelivr', 'cloudflare', 'akamai', 'csrftoken', 'xsrftoken', 'aspnetmvc', 'aspnet']);
 /** キャメルケースの2文字の部分として残してよい語（By・Id・Of・My。乱数の Dg・Ng・Xk を残さない）。大文字だけの略語（JS・IO・DB）は別に認める */
 const SHORT_WORDS = new Set('of by id to in on at is my no or up if as be do go it me us we ok'.split(' '));
 /**
@@ -45,9 +45,11 @@ function partRare(parts: string[]): number {
 function wordLike(w: string): boolean {
   if (w.length > 48) return false;
   if (KNOWN_WORDS.has(w.toLowerCase())) return true;
-  if (/^[A-Z]+$/.test(w)) return w.length <= 12;
-  // 10文字以上は45%未満（英語の長い語は4割まで。乱数の英小文字の12〜15文字は、6割の基準では2割が残った）
-  if (/^[a-z]+$/.test(w)) return w.length <= 24 && !lowerToken(w) && !(w.length >= 6 && rareBigrams(w) >= (w.length >= 10 ? 0.45 : 0.6));
+  // 大文字だけの7文字以上は、まれな2文字の並びが半分未満のもの（SAMEORIGIN・NOSNIFF・HTTPONLY は残す。乱数の英大文字の10文字は、
+  // 12文字までを無条件に残すとすべて残った）
+  if (/^[A-Z]+$/.test(w)) return w.length <= 12 && !(w.length >= 7 && rareBigrams(w.toLowerCase()) >= 0.35);
+  // 10文字以上は45%未満、7〜9文字は半分未満（英語の長い語は4割まで。乱数の英小文字の6〜9文字は、6割の基準では4〜5割が残った）
+  if (/^[a-z]+$/.test(w)) return w.length <= 24 && !lowerToken(w) && !(w.length >= 6 && rareBigrams(w) >= (w.length >= 10 ? 0.45 : w.length >= 7 ? 0.4 : 0.6));
   const parts = w.match(/[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+/g) ?? [];
   if (parts.join('') !== w) return false;
   const singles = parts.filter(p => p.length === 1).length;
@@ -90,20 +92,31 @@ export function allowedWord(w: string): boolean {
 // URL のホスト名は、ユーザー情報（user:****@）のあとか、ユーザー情報のない URL の「//」の直後だけ。「//」の直後をいつも残すと、ユーザー名に
 // 置いたトークン（https://<トークン>:x-oauth-basic@api…）をホスト名として残した。ユーザー情報には ? # / と空白・引用符・<> を含めない
 // （?ref=bob@<トークン> の @ のあとをホスト名とみなした）。伏せた印「…(N chars)」はユーザー情報の中にあってよい（もう一度かけても同じ結果にする）
-const USERINFO = String.raw`(?:[^/\s?#@<>"']|…\(\d+ chars\))*@`;
+// ユーザー情報は256文字まで（上限がないと、「@」の多い入力で、位置ごとに「//」まで読み戻して、入力の長さの2乗の時間がかかった）
+const USERINFO = String.raw`(?:[^/\s?#@<>"']|…\(\d+ chars\)){0,256}@`;
 // 英小文字のドメイン名（スキームのない CSP のホスト ajax.aspnetcdn.com、Via の app01.prod.example.com）。決まった最上位ドメインのものだけ
 // （/reset/<トークン>.pdf のようなファイル名を残さない）
 const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost)(?![\w-])`;
-const KEEP = String.raw`…\(\d+ chars\)|%(?:25)*[0-9A-Fa-f]{2}|(?<![\w-])(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)(?![\w+/=-])|(?<=:\/\/${USERINFO})[A-Za-z0-9.-]+|(?<=:\/\/)[A-Za-z0-9.-]+(?!${USERINFO})|${DOMAIN}`;
+const KEEP = String.raw`…\(\d+ chars\)|%(?:25)*[0-9A-Fa-f]{2}|(?<![\w-])(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)(?![\w+/=-])|(?<=:\/\/${USERINFO})[A-Za-z0-9.-]+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|${DOMAIN}`;
+// ↑ ユーザー情報のない URL のホスト名は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない）。
+// 区切り直すと、長いホスト名らしい並びのあとに @ がある入力（Location: https://a.a.a…@evil/）で、1文字ずつ短くするたびに @ まで読み直し、
+// 入力の長さの2乗の時間がかかった（64KB で4秒）
 // - _ + でつないだ語の並び（glpat-<トークン>・sk_live_<トークン>・Strict-Transport-Security）は、まとめて見る
-const WORDS = new RegExp(`(${KEEP})|[A-Za-z0-9]+(?:[-_+]+[A-Za-z0-9]+)*`, 'g');
+// パーセントエンコードした + / =（%2B・%2F・%3D、二重エンコードを含む）も並びの区切りとする（エンコードした Base64 のトークンが、%XX で
+// 短いかけらに分かれて残った）。区切りは「- _ +」の並びか、エンコードした文字の並び
+const JOIN = String.raw`(?:[-_+]|%(?:25)*(?:2[BbFf]|3[Dd]))+`;
+const WORDS = new RegExp(`(${KEEP})|[A-Za-z0-9]+(?:${JOIN}[A-Za-z0-9]+)*`, 'g');
+const JOIN_SPLIT = new RegExp(`(${JOIN})`);
 /**
  * 語の並びの、残してよい部分。かけらを1つずつ見ると、- _ で区切った乱数のトークン（URL-safe の Base64・GitLab の glpat-…）の短いかけらが
  * 語に見えて残った（4文字までのかけらは残すため）。並びの中に残せないかけらが1つでもあれば、そこから並びの終わりまでを伏せる。
  * それより前は、英字だけの3文字以上の語のかけら（glpat・sk・live・wordpress_logged_in）だけを残す（種類が分かるように）
  */
 function allowRun(run: string): string {
-  const pieces = run.split(/([-_+]+)/);   // 偶数番目がかけら、奇数番目が区切り
+  const pieces = run.split(JOIN_SPLIT);   // 偶数番目がかけら、奇数番目が区切り
+  // 数字だけのかけらが3つ以上で、合わせて12桁以上のもの（カード番号 4111-1111-1111-1111・電話番号）は、まとめて伏せる（4桁ずつ残った）
+  const nums = pieces.filter((_, i) => i % 2 === 0);
+  if (nums.length >= 3 && nums.every(p => /^\d+$/.test(p)) && nums.join('').length >= 12) return `…(${run.length} chars)`;
   const bad = pieces.findIndex((p, i) => i % 2 === 0 && !allowedWord(p));
   if (bad < 0) return run;
   let keep = 0;

@@ -59,7 +59,19 @@ export function tags(html: string, names: string[]): Tag[] {
   const start = new RegExp(`<(${names.join('|')})\\b`, 'iy');
   const endOf = tagEndFinder(html);
   const out: Tag[] = [];
+  const raw = /<(script|style|textarea|title)\b/iy;
+  let lower: string | undefined;                       // 閉じタグを探すため（初めて要るときに一度だけ小文字にする。タグごとに小文字にすると、<script の多い本文で2乗の時間になる）
+  let rawEnd = -1;                                     // <script> などの中身（コメントにならない）の終わり
   for (let i = html.indexOf('<'); i >= 0; i = html.indexOf('<', i + 1)) {
+    // コメント（<!-- … -->）の中のタグは、ブラウザが読まない（コメントアウトしたフォーム・スクリプトで E-10①（高）・E-07① などを誤って出した）。
+    // <script>・<style>・<textarea>・<title> の中身の「<!--」（var s='<!--'）はコメントではない。閉じのない「<!--」は、コメントとして
+    // 読み飛ばさない（読み飛ばすと、後ろのタグをすべて見逃し、E-08・E-10① を合格にした）。「<!-->」「<!--->」は空のコメント
+    if (i > rawEnd && html.startsWith('<!--', i)) { const e = html.indexOf('-->', i + 2); if (e >= 0) { i = e + 2; continue; } }
+    if (i > rawEnd) {
+      raw.lastIndex = i;
+      const r = raw.exec(html);
+      if (r) { lower ??= html.toLowerCase(); const close = lower.indexOf(`</${r[1].toLowerCase()}`, i + r[0].length); rawEnd = close < 0 ? html.length : close; }
+    }
     start.lastIndex = i;
     const m = start.exec(html);
     if (!m) continue;
@@ -163,7 +175,8 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
       if (u.host === host) continue;
       if (isTrustedOrigin(u, trusted)) { skipped++; continue; }
       const g = byOrigin.get(u.origin) ?? { total: 0, missing: [] };
-      g.total++; if (!t.attrs.has('integrity')) g.missing.push(t);
+      // 空の integrity=""（空白だけを含む）は、ブラウザが検証しない（integrity なしと同じ。合格にした）
+      g.total++; if (!t.attrs.get('integrity')?.trim()) g.missing.push(t);
       byOrigin.set(u.origin, g);
     }
     const fails = [...byOrigin].filter(([, g]) => g.missing.length).map(([origin, g]) =>
@@ -235,7 +248,8 @@ export function devCommentWord(html: string): string | undefined {
     if (end < 0) return undefined;
     // Knockout の制御のコメント（<!-- ko if: showDebug -->・<!-- /ko -->）は、開発用のコメントではない
     const c = html.slice(i + 4, end); const m = /^\s*\/?ko\b/.test(c) ? null : c.match(DEV_CODE_WORD) ?? c.match(DEV_WORD);
-    if (m) return m[0];
+    // 一致した語だけを返す。「pass Summer2024」のように値まで一致した部分を返すと、「中身は表示しない」と書いた証跡にパスワードが出た
+    if (m) return /^pass/i.test(m[0]) && !/^passwords?$/i.test(m[0]) ? 'pass' : m[0];
     i = html.indexOf('<!--', end + 3);
   }
   return undefined;

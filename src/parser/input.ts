@@ -97,17 +97,23 @@ export function parseInput(input: string): ParseResult {
   // 採取の印（run=）：コマンド生成器のスクリプトは、実行ごとの乱数を全部のマーカー行に付ける。最初の #TARGET に印があれば、同じ印のマーカー行だけを
   // マーカーとして読む。診断対象のサーバは印を知らないので、応答の本文に書いた「#TARGET label=login」「#META at=」「#PROBE」で、ターゲットを
   // 作ったり分けたりできない（印のないマーカーで偽の login を作り、C-09①（高）を合格にできた）。印のない手書きの入力は、これまでどおり読む
-  const runId = normalized.match(/(?:^|\n)#TARGET[ \t][^\n]*?(?:^|[ \t])run=([0-9a-f]{16,64})(?![\w])/)?.[1];
-  const lines = (runId
-    // 印のある入力では、くっついたマーカーも印のあるものだけを分ける
-    ? normalized.replace(new RegExp(String.raw`([^\n])(?=#(?:TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)[ \t][^\n]*[ \t]run=${runId}(?![\w]))`, 'g'), '$1\n')
-    : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2')).split('\n');
+  // 印は、入力の最初の #TARGET の行からだけ取る（設計書のとおり）。印のある行ならどれでも取ると、手書きの入力で、診断対象のサーバが本文に書いた
+  // 「#TARGET … run=<乱数>」で印を有効にし、利用者の本物のマーカーをすべて本文として読ませられた
+  const firstTarget = normalized.match(/(?:^|\n)#TARGET[ \t]([^\n]*)/)?.[1];
+  const runId = firstTarget !== undefined ? attrs(firstTarget).run?.match(/^[0-9a-f]{16,64}$/)?.[0] : undefined;
+  const lines = runId
+    // 印のある入力では、くっついたマーカーも印のあるものだけを分ける（行の中のマーカーの位置で分け、印のある部分だけを新しい行にする。
+    // 先読みの正規表現で分けると、本文の1行に「#META 」が続く入力で、位置ごとに行の終わりまで読み直し、入力の長さの2乗の時間がかかった）
+    ? splitRunMarkers(normalized, runId)
+    : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
+  let ignoredMarkers = 0;                              // 印のない（違う）#TARGET の行の数。本文として読んだことを知らせる
   for (let li = 0; li < lines.length; li++) {
     let line = lines[li]; let fromV = false;   // fromV：-v の「< 」の行（受信ヘッダ）
     if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;
     line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
     const a = mk ? attrs(mk[2]) : undefined;
+    if (mk && runId && a?.run !== runId && mk[1] === 'TARGET') ignoredMarkers++;
     if (mk && a && (!runId || a.run === runId)) {      // マーカー行は必ず応答を閉じる
       // 前のターゲットの状態（CONNECT を送った、など）を持ち越さない（持ち越すと、次のターゲットの本物の 200 をプロキシの応答とみなした）
       close(); inOpenssl = false; vBody = false; connectReq = false; if (json) { unparsed += json.length; json = null; }
@@ -242,7 +248,9 @@ export function parseInput(input: string): ParseResult {
   });
   for (const tg of targets) assignHopUrls(tg);
   const dup = uniqueLabels(targets);
-  return { targets, warnings: [...dup, ...collectWarnings(targets, unparsed, emptyTargets)] };
+  const ignored: ParseWarning[] = ignoredMarkers ? [{ kind: 'ignored-marker',
+    detail: `採取の印（run=）が最初の #TARGET と違う #TARGET の行が${ignoredMarkers}行あり、応答の本文として読みました（診断対象が本文に書いたもの、または別の採取の出力を付け足したもの。付け足した出力は別に判定してください）` }] : [];
+  return { targets, warnings: [...dup, ...ignored, ...collectWarnings(targets, unparsed, emptyTargets)] };
 }
 
 // %{header_json} にほぼ必ずある応答ヘッダ。どれもない JSON（{"tags":["a"]} など）はヘッダとみなさない
@@ -267,6 +275,27 @@ function headerJson(text: string, code?: string): HttpResponse | null | undefine
 }
 
 /** 本文の最後の行（本文は「行 + 改行」でつなぐので、最後の改行の前の行。body.split('\n').at(-2) と同じ）。改行がなければ空 */
+/**
+ * 印のある入力の行分け：行の中のマーカー（#TARGET・#META など）の位置で部分に分け、自分の部分に「run=<印>」があるものだけを新しい行にする
+ * （改行のない本文の直後にくっついた本物のマーカーを分ける）。ほかの部分は前の部分につなぎ直す。時間は入力の長さに比例する
+ */
+const MARK_START = /#(?:TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)[ \t]/g;
+function splitRunMarkers(text: string, runId: string): string[] {
+  const own = new RegExp(String.raw`[ \t]run=${runId}(?![\w])`);
+  return text.split('\n').flatMap(line => {
+    if (!line.includes(`run=${runId}`)) return [line];
+    const starts = [...line.matchAll(MARK_START)].map(m => m.index).filter(i => i > 0);
+    if (!starts.length) return [line];
+    const out: string[] = []; let cur = line.slice(0, starts[0]);
+    starts.forEach((s, i) => {
+      const seg = line.slice(s, starts[i + 1] ?? line.length);
+      if (own.test(seg)) { out.push(cur); cur = seg; } else cur += seg;
+    });
+    out.push(cur);
+    return out;
+  });
+}
+
 function lastLine(body: string): string {
   const e = body.lastIndexOf('\n');
   return e < 0 ? '' : body.slice(body.lastIndexOf('\n', e - 1) + 1, e);
@@ -283,5 +312,9 @@ function collectWarnings(targets: Target[], unparsed: number, emptyTargets: stri
     w.push({ kind: 'unknown-url', label: t.label, detail: `ターゲット「${t.label}」の url= を URL として読めません。HTTPSかどうかを使う項目は判定できません（https:// から書いてください）` });
   for (const t of targets) for (const p of [...t.tlsProbes, ...t.cipherProbes]) if (p.result === 'error')
     w.push({ kind: 'tls-probe-error', detail: `ターゲット「${t.label}」：手元のOpenSSLが対応していないプローブがあります（判定不能）` });
+  // 応答がプロキシのもの（407・CONNECT）だけのターゲットは、サイトの応答を判定できない。黙って判定から消えないよう知らせる
+  // WebSocket の 101（1xx）だけの応答は、プロキシの応答ではない
+  for (const t of targets) if (t.responses.some(r => r.kind === 'connect') && t.responses.every(r => r.kind === 'connect' || r.kind === 'informational'))
+    w.push({ kind: 'proxy-only', label: t.label, detail: `ターゲット「${t.label}」：プロキシの応答（HTTP ${t.responses.map(r => r.status).join('・')}）しかなく、サイトの応答を判定できません（プロキシの認証を確かめて採取し直してください）` });
   return w;
 }
