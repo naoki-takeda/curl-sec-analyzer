@@ -42,7 +42,8 @@ export function generateScript(o: CommandOptions): string {
     '# 実行後に：rm -f out.txt login.txt jar.txt old.txt s1.txt s2.txt s3.txt（login.txt にはパスワードが入っている）',
     'set -u', 'umask 077', `H=${q(H)}`,
     '# 実行ごとの印（応答の本文に書かれたマーカーと見分けるため）',
-    "RUN=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')", '{');
+    "RUN=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
+    '# 本文を取るコマンドのヘッダと本文の一時ファイル（ヘッダと本文を分けて出す。#BODY の印のあとが本文）', 'hdr=$(mktemp); body=$(mktemp)', '{');
 
   L.push('', '# ---- 第1章：ヘッダ（C4・C2・C10） ----');
   t('top', `${H}/`); L.push('curl -sS -v -o /dev/null "$H/" 2>&1');
@@ -141,10 +142,13 @@ export function generateScript(o: CommandOptions): string {
   t('logout', `${H}${o.logoutPath}`); L.push(`curl -sS -v -o /dev/null -c jar.txt -b jar.txt "$H"${q(o.logoutPath)} 2>&1`);
   t('after-logout', `${H}${o.mypagePath}`, ' sensitive=1'); L.push(`curl -sS -D - -o /dev/null -b old.txt "$H"${q(o.mypagePath)}`);
 
-  L.push('} > out.txt', `echo 'out.txt に書き出しました。ツールで読み込んだら、パスワードやCookieを含むファイルも削除してください：rm -f out.txt login.txt jar.txt old.txt s1.txt s2.txt s3.txt' >&2`);
-  // -i の出力は本文で終わる。本文が改行で終わらない（JSON の API など）と、次の #TARGET の行が本文の続きになり、
-  // ターゲットが前のものに合わさってしまう。-w で最後に改行を出す（-i のコマンドは -w を使っていない）
-  return L.map(l => l.replace(/^(\s*)curl -sS -i /, "$1curl -sS -i -w '\\n' ")).join('\n') + '\n';
+  L.push('} > out.txt', 'rm -f "$hdr" "$body"', `echo 'out.txt に書き出しました。ツールで読み込んだら、パスワードやCookieを含むファイルも削除してください：rm -f out.txt login.txt jar.txt old.txt s1.txt s2.txt s3.txt' >&2`);
+  // 本文を取るコマンド（ここでは curl -sS -i と書く）は、ヘッダ（-D）と本文（-o）を別のファイルに取り、「ヘッダ・#BODY の印・本文」の順に出す。
+  // -i の出力では本文と次の応答を見分けられず、診断対象のサーバが本文を「HTTP/1.1 200 OK」と偽のヘッダで始めると、本物の応答を置き換えられた。
+  // 印は実行ごとの乱数を持つので、サーバは本文の終わりを作れない。取る前に2つのファイルを空にする（接続に失敗したとき、前のコマンドの
+  // ヘッダ・本文を出さない）。最後に改行を出す（本文が改行で終わらないと、次の #TARGET が本文の続きになる）
+  return L.map(l => l.replace(/^(\s*)curl -sS -i (.*?)(\s+#.*)?$/, (_, ind: string, args: string, comment = '') =>
+    `${ind}: > "$hdr"; : > "$body"; curl -sS -D "$hdr" -o "$body" ${args}; cat "$hdr"; echo "#BODY run=$RUN"; cat "$body"; echo${comment}`)).join('\n') + '\n';
 }
 
 /** ラベルに対応する推奨コマンドのID（#META cmd= に出す） */

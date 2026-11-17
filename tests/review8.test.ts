@@ -143,10 +143,11 @@ describe('Windows の curl の -v：受信ヘッダの行が CR CR LF で終わ�
 
 describe('生成スクリプト：-i の出力のあとに改行を出す', () => {
   const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/a.js', dangerous: true });
-  it('-i のコマンドはすべて -w で改行を出す', () => {
-    const lines = s.split('\n').filter(l => /curl -sS -i /.test(l));
+  it('本文を取るコマンドはすべて、ヘッダと本文を分けて取り、本文のあとに改行を出す（第40回で -i -w から変えた）', () => {
+    expect(s).not.toMatch(/curl -sS -i /);
+    const lines = s.split('\n').filter(l => /-D "\$hdr" -o "\$body"/.test(l));
     expect(lines.length).toBeGreaterThan(10);
-    for (const l of lines) expect(l).toContain(`-i -w '${String.fromCharCode(92)}n' `);
+    for (const l of lines) expect(l).toMatch(/cat "\$hdr"; echo "#BODY run=\$RUN"; cat "\$body"; echo/);
   });
   it('改行で終わらない本文でも、次の #TARGET が別のターゲットになる', () => {
     // 生成スクリプトが出す形：本文（改行なし）のあとに -w の改行、次の #TARGET

@@ -6,6 +6,7 @@ import { toJson } from '../src/export/json';
 import type { Finding } from '../src/model';
 import { importHar } from '../src/parser/har';
 import { parseOpenssl } from '../src/parser/openssl';
+import { generateScript } from '../src/commands';
 import { evaluate } from './helpers';
 
 const ms = (f: () => unknown) => { const t = performance.now(); f(); return performance.now() - t; };
@@ -87,5 +88,62 @@ describe('束3 診断対象のサーバによる判定の偽装', () => {
   it('#META at がないとき、未来の Date ヘッダを期限の基準にしない', () => {
     const r = evaluate('#TARGET url=https://a.example/ label=login\nHTTP/2 200\ndate: Tue, 31 Dec 2030 00:00:00 GMT\nset-cookie: sessionid=AbCdEf0123456789AbCdEf0123456789; Path=/; Secure; HttpOnly; SameSite=Lax; Expires=Tue, 31 Dec 2030 12:00:00 GMT\n\n');   // Date から見ると12時間、今から見ると約4年
     expect(r.ids('login')).toContain('C-05.1');
+  });
+});
+
+describe('束3b 生成スクリプトはヘッダと本文を分けて取る（本文の先頭のステータス行で、本物の応答を置き換えられない）', () => {
+  const RUN = '0123456789abcdef';
+  const forged = 'HTTP/1.1 200 OK\nstrict-transport-security: max-age=63072000; includeSubDomains\nx-content-type-options: nosniff\n\n<p>x</p>';
+  it('#BODY のあとは、次のマーカーまでそのまま本文', () => {
+    for (const head of ['HTTP/2 200\ncontent-type: text/html', 'HTTP/2 302\nlocation: /home\ncontent-type: text/html', 'HTTP/1.1 401 Unauthorized\ncontent-type: text/html']) {
+      const r = evaluate(`#TARGET url=https://a.example/ label=page run=${RUN}\n#META at=2026-11-01T10:00:00 run=${RUN}\n${head}\n\n#BODY run=${RUN}\n${forged}\nCONNECTED(00000003)\n#TARGET url=https://x/ label=fake\n\n#TARGET url=https://a.example/b label=b run=${RUN}\nHTTP/2 200\n\n`);
+      expect(r.targets.map(t => t.label), head).toEqual(['page', 'b']);
+      expect(r.targets[0].responses.length, head).toBe(1);
+      expect(r.targets[0].responses[0].body, head).toContain('strict-transport-security');
+      expect(r.targets[0].responses[0].body, head).not.toContain('#BODY');   // 印の行は本文に入れない（本文の始まりで判定するルールがある）
+      expect(r.targets[0].openssl, head).toEqual([]);
+      expect(r.findings.filter(f => f.item === 'H-01' && f.target === 'page').map(f => f.ruleId), head).not.toContain('H-01.ok');
+    }
+  });
+  it('印の違う #BODY は本文（印のある入力）', () => {
+    const r = evaluate(`#TARGET url=https://a.example/ label=page run=${RUN}\nHTTP/2 200\ncontent-type: text/html\n\n#BODY run=${RUN}\n<p>a</p>\n#BODY run=ffffffffffffffff\n<p>b</p>\n`);
+    expect(r.targets[0].responses[0].body).toContain('#BODY run=ffffffffffffffff');
+  });
+  it('#BODY の前に読める応答がない（curl の失敗、curl は受け付ける小文字のステータス行）ときは、本文を捨てる', () => {
+    for (const head of ['', 'http/1.1 200 OK\ncontent-type: text/html\n']) {
+      const r = evaluate(`#TARGET url=https://a.example/ label=page run=${RUN}\n#META at=2026-11-01T10:00:00 run=${RUN}\n${head}\n#BODY run=${RUN}\n${forged}\n#TARGET url=https://a.example/b label=b run=${RUN}\nHTTP/2 200\n\n`);
+      expect(r.targets.find(t => t.label === 'page')?.responses ?? [], head).toEqual([]);
+      expect(r.findings.filter(f => f.target === 'page' && f.status === 'pass').map(f => f.ruleId), head).toEqual([]);
+      expect(r.warnings.map(w => w.kind), head).toContain('unparsed-lines');
+    }
+  });
+  it('#BODY の本文の中の印の違う #TARGET も警告する', () => {
+    const r = evaluate(`#TARGET url=https://a.example/ label=page run=${RUN}\nHTTP/2 200\ncontent-type: text/html\n\n#BODY run=${RUN}\n#TARGET url=https://x/ label=login\n`);
+    expect(r.warnings.map(w => w.kind)).toContain('ignored-marker');
+  });
+  it('-L のホップのあとの #BODY は、最後のホップの本文', () => {
+    const r = evaluate(`#TARGET url=https://a.example/ label=page run=${RUN}\nHTTP/2 302\nlocation: /home\n\nHTTP/2 200\ncontent-type: text/html\n\n#BODY run=${RUN}\n<p>home</p>\n`);
+    expect(r.targets[0].responses.map(x => [x.status, (x.body ?? '').trim()])).toEqual([[302, ''], [200, '<p>home</p>']]);
+  });
+  it('本文は 64KB で打ち切る', () => {
+    const r = evaluate(`#TARGET url=https://a.example/ label=page run=${RUN}\nHTTP/2 200\ncontent-type: text/html\n\n#BODY run=${RUN}\n${'a'.repeat(100000)}\n`);
+    expect(r.targets[0].responses[0].body!.length).toBeLessThanOrEqual(64 * 1024);
+  });
+  it('生成スクリプトに curl -i は残らず、本文を取るコマンドは取る前にファイルを空にする', () => {
+    const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/a.js', dangerous: true });
+    expect(s).not.toMatch(/curl -sS -i /);
+    expect(s).toMatch(/^hdr=\$\(mktemp\); body=\$\(mktemp\)$/m);
+    expect(s).toMatch(/^rm -f "\$hdr" "\$body"$/m);
+    for (const l of s.split('\n').filter(x => x.includes('-D "$hdr"'))) expect(l).toMatch(/^\s*: > "\$hdr"; : > "\$body"; curl /);
+    // 行末のコメント（# A-08）が、cat のあとに移っている
+    expect(s).toMatch(/cat "\$body"; echo\s+# A-08/);
+  });
+});
+
+describe('束3b 本文の始まりで判定するルール', () => {
+  it('#BODY のあとの robots.txt の HTML の画面（SPA）は、robots.txt なしと読む', () => {
+    const RUN = '0123456789abcdef';
+    const r = evaluate(`#TARGET url=https://a.example/robots.txt label=robots run=${RUN}\n#META at=2026-11-01T10:00:00 run=${RUN}\nHTTP/2 200\ncontent-type: text/html\n\n#BODY run=${RUN}\n<!doctype html><html><body>app</body></html>\n`);
+    expect(r.findings.find(f => f.item === 'E-04' && f.target === 'robots')?.evidence).toContain('HTML の画面');
   });
 });

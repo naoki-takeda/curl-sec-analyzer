@@ -4,7 +4,8 @@ import { assignHopUrls, baseLabel, uniqueLabels } from './target';
 import { cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
 
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
-const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
+// #BODY：生成スクリプトが、ヘッダ（-D）のあと・本文（-o）の前に出す印。ここから次のマーカーまでを、直前の応答の本文としてそのまま読む
+const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE|BODY)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
 const OPENSSL_START = /^(CONNECTED\(|depth=|Certificate chain|subject=|issuer=|notBefore=|notAfter=)/;
 // OpenSSL 3.5 は CONNECTED( の前に「Connecting to 127.0.0.1」を出す（読まないと、C11 の採取のたびに解析できない行の警告が出た）
 const CONNECTING = /^Connecting to \S+\s*$/;
@@ -107,8 +108,20 @@ export function parseInput(input: string): ParseResult {
     ? splitRunMarkers(normalized, runId)
     : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
   let ignoredMarkers = 0;                              // 印のない（違う）#TARGET の行の数。本文として読んだことを知らせる
+  let inRaw = false;                                   // #BODY のあと：次のマーカーまでを本文としてそのまま読む（ステータス行・openssl の行・-v の行として読まない）
+  let rawBody: HttpResponse | undefined;              // 本文を足す応答。#BODY の前に応答がない（curl が失敗した、curl は受け付けるがここでは読めないステータス行
+                                                       // （小文字の http/1.1）など）ときは、本文を捨てる（ふつうに読むと、本文の偽のステータス行が応答になった）
+  const isMarker = (l: string) => { const m = l.match(MARKER_RE); const x = m ? attrs(m[2]) : undefined; return !!m && !!x && (!runId || x.run === runId); };
   for (let li = 0; li < lines.length; li++) {
     let line = lines[li]; let fromV = false;   // fromV：-v の「< 」の行（受信ヘッダ）
+    // #BODY のあとの本文は、次のマーカーまでそのまま本文に足す（本文の「HTTP/1.1 200 OK」・偽のヘッダ・CONNECTED(n) を読まない）
+    if (inRaw && !isMarker(line)) {
+      if (runId && /^#TARGET\b/.test(line)) ignoredMarkers++;   // 印の違う #TARGET は、本文の中でも知らせる
+      if (!rawBody) { if (line.trim()) unparsed++; continue; }
+      const room = BODY_LIMIT - (rawBody.body?.length ?? 0);
+      if (room > 0) rawBody.body = (rawBody.body ?? '') + (line.length < room ? `${line}\n` : line.slice(0, room));
+      continue;
+    }
     if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;
     line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
@@ -116,8 +129,9 @@ export function parseInput(input: string): ParseResult {
     if (mk && runId && a?.run !== runId && mk[1] === 'TARGET') ignoredMarkers++;
     if (mk && a && (!runId || a.run === runId)) {      // マーカー行は必ず応答を閉じる
       // 前のターゲットの状態（CONNECT を送った、など）を持ち越さない（持ち越すと、次のターゲットの本物の 200 をプロキシの応答とみなした）
-      close(); inOpenssl = false; vBody = false; connectReq = false; if (json) { unparsed += json.length; json = null; }
+      close(); inOpenssl = false; vBody = false; connectReq = false; inRaw = false; rawBody = undefined; if (json) { unparsed += json.length; json = null; }
       const [, tag] = mk;
+      if (tag === 'BODY') { inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
       if (tag === 'TARGET') { flush(); t = newTarget(a); pendingJson.length = 0; }
       else if (tag === 'META') {
         Object.assign(t.meta, a);
