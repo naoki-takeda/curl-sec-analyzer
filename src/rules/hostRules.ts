@@ -34,6 +34,11 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
       if (accepted.length || oldNegotiated.length) out.push(hf(tlsVersion, host, 1, 'high', 'fail',
         [accepted.length ? `接続できた旧バージョン: ${accepted.map(p => p.version).join(', ')}` : '', oldNegotiated.length ? `合意したバージョン: ${oldNegotiated.join(', ')}` : ''].filter(Boolean).join('、'),
         'TLS 1.2 と 1.3 だけを有効にする'));
+      // 旧バージョンの一部が ok=err（手元の OpenSSL が非対応）なら、そのバージョンは試していないので合格にしない（設計書：ok=err は na）。
+      // 1つでも拒否されたら合格にすると、tls1=err・tls1_1=0 で TLS 1.0 を確かめずに合格にした
+      else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected')
+        && probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'error'))
+        out.push(hf(tlsVersion, host, 'na', 'info', 'na', `旧バージョンの一部の接続可否が分からない（手元のOpenSSLが非対応: ${[...new Set(probes.filter(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'error').map(p => p.version))].join(', ')}）`, '旧バージョンに対応した環境で C12 を実行する'));
       else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected'))
         out.push(reachedTls(ts, negotiated.length) ? hf(tlsVersion, host, 'ok', 'info', 'pass', '旧バージョンは拒否された', '')
           : hf(tlsVersion, host, 'na', 'info', 'na', 'どのバージョンでも接続できなかった（旧バージョンを拒否したのか、openssl が対象に届かないのかが分からない）', UNREACHED_TLS_REC));

@@ -81,8 +81,11 @@ describe('5・11・22 キーと例外', () => {
     const current = new Set(['HAR GET https://a.example/*', 'HAR GET https://a.example/admin/settings']);
     expect(matches(s, f('HAR GET https://a.example/admin/settings', 'https://a.example/admin/settings'), current)).toBe(false);
     expect(matches(s, f('HAR GET https://a.example/*', 'https://a.example/Xy7Kp2Lm9QaBcDeF'), current)).toBe(true);
-    // 今回のキーにないなら、以前の版のパターンとして広く効く
-    expect(matches(s, f('HAR GET https://a.example/お知らせ', 'https://a.example/お知らせ'), new Set(['HAR GET https://a.example/お知らせ']))).toBe(true);
+    // 今回のキーになくても、今の形式のキー（画面で登録したもの）は完全一致だけ（第34回の見直し。そのページを含まない回の入力で、
+    // 同じホストのほかのページの指摘を抑止した）。以前の版のキーで同じ形のものは、外れて fail に戻る（黙って抑止するより安全）
+    expect(matches(s, f('HAR GET https://a.example/お知らせ', 'https://a.example/お知らせ'), new Set(['HAR GET https://a.example/お知らせ']))).toBe(false);
+    // 今の形式でない手書きのパターンは、* を任意の文字列として広く効く
+    expect(matches({ ruleId: 'H-01', target: 'HAR GET https://a.example/admin*', reason: 'x' } as never, f('HAR GET https://a.example/admin/settings', 'https://a.example/admin/settings'), new Set(['HAR GET https://a.example/admin/settings']))).toBe(true);
     // ラベルだけのキーには、パターンを当てない（第30回の修正。*login* が login ラベルの指摘も抑止した）
     expect(matches({ ruleId: 'H-01', target: 'log*', reason: 'x' } as never, f('login', 'https://a.example/x', 'login'), new Set(['login']))).toBe(false);
   });

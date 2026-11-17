@@ -41,7 +41,9 @@ export function splitSetCookie(v: string): string[] {
 export function isDeletion(c: SetCookie, now = Date.now()): boolean {
   if (c.value === '' || c.value === '""') return true;
   const ma = c.attrs.get('max-age');
-  if (typeof ma === 'string' && /^-?\d+$/.test(ma.trim()) && Number(ma) <= 0) return true;   // 空や数字でない Max-Age は無視する（RFC 6265 5.2.2）
+  // 空や数字でない Max-Age は無視する（RFC 6265 5.2.2）。正しい Max-Age があれば Expires より優先する（RFC 6265 5.3 の手順3。C-05 と同じ）。
+  // 過去の Expires を先に見ると、Max-Age=3600 の生きている Cookie を削除とみなし、C-01・C-02 の判定から外して C-09①（高）まで誤って出した
+  if (typeof ma === 'string' && /^-?\d+$/.test(ma.trim())) return Number(ma) <= 0;
   const ex = c.attrs.get('expires');
   return typeof ex === 'string' && Date.parse(ex) < now;
 }

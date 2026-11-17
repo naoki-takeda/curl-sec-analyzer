@@ -242,9 +242,10 @@ describe('コミット前のレビュー', () => {
     expect(summarizeCommand('curl_-d_x=1_-sSLfu_alice:hunter2pw_https://a.example/')).not.toContain('hunter2pw');
     expect(summarizeCommand("curl -d 'a=1 -u alice:hunter2pw https://a.example/")).not.toContain('hunter2pw');
   });
-  it('P4 以前の版のキー（* を含む）の例外は、新しいキーにも * で照合する。非 ASCII の大文字・小文字が入れ替わるトークンはキーに入れない', () => {
+  it('P4 今の形式と同じ形の以前の版のキー（* を含む）の例外は、別のページに効かない。非 ASCII の大文字・小文字が入れ替わるトークンはキーに入れない', () => {
+    // 第34回の見直し：画面で登録した今のキーと見分けられないので、完全一致だけにする（* を任意の文字列とすると、ほかのページの指摘を黙って抑止した）
     const f = { item: 'H-01', ruleId: 'H-01.1', target: 'har-1', targetKey: 'HAR GET https://www.example.jp/お知らせ', url: 'https://www.example.jp/お知らせ' } as Finding;
-    expect(matches({ ruleId: 'H-01', target: 'HAR GET https://www.example.jp/*', reason: 'x' } as never, f)).toBe(true);
+    expect(matches({ ruleId: 'H-01', target: 'HAR GET https://www.example.jp/*', reason: 'x' } as never, f)).toBe(false);
     expect(urlKey('https://a.example/x/ÀbcDéfGhîJkLmNöPqRsTüVw')).toBe('https://a.example/x/*');
   });
   it('P5 本文を採取していない text/html の 200 は na。PHP の Notice のあとに続く HTML は HTML の画面', () => {

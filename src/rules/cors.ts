@@ -10,8 +10,11 @@ const sameHostOrigin = (ctx: RuleContext): boolean => {
   if (!o || !host) return false;
   try { return new URL(o).host.toLowerCase() === host.toLowerCase(); } catch { return false; }
 };
-const acaoOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-origin')?.[0]?.trim();
-const credOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-credentials')?.[0]?.trim().toLowerCase() === 'true';
+// ACAO・ACAC が2回以上あれば、ブラウザは値を「, 」でつないだ1つの値として見る（Fetch Standard）。つないだ値は Origin とも * とも一致せず、
+// CORS の検査は失敗する。最初の値だけを見ると、アプリと nginx の add_header が両方付けた応答を、反射（R-01①）と誤判定した
+const acaoOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-origin')?.map(v => v.trim()).join(', ') || undefined;
+// ACAC は値が「true」と完全に一致するときだけ資格情報を許可する（大文字・小文字を区別する。TRUE はブラウザが受け付けない）
+const credOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-credentials')?.map(v => v.trim()).join(', ') === 'true';
 
 /**
  * ホスト名の「サイト」（登録したドメイン）の目安。公開接尾辞の一覧は持たないので、最後の2つのラベル（example.com）とし、

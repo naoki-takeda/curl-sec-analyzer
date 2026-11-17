@@ -112,3 +112,13 @@ export function legacyHarKey(k?: string): boolean {
   const m = k?.match(/^(?:HAR \S+|\S+) ((?:https?:\/\/|\/)\S*)/);
   return !!m && urlKey(m[1]) !== m[1];
 }
+
+/**
+ * 今の版の形式の URL を持つキー（「HAR メソッド URL」「ラベル URL」、末尾の「 #2」を含む）か。URL の部分が urlKey の出力そのもの（もう一度かけても
+ * 変わらない）なら今の形式。画面で登録した例外の対象はこの形で、キーの * は伏せたパスの部分（任意の文字列ではない）。
+ * HAR GET * や https://a.example/admin* のような手で書いたパターンは、urlKey が変えるので含まれない
+ */
+export function isCurrentKey(k: string): boolean {
+  const m = k.match(/^(?:HAR \S+|\S+) ((?:https?:\/\/|\/)\S*)(?: #\d+)?$/);
+  return !!m && urlKey(m[1]) === m[1];
+}

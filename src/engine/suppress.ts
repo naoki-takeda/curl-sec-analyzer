@@ -1,6 +1,7 @@
 // engine/suppress.ts：例外登録（suppressions.json）の適用
 import type { Finding, Suppression } from '../model';
 import { baseLabel } from '../parser/target';
+import { isCurrentKey } from './targetKey';
 
 /**
  * URL のパターン照合（* は任意の文字列）。正規表現に変換すると、* の多いパターンでバックトラックが爆発する（ReDoS）ため、
@@ -20,10 +21,19 @@ export function wildcardMatch(pattern: string, text: string): boolean {
 const MAX_PATTERN = 500;
 const LABEL_URL = /^\S+ https?:\/\//;
 
+/** 例外の対象が今の形式のキーか（例外ごとに1回だけ調べる。指摘×例外の組ごとに urlKey をかけると遅い） */
+const currentKeyCache = new Map<string, boolean>();
+const isKeyTarget = (target: string): boolean => {
+  let v = currentKeyCache.get(target);
+  if (v === undefined) { if (currentKeyCache.size > 5000) currentKeyCache.clear(); v = isCurrentKey(target); currentKeyCache.set(target, v); }
+  return v;
+};
+
 /**
  * 例外が指摘に当てはまるか。currentKeys は今回の結果のキーの一覧（applySuppressions が渡す）。
- * 例外の target が今回のどれかのキーと同じなら、キーの完全一致だけで判定する（画面で1つのターゲットに登録したキー HAR GET https://a.example/* の
- * *（伏せたパスの部分）が、/login・/admin・/ の指摘まで抑止した）。今回のキーにない target（以前の版のキー、手で書いたパターン）は、
+ * 例外の target が今の形式のキー（画面で登録したもの）か、今回のどれかのキーと同じなら、キーの完全一致だけで判定する（画面で1つのターゲットに
+ * 登録したキー HAR GET https://a.example/* の *（伏せたパスの部分）が、/login・/admin・/ の指摘まで抑止した。そのページを含まない回の入力でも
+ * 同じことが起きたので、今回のキーにあるかではなく、キーの形で見分ける）。それ以外の target（以前の版の形式のキー、手で書いたパターン HAR GET *）は、
  * 今までどおり * を任意の文字列として、キーの全体と照合する（1つの部分の中だけにすると、HAR GET * や log* が黙って効かなくなった）
  */
 export function matches(s: Suppression, f: Finding, currentKeys?: ReadonlySet<string>): boolean {
@@ -36,7 +46,7 @@ export function matches(s: Suppression, f: Finding, currentKeys?: ReadonlySet<st
   const targetOk = s.target === f.target || s.target === f.targetKey || (pattern && !!f.url && wildcardMatch(s.target, f.url))
     || (pattern && !!keyUrl && wildcardMatch(s.target, keyUrl))
     // 照合するのは URL を持つキーだけ（ラベルだけのキーと照合すると、*login* が login・pre-login ラベルの指摘も抑止した。第30回で直したものの退行）
-    || (pattern && !!f.targetKey && f.targetKey.includes('://') && s.target.includes('*') && !currentKeys?.has(s.target) && wildcardMatch(s.target, f.targetKey))
+    || (pattern && !!f.targetKey && f.targetKey.includes('://') && s.target.includes('*') && !currentKeys?.has(s.target) && !isKeyTarget(s.target) && wildcardMatch(s.target, f.targetKey))
     // 同じラベルが1つに減って、キーが「ラベル URL」からラベルだけになったもの（page https://a.example/b で登録した例外が外れた）。URL のキーは、
     // 生の URL から作ったもの（f.keyUrl）を使う（マスクした URL から作ると、ASP.NET の (S(…)) が * になって外れた）。形が「ラベル 空白 URL」の
     // ときだけ比べる（組ごとに URL を解析し直すと、例外の照合が33倍遅くなった）
