@@ -243,12 +243,23 @@ const NOT_SECRET_LAST = new Set(['policy', 'policies', 'updated', 'changed', 'at
   'required', 'reset', 'set', 'hint', 'strength', 'rules', 'rule', 'min', 'max', 'last', 'age', 'count', 'type', 'method', 'enabled', 'exists', 'status', 'state', 'version', 'url', 'link', 'id',
   // 設定・画面の部品・パスの名前（passwordPattern・changePasswordUri・passwordEncoder・passwordComplexity・forgotPasswordPath・password_regex）
   'uri', 'path', 'route', 'endpoint', 'page', 'encoder', 'encoding', 'algorithm', 'algo', 'complexity', 'pattern', 'regex', 'regexp', 'format', 'validator',
-  'validation', 'validators', 'field', 'label', 'placeholder', 'input', 'form', 'mode', 'prompt', 'message', 'msg', 'text', 'title', 'error', 'errors', 'help', 'requirements', 'options', 'config', 'settings']);
+  'validation', 'validators', 'field', 'label', 'placeholder', 'input', 'form', 'mode', 'prompt', 'message', 'msg', 'text', 'title', 'error', 'errors', 'help', 'requirements', 'options', 'config', 'settings',
+  // ハッシュの方式・変更した人（passwordScheme・password_hasher・password_changed_by・passwordRounds）
+  'scheme', 'schemes', 'hasher', 'kdf', 'cost', 'rounds', 'iterations', 'by']);
+// 操作と password の2語の名前（forgotPassword・lostPassword：画面・API のパスを入れる）。resetPassword・changePassword・updatePassword は、
+// 管理者がリセットした仮のパスワードや、送ったパスワードを返す API があるので①のまま。resetAdminPassword・forgotPasswordToken も①のまま
+const PASSWORD_ACTION = new Set(['forgot', 'forgotten', 'lost', 'recover', 'show', 'toggle', 'request']);
+// 公開して使う API キー（publicApiKey、browserApiKey、Supabase の anonKey）。値をブラウザに渡す設計。search は語として除くと、
+// Bing・Azure AI Search・Elastic などのサーバ側の秘密のキー（azureSearchApiKey）を見逃すので、Algolia などの検索専用キーの名前だけ
+const PUBLIC_KEY_WORD = new Set(['public', 'publishable', 'anon', 'browser']);
+const SEARCH_ONLY_KEY = /^(?:algolia_|typesense_|meili(?:search)?_)?search(?:_only)?_api_?key$/;
 const SECRET_KEY = { test: (path: string): boolean => {
   const last = path.split(/[.[\]]+/).filter(Boolean).pop() ?? '';   // キーの区切りは . と []（_ はキーの中の語の区切り）
   const words = last.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[_-]+/).filter(Boolean);
   if (!words.length || NOT_SECRET_LAST.has(words[words.length - 1]) || words[0] === 'has' || words[0] === 'is') return false;
   const j = words.join('_');
+  if (words.length === 2 && PASSWORD_ACTION.has(words[0]) && /^pass(?:word|wd|phrase)$/.test(words[1])) return false;
+  if (/(?:^|_)(?:api_?key|apikey)$/.test(j) && (words.some(w => PUBLIC_KEY_WORD.has(w)) || SEARCH_ONLY_KEY.test(j))) return false;
   return words.some(w => w === 'password' || w === 'passwd' || w === 'passphrase')
     || /(?:^|_)(?:pass_?hash|secret|api_?key|apikey|private_?key|secret_?key|secret_access_key|access_secret|otp_secret|mfa_secret)$/.test(j);
 } };

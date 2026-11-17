@@ -1,7 +1,7 @@
 // 23回目のレビュー（リポジトリ全体を新しい目で見直したもの）で見つかった不具合の再現テスト。小さな束に分けて直す（第40回）
 import { describe, expect, it } from 'vitest';
 import { diff, parseBaseline } from '../src/engine/diff';
-import { tags } from '../src/rules/html';
+import { metaCspFromHtml, tags } from '../src/rules/html';
 import { toJson } from '../src/export/json';
 import type { Finding } from '../src/model';
 import { importHar } from '../src/parser/har';
@@ -145,5 +145,66 @@ describe('束3b 本文の始まりで判定するルール', () => {
     const RUN = '0123456789abcdef';
     const r = evaluate(`#TARGET url=https://a.example/robots.txt label=robots run=${RUN}\n#META at=2026-11-01T10:00:00 run=${RUN}\nHTTP/2 200\ncontent-type: text/html\n\n#BODY run=${RUN}\n<!doctype html><html><body>app</body></html>\n`);
     expect(r.findings.find(f => f.item === 'E-04' && f.target === 'robots')?.evidence).toContain('HTML の画面');
+  });
+});
+
+describe('束4 A-07 の秘密のキーの名前を絞る', () => {
+  const a07 = (body: string) => evaluate(`#TARGET url=https://a.example/api/me label=api\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`)
+    .findings.filter(f => f.item === 'A-07' && f.severity === 'high').length;
+  it('操作の名前・ハッシュの方式・変更した人・公開して使う API キーは①にしない', () => {
+    for (const k of ['forgotPassword', 'lostPassword', 'passwordScheme', 'password_hasher', 'password_changed_by', 'searchApiKey', 'algoliaSearchApiKey', 'search_only_api_key', 'publicApiKey', 'anonApiKey'])
+      expect(a07(`{"${k}":"abc123def"}`), k).toBe(0);
+  });
+  it('秘密の値のキーは①のまま', () => {
+    for (const k of ['password', 'hashedPassword', 'newPassword', 'changePassword', 'passwordResetToken', 'reset_password_token', 'apiKey', 'adminApiKey', 'stripeSecretKey', 'client_secret', 'password_digest', 'resetPassword', 'resetAdminPassword', 'azureSearchApiKey', 'bingSearchApiKey', 'elastic_search_api_key', 'searchAdminApiKey', 'googleMapsApiKey'])
+      expect(a07(`{"${k}":"abc123def"}`), k).toBe(1);
+  });
+});
+
+describe('束4 コメントの読み飛ばしをブラウザに合わせる', () => {
+  const forms = (h: string) => tags(h, ['form']).length;
+  it('「--!>」もコメントを閉じる', () => {
+    expect(forms('<!-- x --!><form action="/a"></form><p>-->')).toBe(1);
+    expect(forms('<!-- <form action="/a"> --!>')).toBe(0);
+  });
+  it('ほかのタグの属性の値の中の「<!--」はコメントの始まりではない', () => {
+    expect(forms('<div title="<!--"><form action="/a"></form></div><p>-->')).toBe(1);
+    expect(forms(`<img alt='<!--' src=x><form action="/a"></form>-->`)).toBe(1);
+  });
+  it('ほかのタグの属性の値の中のタグを読まない', () => {
+    expect(forms('<div data-x="<form action=/evil>">x</div>')).toBe(0);
+  });
+  it('= のあとでない引用符で、後ろの本文をタグの中として読まない', () => {
+    expect(forms(`<p class=it's>x</p><form action="/a"></form><p>'</p>`)).toBe(1);
+  });
+  it('<noscript>・<iframe>・<xmp>・<noembed> の中身の「<!--」はコメントではない', () => {
+    for (const el of ['noscript', 'iframe', 'xmp', 'noembed', 'noframes'])
+      expect(forms(`<${el}><!--</${el}><form action="/a"></form><p>-->`), el).toBe(1);
+  });
+  it('本物のコメントの中のフォームは読まない（これまでどおり）', () => {
+    expect(forms('<!-- <form action="/a"></form> --><p>x</p>')).toBe(0);
+    expect(forms('<!--><form action="/a"></form>')).toBe(1);
+    expect(forms('<script>if(a<b){x="<!--"}</script><form action="/a"></form>-->')).toBe(1);
+  });
+});
+
+describe('束4 束のレビューの指摘', () => {
+  const forms = (h: string, n = 'form') => tags(h, [n]).length;
+  it('<head> のコメントを「--!>」で閉じた本文の meta の CSP は読まない（tags と同じ閉じ）', () => {
+    expect(metaCspFromHtml(`<html><head><!-- a --!></head><body><meta http-equiv="Content-Security-Policy" content="default-src 'self'"><p>--></p></body>`)).toEqual([]);
+    expect(metaCspFromHtml(`<html><head><!--><meta http-equiv="Content-Security-Policy" content="default-src 'self'"></head><body>--></body>`)).toEqual(["default-src 'self'"]);
+  });
+  it('引用符のない値の中・属性名の前の = と引用符で、本物の > を越えない', () => {
+    expect(forms(`<img src=/x?a="1><script src="https://cdn.other.example/x.js"></script><p title="z">`, 'script')).toBe(1);
+    expect(forms(`<link rel=preload href=/a?b="c><form action="http://evil.example/login"></form><span title="x">`)).toBe(1);
+    expect(forms(`<td class==">x</td><form action="/a"></form><p title="q">`)).toBe(1);
+    expect(forms(`<p =" x><form action="/a"></form><p title="q">`)).toBe(1);
+  });
+  it('属性の値の > では止めない（これまでどおり）', () => {
+    const t = tags(`<form onsubmit="return a>0" action = '/x>y' data-x=1>`, ['form']);
+    expect(t[0]?.attrs.get('action')).toBe('/x>y');
+  });
+  it('カスタム要素 <iframe-wrapper> はテキストの要素ではない', () => {
+    expect(forms('<iframe-wrapper></iframe-wrapper><!-- <form action="/a"></form> -->')).toBe(0);
   });
 });

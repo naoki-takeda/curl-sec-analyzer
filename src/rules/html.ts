@@ -36,18 +36,52 @@ export const decodeEntities = (v: string) => v.replace(/&(?:#(\d{1,7})|#[xX]([0-
  * data-config='{"min":">100"}'）。止めると、残りの値が属性名として証跡に出てしまう（値は伏せられるが、属性名は出る）。
  * 「位置と引用符の状態」ごとに結果を覚え、同じところを二度走査しない。> のない本文（<script の繰り返し）や閉じていない引用符でも、
  * 全体の時間が本文の長さに比例する（正規表現で書くと、タグの始まりごとに末尾まで走査し、本文の長さの2乗の時間がかかる）。長い属性にも上限を付けない
+ * 状態はブラウザの字句解析（HTML の tokenizer）の開始タグの部分と同じ。引用符が値を囲むのは、属性名と = のあと（空白を挟んでよい）だけで、
+ * 引用符のない値の中の = と引用符（<img src=/x?a="1>）、属性名の前の = （<p =" x>）、= のあとでない引用符（<p class=it's>）は普通の文字。
+ * ずれると、ほかのタグを読み飛ばすときに本物の > を越え、後ろの <form>・<script> を見逃す
  */
+const enum Q { TagName, BeforeAttr, AttrName, AfterAttr, BeforeValue, Unquoted, Double, Single, AfterQuoted }
+const isSpace = (c: number) => c === 32 || c === 9 || c === 10 || c === 12 || c === 13;
+function nextQ(q: Q, c: number): Q {
+  switch (q) {
+    case Q.TagName: return isSpace(c) || c === 47 ? Q.BeforeAttr : Q.TagName;                         // 空白 /
+    case Q.BeforeAttr: return isSpace(c) || c === 47 ? Q.BeforeAttr : Q.AttrName;                     // 名前の最初の = も名前の文字
+    case Q.AttrName: case Q.AfterAttr: return c === 61 ? Q.BeforeValue : c === 47 ? Q.BeforeAttr      // =
+      : isSpace(c) ? Q.AfterAttr : Q.AttrName;
+    case Q.BeforeValue: return isSpace(c) ? Q.BeforeValue : c === 34 ? Q.Double : c === 39 ? Q.Single : Q.Unquoted;
+    case Q.Unquoted: return isSpace(c) ? Q.BeforeAttr : Q.Unquoted;
+    case Q.Double: return c === 34 ? Q.AfterQuoted : Q.Double;
+    case Q.Single: return c === 39 ? Q.AfterQuoted : Q.Single;
+    default: return isSpace(c) || c === 47 ? Q.BeforeAttr : Q.AttrName;                               // 閉じた引用符のあと
+  }
+}
+/**
+ * 位置 lt の「<!--」で始まるコメントの終わり（閉じの > の位置。閉じがなければ -1）を探す関数を作る。「-->」（「<!-->」「<!--->」は空のコメント）と
+ * 「--!>」で閉じる（ブラウザと同じ）。前に探した結果を覚え、同じところを探し直さない（閉じのない「<!--」の繰り返しや、遠くにしかない「--!>」で、
+ * 位置ごとに本文の終わりまで探し、入力の長さの2乗の時間がかかる）。lt は前に進むだけ（戻ると、覚えた結果が正しくない）
+ */
+function commentEndFinder(html: string): (lt: number) => number {
+  const nextOf = (pat: string) => { let at = -2; let none = false; return (k: number) => { if (none) return -1; if (at < k) { at = html.indexOf(pat, k); none = at < 0; } return at; }; };
+  let close = nextOf('-->'), bang = nextOf('--!>');
+  let last = -1;
+  return (lt: number) => {
+    if (lt < last) { close = nextOf('-->'); bang = nextOf('--!>'); }   // 戻ったら覚えた結果を捨てる
+    last = lt;
+    const a = close(lt + 2), b = bang(lt + 4);
+    return a < 0 ? (b < 0 ? -1 : b + 3) : b < 0 ? a + 2 : Math.min(a + 2, b + 3);
+  };
+}
 function tagEndFinder(html: string): (from: number) => number {
-  const memo = new Int32Array(html.length * 3);    // 0：未走査、-1：閉じない、k+1：位置 k の > で閉じる
+  const memo = new Int32Array(html.length * 9);    // 0：未走査、-1：閉じない、k+1：位置 k の > で閉じる
   return (from: number) => {
-    const path: number[] = []; let q = 0; let res = -1;
+    const path: number[] = []; let q: Q = Q.TagName; let res = -1;
     for (let j = from; j < html.length; j++) {
-      const key = j * 3 + q; const m = memo[key];
+      const key = j * 9 + q; const m = memo[key];
       if (m !== 0) { res = m < 0 ? -1 : m - 1; break; }
       path.push(key);
       const c = html.charCodeAt(j);
-      if (q === 0) { if (c === 62) { res = j; break; } if (c === 34) q = 1; else if (c === 39) q = 2; }   // > " '
-      else if ((q === 1 && c === 34) || (q === 2 && c === 39)) q = 0;
+      if (c === 62 && q !== Q.Double && q !== Q.Single) { res = j; break; }   // 引用符の外の >
+      q = nextQ(q, c);
     }
     const v = res < 0 ? -1 : res + 1;
     for (const k of path) memo[k] = v;
@@ -59,29 +93,35 @@ export function tags(html: string, names: string[]): Tag[] {
   const start = new RegExp(`<(${names.join('|')})\\b`, 'iy');
   const endOf = tagEndFinder(html);
   const out: Tag[] = [];
-  const raw = /<(script|style|textarea|title)\b/iy;
+  // 中身をテキストとして読む要素（中の「<!--」はコメントではない）。<noscript> はスクリプトが有効なブラウザでテキスト。
+  // 名前のあとは空白・/・> だけ（\b だと、カスタム要素 <iframe-wrapper> を、閉じのない <iframe> として本文の終わりまでテキストにした）
+  const raw = /<(script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)(?=[\s/>])/iy;
   let lower: string | undefined;                       // 閉じタグを探すため（初めて要るときに一度だけ小文字にする。タグごとに小文字にすると、<script の多い本文で2乗の時間になる）
   let rawEnd = -1;                                     // <script> などの中身（コメントにならない）の終わり
-  let noCommentClose = Infinity;                       // ここより後ろに「-->」はない
+  const commentEnd = commentEndFinder(html);
   for (let i = html.indexOf('<'); i >= 0; i = html.indexOf('<', i + 1)) {
     // コメント（<!-- … -->）の中のタグは、ブラウザが読まない（コメントアウトしたフォーム・スクリプトで E-10①（高）・E-07① などを誤って出した）。
     // <script>・<style>・<textarea>・<title> の中身の「<!--」（var s='<!--'）はコメントではない。閉じのない「<!--」は、コメントとして
     // 読み飛ばさない（読み飛ばすと、後ろのタグをすべて見逃し、E-08・E-10① を合格にした）。「<!-->」「<!--->」は空のコメント
-    // 閉じの「-->」がないと分かった位置より後ろは探し直さない（閉じのない「<!--」の繰り返しで、位置ごとに本文の終わりまで探し、
-    // 入力の長さの2乗の時間がかかった。64KB で1回1.4秒）
-    if (i > rawEnd && html.startsWith('<!--', i) && i + 2 < noCommentClose) {
-      const e = html.indexOf('-->', i + 2);
-      if (e >= 0) { i = e + 2; continue; }
-      noCommentClose = i + 2;
+    // 「--!>」もコメントを閉じる（ブラウザと同じ）
+    const outside = i > rawEnd;
+    if (outside && html.startsWith('<!--', i)) {
+      const e = commentEnd(i);
+      if (e >= 0) { i = e; continue; }
     }
-    if (i > rawEnd) {
+    if (outside) {
       raw.lastIndex = i;
       const r = raw.exec(html);
       if (r) { lower ??= html.toLowerCase(); const close = lower.indexOf(`</${r[1].toLowerCase()}`, i + r[0].length); rawEnd = close < 0 ? html.length : close; }
     }
     start.lastIndex = i;
     const m = start.exec(html);
-    if (!m) continue;
+    if (!m) {
+      // ほかの開始タグも、属性の値の中（<div title="<!--">）を読み飛ばす（値の中の「<!--」をコメントの始まりとして、後ろのフォームを見逃した）。
+      // <script> などの中身では読み飛ばさない（スクリプトの「a<b」をタグとして読まない）
+      if (outside && /[a-z]/i.test(html[i + 1] ?? '')) { const e = endOf(i + 1); if (e >= 0) i = e; }
+      continue;
+    }
     const from = i + m[0].length; const end = endOf(from);
     if (end < 0) continue;                           // 閉じていないタグ（ブラウザはタグとして扱わない）
     const attrs = new Map<string, string>();
@@ -124,9 +164,10 @@ export function metaCspPolicies(ctx: RuleContext): string[] {
  */
 function bodyStart(html: string): number {
   const lower = html.toLowerCase();
+  const commentEnd = commentEndFinder(lower);        // tags() と同じ閉じ（「--!>」も。違うと、<head> のコメントを「--!>」で閉じた本文の meta の CSP を読んだ）
   for (let i = 0; i < lower.length;) {
     const lt = lower.indexOf('<', i); if (lt < 0) return -1;
-    if (lower.startsWith('<!--', lt)) { const e = lower.indexOf('-->', lt + 4); if (e < 0) return -1; i = e + 3; continue; }
+    if (lower.startsWith('<!--', lt)) { const e = commentEnd(lt); if (e < 0) return -1; i = e + 1; continue; }
     if (/^<script[\s>]/.test(lower.slice(lt, lt + 8))) { const e = lower.indexOf('</script', lt + 7); if (e < 0) return -1; i = e + 8; continue; }
     if (/^<body[\s>]/.test(lower.slice(lt, lt + 6))) return lt;
     i = lt + 1;
