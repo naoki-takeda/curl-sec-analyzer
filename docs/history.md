@@ -816,3 +816,18 @@
 | 中：H-11の合格 | CORPの`cross-origin`（どのサイトからも読み込める）とCOOPの`unsafe-none`（既定の動作）を、ヘッダがあるだけで合格にした | 守りにならない値と読めない値（知らない値・2つ以上の値）は、ないのと同じに扱う。COOPの`report-to`などの引数は除いて見る | `src/rules/headers.ts`、設計書のH-11 |
 | 中：HARの転送の連なりと状態コード | 転送先を引く表のキーが生のURLで、引くときは読み直したURLだったので、書き方の違い（`https://a.example:443/`、エンコードしていない`/日本`）で連なりが切れた。文字列の`"304"`は304の除外を通り抜けた | 表のキーも読み直したURLにする。状態コードは数値にそろえる | `src/parser/har.ts` |
 | 未対応 | 低の指摘：E-04の`Expires: never`、H-02のカンマでつないだHSTS、R-03の`[]`、`parseHsts`の引用符の中の「;」、`Date.parse`の2桁の年。証跡のマスクの残り（第34回の未対応のとおり） | 次回以降 | — |
+
+### 積み残しへの対応（第36回、第34回の低の指摘）
+
+第34回・第35回で「次回以降」とした指摘のうち、低の指摘に対応し、ルールセットを`2026.11-v0.4.43`にした。再現テストは`tests/review20.test.ts`に足し、修正の前に失敗することを確かめた。curl の入力は`tests/golden/cases/17-review20.txt`に足した。既存のゴールデンの期待結果は、`15-review18`のカンマ区切りのHSTSのH-02（②→na）だけが変わった。
+
+| 対象 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 低：E-04の合格 | security.txtの`Expires: never`のような読めない値を、`Date.parse`がNaNを返し期限切れの比べが偽になるので合格にした | 日時として読めない`Expires`は②にする（RFC 9116はRFC 3339の日時を求める） | `src/rules/exposure.ts`、設計書のE-04 |
+| 低：H-02の証跡 | カンマで区切ったHSTS（`max-age=…, includeSubDomains, preload`）を「preloadなし」とした（H-01③で構文の誤りとして指摘済み） | 構文の誤ったHSTSは、ブラウザが無視するのでH-02をnaにする。ディレクティブがあるか（`hstsDirective`）も、有効なヘッダだけで見る | `src/rules/headers.ts`、`src/rules/util.ts`、設計書のH-02 |
+| 低：HSTSの引用符 | 引用符の文字列の中の「;」（`foo="a;b"`）で分け、ブラウザが受け付けるヘッダをH-01③（高）にした | 引用符の外の「;」だけで分ける。引用符で囲んだ`max-age`の値も読む | `src/rules/util.ts` |
+| 低：R-03の`[]` | 送ったOriginが見えない`-i`の`cors-partial`で`[]`（適用外）を返し、R-01もnaなので何も判定しなかった | ACAOが似せたOriginなら、それを送ったものとみなして判定する（R-01のテスト値と同じ考え方）。そうでなければna | `src/rules/cors.ts`、設計書のR-03 |
+| 低：Cookieの2桁の年 | `Date.parse`は2桁の年の50〜69を19xxと読むので、`Expires=Wed, 01-Oct-69 …`の生きているCookieを削除とみなした | RFC 6265 5.1.1のとおり、70〜99を19xx、0〜69を20xxにする（`cookieDate`。削除の判定とC-05で使う） | `src/parser/setCookie.ts`、`src/rules/cookies.ts` |
+| 低：版の番号 | ツールの版が`src/rules/ruleset.ts`と`package.json`の2か所にあり、一致を確かめていなかった | 一致を確かめるテストを足す | `tests/review20.test.ts` |
+| 低：コメント | `Finding.targetKey`の説明が、HARのキーを「URL（マスク済み）」としていた（第28回からマスクとは別に作る） | 説明を直す | `src/model.ts` |
+| 未対応 | 証跡のマスク（`src/mask.ts`）が、URL・JSONの外のベンダーのトークン（`ghp_`・`xoxb-`・`sk_live_`・`AKIA`）や`password="…"`を伏せないこと。証跡に出す経路は見つかっていない。秘密らしい形を推し量る作りをやめ、ルールの側で残してよい部分だけを組み立てる作り（突き合わせのキー・実施コマンドの要約と同じ考え方）に寄せるかは、判断が要る | 次回以降 | — |

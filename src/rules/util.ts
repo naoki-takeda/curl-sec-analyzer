@@ -69,19 +69,35 @@ export function parseCsp(v: string): Map<string, string[]> {
 export function parseHsts(v: string | undefined): { valid: boolean; maxAge: number } {
   if (!v) return { valid: false, maxAge: 0 };
   const seen = new Set<string>(); let maxAge: number | undefined;
-  for (const raw of v.split(';')) {
+  for (const raw of hstsParts(v)) {
     const d = raw.trim(); if (!d) continue;
-    const m = d.match(/^([!#$%&'*+.^_`|~0-9A-Za-z-]+)(?:\s*=\s*(?:"([^"]*)"|([!#$%&'*+.^_`|~0-9A-Za-z-]+)))?$/);
+    const m = d.match(/^([!#$%&'*+.^_`|~0-9A-Za-z-]+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([!#$%&'*+.^_`|~0-9A-Za-z-]+)))?$/);
     if (!m) return { valid: false, maxAge: 0 };
     const name = m[1].toLowerCase();
     if (seen.has(name)) return { valid: false, maxAge: 0 };
     seen.add(name);
-    if (name === 'max-age') { const val = m[2] ?? m[3] ?? ''; if (!/^\d+$/.test(val)) return { valid: false, maxAge: 0 }; maxAge = Number(val); }
+    if (name === 'max-age') { const val = (m[2] ?? m[3] ?? '').replace(/\\(.)/g, '$1'); if (!/^\d+$/.test(val)) return { valid: false, maxAge: 0 }; maxAge = Number(val); }
   }
   return maxAge === undefined ? { valid: false, maxAge: 0 } : { valid: true, maxAge };
 }
+/**
+ * HSTS のディレクティブを「;」で分ける。引用符の文字列（\ のエスケープを含む）の中の「;」では分けない（foo="a;b" を2つに分け、
+ * ブラウザが受け付けるヘッダを H-01③（高）にした）
+ */
+function hstsParts(v: string): string[] {
+  const out: string[] = []; let start = 0, q = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (q) { if (c === '\\') i++; else if (c === '"') q = false; }
+    else if (c === '"') q = true;
+    else if (c === ';') { out.push(v.slice(start, i)); start = i + 1; }
+  }
+  out.push(v.slice(start));
+  return out;
+}
+/** ブラウザが受け付ける（parseHsts で有効な）ヘッダにそのディレクティブがあるか。無効なヘッダはブラウザが無視するので、ないのと同じ */
 export const hstsDirective = (v: string | undefined, name: 'includesubdomains' | 'preload'): boolean =>
-  (v ?? '').split(';').some(d => d.trim().toLowerCase() === name);
+  !!v && parseHsts(v).valid && hstsParts(v).some(d => d.trim().toLowerCase() === name);
 
 /** ログイン・ログアウトに失敗した採取での判定不能（na）の推奨対応（C-09・C-12・H-15） */
 export const LOGOUT_FAILED_REC = 'ログアウトの方法（POST など）に合わせて logout を採取し直す';

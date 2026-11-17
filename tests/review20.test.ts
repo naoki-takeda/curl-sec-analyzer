@@ -8,6 +8,7 @@ import { importHar } from '../src/parser/har';
 import { parseInput } from '../src/parser/input';
 import { messageEn } from '../src/messagesEn';
 import type { Finding } from '../src/model';
+import { readFileSync } from 'node:fs';
 import { evaluate } from './helpers';
 
 const AT = '#META at=2026-11-01T10:00:00';
@@ -172,5 +173,54 @@ describe('11 HAR：URL の書き方の違いと、文字列の状態コード', 
     const imp = importHar(JSON.stringify({ log: { entries: [entry('https://a.example/', '304')] } }));
     expect(imp.chains[0].excluded).toBe(true);
     expect(imp.chains[0].status).toBe(304);
+  });
+});
+
+// ---- 低の指摘 ----
+
+describe('12 E-04：読めない security.txt の Expires は合格にしない', () => {
+  const sec = (ex: string) => evaluate(`#TARGET url=https://a.example/.well-known/security.txt label=sec\n${AT}\nHTTP/2 200\ncontent-type: text/plain\n\nContact: mailto:security@example.com\nExpires: ${ex}\n`)
+    .ids('sec').filter(x => x.startsWith('E-04'));
+  it('Expires: never は②', () => { expect(sec('never')).toEqual(['E-04.2']); });
+  it('正しい日時は合格（確認用）', () => { expect(sec('2027-06-01T00:00:00Z')).toEqual(['E-04.ok']); });
+});
+
+describe('13 HSTS：カンマ区切りのヘッダと、引用符の中の「;」', () => {
+  const hsts = (v: string) => evaluate(`#TARGET url=https://a.example/ label=top\n${AT}\nHTTP/2 200\ncontent-type: text/html\nstrict-transport-security: ${v}\n\n<p>x</p>\n`)
+    .ids('top').filter(x => /^H-0[12]\./.test(x));
+  it('カンマ区切りは H-01③ だけで、H-02 は「preload なし」にしない', () => {
+    const r = hsts('max-age=63072000, includeSubDomains, preload');
+    expect(r).toContain('H-01.3');
+    expect(r).toContain('H-02.na');
+    expect(r).not.toContain('H-02.2');
+  });
+  it('引用符の文字列の中の「;」で分けない', () => {
+    expect(hsts('max-age=63072000; includeSubDomains; preload; foo="a;b"')).toEqual(['H-01.ok', 'H-02.ok']);
+    expect(hsts('max-age="63072000"; includeSubDomains')).toContain('H-01.ok');
+  });
+});
+
+describe('14 R-03：送った Origin の見えない -i の cors-partial', () => {
+  const partial = (acao?: string) => evaluate(`#TARGET url=https://www.example.com/api/me label=cors-partial sensitive=1\n${AT}\nHTTP/2 200\ncontent-type: application/json\n${acao ? `access-control-allow-origin: ${acao}\naccess-control-allow-credentials: true\n` : ''}\n{}\n`)
+    .ids('cors-partial').filter(x => x.startsWith('R-03'));
+  it('似せた Origin の ACAO は反射とみなして①', () => { expect(partial('https://www.example.com.evil.net')).toEqual(['R-03.1']); });
+  it('ACAO がなければ na（[] にしない）', () => { expect(partial()).toEqual(['R-03.na']); });
+});
+
+describe('15 Cookie の Expires の2桁の年（RFC 6265 5.1.1）', () => {
+  const now = Date.parse('2026-11-01T10:00:00Z');
+  it('69 は 2069 年、70 は 1970 年', () => {
+    expect(isDeletion(parseSetCookie('sessionid=x; Expires=Mon, 01-Oct-69 00:00:00 GMT'), now)).toBe(false);
+    expect(isDeletion(parseSetCookie('sessionid=x; Expires=Thu, 01-Jan-70 00:00:00 GMT'), now)).toBe(true);
+    expect(isDeletion(parseSetCookie('sessionid=x; Expires=Thu, 01 Jan 2099 00:00:00 GMT'), now)).toBe(false);
+  });
+});
+
+describe('16 版の番号', () => {
+  it('ルールセットのツールの版は package.json の版と同じ', async () => {
+    const { TOOL_VERSION, RULESET_VERSION } = await import('../src/rules/ruleset');
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+    expect(TOOL_VERSION).toBe(pkg.version);
+    expect(RULESET_VERSION.endsWith(`-v${pkg.version}`)).toBe(true);
   });
 });

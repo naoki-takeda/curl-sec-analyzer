@@ -68,7 +68,7 @@ export interface Finding {
   partial?: boolean;                // 横断・ホスト単位の条件が入力不足で na（診断カバレッジで「一部の条件は入力不足」と示す）
   limited?: boolean;                // 機密でない応答（静的リソースなど）だけで判定した（H-12。項目のすべてがこれなら、カバレッジで「機密応答では判定していない」と示す）
   keyUrl?: string;                  // 対象の URL の突き合わせのキー（engine/targetKey.ts の urlKey。マスクした url ではなく生の URL から作る。例外の「ラベル URL」の照合に使う）
-  targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（マスク済み）」
+  targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（engine/targetKey.ts の urlKey。マスクとは別に作る）」
   evidence: string; recommendation: string; references: string[];
   score: number;                    // obsId があるルール以外は常に0
   suppressedBy?: Suppression;       // 例外に該当したとき

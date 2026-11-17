@@ -17,7 +17,7 @@ program | https://www.example.com/program?session=…(2 chars)&pass1=CA…(11 ch
 ## findings
 about | A-02.ok | info | pass | URL・Location・本文にトークンなし
 about | H-01.3 | high | fail | max-age=31536000, includeSubDomains（構文の誤り・ディレクティブの重複。ブラウザはこのヘッダを無視する）
-about | H-02.2 | info | fail | max-age=31536000, includeSubDomains
+about | H-02.na | info | na | max-age=31536000, includeSubDomains（HSTSの構文の誤り。H-01③で判定）
 about | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
 about | H-04.na | info | na | 強制モードのCSPがない（H-03で判定）
 about | H-05.na | info | na | 強制モードのCSPがない（H-03で判定）
@@ -158,7 +158,7 @@ unauth-session | A-07.ok | info | pass | キー0種に秘密情報・内部属�
 
 ## coverage
 H-01 | evaluated | fails=6
-H-02 | evaluated | fails=1
+H-02 | missing-input | fails=0 | max-age=31536000, includeSubDomains（HSTSの構文の誤り。H-01③で判定） / HSTSがない（H-01で判定）
 H-03 | evaluated | fails=2
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）

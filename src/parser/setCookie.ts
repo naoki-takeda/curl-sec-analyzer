@@ -45,7 +45,16 @@ export function isDeletion(c: SetCookie, now = Date.now()): boolean {
   // 過去の Expires を先に見ると、Max-Age=3600 の生きている Cookie を削除とみなし、C-01・C-02 の判定から外して C-09①（高）まで誤って出した
   if (typeof ma === 'string' && /^-?\d+$/.test(ma.trim())) return Number(ma) <= 0;
   const ex = c.attrs.get('expires');
-  return typeof ex === 'string' && Date.parse(ex) < now;
+  return typeof ex === 'string' && cookieDate(ex) < now;
+}
+
+/**
+ * Cookie の Expires の日時（読めなければ NaN）。2桁の年は RFC 6265 5.1.1 のとおり、70〜99 を 19xx、0〜69 を 20xx にする
+ * （Date.parse は 50〜69 を 19xx と読み、Expires=Wed, 01-Oct-69 … の生きている Cookie を削除とみなした）
+ */
+export function cookieDate(s: string): number {
+  const v = s.replace(/(\b\d{1,2}[-\s]+[A-Za-z]{3,9}[-\s]+)(\d{2})(?!\d)/, (_, pre: string, yy: string) => `${pre}${Number(yy) >= 70 ? 1900 + Number(yy) : 2000 + Number(yy)}`);
+  return Date.parse(v);
 }
 
 // 設計書：セッションCookieは、名前のパターンと期限がないことで推定する。

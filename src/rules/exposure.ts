@@ -139,6 +139,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
         return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `HTML の画面が返った（security.txt ではない。HTTP ${st || '不明'}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
       const ex = b!.match(/^Expires:\s*(.+)$/im)?.[1]; const contact = /^Contact:/im.test(b!);
       if (!contact || !ex) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Contact: ${contact ? 'あり' : 'なし'} / Expires: ${ex ?? 'なし'}`, 'Contact と Expires を書く')];
+      // 読めない Expires（never など）は、期限が書かれていないのと同じ（RFC 9116 は RFC 3339 の日時を求める）。NaN との比べは常に偽なので合格にしていた
+      if (Number.isNaN(Date.parse(ex.trim()))) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Expires: ${ex}（日時として読めない）`, 'Expires を RFC 3339 の日時（2027-01-01T00:00:00Z）で書く')];
       if (Date.parse(ex) < ctx.now) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Expires: ${ex}（期限切れ）`, 'Expires を更新する')];
       return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `Expires: ${ex}`, '')];
     }

@@ -143,6 +143,9 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
     if (ctx.isHttps === false) return [];
     const v = hstsOf(ctx);
     if (!ctx.final || !v) return [mk(hstsPreload, ctx, 'na', 'info', 'na', 'HSTSがない（H-01で判定）', '')];
+    // 構文の誤ったヘッダ（カンマ区切りの max-age=…, includeSubDomains, preload など）はブラウザが無視する。H-01③ で指摘するので、
+    // ここで「preload なし」とは言わない（preload と書いてあるのに「なし」の証跡になった）
+    if (!parseHsts(v).valid) return [mk(hstsPreload, ctx, 'na', 'info', 'na', `${v}（HSTSの構文の誤り。H-01③で判定）`, '')];
     const age = parseHsts(v).maxAge;
     if (!hstsDirective(v, 'preload')) return [mk(hstsPreload, ctx, 2, 'info', 'fail', v, 'preload リストへの登録を検討する（max-age 31536000 以上＋includeSubDomains＋preload）')];
     if (age < 31536000 || !hstsDirective(v, 'includesubdomains')) return [mk(hstsPreload, ctx, 1, 'low', 'fail', v, 'preload には max-age 31536000 以上と includeSubDomains が必要')];

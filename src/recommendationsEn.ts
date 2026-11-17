@@ -151,6 +151,7 @@ const EXACT: Record<string, string> = {
   'robots.txt に機密パスを書かない（アクセス制御で守る）': 'Do not list sensitive paths in robots.txt (protect them with access control)',
   'Contact と Expires を書く': 'Include Contact and Expires',
   'Expires を更新する': 'Update Expires',
+  'Expires を RFC 3339 の日時（2027-01-01T00:00:00Z）で書く': 'Write Expires as an RFC 3339 date-time (2027-01-01T00:00:00Z)',
   '本番では introspection を無効にする': 'Disable introspection in production',
   'introspection のクエリ（{"query":"{__schema{types{name}}}"}）を POST して採取する': 'Capture a POST of an introspection query ({"query":"{__schema{types{name}}}"})',
   'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）': 'Do not expose actuator in production (enable only the endpoints you need, behind authentication)',

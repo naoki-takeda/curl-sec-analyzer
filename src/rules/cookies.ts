@@ -1,7 +1,7 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
-import { isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
+import { cookieDate, isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
 import { baseLabel, firstStatus, hostOf, logoutFailed, siteResponses } from '../parser/target';
 import { LOGOUT_FAILED_REC, mk } from './util';
 
@@ -115,7 +115,7 @@ export const cookieLifetime: Rule = { id: 'C-05', title: 'Expires・Max-Age', ap
       // 空や数字でない Max-Age はブラウザが無視し、Expires が効く（RFC 6265 5.2.2。parser/setCookie.ts の isDeletion と同じ）
       const ma = c.attrs.get('max-age'), ex = c.attrs.get('expires');
       const validMa = typeof ma === 'string' && /^-?\d+$/.test(ma.trim());
-      const exSec = typeof ex === 'string' ? (Date.parse(ex) - ctx.now) / 1000 : NaN;
+      const exSec = typeof ex === 'string' ? (cookieDate(ex) - ctx.now) / 1000 : NaN;
       const sec = validMa ? Number(ma) : Number.isNaN(exSec) ? 0 : exSec;
       const limit = sessionConfig.maxAgeHours * 3600;
       return sec > limit

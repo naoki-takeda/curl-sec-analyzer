@@ -70,3 +70,29 @@ content-type: application/json
 #TLSPROBE v=tls1_3 ok=1
 #CIPHERPROBE c=DES-CBC-SHA ok=1
 #CIPHERPROBE c=AES128-SHA ok=1
+
+#TARGET url=https://www.example.com/.well-known/security.txt label=security-txt
+#META at=2026-11-01T10:00:00 cmd=C13
+HTTP/2 200
+content-type: text/plain
+
+Contact: mailto:security@example.com
+Expires: never
+
+#TARGET url=https://www.example.com/hsts label=hsts-comma
+#META at=2026-11-01T10:00:00 cmd=C2
+HTTP/2 200
+content-type: text/html; charset=utf-8
+strict-transport-security: max-age=63072000, includeSubDomains, preload
+set-cookie: pref=Mon01Oct69CANARYpref012345; Expires=Mon, 01-Oct-69 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Lax
+
+<p>x</p>
+
+#TARGET url=https://www.example.com/api/me label=cors-partial sensitive=1
+#META at=2026-11-01T10:00:00 cmd=C6
+HTTP/2 200
+content-type: application/json
+access-control-allow-origin: https://www.example.com.evil.net
+access-control-allow-credentials: true
+
+{}

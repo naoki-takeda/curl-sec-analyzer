@@ -97,10 +97,15 @@ export const corsNull: Rule = { id: 'R-02', title: 'null許可', appliesTo: 'any
 export const corsPartial: Rule = { id: 'R-03', title: '部分一致の不備', appliesTo: 'any', scope: 'target',
   basis: ['PortSwigger Web Security Academy: CORS'],
   run(ctx) {
-    const sent = ctx.target.sentOrigin;
+    // 送った Origin が見えない -i の cors-partial（C6 の似せた Origin）は、R-01 のテスト値と同じく、似せた Origin の ACAO を反射とみなす。
+    // ACAO が似せた形でなければ、何を送ったか分からないので na（[] にすると、評価したのに「適用外」になり、R-01 も na で何も判定しなかった）
+    const partialLabel = ctx.target.sentOrigin === undefined && baseLabel(ctx.target.label) === 'cors-partial';
+    const acao = acaoOf(ctx);
+    const sent = ctx.target.sentOrigin ?? (partialLabel && isLookalike(ctx, acao) ? acao : undefined);
+    if (partialLabel && !ctx.final) return [mk(corsPartial, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (partialLabel && !sent) return [mk(corsPartial, ctx, 'na', 'info', 'na', `送った Origin が分からない（${acao ? `ACAO: ${acao}` : 'ACAOなし'}）`, '-v を付けて、Origin を送って採取し直す')];
     if (!isLookalike(ctx, sent)) return [];                   // 似せたOriginを送ったターゲットだけ
     if (!ctx.final) return [mk(corsPartial, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const acao = acaoOf(ctx);
     if (acao !== sent) return [mk(corsPartial, ctx, 'ok', 'info', 'pass', `Origin: ${sent} → ${acao ? `ACAO: ${acao}` : '(ACAOなし)'}`, '')];
     const cred = credOf(ctx);
     return [mk(corsPartial, ctx, cred ? 1 : 2, cred ? 'high' : 'medium', 'fail', `Origin: ${sent} → ACAO: ${acao}${cred ? ' / ACAC: true' : ''}`, '前方一致・部分一致ではなく、許可リストとの完全一致で判定する')];
