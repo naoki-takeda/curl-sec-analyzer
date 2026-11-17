@@ -24,6 +24,7 @@ export interface HarChain {
   responses: HttpResponse[];        // 各応答の url はそのホップのリクエストのURL（parser/target.ts の ownChain が使う）
   sentAuth: boolean;                // 一覧の表示用の推定（Authorization か、セッションCookieらしい名前の Cookie を送った）
   sentAuthorization: boolean; sentCookieNames: string[];   // 全ホップのリクエストで送った Authorization の有無と Cookie の名前（値は持たない）
+  sentOrigin?: string;              // 最後のホップのリクエストで送った Origin（R-06：Origin を送らずに返した ACAO は固定の値。curl の -v と同じ）
   sentTokens: string[];             // Authorization・Cookie で送った JWT。A-03 のデコードにだけ使い、画面・エクスポートには出さない（curl の -v と同じ）
   at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
@@ -86,8 +87,9 @@ export function importHar(text: string): HarImport {
   // ないので除く（http のラベルで T-04・C-10 を、http で接続していないのに判定した）
   const internal = (e: HarEntry) => /internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name));
   // 状態コードは数値にそろえる（文字列の "304" を書き出すツールがあり、そのままだと 304 の除外や === 401 などの比べ方が効かなかった）
-  for (const e of all) { const st = Number(e.response.status); e.response.status = Number.isInteger(st) ? st : 0; }
-  const entries = all.filter(e => e.response.status > 0 && !internal(e));
+  // 応答がオブジェクトでないエントリ（"response": 1）は、書き換えずに除く（書き換えると例外になり、HAR 全体を読めなかった）
+  for (const e of all) if (typeof e.response === 'object') { const st = Number(e.response.status); e.response.status = Number.isInteger(st) ? st : 0; }
+  const entries = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && !internal(e));
   const used = new Set<number>(); const chains: HarChain[] = [];
   // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）。
   // 表のキーも、引くときと同じく URL として読み直した形（new URL().href）にする。書き方の違い（https://a.example:443/、エンコードしていない
@@ -132,6 +134,7 @@ export function importHar(text: string): HarImport {
     chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(h => ({ ...toResponse(h), url: h.request.url })),
       sentAuth, sentAuthorization, sentCookieNames, sentTokens: jwtsIn(reqHeaders), at: e.startedDateTime,
+      sentOrigin: named(cur.request.headers).find(h => h.name.toLowerCase() === 'origin')?.value?.toString().trim() || undefined,
       // 304（ブラウザのキャッシュの再検証）は、サーバがセキュリティヘッダを付け直さなくてよい応答（RFC 9110 15.4.5）。
       // 通常の応答として判定すると H-01①（高）などの誤検知になるので、既定で除外する（画面でラベルを選べば判定する）
       suggested: '', label: '', sensitive: undefined, excluded: cur.response.status === 304 });
@@ -193,7 +196,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ（parser/target.ts の ownChain）
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
       // 送った認証情報の推定は、組織プロファイルのセッションCookieの名前で作り直す（Worker の中ではプロファイルが分からない）
-      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens.filter(tok => !tokensSeen.has(tok) && !!tokensSeen.add(tok)), info: [],
+      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentOrigin: c.sentOrigin, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens.filter(tok => !tokensSeen.has(tok) && !!tokensSeen.add(tok)), info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });

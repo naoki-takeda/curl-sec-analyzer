@@ -53,8 +53,14 @@ export function attrs(s: string): Record<string, string> {
   return out;
 }
 
+/**
+ * ラベルとして受け付ける形（英数字・日本語などの文字と _ . - *、64文字まで）。それ以外（引用符・空白・記号を含むもの）は invalid-label にする。
+ * ラベルは画面・エクスポート・例外ファイルにそのまま出るので、本文に入れた「#TARGET label=…」の残り（"password":"…"）を出さない
+ */
+// 引用符で囲んだラベルの中の空白（label="top page"）は認める（第29回）
+const LABEL_OK = /^[\p{L}\p{N}_.*-](?:[\p{L}\p{N}_.* -]{0,62}[\p{L}\p{N}_.*-])?$/u;
 const newTarget = (a: Record<string, string>): Target => ({
-  label: a.label ?? 'default', url: a.url, kind: (['html', 'api'].includes(a.kind) ? a.kind : 'auto') as Target['kind'],
+  label: a.label === undefined ? 'default' : LABEL_OK.test(a.label) ? a.label : 'invalid-label', url: a.url, kind: (['html', 'api'].includes(a.kind) ? a.kind : 'auto') as Target['kind'],
   sensitive: a.sensitive === '1' ? true : a.sensitive === '0' ? false : undefined,
   verbose: false, responses: [], sentAuth: false, sentTokens: [], info: [], meta: {}, probes: [], tlsProbes: [], cipherProbes: [], openssl: [],
 });
@@ -87,16 +93,25 @@ export function parseInput(input: string): ParseResult {
   // （CR CR LF を CR LF と CR に分けて読むと、受信ヘッダの各行のあとに空行ができ、ヘッダがすべて失われる）
   // CR の並びの先頭でだけ LF を探す（/\r+\n|\r/ は、LF の付かない長い CR の並びで、位置ごとに並びの終わりまで読み直し、入力の長さの2乗の時間がかかった）。
   // LF の付かない CR は1つずつ改行にする（古い Mac の改行。CR CR は空行）。結果は /\r+\n|\r/ と同じ
-  const lines = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
+  const normalized = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n');
+  // 採取の印（run=）：コマンド生成器のスクリプトは、実行ごとの乱数を全部のマーカー行に付ける。最初の #TARGET に印があれば、同じ印のマーカー行だけを
+  // マーカーとして読む。診断対象のサーバは印を知らないので、応答の本文に書いた「#TARGET label=login」「#META at=」「#PROBE」で、ターゲットを
+  // 作ったり分けたりできない（印のないマーカーで偽の login を作り、C-09①（高）を合格にできた）。印のない手書きの入力は、これまでどおり読む
+  const runId = normalized.match(/(?:^|\n)#TARGET[ \t][^\n]*?(?:^|[ \t])run=([0-9a-f]{16,64})(?![\w])/)?.[1];
+  const lines = (runId
+    // 印のある入力では、くっついたマーカーも印のあるものだけを分ける
+    ? normalized.replace(new RegExp(String.raw`([^\n])(?=#(?:TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)[ \t][^\n]*[ \t]run=${runId}(?![\w]))`, 'g'), '$1\n')
+    : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2')).split('\n');
   for (let li = 0; li < lines.length; li++) {
     let line = lines[li]; let fromV = false;   // fromV：-v の「< 」の行（受信ヘッダ）
     if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;
     line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
-    if (mk) {                                          // マーカー行は必ず応答を閉じる
+    const a = mk ? attrs(mk[2]) : undefined;
+    if (mk && a && (!runId || a.run === runId)) {      // マーカー行は必ず応答を閉じる
       // 前のターゲットの状態（CONNECT を送った、など）を持ち越さない（持ち越すと、次のターゲットの本物の 200 をプロキシの応答とみなした）
       close(); inOpenssl = false; vBody = false; connectReq = false; if (json) { unparsed += json.length; json = null; }
-      const [, tag, rest] = mk; const a = attrs(rest);
+      const [, tag] = mk;
       if (tag === 'TARGET') { flush(); t = newTarget(a); pendingJson.length = 0; }
       else if (tag === 'META') {
         Object.assign(t.meta, a);
@@ -218,7 +233,9 @@ export function parseInput(input: string): ParseResult {
     // 最初の応答（T-04・A-01・C-09・C-12 などが見るステータス）にしない。プロキシの 407 を最初の応答にすると、T-04 が「HTTP を拒否」と合格にする
     const retried = i < tg.responses.length - 1;
     if (r.status > 0 && r.status < 200) r.kind = 'informational';
-    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '')) || proxyReply || (r.status === 407 && retried)) r.kind = 'connect';
+    // 407 はプロキシだけが返すので、あとに応答が続かなくても（プロキシの認証に失敗して諦めた）サイトの応答にしない
+    // （最終応答にすると、プロキシの 407 で H-01①（高）などを判定した）
+    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '')) || proxyReply || r.status === 407) r.kind = 'connect';
     else if (r.status === 401 && retried) r.kind = 'challenge';
     else if (r.status >= 300 && r.status < 400 && r.headers.has('location')) r.kind = 'redirect';
     if (r.body !== undefined && !r.body.trim()) r.body = undefined;

@@ -20,7 +20,9 @@ const MASK_EXACT = new Set(MASK_PARAM_NAMES.map(n => n.toLowerCase()));
 /** 区切った語にこれがあればマスクする（x-amz-security-token、x-goog-signature、private_token、x-api-key、access-token など） */
 const MASK_WORDS = new Set(['token', 'secret', 'signature', 'sig', 'credential', 'credentials', 'password', 'passwd', 'pwd', 'pass', 'pw', 'key', 'apikey',
   'accesskey', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp', 'ticket', 'verifier', 'samlresponse', 'samlart', 'samlassertion',
-  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf', 'hmac', 'hdnts', 'hdnea', 'bearer', 'authentication']);   // hdnts・hdnea は Akamai の署名トークン（acl=/* の値は持参人の資格情報）   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
+  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf', 'hmac', 'hdnts', 'hdnea', 'bearer', 'authentication',
+  // マジックリンク・招待・確認の番号（?magic=abcd-efgh-ijkl-mnop、?verification=482910、?invite=…）。短い番号や区切った番号は許可リストで残るため
+  'magic', 'invite', 'verification']);   // hdnts・hdnea は Akamai の署名トークン（acl=/* の値は持参人の資格情報）   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
 /**
  * 語 code と組み合わせても秘密ではない語（country_code、zip_code、error_code、currency_code）。名前の語が code とこれらだけなら伏せない。
  * code だけの名前と、auth_code・verification_code・otp_code・device_code のように秘密の語と組み合わせたものは伏せる
@@ -252,10 +254,23 @@ const maskJsonPairs = (s: string, h: Hider) => {
  * 短い合言葉は形では見分けられない（shownText.ts の許可リストは hunter2 を語として残す）ので、名前で伏せる。名前は、最後の語が
  * password・secret・token・api_key などのものだけ（Access-Control-Allow-Credentials・token_type は対象外）。値は ASCII の文字だけ
  */
-const FREE_NAME = String.raw`(?:[A-Za-z][\w-]{0,30}[_-])?(?:password|passwd|passphrase|pwd|pass|secret|api[_-]?key|apikey|token|private[_-]?key)`;
-const FREE_PAIR = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*[:=]\s*(["']?))([^\s"'<>,;&)}\]\\]+)`, 'gi');
-const maskFreePairs = (s: string, h: Hider) => s.replace(FREE_PAIR, (all, pre: string, _q1: string, _q2: string, v: string) =>
-  (/…\(\d+ chars\)/.test(v) || v.includes('…') || !/^[\x21-\x7e]+$/.test(v) ? all : `${pre}${h.value(v)}`));
+// 名前の前置きは64文字まで（SPRING_DATASOURCE_PRIMARY_CONNECTIONPOOL_PASSWORD）
+const FREE_NAME = String.raw`(?:[A-Za-z][\w-]{0,62}[_-])?(?:password|passwd|passphrase|pwd|pass|secret|api[_-]?key|apikey|token|private[_-]?key)`;
+// 名前と値の区切り：= : と、PHP の配列の =>、define('DB_PASSWORD', '…') のカンマ（値が引用符で囲まれているときだけ）
+const FREE_SEP = String.raw`\s*(?:=>|[:=]|,(?=\s*["']))\s*`;
+// 引用符で囲んだ値は、閉じの引用符まで（secret="Tr0ub4dor&3" の & で切って、残りを出した）
+const FREE_QUOTED = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2${FREE_SEP}(["']))((?:(?!\3)[^\\\r\n]|\\.)+)(?=\3)`, 'gi');
+const FREE_PAIR = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*[:=]\s*)([^\s"'<>,;&)}\]\\]+)`, 'gi');
+// XML（<password>…</password>）と .NET の設定（<add key="Password" value="…"/>）
+const FREE_XML = new RegExp(String.raw`(<(${FREE_NAME})>)([^<]{1,512})(<\/\2>)`, 'gi');
+const FREE_KEY_VALUE = new RegExp(String.raw`(\bkey\s*=\s*(["'])${FREE_NAME}\2\s+value\s*=\s*(["']))([^"']{1,512})(?=\3)`, 'gi');
+const freeValue = (all: string, pre: string, v: string, h: Hider, post = '') =>
+  (v.includes('…') || !/^[\x21-\x7e][\x20-\x7e]*$/.test(v) ? all : `${pre}${h.value(v)}${post}`);
+const maskFreePairs = (s: string, h: Hider) => s
+  .replace(FREE_XML, (all, open: string, _n: string, v: string, close: string) => freeValue(all, open, v, h, close))
+  .replace(FREE_KEY_VALUE, (all, pre: string, _q1: string, _q2: string, v: string) => freeValue(all, pre, v, h))
+  .replace(FREE_QUOTED, (all, pre: string, _q1: string, _q2: string, v: string) => freeValue(all, pre, v, h))
+  .replace(FREE_PAIR, (all, pre: string, _q: string, v: string) => freeValue(all, pre, v, h));
 
 /**
  * パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る。

@@ -18,6 +18,22 @@ const reachedTls = (ts: Target[], negotiated: number): boolean => negotiated > 0
   || ts.some(t => t.tlsProbes.some(p => p.result === 'accepted' && !OLD.test(p.version.replace(/\s/g, ''))) || t.cipherProbes.some(p => p.result === 'accepted'))
   || ts.some(t => t.openssl.length > 0 && (() => { const i = parseOpenssl(t.openssl); return !!i && hasCertificate(i); })());
 const UNREACHED_TLS_REC = 'openssl が対象に届く環境（プロキシを通さない端末、-proxy の指定）で C12・C23 を実行し直す';
+/**
+ * ターゲットの -v の情報行のうち、そのホストへの接続のもの。-L で別のホスト（外部の SSO、apex から www）に移ると、そのホストの
+ * 「SSL connection using」の行も同じターゲットに入る。-L で次のリクエストに移るときの curl の「Issue another request to this URL: '…'」で、
+ * どのホストへの接続かをたどる（たどらないと、外部の SSO の TLS 1.1 を対象のホストの T-09①（高）にした）。「Connected to」はプロキシへの接続でも
+ * 出るので使わない（プロキシ経由の採取で、対象のホストの TLS を失う）
+ */
+const hostnameOf = (h: string) => h.replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
+function ownInfo(t: Target, host: string): string[] {
+  const want = hostnameOf(host); let cur = want; const out: string[] = [];
+  for (const l of t.info) {
+    const m = l.match(/^Issue another request to this URL: '([^']+)'/);
+    if (m) { try { cur = hostnameOf(new URL(m[1]).host); } catch { /* 読めない URL なら、いまのホストのまま */ } }
+    if (cur === want) out.push(l);
+  }
+  return out;
+}
 const OLD = /^(ssl3|sslv3|tls1(?:\.0)?|tls1\.1|tls1_1|tls1_0|tlsv1(?:\.0)?|tlsv1\.1)$/i;   // -v の「SSL connection using SSLv3」も
 export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appliesTo: 'any', scope: 'host',
   basis: ['Mozilla Server Side TLS', 'IPA TLS暗号設定ガイドライン'],
@@ -26,7 +42,7 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
     for (const [host, ts] of x.byHost()) {
       const probes = ts.flatMap(t => t.tlsProbes);
       // OpenSSL は TLS 1.0 を「TLSv1」と出す
-      const negotiated = ts.flatMap(t => t.info).map(l => l.match(/SSL connection using (TLSv1(?:\.\d)?|SSLv3)\b/)?.[1]).filter((v): v is string => !!v);
+      const negotiated = ts.flatMap(t => ownInfo(t, host)).map(l => l.match(/SSL connection using (TLSv1(?:\.\d)?|SSLv3)\b/)?.[1]).filter((v): v is string => !!v);
       if (!probes.length && !negotiated.length) continue;         // TLSの情報がないホストは適用外
       const accepted = probes.filter(p => p.result === 'accepted' && OLD.test(p.version.replace(/\s/g, '')));
       // C4 で旧バージョンを合意した場合も、そのバージョンで接続できたので①にする（②の「TLS 1.3 非対応」だけにしない）
@@ -104,7 +120,7 @@ export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵
       // 鍵・署名の分かる出力を使う（x509 -noout だけの出力より、s_client -showcerts の出力）
       const caps = opensslCaptures(ts);
       const info = (caps.find(c => c.info.keyBits || c.info.sigalgs.length) ?? caps[0])?.info;
-      const negotiated = ts.flatMap(t => t.info).map(l => l.match(/SSL connection using (TLSv[\d.]+) \/ (\S+)/)).filter((m): m is RegExpMatchArray => !!m);
+      const negotiated = ts.flatMap(t => ownInfo(t, host)).map(l => l.match(/SSL connection using (TLSv[\d.]+) \/ (\S+)/)).filter((m): m is RegExpMatchArray => !!m);
       if (!probes.length && !info && !negotiated.length) continue;
       const before = out.length;
       for (const p of probes.filter(p => p.result === 'accepted')) {

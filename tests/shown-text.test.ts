@@ -19,13 +19,38 @@ describe('名前の付いていないトークンを出さない', () => {
     ['Slack の Webhook', 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX', 'XXXXXXXXXXXXXXXXXXXXXXXX'],
     ['Basic 認証', 'Authorization: Basic dXNlcjpwYXNz', 'dXNlcjpwYXNz'],
     ['秘密鍵', '-----BEGIN RSA PRIVATE KEY-----MIIEowIBAAKCAQEA', 'MIIEowIBAAKCAQEA'],
+    // 第38回：- _ で区切ったかけらを1つずつ見ると、短いかけらが語に見えて残った
+    ['GitLab', 'glpat-rbdO66tkD_ZWNg4NoDgY', 'rbdO66tkD'],
+    ['GitLab（後半）', 'glpat-rbdO66tkD_ZWNg4NoDgY', 'NoDgY'],
+    ['URL のユーザー名のトークン', 'https://0123456789abcdef0123456789abcdef01234567:x-oauth-basic@api.example/user', '0123456789abcdef'],
+    ['クエリの @ のあと', 'https://a.example?ref=bob@XHuZ1Wd8E71o0abQ', 'XHuZ1Wd8E71o0abQ'],
+    ['短い英数字', 'id NDBjn4jbean / lPbj3kupRYBa', 'NDBjn4jbean'],
   ])('%s', (_, text, secret) => {
     expect(showText(`本文：${text} 。`)).not.toContain(secret);
   });
 
   it('名前を付けた短い合言葉（URL・JSON の外）は、名前で伏せる', () => {
-    for (const s of ['<!-- admin password=hunter2 -->', 'password="hunter2"', "{'password': 'hunter2'}", 'pass: hunter2', 'X-Auth-Token: hunter2', 'db_password = hunter2'])
+    for (const s of ['<!-- admin password=hunter2 -->', 'password="hunter2"', "{'password': 'hunter2'}", 'pass: hunter2', 'X-Auth-Token: hunter2', 'db_password = hunter2',
+      "'password' => 'hunter2'", "define('DB_PASSWORD', 'hunter2');", '<password>hunter2</password>', '<add key="Password" value="hunter2"/>',
+      'SPRING_DATASOURCE_PRIMARY_CONNECTIONPOOL_PASSWORD=hunter2', 'secret="hunter2&3"', 'https://a.example/x?magic=abcd-efgh-ijkl-hunter2', 'https://a.example/x?verification=hunter2'])
       expect(showText(s), s).not.toContain('hunter2');
+  });
+
+  it('一様な乱数のトークン（実際のトークンの作り方）のかけらが残る割合は小さい', () => {
+    // 決まった種の擬似乱数（mulberry32）。fast-check の文字列は区切りの文字に偏るので、実際のトークンの形を一様な乱数で作る
+    let seed = 20261117;
+    const rand = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const A62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const gen = (alpha: string, min: number, max: number) => { const n = min + Math.floor(rand() * (max - min + 1)); let s = ''; for (let i = 0; i < n; i++) s += alpha[Math.floor(rand() * alpha.length)]; return s; };
+    const shapes: [string, () => string, number][] = [
+      ['base62', () => gen(A62, 16, 40), 0.002], ['URL-safe', () => gen(`${A62}-_`, 20, 43), 0.01], ['GitLab', () => `glpat-${gen(`${A62}-_`, 20, 20)}`, 0.02],
+      ['16進数', () => gen('0123456789abcdef', 16, 40), 0.002], ['英数字10〜15文字', () => gen(A62, 10, 15), 0.02],
+    ];
+    for (const [name, make, limit] of shapes) {
+      let n = 0;
+      for (let i = 0; i < 2000; i++) { const t = make(); if (leaks(showText(` ${t} `), t.replace(/^glpat-/, ''))) n++; }
+      expect(n / 2000, name).toBeLessThan(limit);
+    }
   });
 
   it('秘密でない名前は伏せない', () => {
@@ -64,6 +89,12 @@ describe('読める語は残す', () => {
     'https://d111111abcdef8.cloudfront.net/app.js',
     'HTTP 302 → /login?next=%2Fv1%2Fadmin',
     'sessionid=AbCd…(29 chars); Secure; HttpOnly',
+    // 第38回：許可リストで伏せすぎた製品名・例外名・パス
+    'server: AkamaiGHost / x-powered-by: lighttpd/1.4.59 / X-AspNetMvc-Version: 5.2 / NextJS',
+    'System.InvalidOperationException HttpMessageNotReadableException IndexOutOfRangeException',
+    'Disallow: /phpMyAdmin/ /xmlrpc.php brainpoolP256r1',
+    "script-src 'self' ajax.aspnetcdn.com *.example.com",
+    'https://user:****@api.example/x',
   ])('%s', s => {
     expect(showText(s)).toBe(s);
   });
@@ -71,7 +102,7 @@ describe('読める語は残す', () => {
 
 describe('冪等', () => {
   it('もう一度かけても変わらない', () => {
-    const piece = fc.oneof(fc.stringMatching(/^[A-Za-z0-9]{1,30}$/), fc.constantFrom(' ', '/', '-', '_', '.', ':', '=', '…(12 chars)', 'https://', '%2F', '日本語', "'sha256-", '"'));
+    const piece = fc.oneof(fc.stringMatching(/^[A-Za-z0-9]{1,30}$/), fc.constantFrom(' ', '/', '-', '_', '.', ':', '=', '…(12 chars)', 'https://', '%2F', '日本語', "'sha256-", '"', '@', '>', '?', "'nonce-", ':****@'));
     fc.assert(fc.property(fc.array(piece, { maxLength: 10 }), ps => {
       const once = showText(ps.join(''));
       expect(showText(once)).toBe(once);

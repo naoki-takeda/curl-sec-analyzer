@@ -83,7 +83,7 @@ login | C-09.ok | info | pass | URLにセッションIDなし
 login | C-11.ok | info | pass | .AspNetCore.Identity.ApplicationC1
 login | C-13.ok | info | pass | 共有キャッシュの指定なし
 login | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
-logout | C-12.ok | info | pass | wordpress_logged_in_…(32 chars)=…(1 chars); expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
+logout | C-12.ok | info | pass | wordpress_logged_…(35 chars)=…(1 chars); expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
 logout | H-15.1 | info | fail | (ヘッダなし)
 mypage | A-02.ok | info | pass | URL・Location・本文にトークンなし
 mypage | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -124,7 +124,7 @@ pre-login | C-09.ok | info | pass | URLにセッションIDなし
 pre-login | C-11.ok | info | pass | JSESSIONID
 pre-login | C-13.ok | info | pass | 共有キャッシュの指定なし
 pre-login | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
-pre-login/login | C-09.ok | info | pass | ログイン時にセッションIDを再発行している
+pre-login/login | C-09.na | info | na | login 応答で JSESSIONID を再発行せず、ほかの Cookie（.AspNetCore.Identity.ApplicationC1）を発行した。どちらで認証しているかは分からない
 reset | A-02.ok | info | pass | URL・Location・本文にトークンなし
 reset | E-01.ok | info | pass | エラーの詳細らしき記述なし
 reset | E-02.ok | info | pass | 一覧表示なし
@@ -184,7 +184,7 @@ C-05 | evaluated | fails=1
 C-06 | evaluated | fails=2
 C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | evaluated | fails=1
-C-09 | evaluated | fails=0
+C-09 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / ログイン後に、ログイン前の JSESSIONID だけを送って認証後のページを取得できないか、手動で確認する
 C-10 | missing-input | fails=0 | 必要なラベル: http
 C-11 | evaluated | fails=0
 C-12 | evaluated | fails=1

@@ -1,6 +1,6 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument } from '../parser/target';
+import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
@@ -11,7 +11,9 @@ const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Se
      target, evidence, recommendation, references: rule.basis, score: 0 });
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
-const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.now(); return (t?.responses ?? []).flatMap(r => r.headers.get('set-cookie') ?? [])
+// 対象のサイトの応答だけを見る（C-01〜C-07 と同じ siteResponses）。-L でたどった外部の IdP の Cookie（idp_session）を、アプリが
+// セッションIDを再発行したものとみなし、C-09① を合格にした
+const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.now(); return (t ? siteResponses(t) : []).flatMap(r => r.headers.get('set-cookie') ?? [])
   .map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, now) && looksLikeSession(c, now) && !isChunkMarker(c)); };   // 値を比べるので、分割の印は除く
 
 /**
@@ -160,6 +162,14 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
     if (!after.length || after.some(a => before.includes(a)))
       return [cf(sessionFixation, 'pre-login/login', 1, 'high', 'fail', 'login 応答でセッションIDが再発行されていない', 'ログイン成功時にセッションIDを再発行する')];
+    // pre-login で発行した主のセッションID（名前に sess・sid を含むもの）を、login で新しい値にせず、別の Cookie（auth_token・
+    // ASP.NET Core の .AspNetCore.Identity.Application）だけを発行した。認証を新しい Cookie で持つなら固定化はないが、ログイン前の ID の
+    // セッションに認証を結び付けるなら固定化になる。どちらかは応答からは分からないので、合格にしない（新しい Cookie があるだけで合格にした）
+    const renewed = new Set(afterC.filter(c => !before.includes(`${c.name}=${c.value}`)).map(c => c.name));
+    const kept = [...new Set(beforeC.filter(c => /sess|^sid$/i.test(c.name) && !renewed.has(c.name)).map(c => c.name))];
+    if (kept.length)
+      return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答で ${kept.join(', ')} を再発行せず、ほかの Cookie（${[...renewed].join(', ')}）を発行した。どちらで認証しているかは分からない`,
+        `ログイン後に、ログイン前の ${kept.join('・')} だけを送って認証後のページを取得できないか、手動で確認する`)];
     return [cf(sessionFixation, 'pre-login/login', 'ok', 'info', 'pass', 'ログイン時にセッションIDを再発行している', '')];
   } };
 
@@ -202,6 +212,12 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
     for (const [rawName, vals] of byName) {
       if (vals.length < 2) continue;
       const name = rawName || '（名前なし）';   // 値だけの Set-Cookie（rules/cookies.ts の cookieName と同じ表示）
+      // 署名付きのトークン（JWT・Flask・Django）がすべて同じ値なのは、同じ秒に同じ内容で署名したため（HS256 は同じ入力から同じ署名になる）。
+      // 署名の鍵がなければ作れないので、推測できる（②（高））とはしない
+      if (new Set(vals).size === 1 && JWT_VALUE.test(vals[0])) {
+        out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：署名付きのトークンが同じ値（同じ秒に同じ内容で署名した可能性）`, '秒をまたいで session-sample を採取し直す'));
+        continue;
+      }
       const why = predictable(vals);
       out.push(why ? cf(sessionPredictable, 'session-sample-*', 2, 'high', 'fail', `${name}：${why}（${vals.map(maskValue).join(' / ')}）`, '暗号論的に安全な乱数でセッションIDを生成する')
                    : cf(sessionPredictable, 'session-sample-*', 'ok', 'info', 'pass', `${name}：${vals.length}件に共通部分・連番なし`, ''));

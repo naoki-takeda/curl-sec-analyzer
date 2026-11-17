@@ -279,20 +279,23 @@ export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CO
     const out = []; const sensitive = sensitiveUnlessStatic(ctx);
     // 守りにならない値は、ないのと同じ：CORP の cross-origin（どのサイトからも読み込める）、COOP の unsafe-none（既定の動作）と、
     // 知らない値・2つ以上の値（ブラウザは読めずに無視する）。あるだけで合格にすると、cross-origin を付けた機密応答を見逃した
-    const policy = (name: string) => { const v = header(ctx, name); return v.length === 1 ? v[0].split(';')[0].trim().toLowerCase() : v.length ? 'invalid' : undefined; };
+    // 値は大文字・小文字を区別する（ブラウザは Same-Origin を読めずに無視する。小文字にして比べると合格にした）
+    const policy = (name: string) => { const v = header(ctx, name); return v.length === 1 ? v[0].split(';')[0].trim() : v.length ? 'invalid' : undefined; };
     const corp = policy('cross-origin-resource-policy'), coop = policy('cross-origin-opener-policy');
+    const corpProtects = corp === 'same-origin' || corp === 'same-site';
     if (sensitive && corp === undefined)
       out.push(mk(crossOriginIsolation, ctx, 1, 'low', 'fail', '機密応答に Cross-Origin-Resource-Policy なし', 'Cross-Origin-Resource-Policy: same-origin'));
-    else if (sensitive && corp !== 'same-origin' && corp !== 'same-site')
+    else if (sensitive && !corpProtects)
       out.push(mk(crossOriginIsolation, ctx, 1, 'low', 'fail', `機密応答の Cross-Origin-Resource-Policy が ${header(ctx, 'cross-origin-resource-policy').join(', ')}（ほかのサイトから読み込める・無効な値）`, 'Cross-Origin-Resource-Policy: same-origin'));
     if (ctx.responseKind === 'html' && coop === undefined)
       out.push(mk(crossOriginIsolation, ctx, 2, 'info', 'fail', 'Cross-Origin-Opener-Policy なし', 'Cross-Origin-Opener-Policy: same-origin'));
     else if (ctx.responseKind === 'html' && !['same-origin', 'same-origin-allow-popups', 'noopener-allow-popups'].includes(coop!))
       out.push(mk(crossOriginIsolation, ctx, 2, 'info', 'fail', `Cross-Origin-Opener-Policy が ${header(ctx, 'cross-origin-opener-policy').join(', ')}（分離しない・無効な値）`, 'Cross-Origin-Opener-Policy: same-origin'));
     if (out.length) return out;
-    // 機密かどうか分からず CORP もなければ、①を判定していない。COOP（②）があっても合格にしない（カバレッジの水増しになる）
-    if (sensitive === undefined && !header(ctx, 'cross-origin-resource-policy').length)
-      return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（CORP なし${ctx.responseKind === 'html' ? '、COOP あり' : ''}）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
+    // 機密かどうか分からず、守りになる CORP もなければ、①を判定していない。COOP（②）があっても合格にしない（カバレッジの水増しになる）。
+    // CORP の cross-origin・読めない値も、ないのと同じ（ヘッダがあるだけで合格にした）
+    if (sensitive === undefined && !corpProtects)
+      return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（${corp === undefined ? 'CORP なし' : `CORP: ${header(ctx, 'cross-origin-resource-policy').join(', ')}`}${ctx.responseKind === 'html' ? '、COOP あり' : ''}）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
     return [mk(crossOriginIsolation, ctx, 'ok', 'info', 'pass', [...header(ctx, 'cross-origin-opener-policy'), ...header(ctx, 'cross-origin-resource-policy')].join(' / ') || '(該当なし)', '')];
   } };
 

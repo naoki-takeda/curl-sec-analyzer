@@ -54,7 +54,8 @@ export function isLookalike(ctx: RuleContext, origin?: string): boolean {
  * -v で採取したのに Origin を送っていない（送信ヘッダは全部見えている）。CORS のミドルウェアの多くは Origin があるときだけ ACAO を返すので、
  * ACAO がないことは「反射しない」「null を許可しない」の根拠にならない（合格にすると、カバレッジも水増しになる）。-i では送信ヘッダが見えないので対象外
  */
-const noOriginSent = (ctx: RuleContext) => ctx.target.verbose && !ctx.target.sentOrigin;
+// HAR もリクエストのヘッダが分かるので、-v と同じく Origin を送っていないことが分かる（分からないものとして R-06① にした）
+const noOriginSent = (ctx: RuleContext) => (ctx.target.verbose || ctx.target.meta.source === 'har') && !ctx.target.sentOrigin;
 const NO_ORIGIN_REC = 'C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す';
 export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo: 'any', scope: 'target',
   basis: ['PortSwigger Web Security Academy: CORS', 'OWASP WSTG'],

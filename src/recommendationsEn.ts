@@ -60,6 +60,7 @@ const EXACT: Record<string, string> = {
   'ログイン成功時にセッションIDを再発行する': 'Issue a new session ID when login succeeds',
   '暗号論的に安全な乱数でセッションIDを生成する': 'Generate session IDs with a cryptographically secure random number generator',
   '同じ名前のセッションCookieを2回以上採取する': 'Capture the same session cookie at least twice',
+  '秒をまたいで session-sample を採取し直す': 'Capture session-sample again, at least a second apart',
   'ログアウト時にサーバ側のセッションを破棄する': 'Destroy the server-side session on logout',
   // 第3章
   '送信したOriginが分からない。-v 付きで再取得する': 'The Origin that was sent is unknown. Capture again with -v',
@@ -221,6 +222,8 @@ const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^必要なラベル: (.+)$/, m => `Required labels: ${m[1].replace(/（一般）/g, '(general)').replace(/（2つ以上）/g, ' (2 or more)').replace(/（同じURLを2回取得）/g, ' (fetch the same URL twice)').replace(/（APIのエラー応答を2つ以上）/g, ' (2 or more API error responses)').replace(/（https:\/\/apexドメイン\/）/g, ' (https://apex-domain/)')}`],
   [/^使っていなければ (.+) を無効にする$/, m => `Disable ${m[1].replace(/・/g, ', ')} if unused`],
   [/^(\S+) として数える（(.+)）$/, m => `Counted as ${m[1]} (avoids double counting)`],
+  [/^ログイン後に、ログイン前の (.+) だけを送って認証後のページを取得できないか、手動で確認する$/,
+    m => `After logging in, check manually whether a page behind login can be fetched by sending only the pre-login ${m[1].replace(/・/g, ', ')}`],
 ];
 
 /** 推奨対応を英訳する。辞書にない文言はそのまま返す */

@@ -6,11 +6,13 @@ set -u
 umask 077                         # out.txt と jar.txt を本人だけが読めるようにする（設計書 0.5）
 HOST=${HOST:-www.example.com}
 H=https://$HOST
+# 実行ごとの印。ツールは最初の #TARGET と同じ印のマーカー行だけを読む（応答の本文に書かれた #TARGET を読まないため）
+RUN=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 
 # t <label> <url> <sensitive(1/0/空)> <curlの引数...>
 t() { local label=$1 url=$2 s=$3; shift 3
-  echo "#TARGET url=$url label=$label${s:+ sensitive=$s}"
-  echo "#META at=$(date +%Y-%m-%dT%H:%M:%S)"
+  echo "#TARGET url=$url label=$label${s:+ sensitive=$s} run=$RUN"
+  echo "#META at=$(date +%Y-%m-%dT%H:%M:%S) run=$RUN"
   curl -sS "$@" "$url" 2>&1; echo; }
 
 {

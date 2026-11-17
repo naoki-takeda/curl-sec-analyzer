@@ -29,28 +29,32 @@ export function generateScript(o: CommandOptions): string {
   const H = `https://${o.host}`;
   const L: string[] = [];
   // 各ターゲットの前に #TARGET と #META（実施日時と推奨コマンドのID）を出す。CSV（第8章の様式）の「実施日時」「実施コマンド」に使う
-  const meta = (cmd: string) => `echo "#META at=$(date +%Y-%m-%dT%H:%M:%S) cmd=${cmd}"`;
+  // どのマーカー行にも、実行ごとの乱数の印（run=$RUN）を付ける。ツールは最初の #TARGET の印と同じマーカー行だけを読む（parser/input.ts。
+  // 診断対象のサーバが応答の本文に書いた #TARGET・#META・#PROBE で、ターゲットを作ったり分けたりできないように）
+  const meta = (cmd: string) => `echo "#META at=$(date +%Y-%m-%dT%H:%M:%S) cmd=${cmd} run=$RUN"`;
   // #TARGET の前に改行を出す（curl -i の本文が改行で終わらないと、#TARGET が前の本文の行にくっついた）
-  const t = (label: string, url: string, extra = '') => L.push('echo', `echo ${q(`#TARGET url=${url} label=${label}${extra}`)}`, meta(cmdOf(label)));
+  const t = (label: string, url: string, extra = '') => L.push('echo', `echo ${q(`#TARGET url=${url} label=${label}${extra}`)}" run=$RUN"`, meta(cmdOf(label)));
   L.push('#!/usr/bin/env bash',
     '# curl-sec-analyzer の推奨コマンド（コマンド生成器で作成）。出力を out.txt にまとめ、ツールに貼り付けて判定する',
     '# 実行前に：診断は自社で管理しているか書面で許可を得たシステムだけ。',
     '#   ログインには必ずテスト用アカウントを使い、login.txt（ログインのPOST本文）を用意して chmod 600 にする',
     '#   Gitリポジトリの中で実行する場合、出力ファイルは .gitignore で除外されていることを確認する',
     '# 実行後に：rm -f out.txt login.txt jar.txt old.txt s1.txt s2.txt s3.txt（login.txt にはパスワードが入っている）',
-    'set -u', 'umask 077', `H=${q(H)}`, '{');
+    'set -u', 'umask 077', `H=${q(H)}`,
+    '# 実行ごとの印（応答の本文に書かれたマーカーと見分けるため）',
+    "RUN=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')", '{');
 
   L.push('', '# ---- 第1章：ヘッダ（C4・C2・C10） ----');
   t('top', `${H}/`); L.push('curl -sS -v -o /dev/null "$H/" 2>&1');
   t('page', `${H}/`); L.push('curl -sS -i "$H/"');
   t('static', `${H}${o.staticPath}`); L.push(`curl -sS -i "$H"${q(o.staticPath)}`);
-  t('header-json', `${H}/`); L.push(`curl -sS -o /dev/null -w '#META response_code=%{response_code}\\n%{header_json}\\n' "$H/"`);
+  t('header-json', `${H}/`); L.push(`curl -sS -o /dev/null -w '#META response_code=%{response_code} run='"$RUN"'\\n%{header_json}\\n' "$H/"`);
   t('notfound', `${H}/no-such-page-csa404`); L.push('curl -sS -i "$H/no-such-page-csa404"');
-  L.push('for i in 1 2; do', `  echo "#TARGET url=$H/ label=csp-sample-$i"; ${meta('C24')}; curl -sS -D - -o /dev/null "$H/"   # C24`, 'done');
+  L.push('for i in 1 2; do', `  echo "#TARGET url=$H/ label=csp-sample-$i run=$RUN"; ${meta('C24')}; curl -sS -D - -o /dev/null "$H/"   # C24`, 'done');
 
   L.push('', '# ---- 第4章：HTTP→HTTPS（C5・C15） ----');
   t('http', `http://${o.host}/`);
-  L.push(`curl -sS -L -D - -o /dev/null -w '\\n#META response_code=%{response_code} num_redirects=%{num_redirects} url_effective=%{url_effective} http_version=%{http_version}\\n' ${q(`http://${o.host}/`)}`);
+  L.push(`curl -sS -L -D - -o /dev/null -w '\\n#META response_code=%{response_code} num_redirects=%{num_redirects} url_effective=%{url_effective} http_version=%{http_version} run='"$RUN"'\\n' ${q(`http://${o.host}/`)}`);
   if (o.apex) {
     t('apex', `https://${o.apex}/`); L.push(`curl -sS -D - -o /dev/null ${q(`https://${o.apex}/`)}`);
   }
@@ -58,7 +62,7 @@ export function generateScript(o: CommandOptions): string {
   L.push('', '# ---- 第2章：ログインの流れ（C18）。login.txt にログインのPOST本文を書いておく ----');
   t('pre-login', `${H}${o.loginPath}`); L.push(`curl -sS -v -o /dev/null -c jar.txt -b jar.txt "$H"${q(o.loginPath)} 2>&1`);
   t('login', `${H}${o.loginPath}`, ' sensitive=1'); L.push(`curl -sS -v -o /dev/null -c jar.txt -b jar.txt -X POST --data @login.txt "$H"${q(o.loginPath)} 2>&1`);
-  L.push('for i in 1 2 3; do', `  echo "#TARGET url=$H${o.loginPath} label=session-sample-$i"; ${meta('C18')}`, `  curl -sS -D - -o /dev/null -c "s$i.txt" -X POST --data @login.txt "$H"${q(o.loginPath)}`, 'done');
+  L.push('for i in 1 2 3; do', `  echo "#TARGET url=$H${o.loginPath} label=session-sample-$i run=$RUN"; ${meta('C18')}`, `  curl -sS -D - -o /dev/null -c "s$i.txt" -X POST --data @login.txt "$H"${q(o.loginPath)}`, 'done');
   t('mypage', `${H}${o.mypagePath}`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(o.mypagePath)}`);
   t('api', `${H}${o.apiPath}`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(o.apiPath)}`);
   t('unauth-api', `${H}${o.apiPath}`); L.push(`curl -sS -i "$H"${q(o.apiPath)}   # A-01：Cookie・Authorization を付けない`);
@@ -96,7 +100,7 @@ export function generateScript(o: CommandOptions): string {
     `for p in /.git/HEAD /.env /.svn/entries /.DS_Store /WEB-INF/web.xml /package.json /composer.json /backup.zip /phpinfo.php /server-status /robots.txt /.well-known/security.txt ${q(`${o.staticPath}.map`)}; do`,
     '  : > "$probe"',
     `  info=$(curl -sS -o "$probe" -w 'code=%{response_code} size=%{size_download} ct=%{content_type}' "$H$p")`,
-    `  printf '#PROBE path=%s head=%s %s\\n' "$p" "$(head -c 64 "$probe" | base64 | tr -d '\\n')" "$info"`,
+    `  printf '#PROBE run=%s path=%s head=%s %s\\n' "$RUN" "$p" "$(head -c 64 "$probe" | base64 | tr -d '\\n')" "$info"`,
     'done', 'rm -f "$probe"');
 
   L.push('', '# ---- 第4章：TLS（C11・C12・C23） ----');
@@ -108,12 +112,12 @@ export function generateScript(o: CommandOptions): string {
     `  out=$(openssl s_client -connect ${q(hp)} -servername ${q(sni)} -$v -cipher 'DEFAULT@SECLEVEL=0' </dev/null 2>&1); rc=$?`,
     `  if printf '%s' "$out" | grep -qiE 'unknown option|no protocols available|unsupported protocol'; then r=err`,
     `  elif [ $rc -eq 0 ] && printf '%s' "$out" | grep -qE 'Protocol *: *TLS'; then r=1`, '  else r=0; fi',
-    `  printf '#TLSPROBE v=%s ok=%s\\n' "$v" "$r"`, 'done',
+    `  printf '#TLSPROBE run=%s v=%s ok=%s\\n' "$RUN" "$v" "$r"`, 'done',
     'for c in RC4-SHA DES-CBC3-SHA NULL-SHA256 AES128-SHA ECDHE-RSA-AES128-SHA; do',
     `  out=$(openssl s_client -connect ${q(hp)} -servername ${q(sni)} -tls1_2 -cipher "$c:@SECLEVEL=0" </dev/null 2>&1); rc=$?`,
     `  if printf '%s' "$out" | grep -qiE 'no cipher match|unknown option'; then r=err`,
     `  elif [ $rc -eq 0 ] && printf '%s' "$out" | grep -qE "Cipher *: *$c"; then r=1`, '  else r=0; fi',
-    `  printf '#CIPHERPROBE c=%s ok=%s\\n' "$c" "$r"`, 'done');
+    `  printf '#CIPHERPROBE run=%s c=%s ok=%s\\n' "$RUN" "$c" "$r"`, 'done');
 
   if (o.dangerous) {
     L.push('', '# ---- 検証環境でだけ実行する試験（C20・C21・C17） ----');
