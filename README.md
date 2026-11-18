@@ -76,7 +76,7 @@ npm run screenshot   # README の画像（docs/screenshot.png）と共有用の�
 | `src/engine/` | ルールの実行、ラベル対応表、例外、診断カバレッジ、集計 |
 | `src/export/` | Markdown・JSON・CSV のエクスポート |
 | `src/commands.ts` | コマンド生成器 |
-| `tests/` | 単体テストと fixture |
+| `tests/` | 単体テストと fixture。領域ごとのテストは直下、レビューの回ごとの回帰テストは `tests/regression/` |
 | `e2e/` | Playwright の E2E と、axe-core によるアクセシビリティの検査 |
 | `docs/design.md` | チェックリストと設計書（正本） |
 | `docs/history.md` | 設計書のレビューの経緯 |

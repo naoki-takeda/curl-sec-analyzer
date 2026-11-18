@@ -131,7 +131,7 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
       if (rule.appliesTo === 'api' && ctx.responseKind !== 'api') continue;
       for (const f of safeRun(rule, () => rule.run?.(ctx), t.label).filter(x => allow.allowsFinding(x))) {   // ②⑤
         // 推奨対応も許可リストを通す（C-09 の推奨対応に、入力の Cookie の名前がそのまま入り、証跡では伏せた名前が画面・エクスポートに出た）。
-        // 決まった文言は変わらないことを tests/review26.test.ts で確かめる
+        // 決まった文言は変わらないことを tests/regression/review26.test.ts で確かめる
         const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: showText(f.evidence), recommendation: showText(f.recommendation) };
         if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') g.severity = 'info';   // ⑥
         findings.push(g);

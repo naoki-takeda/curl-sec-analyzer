@@ -788,7 +788,7 @@ curl-sec-analyzer/
 │  ├─ engine/  run.ts labels.ts labels.json items.json coverage.ts suppress.ts profile.ts diff.ts summarize.ts
 │  └─ export/  markdown.ts json.ts csv.ts
 ├─ scripts/screenshot.mjs     # README の画像を撮り直す（npm run screenshot）
-├─ tests/                     # Vitest の単体テストと fixture（実際の curl 8.5.0・OpenSSL 3.0.13 の出力を含む）
+├─ tests/                     # Vitest の単体テストと fixture（実際の curl 8.5.0・OpenSSL 3.0.13 の出力を含む）。tests/regression/ はレビューの回ごとの回帰テスト
 ├─ e2e/                       # Playwright の E2E と axe-core のアクセシビリティ検査（本番ビルドに対して実行）
 ├─ docs/design.md             # 設計書（正本）。docs/history.md はレビューの経緯、docs/screenshot.png は README の画像
 ├─ .github/                   # workflows/（checks・ci・deploy・codeql・dependency-review）、dependabot.yml、ISSUE_TEMPLATE/、pull_request_template.md
