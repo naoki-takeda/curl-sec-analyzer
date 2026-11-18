@@ -7,7 +7,7 @@
 // - 入力の順番で変わらない（クエリのパラメータの順番、同じ名前の値の順番、貼り付けたターゲットの順番）
 import type { Target } from '../model';
 import { baseLabel } from '../parser/target';
-import { lowerToken } from '../tokenShape';
+import { lowerToken, wordLike } from '../tokenShape';
 
 /**
  * 例外と前回の結果の突き合わせに使う URL（HAR の targetKey）。URL の形だけで作る：
@@ -66,6 +66,9 @@ const keyPiece = (p: string): boolean => {
   // 英小文字だけの16文字以上の乱数のトークン（kqzvwxmplrtb…）は * にする（tokenShape.ts。画面のマスクと同じ規則。12文字にすると、cryptography・
   // strengthening のような実在の語まで * にした）
   if (lowerToken(p)) return false;
+  // 5文字以上は、画面の許可リストと同じ「英字の語として読めるか」（tokenShape.ts の wordLike）も満たすものだけ。キーの形の規則だけでは、
+  // 英小文字の15文字までの乱数（/reset/qkzvwxmplrtbnhg）がすべて残り、画面では伏せたトークンが JSON・CSV の実施コマンド・例外ファイルに出た
+  if (p.length > 4 && !wordLike(p)) return false;
   if (/^[A-Z]+$/.test(p)) return p.length <= 10;
   return (p.match(/[a-z]+|[A-Z]+/g) ?? []).length <= 4;
 };

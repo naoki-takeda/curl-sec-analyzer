@@ -916,3 +916,17 @@
 | 6 | security.txt のプローブ | 先頭が`# `のものを、Contact・Expires がなくても合格にした | 先頭の64バイトがコメントだけなら na | `src/mask.ts`、`src/rules/exposure.ts`、設計書 |
 | 6 | 差分の突き合わせ | 証跡のホスト名が同じサイトの別のサーバに変わっただけで、同じ指摘を「解消」と「新規」に分けた | ホスト名をサイトにまとめる | `src/engine/diff.ts`、設計書 |
 | 6（レビュー） | 束6のコミットのあとのレビュー（束6はチェックの通過でコミットし、レビューをあとにした） | 差分のキーのホスト名をサイトにまとめたため、同じサイトの別の配信元（`ajax.googleapis.com`に増えた`storage.googleapis.com`、`*.github.io`の別の持ち主）の新規を、継続の1行にして黙って落とした。`ssn`・`cvv`を JSON の数値・名前を付けた値で伏せなかった。全角・ゼロ幅の文字を含む JSON のキーを見なかった。American Express の 4-6-5 と`.`の区切りのカード番号を見逃した。番号の形がパスのトークンの途中に一致して、残りのかけらを伏せなくした。`cc`（mailto の宛先・国のコード）と`compass_token`などを伏せすぎた。security.txt のプローブのフィールド名で大文字・小文字を区別した | サイトにまとめるのを戻す（同じサイトの別のサーバへの変化が解消と新規に分かれるのは、見逃すより安全なので残す）。個人の番号の名前を JSON の数値（3桁から）と名前を付けた値に足す。JSON のキーの文字を広げる。区切りを足す。前後が英数字のものは除く。`cc`を外し、パスワードの名前を語で見る。プローブを大文字・小文字を区別しないようにし、`#`だけの行で始まるものも na。2乗の時間の見張りに新しい形を足す。キャメルケースの名前（`userPassword: …`）の値を伏せないのは以前からの限界として設計書に書いた | `src/engine/diff.ts`、`src/mask.ts`、`tests/adversarial-perf.test.ts`、設計書 |
+
+### レビュー指摘への対応（第41回、24回目の新鮮な目でのレビュー：領域ごとの4人のレビュアー。重要度「中」の9件）
+
+マスキング・エクスポート、コマンド生成器、パーサ・エンジン、判定ルールの4つの領域に分けてレビューし、重要度「中」の9件を直した（「低」の十数件は積み残し）。版を 0.4.54 にする。
+
+| 対象 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 突き合わせのキー | パスの英字の語を形の規則（24文字まで、大文字・小文字の入れ替わり4回まで）だけで残し、英小文字15文字までの乱数（`/reset/qkzvwxmplrtbnhg`）を残した。画面では伏せたトークンが、JSON（`keyUrl`・`targetKey`）、CSV の実施コマンド、例外ファイルに出た | 5文字以上の英字の語は、画面の許可リストと同じ`wordLike`も満たすものだけを残す（`wordLike`を`src/tokenShape.ts`に移して共有）。キーが変わったものは、読み込みで以前の形式として知らせる | `src/engine/targetKey.ts`、`src/tokenShape.ts`、`src/shownText.ts`、設計書 |
+| 生成スクリプトの curl | `~/.curlrc`を読み（`header = "Authorization: …"`で、認証を付けないはずの採取にトークンが付いた）、時間の上限がなく（応答しないサーバで止まり、`/backup.zip`を全部ダウンロードした）、WebSocket（C16）を HTTP/2 で送って`Upgrade`が落ち、R-09 がいつも na だった。Ctrl-C で止めると、認証後の応答を含む一時ファイルが残った | すべての curl を`curl -q -sS --connect-timeout 10 --max-time 30`で始める。C16 に`--http1.1`。一時ファイルを`trap`で消す | `src/commands.ts`、設計書 |
+| http から www の https への転送 | `http://example.com`を`-L`で`https://www.example.com`に転送したターゲットを HTTP のまま判定し、H-・C- の項目が黙って適用外になった（同じホストの https だけを見ていた） | 同じサイトの https への転送も HTTPS のターゲットとする（`finalResponse`と同じ） | `src/parser/target.ts`、設計書 |
+| H-05② | `base-uri *`・`https:`・`data:`を合格にした（csp_evaluator は指摘するが、振り分けで捨てていた） | `*`とスキームだけの指定は、ないのと同じとする | `src/rules/headers.ts`、設計書 |
+| T-06 | `url=`のない`Refresh: 0; https://evil.example/`を見逃し、転送しない`Refresh: 5`で合格にした | HTML Standard のとおりに転送先を読む。転送先のない Refresh・同じページへの Refresh は転送を試していないとする | `src/rules/transport.ts`、設計書 |
+| E-11① | `inline; filename="attachment.html"`を、値に attachment があるので attachment とみなした（①高の見逃し） | Content-Disposition は最初のトークン（種類）で見る | `src/rules/exposure.ts`、設計書 |
+| E-10① | http のページの相対の送信先（`/login`）のパスワードフォームを合格にし、「https・POST」と事実と違う証跡を出した | 送信先をページの URL を基準に読む | `src/rules/html.ts`、設計書 |

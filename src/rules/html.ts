@@ -345,6 +345,11 @@ function forms(html: string): { form: Tag; inputs: Tag[] }[] {
   });
 }
 
+/** フォームの送信先が http か（ページの URL が分からなければ、送信先そのものが http:// で始まるか） */
+const sendsInClear = (action: string, page?: string): boolean => {
+  try { return new URL(action.trim(), page).protocol === 'http:'; } catch { return /^\s*http:\/\//i.test(action); }
+};
+
 export const passwordForm: Rule = { id: 'E-10', title: 'HTML本文：パスワードフォーム', appliesTo: 'html', scope: 'target',
   basis: ['IPA', 'OWASP Authentication CS'],
   run(ctx) {
@@ -355,7 +360,9 @@ export const passwordForm: Rule = { id: 'E-10', title: 'HTML本文：パスワ�
     const out = [];
     for (const { form } of pw) {
       const action = form.attrs.get('action') ?? '';
-      if (/^http:\/\//i.test(action)) out.push(mk(passwordForm, ctx, 1, 'high', 'fail', form.evidence, 'フォームの送信先を https:// にする'));
+      // 送信先はページの URL を基準に読む（ブラウザと同じ）。http のページの相対の送信先（/login・空・//host/login）も平文で送る
+      // （http:// で始まるものだけを見ると、http のページのフォームを合格にし、「https・POST」と事実と違う証跡を出した）
+      if (sendsInClear(action, pageUrlOf(ctx))) out.push(mk(passwordForm, ctx, 1, 'high', 'fail', form.evidence, 'フォームの送信先を https:// にする'));
       if ((form.attrs.get('method') ?? 'get').toLowerCase() !== 'post') out.push(mk(passwordForm, ctx, 2, 'medium', 'fail', form.evidence, 'パスワードは method="post" で送る（URLに残さない）'));
     }
     return out.length ? out : [mk(passwordForm, ctx, 'ok', 'info', 'pass', `パスワードフォーム${pw.length}件は https・POST`, '')];

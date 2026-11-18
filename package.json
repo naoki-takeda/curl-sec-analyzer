@@ -1,7 +1,7 @@
 {
   "name": "curl-sec-analyzer",
   "private": true,
-  "version": "0.4.53",
+  "version": "0.4.54",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"

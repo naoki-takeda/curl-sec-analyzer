@@ -131,7 +131,9 @@ describe('束5 H-02③ の apex を http で採取したとき', () => {
   });
   it('http で採取して https の apex に転送したものは、その https のホップで見る', () => {
     const r = ids(`#TARGET url=https://www.a.example/ label=top\nHTTP/2 200\nstrict-transport-security: max-age=63072000; includeSubDomains; preload\n\n#TARGET url=http://a.example/ label=apex\nHTTP/1.1 301 Moved Permanently\nlocation: https://a.example/\n\nHTTP/2 301\nlocation: https://www.a.example/\n\nHTTP/2 200\ncontent-type: text/html\n\n`, 'H-02', 'apex');
-    expect(r).toEqual(['H-02.3']);
+    // 同じサイトの https（www）への転送なので HTTPS のターゲットとして判定する（https で採取した apex と同じ結果。最後の www の応答に HSTS がないので
+    // ターゲットごとの H-02 は na）
+    expect(r).toEqual(['H-02.na', 'H-02.3']);
   });
 });
 

@@ -23,3 +23,43 @@ export function rareBigrams(x: string): number {
   for (let i = 0; i + 1 < x.length; i++) if (!COMMON_BIGRAMS.has(x.slice(i, i + 2))) rare++;
   return rare / (x.length - 1);
 }
+
+// ---- 英字の語として読めるか。画面の許可リスト（shownText.ts）と突き合わせのキー（engine/targetKey.ts）で共有する ----
+/** 語として残す、英語の読み方の規則に当たらない名前（製品・プロトコル） */
+const KNOWN_WORDS = new Set(['xmlrpc', 'nginx', 'lighttpd', 'nodejs', 'nextjs', 'nuxtjs', 'webpack', 'fastly', 'varnish', 'wsgi', 'cgi', 'fcgi', 'grpc', 'hsts', 'csrf', 'xsrf', 'jwks', 'jsdelivr', 'cloudflare', 'akamai', 'csrftoken', 'xsrftoken', 'aspnetmvc', 'aspnet']);
+/** キャメルケースの2文字の部分として残してよい語（By・Id・Of・My。乱数の Dg・Ng・Xk を残さない）。大文字だけの略語（JS・IO・DB）は別に認める */
+const SHORT_WORDS = new Set('of by id to in on at is my no or up if as be do go it me us we ok'.split(' '));
+/**
+ * 部分（キャメルケースの語）の中の、英語でよく現れる2文字の並びにないものの割合。語の境目（Asp|Net の pn）は数えない。大文字だけの略語（XML・JS）
+ * と2文字までの部分は数えない。数えた並びがなければ0
+ */
+function partRare(parts: string[]): number {
+  let rare = 0, n = 0;
+  for (const p of parts) if (p.length >= 3 && !/^[A-Z]+$/.test(p)) { rare += rareBigrams(p.toLowerCase()) * (p.length - 1); n += p.length - 1; }
+  return n ? rare / n : 0;
+}
+/**
+ * 英字だけの語が、語として読めるか：
+ * - 大文字だけは12文字まで（SAMEORIGIN・ECDHE）
+ * - 小文字だけは、乱数のトークン（lowerToken）でなく、6文字以上ならまれな2文字の並びが6割未満（乱数の英小文字は3分の2ほど）
+ * - キャメルケースは、部分（Akamai|G|Host・XML|Http|Request）に分けて：2つ目からは大文字で始まる。大文字だけの略語は5文字まで。2文字の部分は
+ *   決まった語（By・Id・Of）か略語、1文字の部分は1つまで。部分は4つまで（すべて3文字以上の語なら7つまで。HttpMessageNotReadableException）。
+ *   部分の中のまれな2文字の並びが45%未満（tByYjxuIhbLwqalx・NoDgY のような乱数は、語の数や長さだけでは見分けられなかった）
+ */
+export function wordLike(w: string): boolean {
+  if (w.length > 48) return false;
+  if (KNOWN_WORDS.has(w.toLowerCase())) return true;
+  // 大文字だけの7文字以上は、まれな2文字の並びが半分未満のもの（SAMEORIGIN・NOSNIFF・HTTPONLY は残す。乱数の英大文字の10文字は、
+  // 12文字までを無条件に残すとすべて残った）
+  if (/^[A-Z]+$/.test(w)) return w.length <= 12 && !(w.length >= 7 && rareBigrams(w.toLowerCase()) >= 0.35);
+  // 10文字以上は45%未満、7〜9文字は半分未満（英語の長い語は4割まで。乱数の英小文字の6〜9文字は、6割の基準では4〜5割が残った）
+  if (/^[a-z]+$/.test(w)) return w.length <= 24 && !lowerToken(w) && !(w.length >= 6 && rareBigrams(w) >= (w.length >= 10 ? 0.45 : w.length >= 7 ? 0.4 : 0.6));
+  const parts = w.match(/[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+/g) ?? [];
+  if (parts.join('') !== w) return false;
+  const singles = parts.filter(p => p.length === 1).length;
+  const allWords = parts.every(p => p.length >= 3 || SHORT_WORDS.has(p.toLowerCase()) || /^[A-Z]{2}$/.test(p) || p.length === 1);
+  return parts.length <= (allWords && singles === 0 ? 7 : 4) && singles <= 1
+    && parts.every((p, i) => (i === 0 || /^[A-Z]/.test(p)) && !/^[A-Z]{6,}$/.test(p)
+      && (p.length !== 2 || SHORT_WORDS.has(p.toLowerCase()) || /^[A-Z]{2}$/.test(p)))
+    && partRare(parts) < 0.45;
+}

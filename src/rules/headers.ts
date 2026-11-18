@@ -213,6 +213,9 @@ export const cspScript: Rule = { id: 'H-04', title: 'CSP：script-src', appliesT
     return issues.map(i => mk(cspScript, ctx, i.condition, i.severity, 'fail', issueEvidence(i), CSP_REC[i.condition]));
   } };
 
+/** base-uri が * かスキームだけ（https:・data:）を含む（どの <base> も止めない） */
+const looseBaseUri = (p: Map<string, string[]>) => (p.get('base-uri') ?? []).some(v => v === '*' || /^[a-z][a-z0-9+.-]*:$/i.test(v));
+
 export const cspObjectBase: Rule = { id: 'H-05', title: 'CSP：object-src・base-uri', appliesTo: 'html', scope: 'target',
   basis: ['Chrome Lighthouse csp-xss', 'Google csp_evaluator'],
   run(ctx) {
@@ -225,10 +228,15 @@ export const cspObjectBase: Rule = { id: 'H-05', title: 'CSP：object-src・base
     if (!ps.some(p => p.has('object-src') || p.has('default-src'))) out.push(mk(cspObjectBase, ctx, 1, 'medium', 'fail', 'object-src も default-src もない', "object-src 'none'"));
     else if (obj) out.push(mk(cspObjectBase, ctx, 1, 'medium', 'fail', issueEvidence(obj), "object-src 'none'"));
     // ②：base-uri は default-src にフォールバックしないため、常に確認する
-    if (!ps.some(p => p.has('base-uri'))) out.push(mk(cspObjectBase, ctx, 2, 'medium', 'fail', 'base-uri がない（default-src にはフォールバックしない）', "base-uri 'none'（または 'self'）"));
+    // * とスキームだけの指定（https:・data:）は、どの <base> も止めないので、ないのと同じ（csp_evaluator はこれを指摘するが、振り分け
+    // （rules/csp.ts）は object-src とスクリプトのディレクティブだけを見るので、base-uri * が合格になった）。ポリシーは重ねて効くので、
+    // 制限する base-uri のあるポリシーが1つでもあれば満たす
+    const bases = ps.filter(p => p.has('base-uri'));
+    if (!bases.length) out.push(mk(cspObjectBase, ctx, 2, 'medium', 'fail', 'base-uri がない（default-src にはフォールバックしない）', "base-uri 'none'（または 'self'）"));
+    else if (bases.every(p => looseBaseUri(p))) out.push(mk(cspObjectBase, ctx, 2, 'medium', 'fail', bases.map(p => `base-uri ${p.get('base-uri')!.join(' ')}`).join(' / '), "base-uri 'none'（または 'self'）"));
     // csp_evaluator が解析できなかったポリシーがあれば、object-src の問題を見逃しているかもしれないので合格にしない（H-04 と同じ）
     // ただし object-src 'none' と base-uri のあるポリシーが1つでもあれば、ほかのポリシーによらず満たしている（ポリシーは重ねて効く）
-    const solid = ps.some(p => p.get('object-src')?.join(' ') === "'none'" && p.has('base-uri'));
+    const solid = ps.some(p => p.get('object-src')?.join(' ') === "'none'" && p.has('base-uri') && !looseBaseUri(p));
     if (!out.length && !solid && unevaluated(ctx)) return [mk(cspObjectBase, ctx, 'na', 'info', 'na', 'csp_evaluator で解析できないポリシーがある（H-07④）', '')];
     return out.length ? out : [mk(cspObjectBase, ctx, 'ok', 'info', 'pass', 'object-src・base-uri あり', '')];
   } };

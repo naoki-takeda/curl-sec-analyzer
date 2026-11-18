@@ -79,13 +79,15 @@ export function assignHopUrls(t: Target): void {
 }
 
 /**
- * http の URL で採取し、-L で同じホストの https に転送された（最後のホップが https）。http ラベル（T-04）以外は、HTTPS の応答として判定する。
+ * http の URL で採取し、-L で同じサイトの https に転送された（最後のホップが https）。http ラベル（T-04）以外は、HTTPS の応答として判定する。
  * URL が http のままだと、H-・C- の項目がすべて黙って適用外になる（HAR では取り込みでターゲットの URL を https にしている）
  */
 const upgradedToHttps = (t: Target): boolean => {
   if (baseLabel(t.label) === 'http' || !/^http:/i.test(t.url ?? '')) return false;
   const last = chainOf(t).at(-1)?.url;
-  try { return !!last && new URL(last).protocol === 'https:' && new URL(last).hostname === new URL(t.url!).hostname; } catch { return false; }
+  // 同じサイト（apex と www）の https への転送も含める（finalResponse と同じ。http://example.com → https://www.example.com のよくある形で、
+  // H-・C- の項目が黙って適用外になった）
+  try { return !!last && new URL(last).protocol === 'https:' && siteOf(new URL(last).hostname.toLowerCase()) === siteOf(new URL(t.url!).hostname.toLowerCase()); } catch { return false; }
 };
 
 /**

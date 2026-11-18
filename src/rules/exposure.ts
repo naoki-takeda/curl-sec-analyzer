@@ -277,7 +277,8 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     // JSON の API の応答（/api/files/123.json など、パスがアップロード先らしくても）は、ダウンロードではない（DOWNLOAD_CT で +json を除くのと同じ）
     // Content-Type で見る（kind=api を明示したターゲットの SVG・PDF まで除かないため）
     if (/^\s*application\/(?:[\w.-]+\+)?json\b/i.test(ct) && !cd) return [];
-    if (uploadPath && ACTIVE_CT.test(ct) && !/attachment/i.test(cd))
+    // 種類（最初のトークン）で見る。値のどこかに attachment があるかで見ると、inline; filename="attachment.html" を見逃した（RFC 6266）
+    if (uploadPath && ACTIVE_CT.test(ct) && !/^\s*attachment\s*(?:;|$)/i.test(cd))
       return [mk(downloadResponse, ctx, 1, 'high', 'fail', `Content-Type: ${ct} / Content-Disposition: ${cd || '(なし)'}`, '利用者がアップロードしたファイルは別オリジンから attachment で配信する')];
     // ビルドした CSS・JS・フォント（Drupal の /sites/default/files/css/…、Next.js の /_next/static/media/…）は、ページが読み込むもので、ダウンロードではない
     if (!cd && BUILD_ASSET_CT.test(ct)) return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Type: ${ct}（CSS・JS・フォント）`, '')];

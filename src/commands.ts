@@ -43,7 +43,11 @@ export function generateScript(o: CommandOptions): string {
     'set -u', 'umask 077', `H=${q(H)}`,
     '# 実行ごとの印（応答の本文に書かれたマーカーと見分けるため）',
     "RUN=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
-    '# 本文を取るコマンドのヘッダと本文の一時ファイル（ヘッダと本文を分けて出す。#BODY の印のあとが本文）', 'hdr=$(mktemp); body=$(mktemp)', '{');
+    '# 本文を取るコマンドのヘッダと本文の一時ファイル（ヘッダと本文を分けて出す。#BODY の印のあとが本文）', 'hdr=$(mktemp); body=$(mktemp)',
+    // 一時ファイルには認証後の応答（Set-Cookie・本文）が入る。Ctrl-C や kill で止めたときも消す（dash は INT で EXIT の trap を実行しないので、
+    // INT・TERM・HUP では exit して EXIT の trap を通す）。まだ作っていない一時ファイルは rm に渡さない（空の引数を渡さない）
+    "probe=''; tout=''; terr=''",
+    `trap 'rm -f "$hdr" "$body" \${probe:+"$probe"} \${tout:+"$tout"} \${terr:+"$terr"}' EXIT`, "trap 'exit 130' INT TERM HUP", '{');
 
   L.push('', '# ---- 第1章：ヘッダ（C4・C2・C10） ----');
   t('top', `${H}/`); L.push('curl -sS -v -o /dev/null "$H/" 2>&1');
@@ -78,7 +82,9 @@ export function generateScript(o: CommandOptions): string {
 
   if (o.wsPath) {                                             // C16：許可外の Origin でハンドシェイクし、101 が返るかを見る（R-09）
     t('websocket', `${H}${o.wsPath}`, ' sensitive=1');
-    L.push(`curl -sS -v -o /dev/null --max-time 5 -b jar.txt -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Origin: https://evil.example' "$H"${q(o.wsPath)} 2>&1`);
+    // --http1.1：HTTP/2 では curl が Connection・Upgrade を送らない（HTTP/2 で禁じられたヘッダ）。h2 に対応したサーバには普通の GET になり、
+    // 101 が返らないので R-09 がいつも na になった
+    L.push(`curl -sS -v -o /dev/null --http1.1 --max-time 5 -b jar.txt -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Origin: https://evil.example' "$H"${q(o.wsPath)} 2>&1`);
   }
 
   L.push('', '# ---- 第4章：メソッド・転送・ヘッダ（C9・C14・C19・C22） ----');
@@ -148,8 +154,18 @@ export function generateScript(o: CommandOptions): string {
   // 印は実行ごとの乱数を持つので、サーバは本文の終わりを作れない。取る前に2つのファイルを空にする（接続に失敗したとき、前のコマンドの
   // ヘッダ・本文を出さない）。最後に改行を出す（本文が改行で終わらないと、次の #TARGET が本文の続きになる）
   return L.map(l => l.replace(/^(\s*)curl -sS -i (.*?)(\s+#.*)?$/, (_, ind: string, args: string, comment = '') =>
-    `${ind}: > "$hdr"; : > "$body"; curl -sS -D "$hdr" -o "$body" ${args}; cat "$hdr"; echo "#BODY run=$RUN"; cat "$body"; echo${comment}`)).join('\n') + '\n';
+    `${ind}: > "$hdr"; : > "$body"; curl -sS -D "$hdr" -o "$body" ${args}; cat "$hdr"; echo "#BODY run=$RUN"; cat "$body"; echo${comment}`)
+    .replace(/\bcurl -sS /g, `curl ${CURL_COMMON} `)).join('\n') + '\n';
 }
+
+/**
+ * すべての curl に付ける指定（生成したスクリプトの curl -sS を置き換える）：
+ * - -q：利用者の ~/.curlrc を読まない（最初の引数でないと効かない）。.curlrc の header = "Authorization: …" で、認証を付けないはずの
+ *   unauth-api（A-01）や CORS の採取にトークンが付き、location で -D - の採取が転送をたどって、判定が黙って変わった
+ * - --connect-timeout・--max-time：応答しないサーバ（tarpit・WAF）でスクリプトが止まらないようにする。プローブ（/backup.zip など）は
+ *   全体をダウンロードしていたが、時間で打ち切る（打ち切っても先頭の64バイトとステータスは残る）。WebSocket（C16）は後ろの --max-time 5 が効く
+ */
+const CURL_COMMON = '-q -sS --connect-timeout 10 --max-time 30';
 
 /** ラベルに対応する推奨コマンドのID（#META cmd= に出す） */
 const CMD_BY_LABEL: [RegExp, string][] = [
