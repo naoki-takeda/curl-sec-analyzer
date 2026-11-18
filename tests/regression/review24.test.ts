@@ -201,7 +201,7 @@ describe('束6 security.txt のプローブ', () => {
 });
 
 describe('束6 差分の突き合わせ（束6のレビューで、ホスト名をサイトにまとめるのを戻した）', () => {
-  const f = (evidence: string, ruleId = 'E-08.1'): Finding => ({ ruleId, item: ruleId.slice(0, 4), title: '', severity: 'medium', status: 'fail', target: 'top', evidence, recommendation: '', references: [], score: 0 });
+  const f = (evidence: string, ruleId = 'E-08.1'): Finding => ({ ruleId, item: ruleId.slice(0, 4), title: '', severity: 'medium', status: 'fail', target: 'top', evidence, recommendation: '', references: [] });
   it('同じサイトの別の配信元のスクリプトが増えたら「新規」（まとめると、継続の1行にして新規を落とした）', () => {
     const rows = diff([f('https://ajax.googleapis.com/x.js')], [f('https://ajax.googleapis.com/x.js'), f('https://storage.googleapis.com/evil/x.js')]);
     expect(rows.map(r => r.kind).sort()).toEqual(['continuing', 'new']);

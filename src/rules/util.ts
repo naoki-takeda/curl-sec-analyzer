@@ -4,7 +4,7 @@ export function mk(rule: Rule, ctx: RuleContext, cond: number | 'ok' | 'na', sev
                    evidence: string, recommendation: string, extra: Partial<Finding> = {}): Finding {
   return { ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined,
            title: rule.title, severity, status, target: ctx.target.label, evidence, recommendation,
-           references: rule.basis, score: 0, ...extra };
+           references: rule.basis, ...extra };
 }
 
 export const header = (ctx: RuleContext, name: string): string[] => ctx.final?.headers.get(name) ?? [];

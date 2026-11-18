@@ -10,7 +10,7 @@ import { generateScript } from '../../src/commands';
 import { evaluate } from '../helpers';
 
 const ms = (f: () => unknown) => { const t = performance.now(); f(); return performance.now() - t; };
-const f = (evidence: unknown) => ({ ruleId: 'E-08.1', item: 'E-08', condition: 1, title: 'SRI', severity: 'low', status: 'fail', target: 'page', targetKey: 'page', evidence, recommendation: '', references: [], score: 0 } as Finding);
+const f = (evidence: unknown) => ({ ruleId: 'E-08.1', item: 'E-08', condition: 1, title: 'SRI', severity: 'low', status: 'fail', target: 'page', targetKey: 'page', evidence, recommendation: '', references: [] } as Finding);
 
 describe('束2 2乗の時間と、壊れた前回の結果', () => {
   it('閉じのない <!-- の繰り返しでも、タグの読み取りは本文の長さに比例する', { tags: ['perf'] }, () => {

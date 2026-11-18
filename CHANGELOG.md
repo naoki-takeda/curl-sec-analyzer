@@ -45,6 +45,7 @@ curl-sec-analyzer の版ごとの変更です。版の付け方は [docs/design.
 ### 0.4.57 からの変更
 
 - 版を 1.0.0 にしました。判定の範囲と条件は 0.4.57 と同じです。
+- JSON のエクスポートの指摘（`findings`）から、使っていなかった `score`（ほとんどの指摘で0。HSTS とHTTP→HTTPS の転送だけが Observatory の配点を持っていた）と `obsId` を外しました。MDN HTTP Observatory 互換のスコアは作らないと決めたためです。
 
 ### 既知の限界
 

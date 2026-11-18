@@ -107,7 +107,7 @@ export function runAll(targets: Target[], opt: RunOptions = {}): Finding[] {
 function safeRun(rule: Rule, run: () => Finding[] | undefined, target: string): Finding[] {
   try { return run() ?? []; } catch {
     return [{ ruleId: `${rule.id}.na`, item: rule.id, title: rule.title, severity: 'info', status: 'na', target,
-              evidence: 'ルールの実行中にエラーが発生した（入力の形式が想定外）', recommendation: '', references: rule.basis, score: 0 }];
+              evidence: 'ルールの実行中にエラーが発生した（入力の形式が想定外）', recommendation: '', references: rule.basis }];
   }
 }
 

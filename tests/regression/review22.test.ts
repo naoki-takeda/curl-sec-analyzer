@@ -116,7 +116,7 @@ describe('9〜12 API・転送', () => {
 });
 
 describe('13 差分は、同じルール・ターゲットの別のものの指摘を別に突き合わせる', () => {
-  const f = (evidence: string) => ({ ruleId: 'E-08.1', item: 'E-08', condition: 1, title: 'SRI', severity: 'low', status: 'fail', target: 'page', targetKey: 'page', evidence, recommendation: '', references: [], score: 0 } as Finding);
+  const f = (evidence: string) => ({ ruleId: 'E-08.1', item: 'E-08', condition: 1, title: 'SRI', severity: 'low', status: 'fail', target: 'page', targetKey: 'page', evidence, recommendation: '', references: [] } as Finding);
   it('cdn-a を直して cdn-b が増えた', () => {
     const rows = diff([f('https://cdn-a.example（integrity なし 1件／1件）')], [f('https://cdn-b.example（integrity なし 1件／1件）')]);
     expect(rows.map(r => r.kind).sort()).toEqual(['new', 'resolved']);

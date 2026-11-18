@@ -24,7 +24,7 @@ function validFinding(x: unknown): Finding | undefined {
   // 長さは切らない（証跡を切ると、大きな CSP の証跡の後ろのホスト名が前回のキーからだけ落ち、同じ結果どうしの差分が新規と解消になった）
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
   return { ruleId: f.ruleId!, item: m[1], condition, title: str(f.title), severity: f.severity!, status: f.status!, target: str(f.target),
-           targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined, evidence: str(f.evidence), recommendation: '', references: [], score: 0 };
+           targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined, evidence: str(f.evidence), recommendation: '', references: [] };
 }
 
 export function parseBaseline(text: string): { baseline?: Baseline; error?: string; skipped: number } {

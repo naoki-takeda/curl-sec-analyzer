@@ -7,7 +7,7 @@ import { PROBE_UNREACHED_REC } from './util';
 
 const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
-     target: host, host, evidence, recommendation, references: rule.basis, score: 0 });
+     target: host, host, evidence, recommendation, references: rule.basis });
 
 /**
  * そのホストに TLS で接続できたと分かるか：新しいバージョン（1.2・1.3）か弱くない暗号のプローブで接続できた、curl -v で合意した、

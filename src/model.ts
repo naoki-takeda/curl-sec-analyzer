@@ -65,14 +65,13 @@ export interface Finding {
   ruleId: string;                   // 例: H-01.1 / H-01.ok / H-01.na
   item: string;                     // 例: H-01
   condition?: number;               // 例: 1（①）
-  obsId?: string; title: string; severity: Severity; status: Status;
+  title: string; severity: Severity; status: Status;
   target: string; url?: string; host?: string;
   partial?: boolean;                // 横断・ホスト単位の条件が入力不足で na（診断カバレッジで「一部の条件は入力不足」と示す）
   limited?: boolean;                // 機密でない応答（静的リソースなど）だけで判定した（H-12。項目のすべてがこれなら、カバレッジで「機密応答では判定していない」と示す）
   keyUrl?: string;                  // 対象の URL の突き合わせのキー（engine/targetKey.ts の urlKey。マスクした url ではなく生の URL から作る。例外の「ラベル URL」の照合に使う）
   targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（engine/targetKey.ts の urlKey。マスクとは別に作る）」
   evidence: string; recommendation: string; references: string[];
-  score: number;                    // obsId があるルール以外は常に0
   suppressedBy?: Suppression;       // 例外に該当したとき
   originalSeverity?: Severity;      // 組織プロファイルで重要度を変えたときの元の重要度
   dedupedBy?: string;               // 二重計上を防ぐため、別のルールID（例：A-09.2）で数えたとき。status は na になる

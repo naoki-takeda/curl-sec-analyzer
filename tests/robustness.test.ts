@@ -23,7 +23,7 @@ describe('性能（設計書の非機能要件）', () => {
 
 describe('悪意のある入力（Q-1・Q-2）', () => {
   it('例外ファイルの * の多いパターンでも、照合がすぐ終わる（ReDoS）', { tags: ['perf'] }, () => {
-    const f = { ruleId: 'H-01.1', item: 'H-01', title: '', severity: 'high', status: 'fail', target: 'x', url: `https://a.example/${'a'.repeat(2000)}`, evidence: '', recommendation: '', references: [], score: 0 } as never;
+    const f = { ruleId: 'H-01.1', item: 'H-01', title: '', severity: 'high', status: 'fail', target: 'x', url: `https://a.example/${'a'.repeat(2000)}`, evidence: '', recommendation: '', references: [] } as never;
     const sup = [{ ruleId: 'H-01', target: `${'*a'.repeat(200)}*b`, reason: 'r', approver: '', until: '' }];
     expect(ms(() => applySuppressions([f], sup))).toBeLessThan(500);
     expect(parseSuppressions(JSON.stringify([{ ruleId: 'H-01', target: '*'.repeat(501), reason: 'r' }])).errors[0]).toContain('長すぎ');

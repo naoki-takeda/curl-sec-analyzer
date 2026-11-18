@@ -349,7 +349,7 @@ export const errorFormat: Rule = { id: 'A-10', title: 'エラー形式', applies
     // ブラウザ向けのHTMLのエラーページ（error-url など）は対象外（情報の露出は E-01 で判定）。unauth-* の 401 なども含めない
     // 付け直したラベル（error-api#2）は除く。横断の判定には最初のものだけを使う（parser/target.ts の uniqueLabels）
     const errs = x.targets.filter(t => { const f = finalResponse(t); return t.label.startsWith('error-') && !/#\d+$/.test(t.label) && f && f.status >= 400 && responseKind(t, f) !== 'html'; });
-    const base = { item: 'A-10', title: errorFormat.title, target: 'error-*', references: errorFormat.basis, score: 0 };
+    const base = { item: 'A-10', title: errorFormat.title, target: 'error-*', references: errorFormat.basis };
     if (errs.length < 2) return [{ ...base, ruleId: 'A-10.na', severity: 'info', status: 'na', evidence: '', recommendation: '必要なラベル: error-*（APIのエラー応答を2つ以上）' }];
     const types = new Map<string, string[]>();
     for (const t of errs) { const ct = normCt(finalResponse(t)!.headers.get('content-type')?.[0] ?? ''); types.set(ct, [...(types.get(ct) ?? []), t.label]); }

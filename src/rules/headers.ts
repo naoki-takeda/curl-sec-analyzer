@@ -19,17 +19,16 @@ export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appl
     if (ctx.isHttps === undefined || !ctx.final) return [mk(hsts, ctx, 'na', 'info', 'na', 'HTTPSかどうか判定できない', '#TARGET に url= を付ける')];
     const v = hstsOf(ctx);
     const rec = 'Strict-Transport-Security: max-age=63072000; includeSubDomains';
-    if (!v) return [mk(hsts, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec, { obsId: 'hsts-not-implemented', score: -20 })];
+    if (!v) return [mk(hsts, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
     const parsed = parseHsts(v); const age = parsed.maxAge;
-    if (!parsed.valid) return [mk(hsts, ctx, 3, 'high', 'fail', `${v}（構文の誤り・ディレクティブの重複。ブラウザはこのヘッダを無視する）`, rec, { obsId: 'hsts-header-invalid', score: -20 })];
+    if (!parsed.valid) return [mk(hsts, ctx, 3, 'high', 'fail', `${v}（構文の誤り・ディレクティブの重複。ブラウザはこのヘッダを無視する）`, rec)];
     // max-age=0 は、ブラウザに HSTS の記録を消させる指定（RFC 6797 6.1.1）。ヘッダがないのと同じなので①にする（②の「短い」ではない）
-    if (age === 0) return [mk(hsts, ctx, 1, 'high', 'fail', `${v}（max-age=0 は HSTS を解除する指定）`, rec, { obsId: 'hsts-not-implemented', score: -20 })];
-    // ②の基準は ASVS 5.0.0 3.4.1 に合わせて1年（31536000秒）。obsId は Observatory の区切り（6か月）のまま付ける
-    const obs = age < 15768000 ? { obsId: 'hsts-implemented-max-age-less-than-six-months', score: -10 } : { obsId: 'hsts-implemented-max-age-at-least-six-months' };
-    if (age < 31536000) return [mk(hsts, ctx, 2, 'medium', 'fail', v, rec, obs)];
+    if (age === 0) return [mk(hsts, ctx, 1, 'high', 'fail', `${v}（max-age=0 は HSTS を解除する指定）`, rec)];
+    // ②の基準は ASVS 5.0.0 3.4.1 に合わせて1年（31536000秒）
+    if (age < 31536000) return [mk(hsts, ctx, 2, 'medium', 'fail', v, rec)];
     // ④ ASVS 5.0.0 3.4.1 は L2 以上で includeSubDomains を求める
-    if (!hstsDirective(v, 'includesubdomains')) return [mk(hsts, ctx, 4, 'low', 'fail', v, rec, obs)];
-    return [mk(hsts, ctx, 'ok', 'info', 'pass', v, '', obs)];
+    if (!hstsDirective(v, 'includesubdomains')) return [mk(hsts, ctx, 4, 'low', 'fail', v, rec)];
+    return [mk(hsts, ctx, 'ok', 'info', 'pass', v, '')];
   } };
 
 export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）', appliesTo: 'html', scope: 'target',

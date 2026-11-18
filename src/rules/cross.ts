@@ -8,7 +8,7 @@ import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
-     target, evidence, recommendation, references: rule.basis, score: 0 });
+     target, evidence, recommendation, references: rule.basis });
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
 // 対象のサイトの応答だけを見る（C-01〜C-07 と同じ siteResponses）。-L でたどった外部の IdP の Cookie（idp_session）を、アプリが
