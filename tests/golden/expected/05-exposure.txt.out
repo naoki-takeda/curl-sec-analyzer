@@ -36,7 +36,7 @@ actuator | H-13.ok | info | pass | application/vnd.spring-boot.actuator.v3+json
 actuator | H-14.1 | info | fail | (ヘッダなし)
 actuator | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 actuator | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-actuator | R-04.ok | info | pass | (ACAOなし)
+actuator | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 actuator | T-12.ok | info | pass | HTTP/2
 csp-sample-* | H-04.na | info | na | 
 download | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -49,7 +49,7 @@ download | H-12.na | info | na | 機密応答かどうか分からない（(ヘ�
 download | H-13.ok | info | pass | application/pdf
 download | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 download | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-download | R-04.ok | info | pass | (ACAOなし)
+download | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 download | T-12.ok | info | pass | HTTP/2
 error-* | A-10.na | info | na | 
 error-custom | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -111,7 +111,7 @@ graphql | H-13.ok | info | pass | text/html; charset=utf-8
 graphql | H-14.1 | low | fail | (ヘッダなし)
 graphql | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 graphql | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-graphql | R-04.ok | info | pass | (ACAOなし)
+graphql | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 graphql | T-12.ok | info | pass | HTTP/2
 jsonp | A-02.ok | info | pass | URL・Location・本文にトークンなし
 jsonp | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -125,7 +125,7 @@ jsonp | H-12.1 | high | fail | (ヘッダなし)
 jsonp | H-13.ok | info | pass | text/javascript
 jsonp | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 jsonp | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-jsonp | R-04.ok | info | pass | (ACAOなし)
+jsonp | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 jsonp | T-12.ok | info | pass | HTTP/2
 listing | A-02.ok | info | pass | URL・Location・本文にトークンなし
 listing | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -149,7 +149,7 @@ listing | H-13.ok | info | pass | text/html; charset=utf-8
 listing | H-14.1 | low | fail | (ヘッダなし)
 listing | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 listing | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-listing | R-04.ok | info | pass | (ACAOなし)
+listing | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 listing | T-12.ok | info | pass | HTTP/2
 logout/after-logout | C-12.na | info | na | 
 pre-login/login | C-09.na | info | na | 
@@ -181,7 +181,7 @@ secrets | H-13.ok | info | pass | text/html; charset=utf-8
 secrets | H-14.1 | low | fail | (ヘッダなし)
 secrets | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 secrets | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-secrets | R-04.ok | info | pass | (ACAOなし)
+secrets | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 secrets | T-12.ok | info | pass | HTTP/2
 session-sample-* | C-07.na | info | na | 
 swagger | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -207,7 +207,7 @@ swagger | H-13.ok | info | pass | text/html; charset=utf-8
 swagger | H-14.1 | low | fail | (ヘッダなし)
 swagger | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 swagger | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-swagger | R-04.ok | info | pass | (ACAOなし)
+swagger | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 swagger | T-05.ok | info | pass | 1回の転送
 swagger | T-12.ok | info | pass | HTTP/2
 upload | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -220,7 +220,7 @@ upload | H-12.3 | info | fail | (ヘッダなし)
 upload | H-13.ok | info | pass | image/svg+xml
 upload | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 upload | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-upload | R-04.ok | info | pass | (ACAOなし)
+upload | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 upload | T-12.ok | info | pass | HTTP/2
 www.example.com | E-03.1 | high | fail | /.env（HTTP 200、一致したパターン: dotenv）
 www.example.com | E-03.1 | high | fail | /.git/HEAD（HTTP 200、一致したパターン: git-head）
@@ -262,7 +262,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

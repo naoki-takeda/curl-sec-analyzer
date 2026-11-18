@@ -207,6 +207,8 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     }
     // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、拒否されたかどうかも分からない
     if (!f.status) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
+    // 5xx は、公開していないとは言えない（認証の前に落ちた・一時的な障害の可能性。A-01 の 5xx と同じく na。合格にした。第50回）
+    if (f.status >= 500) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。サーバのエラーで、公開しているかは分からない）`, '時間をおいて採取し直す')];
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     // ①②は「未認証で使える・公開されている」。Cookie・Authorization を送った応答の 200 では、未認証で使えるかは分からない
     if (ctx.target.sentAuth) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。Cookie・Authorization を送った応答で、未認証で使えるかは分からない）`, 'Cookie・Authorization を付けずに採取し直す')];

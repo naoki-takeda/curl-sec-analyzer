@@ -118,6 +118,11 @@ export const corsWildcard: Rule = { id: 'R-04', title: 'ワイルドカード', 
   run(ctx) {
     if (!ctx.final) return [mk(corsWildcard, ctx, 'na', 'info', 'na', '応答がない', '')];
     const acao = acaoOf(ctx);
+    // Origin を送っていない応答の ACAO のなさは、* を返さないことの証拠にならない（Spring の allowedOrigins("*") など、ミドルウェアの多くは Origin が
+    // あるときだけ ACAO を返す。R-01・R-02 と同じく na。合格にして、カバレッジも水増しした。第50回）。
+    // -i（送ったヘッダが見えない）でも、cors-* のラベル（C6 のとおり Origin を送る）でなければ、送ったとは分からないので同じく na（curl と HAR で結果をそろえる）
+    if (!acao && !ctx.target.sentOrigin && (noOriginSent(ctx) || !/^cors-/.test(baseLabel(ctx.target.label))))
+      return [mk(corsWildcard, ctx, 'na', 'info', 'na', 'ACAOなし（Origin を送っていない、または送ったかが分からない）', NO_ORIGIN_REC)];
     if (acao !== '*') return [mk(corsWildcard, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     if (credOf(ctx)) return [mk(corsWildcard, ctx, 2, 'low', 'fail', 'ACAO: * / ACAC: true', '仕様上ブラウザが拒否する組み合わせ。設定を見直す')];
     const sensitive = sensitiveUnlessStatic(ctx);    // JS・フォントは CDN から * で配ることが多い。sensitive=1 の明示がなければ機密としない
@@ -161,6 +166,9 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
     if (vary.split(',').some(s => ['origin', '*'].includes(s.trim()))) return [mk(corsVary, ctx, 'ok', 'info', 'pass', `Vary: ${vary}`, '')];
     // プリフライト（OPTIONS）の応答は HTTP のキャッシュに保存されない（RFC 9110 9.3.7）ので、Vary: Origin は要らない
     if (baseLabel(ctx.target.label) === 'cors-preflight') return [];
+    // 送った Origin と違う ACAO（https://evil.example を送って https://app.example.com が返った）は、Origin によって変わる値かが分からない
+    // （固定の値のこともある。①にした。第50回）。許可した Origin を送って ACAO が変わるかを見る
+    if (ctx.target.sentOrigin && !acao.split(/\s*,\s*/).includes(ctx.target.sentOrigin)) return [mk(corsVary, ctx, 'na', 'info', 'na', `ACAO: ${acao}（送った Origin と違う。Origin によって変わる値かが分からない）`, 'ACAO に返った Origin を送って採取し、ACAO が Origin によって変わるかを確かめる')];
     // Vary がなく、送った Origin が分からない（-i。送信ヘッダの見えない採取）ときは、ACAO が Origin によって変わる値かが分からないので na
     // ただし ACAO が既知のテスト値（https://evil.example）なら、R-01 と同じく送った Origin を反射した値とみなす（R-01 が反射を指摘しても na にした）
     if (!ctx.target.verbose && !ctx.target.sentOrigin && ctx.target.meta.source !== 'har' && !TEST_ORIGINS.includes(acao)) return [mk(corsVary, ctx, 'na', 'info', 'na', `ACAO: ${acao}（送った Origin が分からない）`, '-v を付けて、Origin を送って採取し直す')];

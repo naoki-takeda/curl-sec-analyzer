@@ -2,7 +2,7 @@
 import type { Finding, Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
-import { NO_BODY_REC, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat } from './util';
+import { NO_BODY_REC, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
 import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
@@ -258,11 +258,12 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
 const ASSIGNED = /(?<![\w-])["']?(api[_-]?key|client[_-]?secret|secret[_-]?key|access[_-]?token|password)["']?\s*[:=]\s*["']([!#-&(-~]{12,})["']/gi;
 /**
  * 秘密ではない値：パス（password:"/users/password/new"）、URL、ドットでつないだ翻訳キー（"auth.password.label"）、テンプレート（{{…}}、${…}）、
- * 英語の画面の文言（A-07 と同じ isLabelText）
+ * 英語の画面の文言（A-07 と同じ isLabelText）、セレクタ・項目の名前・エスケープした日本語の文言（notSecretText。第50回）
  */
 const notSecretValue = (key: string, v: string): boolean =>
-  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v)
-  || notSecretFormat(v);
+  // パス・URL・翻訳キー・テンプレートは notSecretText と同じ形だけ（大文字を含む /Ab3… で始まる base64 の秘密を除いていた。束のレビュー）
+  isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v)
+  || notSecretFormat(v) || notSecretText(v);
 // Google の API キー（AIza…）は、Maps・Firebase などブラウザから使う前提のキー（HTTP リファラーや API の制限で守る）なので、HTML にあっても①にしない。
 // Stripe の公開キー（pk_live_…）、PaymentIntent の client_secret も同じ（A-07 と同じ isPublicClientValue）
 /** 公開を前提にした JWT（ペイロードの role が anon。Supabase の anon key） */

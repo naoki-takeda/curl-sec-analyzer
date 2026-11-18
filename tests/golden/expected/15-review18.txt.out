@@ -38,7 +38,7 @@ about | H-13.ok | info | pass | text/html; charset=utf-8
 about | H-14.1 | low | fail | (ヘッダなし)
 about | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 about | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-about | R-04.ok | info | pass | (ACAOなし)
+about | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 about | T-12.ok | info | pass | HTTP/2
 after-logout | C-12.na | info | na | 旧Cookieでの認証後ページが HTTP 200（SPA の画面。旧Cookie が使えたかは分からない）
 cors-reflect | R-01.1 | high | fail | Origin: https://evil.example → ACAO: https://evil.example / ACAC: true
@@ -57,7 +57,7 @@ font | H-12.3 | info | fail | (ヘッダなし)
 font | H-13.ok | info | pass | application/vnd.ms-fontobject
 font | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 font | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-font | R-04.ok | info | pass | (ACAOなし)
+font | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 font | T-12.ok | info | pass | HTTP/2
 health | A-02.ok | info | pass | URL・Location・本文にトークンなし
 health | A-07.ok | info | pass | キー1種に秘密情報・内部属性らしきものなし
@@ -81,7 +81,7 @@ health | H-13.ok | info | pass | application/vnd.spring-boot.actuator.v3+json
 health | H-14.1 | info | fail | (ヘッダなし)
 health | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 health | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-health | R-04.ok | info | pass | (ACAOなし)
+health | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 health | T-12.ok | info | pass | HTTP/2
 logout | C-12.ok | info | pass | sid=…(0 chars); Max-Age=0; Path=/
 logout | H-15.1 | info | fail | (ヘッダなし)
@@ -94,7 +94,7 @@ moved | H-12.na | info | na | 機密応答かどうか分からない（(ヘッ�
 moved | H-13.na | info | na | HTTP 301（別のサイトへの転送で終わる。転送先の応答は判定しない）
 moved | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 moved | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-moved | R-04.ok | info | pass | (ACAOなし)
+moved | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 moved | T-05.ok | info | pass | 1回の転送
 moved | T-12.ok | info | pass | HTTP/2
 page | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -126,7 +126,7 @@ page | H-13.ok | info | pass | text/html; charset=utf-8
 page | H-14.1 | low | fail | (ヘッダなし)
 page | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 page | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-page | R-04.ok | info | pass | (ACAOなし)
+page | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 page | T-12.ok | info | pass | HTTP/2
 pre-login/login | C-09.na | info | na | 
 program | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -151,7 +151,7 @@ program | H-13.ok | info | pass | text/html; charset=utf-8
 program | H-14.1 | low | fail | (ヘッダなし)
 program | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 program | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-program | R-04.ok | info | pass | (ACAOなし)
+program | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 program | T-12.ok | info | pass | HTTP/2
 session-sample-* | C-07.na | info | na | 
 unauth-api | A-01.ok | info | pass | HTTP 401（WWW-Authenticate なし）
@@ -198,7 +198,7 @@ C-15 | manual | fails=0
 R-01 | evaluated | fails=1
 R-02 | missing-input | fails=0 | C7 のとおり Origin: null を送って採取する
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | evaluated | fails=0 | 一部のターゲット（6件）は入力不足 / C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | evaluated | fails=1
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

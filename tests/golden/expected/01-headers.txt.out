@@ -51,7 +51,7 @@ blog | H-13.ok | info | pass | text/html; charset=utf-8
 blog | H-14.1 | low | fail | (ヘッダなし)
 blog | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 blog | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-blog | R-04.ok | info | pass | (ACAOなし)
+blog | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 blog | T-12.ok | info | pass | HTTP/2
 csp-sample-* | H-04.na | info | na | 
 docs | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -76,7 +76,7 @@ docs | H-13.ok | info | pass | text/html; charset=utf-8
 docs | H-14.1 | low | fail | (ヘッダなし)
 docs | H-16.1 | low | fail | x-generator: Drupal 10 (https://www.drupal.org)
 docs | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-docs | R-04.ok | info | pass | (ACAOなし)
+docs | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 docs | T-12.ok | info | pass | HTTP/2
 error-* | A-10.na | info | na | 
 legacy | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -110,7 +110,7 @@ legacy | H-16.5 | low | fail | server-timing: db, app（desc・dur の値は表�
 legacy | H-17.1 | low | fail | x-xss-protection: 1; mode=block
 legacy | H-17.2 | info | fail | feature-policy: camera 'none'
 legacy | H-17.2 | info | fail | pragma: no-cache
-legacy | R-04.ok | info | pass | (ACAOなし)
+legacy | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 legacy | T-12.1 | info | fail | HTTP/1.1
 logout/after-logout | C-12.na | info | na | 
 pre-login/login | C-09.na | info | na | 
@@ -124,7 +124,7 @@ robots | H-12.3 | info | fail | (ヘッダなし)
 robots | H-13.ok | info | pass | text/plain
 robots | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 robots | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-robots | R-04.ok | info | pass | (ACAOなし)
+robots | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 robots | T-12.ok | info | pass | HTTP/2
 session-sample-* | C-07.na | info | na | 
 top | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -149,7 +149,7 @@ top | H-13.ok | info | pass | text/html; charset=utf-8
 top | H-14.ok | info | pass | none
 top | H-16.2 | info | fail | server: nginx
 top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-top | R-04.ok | info | pass | (ACAOなし)
+top | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 top | T-12.ok | info | pass | HTTP/2
 
 ## coverage
@@ -188,7 +188,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=1
+R-04 | evaluated | fails=1 | 一部のターゲット（5件）は入力不足 / C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

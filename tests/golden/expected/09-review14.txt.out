@@ -43,7 +43,7 @@ form-post | H-13.ok | info | pass | text/html; charset=utf-8
 form-post | H-14.1 | low | fail | (ヘッダなし)
 form-post | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 form-post | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-form-post | R-04.ok | info | pass | (ACAOなし)
+form-post | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 form-post | T-12.ok | info | pass | HTTP/2
 http | C-10.1 | high | fail | ASP.NET_SessionId=CANA…(26 chars); path=/; HttpOnly
 http | T-04.2 | medium | fail | HTTP 301 → http://www.example.com/app/
@@ -75,7 +75,7 @@ mypage | H-13.ok | info | pass | text/html; charset=utf-8
 mypage | H-14.1 | low | fail | (ヘッダなし)
 mypage | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 mypage | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-mypage | R-04.ok | info | pass | (ACAOなし)
+mypage | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 mypage | T-12.ok | info | pass | HTTP/2
 open-redirect | T-06.na | info | na | HTTP 200（転送しなかった。転送先を検証しているかは分からない）
 pre-login/login | C-09.na | info | na | 
@@ -127,7 +127,7 @@ spa-actuator | H-13.ok | info | pass | text/html; charset=utf-8
 spa-actuator | H-14.1 | low | fail | (ヘッダなし)
 spa-actuator | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 spa-actuator | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-spa-actuator | R-04.ok | info | pass | (ACAOなし)
+spa-actuator | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 spa-actuator | T-12.ok | info | pass | HTTP/2
 
 ## coverage
@@ -166,7 +166,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

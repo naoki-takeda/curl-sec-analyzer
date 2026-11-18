@@ -50,7 +50,7 @@ cookies | H-13.ok | info | pass | text/html; charset=utf-8
 cookies | H-14.1 | low | fail | (ヘッダなし)
 cookies | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 cookies | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-cookies | R-04.ok | info | pass | (ACAOなし)
+cookies | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 cookies | T-12.ok | info | pass | HTTP/2
 csp-sample-* | H-04.na | info | na | 
 error-* | A-10.na | info | na | 
@@ -98,7 +98,7 @@ mypage | H-13.ok | info | pass | text/html; charset=utf-8
 mypage | H-14.1 | low | fail | (ヘッダなし)
 mypage | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 mypage | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-mypage | R-04.ok | info | pass | (ACAOなし)
+mypage | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 mypage | T-12.ok | info | pass | HTTP/2
 pre-login | A-02.ok | info | pass | URL・Location・本文にトークンなし
 pre-login | C-01.1 | high | fail | JSESSIONID=4f1c…(31 chars); Path=/; HttpOnly
@@ -188,7 +188,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

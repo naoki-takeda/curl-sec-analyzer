@@ -35,7 +35,7 @@ after | H-13.ok | info | pass | text/html; charset=utf-8
 after | H-14.1 | low | fail | (ヘッダなし)
 after | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 after | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-after | R-04.ok | info | pass | (ACAOなし)
+after | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 after | T-12.ok | info | pass | HTTP/2
 csp-sample-* | H-04.na | info | na | 
 error-* | A-10.na | info | na | 
@@ -57,7 +57,7 @@ json-header | H-13.ok | info | pass | application/json
 json-header | H-14.1 | info | fail | (ヘッダなし)
 json-header | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 json-header | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-json-header | R-04.ok | info | pass | (ACAOなし)
+json-header | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 json-header | T-12.na | info | na | HTTPのバージョンが分からない
 logout/after-logout | C-12.na | info | na | 
 nobreak | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -81,7 +81,7 @@ nobreak | H-13.ok | info | pass | application/json
 nobreak | H-14.1 | info | fail | (ヘッダなし)
 nobreak | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 nobreak | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-nobreak | R-04.ok | info | pass | (ACAOなし)
+nobreak | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 nobreak | T-12.ok | info | pass | HTTP/2
 page | A-02.ok | info | pass | URL・Location・本文にトークンなし
 page | C-01.3 | low | fail | tmp=…(6 chars); Path=/（ホストはHSTSあり）
@@ -114,7 +114,7 @@ page | H-13.ok | info | pass | text/html; charset=utf-8
 page | H-14.1 | low | fail | (ヘッダなし)
 page | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 page | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-page | R-04.ok | info | pass | (ACAOなし)
+page | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 page | T-05.ok | info | pass | 1回の転送
 page | T-12.ok | info | pass | HTTP/2
 pre-login/login | C-09.na | info | na | 
@@ -142,7 +142,7 @@ slow | H-13.ok | info | pass | text/html; charset=utf-8
 slow | H-14.1 | low | fail | (ヘッダなし)
 slow | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 slow | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-slow | R-04.ok | info | pass | (ACAOなし)
+slow | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 slow | T-12.1 | info | fail | HTTP/1.1
 top | A-02.ok | info | pass | URL・Location・本文にトークンなし
 top | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -166,7 +166,7 @@ top | H-13.ok | info | pass | text/html; charset=utf-8
 top | H-14.1 | low | fail | (ヘッダなし)
 top | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-top | R-04.ok | info | pass | (ACAOなし)
+top | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 top | T-12.ok | info | pass | HTTP/2
 top#2 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 top#2 | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -190,7 +190,7 @@ top#2 | H-13.ok | info | pass | text/html; charset=utf-8
 top#2 | H-14.1 | low | fail | (ヘッダなし)
 top#2 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 top#2 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-top#2 | R-04.ok | info | pass | (ACAOなし)
+top#2 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 top#2 | T-12.1 | info | fail | HTTP/1.1
 
 ## coverage
@@ -229,7 +229,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

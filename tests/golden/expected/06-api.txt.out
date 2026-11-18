@@ -73,7 +73,7 @@ export | H-13.ok | info | pass | application/json
 export | H-14.1 | info | fail | (ヘッダなし)
 export | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 export | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-export | R-04.ok | info | pass | (ACAOなし)
+export | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 export | T-12.ok | info | pass | HTTP/2
 gql | A-02.ok | info | pass | URL・Location・本文にトークンなし
 gql | A-07.2 | medium | fail | キー: data.user.isAdmin
@@ -97,7 +97,7 @@ gql | H-13.ok | info | pass | application/json
 gql | H-14.1 | info | fail | (ヘッダなし)
 gql | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 gql | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-gql | R-04.ok | info | pass | (ACAOなし)
+gql | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 gql | T-12.ok | info | pass | HTTP/2
 jwt | A-02.ok | info | pass | URL・Location・本文にトークンなし
 jwt | A-03.1 | high | fail | alg: none
@@ -132,7 +132,7 @@ jwt | H-13.ok | info | pass | application/json
 jwt | H-14.1 | info | fail | (ヘッダなし)
 jwt | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 jwt | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-jwt | R-04.ok | info | pass | (ACAOなし)
+jwt | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 jwt | T-12.ok | info | pass | HTTP/2
 legacy-json | A-02.ok | info | pass | URL・Location・本文にトークンなし
 legacy-json | A-09.1 | medium | fail | Content-Type: text/html（本文はJSON）
@@ -157,7 +157,7 @@ legacy-json | H-13.2 | medium | na | text/html | dedupedBy=A-09.1
 legacy-json | H-14.1 | low | fail | (ヘッダなし)
 legacy-json | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 legacy-json | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-legacy-json | R-04.ok | info | pass | (ACAOなし)
+legacy-json | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 legacy-json | T-12.ok | info | pass | HTTP/2
 logout/after-logout | C-12.na | info | na | 
 method-delete | A-11.1 | medium | fail | 想定外のメソッドが HTTP 204
@@ -210,7 +210,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

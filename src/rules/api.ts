@@ -2,7 +2,7 @@
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
 import { baseLabel, finalResponse, responseKind, sameDocumentHop } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { NO_BODY_REC, graphqlError as graphqlErrorOf, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, notSecretFormat } from './util';
+import { NO_BODY_REC, graphqlError as graphqlErrorOf, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, notSecretFormat, notSecretText } from './util';
 import { loginForm } from './html';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
@@ -227,9 +227,10 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   if (Array.isArray(v)) v.slice(0, 50).forEach(x => secretValuedKeys(x, `${prefix}[]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
     const p = prefix ? `${prefix}.${k}` : k;
-    // 入力の検証の規則・autocomplete の値・正規表現と、エラーの項目の中の値（errors.password の TOO_SHORT）は秘密の値ではない（第49回）
+    // 入力の検証の規則・autocomplete の値・正規表現と、エラーの項目の中の値（errors.password の TOO_SHORT）は秘密の値ではない（第49回）。
+    // パス・URL・項目の名前（{"menu":{"password":"/settings/password"}}）も、E-09 と同じく除く（第50回）
     if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x) && !isPlaceholderValue(x) && !stateWord(x)
-      && !notSecretFormat(x) && !/(?:^|\.)(?:errors?|validation(?:_?errors)?)(?:\[\])?$/i.test(prefix)) out.add(p);   // errors・validation の直下だけ（束のレビュー）
+      && !notSecretFormat(x) && !notSecretText(x) && !/(?:^|\.)(?:errors?|validation(?:_?errors)?)(?:\[\])?$/i.test(prefix)) out.add(p);   // errors・validation の直下だけ（束のレビュー）
     secretValuedKeys(x, p, out, depth + 1);
   }
   return out;

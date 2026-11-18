@@ -1,4 +1,5 @@
 import type { Finding, Rule, RuleContext, Severity, Status } from '../model';
+import { wordLike } from '../tokenShape';
 
 export function mk(rule: Rule, ctx: RuleContext, cond: number | 'ok' | 'na', severity: Severity, status: Status,
                    evidence: string, recommendation: string, extra: Partial<Finding> = {}): Finding {
@@ -200,3 +201,33 @@ export const AUTOCOMPLETE = /^(?:current-password|new-password|one-time-code|use
 /** 秘密の値ではない形（入力の検証の規則・正規表現 ^…$・autocomplete の値）。E-09 と A-07 で共有する（A-07 だけ除いておらず、API の検証の規則を
  * パスワードの露出（高）とした。第49回） */
 export const notSecretFormat = (v: string): boolean => VALIDATION_RULE.test(v) || /^\^.*\$$/.test(v) || AUTOCOMPLETE.test(v);
+
+/** 秘密の値の名前の語（項目の名前・セレクタに含まれていれば、その値は秘密ではなく画面の部品・項目を指す） */
+const SECRET_WORD = /^(?:password|passwd|pass|pwd|secret|token|key|credentials?|passphrase)$/;
+const wordsOf = (v: string) => v.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[^a-z\d]+/).filter(Boolean);
+/** 項目の名前の部品の語（user_password・loginPassword・password_confirmation の、秘密の語以外の語） */
+const FIELD_WORD = /^(?:user|users|login|new|current|old|confirm|confirmation|confirmed|input|field|repeat|retype|form|account|reset|verify|verification|enter|your|my|label|placeholder|hint|name|id)$/;
+/** JSON でエスケープした ASCII 以外の文字（パ） */
+const ESCAPED_NON_ASCII = /\\u(?!00[0-7])[0-9a-fA-F]{4}/g;
+/**
+ * 画面の部品・項目の名前などで、秘密の値ではない形（E-09 と A-07 で共有する。第50回）：
+ * - パス（/settings/password・/Account/ForgotPassword）と翻訳キー（auth.password.label・user.newPassword）：かけらが語として読め、秘密の語を含むもの
+ * - ユーザー情報のない URL と、テンプレート（{{…}}・${…}）
+ * - 秘密の語を含む、小文字の CSS のセレクタ（#password-input・.js-password・input[name=password]。値の全体がセレクタの形のもの）
+ * - 項目の名前（user_password・loginPassword・password_confirmation）：英字と _ - だけで、語が秘密の語と項目の部品の語（user・login・new・
+ *   confirm など）だけのもの（super-secret-key・admin_pass・changeme_password は、ほかの語を含むので秘密の値として扱う。束のレビュー）
+ * - JSON でエスケープした ASCII 以外の文字（PHP の json_encode・Laravel の @json の "パス…"）が2つ以上で、値の半分以上を占めるもの
+ * 語として読めないかけらのパス・ドットの形は除かない（base64 の秘密は / で始まることがあり、JWT はドットでつなぐ）
+ */
+export const notSecretText = (v: string): boolean => {
+  const words = wordsOf(v);
+  // パス（/Account/ForgotPassword・/users/password/new?locale=ja）と翻訳キー（auth.passwordLabel）は、かけらがすべて語として読め、秘密の語を
+  // 含むものだけ（base64 の /Ab3… や、合言葉の correct.horse.battery を除かないため。束のレビュー）。URL はユーザー情報（u:pw@）のないものだけ
+  const wordy = (s: string) => s.split(/[/._-]+/).filter(Boolean).every(wordLike) && words.some(w => SECRET_WORD.test(w));
+  if ((/^\/[\w\-./]*(?:\?[\w=&.-]*)?$/.test(v) && wordy(v.split('?')[0])) || (/^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) && wordy(v))) return true;
+  if (/^https?:\/\/[^/@\s]+(?:[/?#]|$)/i.test(v) || /^(?:\{\{|\$\{)/.test(v)) return true;
+  if ((/^[#.][a-z][a-z0-9_-]*$/.test(v) || /^[a-z]*(?:\[[a-z_-]+(?:[~|^$*]?=["']?[a-z0-9_-]*["']?)?\])+$/.test(v)) && words.some(w => SECRET_WORD.test(w))) return true;
+  if (v.length <= 64 && /^[A-Za-z]+(?:[_-][A-Za-z]+)*$/.test(v) && words.length >= 2 && words.some(w => SECRET_WORD.test(w)) && words.every(w => SECRET_WORD.test(w) || FIELD_WORD.test(w))) return true;
+  const esc = v.match(ESCAPED_NON_ASCII)?.length ?? 0;
+  return esc >= 2 && esc * 6 * 2 >= v.length;
+};

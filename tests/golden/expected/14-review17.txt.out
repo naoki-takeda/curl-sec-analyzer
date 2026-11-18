@@ -64,7 +64,7 @@ me | H-13.ok | info | pass | application/json
 me | H-14.1 | info | fail | (ヘッダなし)
 me | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 me | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-me | R-04.ok | info | pass | (ACAOなし)
+me | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 me | T-12.ok | info | pass | HTTP/2
 method-delete | A-11.na | info | na | HTTP 403（メソッドを断ったかは分からない）
 open-redirect | T-06.na | info | na | HTTP 302（ログイン画面か同じページへの転送。転送先を検証しているかは分からない）
@@ -90,7 +90,7 @@ page | H-13.ok | info | pass | text/html; charset=utf-8
 page | H-14.1 | low | fail | (ヘッダなし)
 page | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 page | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-page | R-04.ok | info | pass | (ACAOなし)
+page | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 page | T-12.ok | info | pass | HTTP/2
 pre-login | A-02.ok | info | pass | URL・Location・本文にトークンなし
 pre-login | C-01.ok | info | pass | sessionid
@@ -128,7 +128,7 @@ press | H-13.ok | info | pass | text/html; charset=utf-8
 press | H-14.1 | low | fail | (ヘッダなし)
 press | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 press | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-press | R-04.ok | info | pass | (ACAOなし)
+press | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 press | T-12.ok | info | pass | HTTP/2
 quoted label | A-02.ok | info | pass | URL・Location・本文にトークンなし
 quoted label | H-01.1 | high | fail | (ヘッダなし)
@@ -138,7 +138,7 @@ quoted label | H-11.na | info | na | 機密応答かどうか分からない（C
 quoted label | H-12.na | info | na | HTTP 401（鮮度の指定がなく、キャッシュされない応答）
 quoted label | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 quoted label | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-quoted label | R-04.ok | info | pass | (ACAOなし)
+quoted label | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 quoted label | T-12.ok | info | pass | HTTP/2
 session-sample-* | C-07.na | info | na | 
 top | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -150,7 +150,7 @@ top | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシ�
 top | H-13.na | info | na | HTTP 302（別のサイトへの転送で終わる。転送先の応答は判定しない）
 top | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-top | R-04.ok | info | pass | (ACAOなし)
+top | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 top | T-05.ok | info | pass | 1回の転送
 top | T-12.ok | info | pass | HTTP/2
 unauth-export | A-01.1 | high | fail | 認証なしで HTTP 200
@@ -181,7 +181,7 @@ upload | H-13.ok | info | pass | text/html; charset=utf-8
 upload | H-14.1 | low | fail | (ヘッダなし)
 upload | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 upload | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-upload | R-04.ok | info | pass | (ACAOなし)
+upload | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 upload | T-12.ok | info | pass | HTTP/2
 www.example.com | T-10.na | info | na | 暗号・鍵の情報がない（ハンドシェイクに失敗した可能性）
 www.example.com | T-11.ok | info | pass | notAfter: 2036-01-01 / SAN: www.example.com
@@ -222,7 +222,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

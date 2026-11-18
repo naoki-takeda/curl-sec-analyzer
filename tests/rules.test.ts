@@ -151,3 +151,52 @@ describe('第49回：ルールの誤検知・見逃し', () => {
     expect(form('http://www.example.com/session', 'https://www.example.com/session')).toContain('E-10.1');
   });
 });
+
+describe('第50回：E-09・A-07 の画面の部品の値、R-04・R-06・E-05', () => {
+  const page = (js: string) => `#TARGET url=https://www.example.com/login label=t\nHTTP/2 200\ncontent-type: text/html\n\n<html><script>${js}</script></html>\n`;
+  const e09 = (js: string) => ids(page(js)).filter(i => i === 'E-09.1');
+  it('E-09①：セレクタ・項目の名前・エスケープした日本語の文言は秘密の値ではない', () => {
+    for (const js of ['var s={password:"#password-input"}', 'var s={password:".js-password"}', 'var s={password:"input[name=password]"}',
+      'var s={"password":"user_password"}', 'var s={"password":"loginPassword"}', 'var s={"password":"password_confirmation"}',
+      'window.i18n={"password":"\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5165\u529b"}'])
+      expect(e09(js), js).toEqual([]);
+  });
+  it('E-09①：本物の秘密の値は、これまでどおり①', () => {
+    expect(e09('var cfg={client_secret:"sk9Fq2LmZx81PwQr"}')).toEqual(['E-09.1']);
+    expect(e09('var cfg={password:"Winter2024!Strong"}')).toEqual(['E-09.1']);
+  });
+  it('A-07①：パス・URL・項目の名前の値はパスワードの露出とみなさない', () => {
+    const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/me label=api sensitive=1\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('api');
+    for (const b of ['{"menu":{"password":"/settings/password"}}', '{"links":{"password":"https://www.example.com/password/reset"}}', '{"form":{"password":"user_password"}}'])
+      expect(api(b).filter(i => i === 'A-07.1'), b).toEqual([]);
+    expect(api('{"user":{"password":"Winter2024!Strong"}}')).toContain('A-07.1');
+  });
+  it('R-04：Origin を送ったと分からず ACAO もない応答は合格にしない（na）。cors-* のラベルと ACAO: * はこれまでどおり判定', () => {
+    expect(withLabel('page', 'https://www.example.com/', HTML)).toContain('R-04.na');
+    expect(withLabel('cors-reflect', 'https://www.example.com/api', HTML)).toContain('R-04.ok');
+    expect(withLabel('page', 'https://www.example.com/', `${HTML}access-control-allow-origin: *`)).not.toContain('R-04.na');
+  });
+  it('R-06①：送った Origin と違う固定の ACAO には出さない（na）。反射した ACAO はこれまでどおり①', () => {
+    const v = (acao: string) => evaluate(['#TARGET url=https://www.example.com/api label=cors-reflect', '* Connected to www.example.com (192.0.2.1) port 443', '> GET /api HTTP/2',
+      '> Origin: https://evil.example', '>', '< HTTP/2 200', '< content-type: application/json', `< access-control-allow-origin: ${acao}`, '<', ''].join('\n')).ids('cors-reflect');
+    expect(v('https://app.example.com')).toContain('R-06.na');
+    expect(v('https://evil.example')).toContain('R-06.1');
+  });
+  it('E-05：5xx は合格にしない（na）', () => {
+    const r = evaluate('#TARGET url=https://www.example.com/actuator/env label=page\nHTTP/2 503\ncontent-type: application/json\n\n{"error":"x"}\n').ids('page').filter(x => x.startsWith('E-05'));
+    expect(r).toEqual(['E-05.na']);
+  });
+  it('E-09①・A-07①（束のレビュー）：秘密の語のほかの語を含む値・セレクタの形でない値・エスケープが1つの値は、秘密の値として扱う', () => {
+    for (const js of ['var cfg={secret_key:"my-super-secret-key"}', 'var cfg={password:"changeme_password"}', 'var cfg={password:"Pass[1]Secret!x"}', 'var cfg={password:"S3cr3t\\u00e9Value99"}', 'var cfg={password:"/Ab3xY9qLmZ81PwQr"}'])
+      expect(e09(js), js).toEqual(['E-09.1']);
+    const api = evaluate('#TARGET url=https://www.example.com/api/me label=api sensitive=1\nHTTP/2 200\ncontent-type: application/json\n\n{"user":{"password":"admin_pass"}}\n').ids('api');
+    expect(api).toContain('A-07.1');
+  });
+  it('（2回目の束のレビュー）E-09：語として読める翻訳キー・パスは除き、A-07：ユーザー情報のある URL・合言葉は除かない', () => {
+    for (const js of ['var s={password:"auth.passwordLabel"}', 'var s={password:"user.newPassword"}', 'var s={password:"/Account/ForgotPassword"}', 'var s={password:"/users/password/new?locale=ja"}'])
+      expect(e09(js), js).toEqual([]);
+    const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/me label=api sensitive=1\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('api');
+    for (const b of ['{"user":{"password":"https://u:Winter2024@db.example.com/"}}', '{"user":{"password":"correct.horse.battery"}}', '{"user":{"password":"a1b2c3d4e5.f6a7b8c9d0e1f2"}}'])
+      expect(api(b), b).toContain('A-07.1');
+  });
+});
