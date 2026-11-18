@@ -977,3 +977,14 @@
 | Mozilla Server Side TLS | 最新は6.0（5.8 で Intermediate から DHE を外し、6.0 で Old を廃止）。wiki は移転の案内だけ | 出典を指針の JSON に替える。T-10 は DHE＋AEAD を合格のままにする（IPA の TLS 暗号設定ガイドラインに合わせる。判断の根拠15） | 設計書 |
 | 出典・ライセンス・そのほか | OWASP Secure Headers Project は移転（旧URLは404）。貼り付け型 OSS などは MIT（techshield-tech/http-headers は存在しない）。Observatory の現行の加点の合計は165。Trusted Types は Baseline 2026。HTTP/2 のヘッダ名は常に小文字。C12・C23 は OpenSSL 3.5.9 で正しく判定した。C23 の暗号名は正しい。Chrome・Edge の HAR の既定は sanitized | 設計書の要確認事項・出典・既存ツールの表に反映する | 設計書 |
 | 未対応 | プローブの判定パターンは、形式の仕様と典型的な例で確かめただけで、実際の応答では確かめていない（要確認事項に残す） | 次回以降 | — |
+
+### 1.0.0 の準備（第45回）
+
+v1.0 の範囲を実装し、要確認事項（第44回）を確かめたので、ツールの版を 1.0.0 にする（2026-11-18）。判定の範囲と条件は 0.4.57 と同じ。
+
+| 対象 | 内容 | 反映箇所 |
+| --- | --- | --- |
+| 版 | 0.4.57 から 1.0.0 にする。ルールセットの版は`2026.11-v1.0.0` | `package.json`、`package-lock.json`、`src/rules/ruleset.ts` |
+| 版の付け方 | 1.0.0 からセマンティックバージョニングにする（入力・ファイルの互換を壊す変更はメジャー、追加はマイナー、修正はパッチ） | 設計書の「版の付け方」、README |
+| 変更履歴 | 利用者向けの変更履歴（機能のまとめと既知の限界）を作る。GitHub のリリースの本文にも使う | `CHANGELOG.md`、CONTRIBUTING.md |
+| 画像 | README の画像と共有用の画像を撮り直す | `docs/screenshot.png`、`public/og.png` |
