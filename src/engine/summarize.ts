@@ -27,3 +27,18 @@ export function countBySeverity(rows: OverallRow[]): Record<Severity, number> {
 
 /** 丸数字（第8章の「該当条件」列） */
 export const circled = (n?: number) => (n && n >= 1 && n <= 20 ? String.fromCodePoint(0x245f + n) : '');
+
+/**
+ * 判定不能（na）の行のうち、証跡と推奨対応が同じものを1行にまとめる（項目の列に項目IDを並べる）。本文を採取していないページでは、
+ * E-02・E-07〜E-10・E-12 が同じ理由の na になり、すべてを表示すると1つのターゲットに6行並んだ
+ */
+export function mergeNa(fs: Finding[]): (Finding & { items?: string[] })[] {
+  const out: (Finding & { items?: string[] })[] = []; const byReason = new Map<string, Finding & { items?: string[] }>();
+  for (const f of fs) {
+    if (f.status !== 'na') { out.push(f); continue; }
+    const k = JSON.stringify([f.evidence, f.recommendation]); const g = byReason.get(k);
+    if (!g) { const row = { ...f }; byReason.set(k, row); out.push(row); continue; }
+    g.items = [...new Set([...(g.items ?? [g.item]), f.item])];
+  }
+  return out;
+}

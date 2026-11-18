@@ -3,7 +3,7 @@ import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
+import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
 import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
@@ -160,7 +160,12 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     const lc = ownChain(login);
     if (!after.length && lc.length === 1 && /[?&](?:code|ticket|SAMLart)=/i.test(lc[0].headers.get('location')?.[0] ?? ''))
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
-    if (!after.length || after.some(a => before.includes(a)))
+    const reused = !after.length || after.some(a => before.includes(a));
+    // 2xx のログインで本文を採取していない（-v -o /dev/null、HAR の本文なし）なら、パスワード欄のある画面を返し直す失敗（loginRejected）と
+    // 成功を見分けられない。失敗ならセッションIDを再発行しないのは当然なので、①（高）にせず na にする（3xx は Location で見分けるので判定する）
+    if (reused && lc[0] && lc[0].status >= 200 && lc[0].status < 300 && !lc[0].body?.trim())
+      return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答が HTTP ${lc[0].status}（本文を採取していないので、ログインに成功したかは分からない）`, NO_BODY_REC)];
+    if (reused)
       return [cf(sessionFixation, 'pre-login/login', 1, 'high', 'fail', 'login 応答でセッションIDが再発行されていない', 'ログイン成功時にセッションIDを再発行する')];
     // pre-login で発行した主のセッションID（名前に sess・sid を含むもの）を、login で新しい値にせず、別の Cookie（auth_token・
     // ASP.NET Core の .AspNetCore.Identity.Application）だけを発行した。認証を新しい Cookie で持つなら固定化はないが、ログイン前の ID の

@@ -21,7 +21,11 @@ describe('E-03・E-13：取得できた（2xx）プローブだけを一致と�
     expect(run(probe('/assets/app.js.map', 404, '{"message":"not found"}'))).not.toContain('E-13.1');
   });
   it('2xx で中身がそのファイルの形なら指摘する', () => {
-    expect(run(probe('/package.json', 200, '{\n  "name": "my-app",\n  "version": "1.0.0"'))).toContain('E-03.1');
+    expect(run(probe('/package.json', 200, '{\n  "name": "my-app",\n  "version": "1.0.0",\n  "private": true'))).toContain('E-03.1');
+    // name・version だけでは、どのパスにも同じ JSON を返す API と見分けられないので②（判定保留）（要確認事項の確認、2026-11-18）
+    const nameOnly = run(probe('/package.json', 200, '{\n  "name": "my-app",\n  "version": "1.0.0"'));
+    expect(nameOnly).toContain('E-03.2');
+    expect(nameOnly).not.toContain('E-03.1');
     expect(run(probe('/WEB-INF/web.xml', 200, '<?xml version="1.0" encoding="UTF-8"?>\n<web-app xmlns'))).toContain('E-03.1');
     expect(run(probe('/assets/app.js.map', 200, '{"version":3,"file":"app.js","sources":["src/a.ts"]'))).toContain('E-13.1');
   });

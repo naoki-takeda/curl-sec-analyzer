@@ -72,7 +72,7 @@ export const EXACT: Record<string, string> = {
   '公開データであれば問題ない。意図どおりか確認する': 'Acceptable for public data. Confirm this is intended',
   '機密応答なら①（中）にあたる。#TARGET に sensitive=1 か sensitive=0 を付ける': 'If the response is sensitive, this is condition 1 (medium). Add sensitive=1 or sensitive=0 to #TARGET',
   '許可外のOriginに状態を変えるメソッドを許可しない': 'Do not allow state-changing methods for untrusted origins',
-  'Chromeは7200秒で打ち切る。必要な長さにする': 'Chrome caps this at 7200 seconds. Use only the length you need',
+  'Chromeは7200秒、Safariは600秒で打ち切る。必要な長さにする': 'Chrome caps this at 7200 seconds and Safari at 600 seconds. Use only the length you need',
   'Origin によって ACAO を変えるなら Vary: Origin を付ける（キャッシュ汚染の防止）': 'Add Vary: Origin when ACAO depends on the Origin (prevents cache poisoning)',
   '公開するヘッダを明示する': 'List the exposed headers explicitly',
   '認証トークンや内部ヘッダを公開しない': 'Do not expose authentication tokens or internal headers',
@@ -224,6 +224,7 @@ Object.assign(EXACT, {
 const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^機密応答かどうか分からない（(.*)）$/, m => `Unknown whether the response is sensitive (${m[1]})`],
   [/^HTTP (\d+)（Allow ヘッダなし）$/, m => `HTTP ${m[1]} (no Allow header)`],
+  [/^一部のターゲット（(\d+)件）は入力不足$/, m => `Some targets (${m[1]}) lack input`],
   [/^必要なラベル: (.+)$/, m => `Required labels: ${m[1].replace(/（一般）/g, '(general)').replace(/（2つ以上）/g, ' (2 or more)').replace(/（同じURLを2回取得）/g, ' (fetch the same URL twice)').replace(/（APIのエラー応答を2つ以上）/g, ' (2 or more API error responses)').replace(/（https:\/\/apexドメイン\/）/g, ' (https://apex-domain/)')}`],
   [/^使っていなければ (.+) を無効にする$/, m => `Disable ${m[1].replace(/・/g, ', ')} if unused`],
   [/^(\S+) として数える（(.+)）$/, m => `Counted as ${m[1]} (avoids double counting)`],

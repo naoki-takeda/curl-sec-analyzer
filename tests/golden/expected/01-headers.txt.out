@@ -163,8 +163,8 @@ H-07 | evaluated | fails=2
 H-08 | evaluated | fails=4
 H-09 | evaluated | fails=2
 H-10 | evaluated | fails=3
-H-11 | evaluated | fails=3
-H-12 | evaluated | fails=1
+H-11 | evaluated | fails=3 | 一部のターゲット（1件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-12 | evaluated | fails=1 | 一部のターゲット（3件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=1
 H-14 | evaluated | fails=3
 H-15 | missing-input | fails=0 | 必要なラベル: logout

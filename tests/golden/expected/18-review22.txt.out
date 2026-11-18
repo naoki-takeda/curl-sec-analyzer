@@ -96,11 +96,11 @@ H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定�
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=2
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-08 | evaluated | fails=1
+H-08 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（204・304 は対象外）
 H-09 | evaluated | fails=2
 H-10 | evaluated | fails=2
-H-11 | evaluated | fails=1
-H-12 | evaluated | fails=1 | 機密応答では判定していない（静的リソース・機密でない応答だけ）
+H-11 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-12 | evaluated | fails=1 | 機密応答では判定していない（静的リソース・機密でない応答だけ） / 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=2
 H-15 | missing-input | fails=0 | 必要なラベル: logout
@@ -156,7 +156,7 @@ E-10 | missing-input | fails=0 | 必要なラベル: （一般）
 E-11 | missing-input | fails=0 | 必要なラベル: （一般）
 E-12 | missing-input | fails=0 | 必要なラベル: （一般）
 E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
-A-01 | evaluated | fails=1
+A-01 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 認証が必要なデータを返す API の URL で採取し直す
 A-02 | evaluated | fails=0
 A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
 A-04 | manual | fails=0

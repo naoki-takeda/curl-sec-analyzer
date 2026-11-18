@@ -91,6 +91,12 @@ page | C-06.ok | info | pass | tmp
 page | C-08.ok | info | pass | tmp
 page | C-11.ok | info | pass | tmp
 page | C-13.ok | info | pass | 共有キャッシュの指定なし
+page | E-02.na | info | na | 本文を採取していない
+page | E-07.na | info | na | 本文を採取していない
+page | E-08.na | info | na | 本文を採取していない
+page | E-09.na | info | na | 本文を採取していない
+page | E-10.na | info | na | 本文を採取していない
+page | E-12.na | info | na | 本文を採取していない
 page | H-01.ok | info | pass | max-age=63072000; includeSubDomains
 page | H-02.2 | info | fail | max-age=63072000; includeSubDomains
 page | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
@@ -113,6 +119,12 @@ page | T-12.ok | info | pass | HTTP/2
 pre-login/login | C-09.na | info | na | 
 session-sample-* | C-07.na | info | na | 
 slow | A-02.ok | info | pass | URL・Location・本文にトークンなし
+slow | E-02.na | info | na | 本文を採取していない
+slow | E-07.na | info | na | 本文を採取していない
+slow | E-08.na | info | na | 本文を採取していない
+slow | E-09.na | info | na | 本文を採取していない
+slow | E-10.na | info | na | 本文を採取していない
+slow | E-12.na | info | na | 本文を採取していない
 slow | H-01.1 | high | fail | (ヘッダなし)
 slow | H-02.na | info | na | HSTSがない（H-01で判定）
 slow | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
@@ -183,7 +195,7 @@ top#2 | T-12.1 | info | fail | HTTP/1.1
 ## coverage
 H-01 | evaluated | fails=5
 H-02 | evaluated | fails=2
-H-03 | evaluated | fails=3
+H-03 | evaluated | fails=3 | 一部のターゲット（2件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=7
@@ -191,8 +203,8 @@ H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定�
 H-08 | evaluated | fails=4
 H-09 | evaluated | fails=7
 H-10 | evaluated | fails=7
-H-11 | evaluated | fails=5
-H-12 | evaluated | fails=0
+H-11 | evaluated | fails=5 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-12 | evaluated | fails=0 | 一部のターゲット（5件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=7
 H-15 | missing-input | fails=0 | 必要なラベル: logout
@@ -233,20 +245,20 @@ T-08 | missing-input | fails=0 | 必要なラベル: crlf
 T-09 | missing-input | fails=0 | 必要なラベル: tls
 T-10 | missing-input | fails=0 | 必要なラベル: tls
 T-11 | missing-input | fails=0 | 必要なラベル: tls
-T-12 | evaluated | fails=2
+T-12 | evaluated | fails=2 | 一部のターゲット（1件）は入力不足 / HTTPのバージョンが分からない
 T-13 | manual | fails=0
 E-01 | evaluated | fails=0
-E-02 | evaluated | fails=0
+E-02 | evaluated | fails=0 | 一部のターゲット（2件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-03 | missing-input | fails=0 | 必要なラベル: probes
 E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
 E-05 | missing-input | fails=0 | 必要なラベル: （一般）
 E-06 | missing-input | fails=0 | 必要なラベル: （一般）
-E-07 | evaluated | fails=0
-E-08 | evaluated | fails=0
-E-09 | evaluated | fails=0
-E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0 | 一部のターゲット（2件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-08 | evaluated | fails=0 | 一部のターゲット（2件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-09 | evaluated | fails=0 | 一部のターゲット（2件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-10 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-11 | missing-input | fails=0 | 必要なラベル: （一般）
-E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
 A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
 A-02 | evaluated | fails=0

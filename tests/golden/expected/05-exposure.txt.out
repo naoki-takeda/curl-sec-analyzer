@@ -237,8 +237,8 @@ H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定�
 H-08 | evaluated | fails=9
 H-09 | evaluated | fails=7
 H-10 | evaluated | fails=7
-H-11 | evaluated | fails=8
-H-12 | evaluated | fails=3
+H-11 | evaluated | fails=8 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-12 | evaluated | fails=3 | 一部のターゲット（7件）は入力不足 / 機密データを返す 200 の応答（認証後ページなど）で採取する / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=7
 H-15 | missing-input | fails=0 | 必要なラベル: logout

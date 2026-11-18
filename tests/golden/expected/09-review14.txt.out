@@ -142,7 +142,7 @@ H-08 | evaluated | fails=3
 H-09 | evaluated | fails=3
 H-10 | evaluated | fails=3
 H-11 | evaluated | fails=4
-H-12 | evaluated | fails=1
+H-12 | evaluated | fails=1 | 一部のターゲット（4件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける / 機密データを返す 200 の応答（認証後ページなど）で採取する
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=3
 H-15 | evaluated | fails=1
@@ -175,7 +175,7 @@ R-09 | missing-input | fails=0 | 必要なラベル: websocket
 T-01 | missing-input | fails=0 | 必要なラベル: options, trace
 T-02 | manual | fails=0
 T-03 | manual | fails=0
-T-04 | evaluated | fails=1
+T-04 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）
 T-05 | evaluated | fails=0
 T-06 | missing-input | fails=0 | next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す
 T-07 | missing-input | fails=0 | 必要なラベル: host-inj

@@ -1,8 +1,8 @@
 // rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64KBまで。正規表現による簡易的な走査
-import type { Rule, RuleContext } from '../model';
+import type { Finding, Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
-import { isLabelText, isPlaceholderValue, isPublicClientValue, mk } from './util';
+import { NO_BODY_REC, isLabelText, isPlaceholderValue, isPublicClientValue, mk } from './util';
 import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
@@ -141,6 +141,16 @@ export function tags(html: string, names: string[]): Tag[] {
 /** HTML本文があるか（-i・C2 で取得したもの） */
 export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ctx.final?.body?.trim() ? ctx.final.body : undefined);
 /**
+ * HTML本文がないときの結果：2xx の HTML 応答で本文を採取していない（-v・-D - -o /dev/null、HAR の本文なし）なら、本文の項目は判定できないので na。
+ * それ以外（HTML でない応答、3xx・4xx など）は適用外の []。本文を採取した HTML がほかに1つでもあると項目は「判定済み」になり、
+ * [] では本文のないページ（機密のページを含む）を調べていないことが見えなかった（空配列は適用外だけに使う取り決め）
+ */
+export const noHtmlBody = (rule: Rule, ctx: RuleContext): Finding[] => {
+  const s = ctx.final?.status ?? 0;
+  return ctx.responseKind === 'html' && s >= 200 && s < 300 && !ctx.final?.body?.trim()
+    ? [mk(rule, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
+};
+/**
  * HTML を返したページの URL とホスト。-L で別のホスト（apex から www など）に転送されたときは、ターゲットの URL ではなく転送先（最後のホップ）。
  * ターゲットのホストと比べると、転送先と同じホストのスクリプト（WordPress の絶対 URL）を第三者のもの（E-08）とし、相対の src も違う基準で解決した
  */
@@ -201,8 +211,9 @@ export function mixedContent(html: string): { active: Tag[]; passive: Tag[] } {
 export const mixedContentRule: Rule = { id: 'E-07', title: 'HTML本文：混在コンテンツ', appliesTo: 'html', scope: 'target',
   basis: ['MDN: Mixed content', 'W3C Mixed Content'],
   run(ctx) {
+    if (ctx.isHttps === false) return [];
     const html = htmlBody(ctx);
-    if (!html || ctx.isHttps === false) return [];
+    if (!html) return noHtmlBody(mixedContentRule, ctx);
     const { active, passive } = mixedContent(html);
     const out = [
       ...active.map(t => mk(mixedContentRule, ctx, 1, 'medium', 'fail', t.evidence, 'https:// で読み込む（CSPの upgrade-insecure-requests も検討）')),
@@ -215,7 +226,7 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
   basis: ['MDN: Subresource Integrity', 'OWASP Third Party JavaScript Management CS'],
   run(ctx) {
     const html = htmlBody(ctx);
-    if (!html) return [];
+    if (!html) return noHtmlBody(sriRule, ctx);
     const host = pageHostOf(ctx);
     const trusted = ctx.profile?.trustedScriptOrigins ?? [];
     // 外部オリジンの script を配信元（オリジン）ごとにまとめる。組織プロファイルで自社の配信元とした所は対象外
@@ -311,7 +322,7 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
   basis: ['OWASP WSTG-INFO-05'],
   run(ctx) {
     const html = htmlBody(ctx);
-    if (!html) return [];
+    if (!html) return noHtmlBody(htmlSecrets, ctx);
     const out = [];
     // OpenID Connect の response_mode=form_post：IdP は id_token・access_token を hidden の欄に入れて、アプリへ POST する画面を返す。
     // 利用者のブラウザに渡すのが仕事のトークンなので、その欄の値は秘密情報の露出として数えない（自社の Keycloak などを対象にしたとき）
@@ -354,7 +365,7 @@ export const passwordForm: Rule = { id: 'E-10', title: 'HTML本文：パスワ�
   basis: ['IPA', 'OWASP Authentication CS'],
   run(ctx) {
     const html = htmlBody(ctx);
-    if (!html) return [];
+    if (!html) return noHtmlBody(passwordForm, ctx);
     const pw = forms(html).filter(f => f.inputs.some(i => i.attrs.get('type')?.toLowerCase() === 'password'));
     if (!pw.length) return [];
     const out = [];
@@ -372,8 +383,9 @@ const TOKEN_NAME = /csrf|xsrf|token|authenticity|nonce|__RequestVerificationToke
 export const csrfToken: Rule = { id: 'E-12', title: 'HTML本文：CSRFトークンの有無', appliesTo: 'html', scope: 'target',
   basis: ['OWASP CSRF Prevention CS'],
   run(ctx) {
+    if (ctx.sensitive === false) return [];
     const html = htmlBody(ctx);
-    if (!html || ctx.sensitive === false) return [];
+    if (!html) return noHtmlBody(csrfToken, ctx);
     const posts = forms(html).filter(f => (f.form.attrs.get('method') ?? '').toLowerCase() === 'post');
     if (!posts.length) return [];
     const missing = posts.filter(f => !f.inputs.some(i => i.attrs.get('type')?.toLowerCase() === 'hidden' && TOKEN_NAME.test(i.attrs.get('name') ?? '')));
