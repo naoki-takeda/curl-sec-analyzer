@@ -92,13 +92,28 @@ const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-])|(?<=(?:^|[^\w-])[A-Za-z0-9_]{1,4
 // スキームのない「//ユーザー情報@ホスト」（<script src="//user:pass@cdn…">）も含める
 // スキームの前が数字のとき（エンコードした引用符 %22https://…、%3Dhttps://…）も含める（\b だと「2」と「h」の間を語の先頭とみなさず、パスワードを残した）。
 // スキームは英字の直後でないところから始める（「-」「.」の直後も含める。除くと、32文字を超える corp-egress-…-https://user:pw@ を見逃した）
-const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)([^/\s?#<>"']{1,512})@/g;
+// ユーザー情報には引用符（' "）も入る（new URL も curl も受け付ける。除くと、https://alice:Summer'2024@host/ のパスワードをまったく伏せなかった）。
+// ただし、引用符は後ろに語の文字が続くときだけ（JSON の {"site":"https://a.example","id":"x@<トークン>"} の「","」や、属性の「' title=」の後ろを
+// ユーザー情報とみなすと、@ の後ろのトークンをホスト名として残し、メールアドレスを伏せた。第48回の束1のレビュー）
+const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)((?:[^/\s?#<>"']|["'](?=[\w-])){1,512})@/g;
+/**
+ * コロンだけをエンコードしたスキームの URL（パラメータの値の https%3A//alice:<パスワード>@idp…。伏せなかった）。ユーザー情報には、エンコードした
+ * / ? #（%2F・%3F・%23）を含めない（?next=https%3A//a.example%2Fcb%3Fe=bob@example.com のパスの中のメールアドレスを、ユーザー情報とみなさない）
+ */
+const URL_CRED_PCT = /(?<=%(?:25)?3[Aa])(\/\/)((?:(?!%(?:25)?(?:2[Ff]|3[Ff]|23))[^/\s?#<>]){1,512})@/g;
 /**
  * パラメータの値に入れた、エンコードした URL のユーザー情報（?redirect=https%3A%2F%2Falice%3A<パスワード>%40evil.example）。
  * パスワード（%3A の後ろ、%40 の前）を伏せる。伏せ済みの「****」は伏せ直さない
  */
 // スキームは語の先頭から（どの位置からも試すと、長い語の本文で位置ごとに32文字ずつ読み、マスク全体の時間が2倍になった）
-const URL_CRED_ENCODED = /((?<![\w+.-])[A-Za-z][\w+.-]{0,31}%3A%2F%2F)([^\s?#&<>"'/%]{0,256})%3A(?!\*{4}%40)(?:(?!%2[Ff]|%3[Ff]|%23)[^\s?#&<>"'/]){1,512}?%40/gi;
+// スキームのない「%2F%2Fユーザー%3Aパスワード%40」、多重のエンコード（%253A%252F%252F…%2540）、スキームの前のエンコードした文字（%22https%3A…・
+// 入れ子の %3Dhttps%3A…）、:// と %3A の混在（https:%2F%2F…・https%3A//alice%3A…%40）、ユーザー名のメールアドレス（bob%40corp%3A…）、パスワードの中の
+// エンコードした / ? # も含める（どれも伏せなかった）。ポートのあとのパス（host%3A8443%2Fusers%2Fbob%40…）は伏せない（%3A の直後が数字と / のもの）。
+// パスワードは、コロンと同じ深さのエンコードの %40 で終える（中の URL を正しくエンコードすると、パスワードの @ は %2540 になる。深さを見ずに
+// 最初の %40 で終えると、%2540 の後ろのパスワードを残した）。ユーザー名の先読みは256文字まで（上限がないと、%2F%2F%40 の繰り返しで2乗の時間）
+const URL_CRED_ENCODED = new RegExp(String.raw`((?:(?:(?<![\w+.-])|(?<=%[0-9A-Fa-f]{2}))[A-Za-z][\w+.-]{0,31}(?::|%(?:25)*3A)|(?<![\w%]))(?:%(?:25)*2F%(?:25)*2F|\/\/))((?:[^\s?#&<>"'/%:@]|%(?:25)*40(?=[^\s?#&<>"'/]{0,256}?%(?:25)*3A)){0,256})(%(?<lv>(?:25)*)3A)(?!\*{4}%)(?!\d{1,5}(?:%(?:25)*2F|\/))(?:[^\s?#&<>"'/@%]|%(?!\k<lv>40)[0-9A-Fa-f]{2}){1,512}?(%\k<lv>40)`, 'gi');
+/** エンコードした // のあとの、生の : と @ のユーザー情報（https:%2F%2Falice:<パスワード>@idp…） */
+const URL_CRED_MIXED = new RegExp(String.raw`((?:(?<![\w+.-])|(?<=%[0-9A-Fa-f]{2}))[A-Za-z][\w+.-]{0,31}(?::|%(?:25)*3A)%(?:25)*2F%(?:25)*2F)([^\s?#&<>"'/%:@]{0,256}):(?!\*{4}@)(?!\d{1,5}(?:%|\/))[^\s?#&<>"'/@]{1,512}@`, 'gi');
 /** パスワードがあればユーザー名を残してパスワードを伏せる。ユーザー名だけ（https://<トークン>@host/ の形）なら、それをトークンとしてマスクする */
 const maskUserinfo = (u: string, h: Hider) => { const i = u.indexOf(':'); return i >= 0 ? `${u.slice(0, i)}:****` : h.value(u); };
 
@@ -311,23 +326,41 @@ function maskParams(s: string, h: Hider, depth = 0): string {
  * 区切りのない15・16桁で 3〜6 で始まるもの）。13桁のミリ秒の時刻などは対象外。
  * 前後が英数字・_・- のもの（パスのトークンの途中 ab12…123-45-6789ij…）は対象外（途中を伏せると、残りのかけらが短くなり、パスの部分として伏せられなくなった）
  */
-const SSN = /(?<![\w-])\d{3}-\d{2}-\d{4}(?![\w-])/g;
-const CARD = /(?<![\w.-])(?:\d{4}([ .-])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ .-])\d{6}\2\d{5}|[3-6]\d{14,15})(?![\w-]|\.\d)/g;
+// 区切りをパーセントエンコードしたもの（%20・%2D・%2E。encodeURIComponent で組み立てた URL の ?card=4111%201111%201111%201111）も含める
+// （伏せずに、すべての行の URL に出た）
+const SEP_NUM = String.raw`(?:[ .+-]|%2[0DdEe])`;
+const SSN = /(?:(?<![\w-])|(?<=%[0-9A-Fa-f]{2}|\+))\d{3}(-|%2[Dd]|\+)\d{2}\1\d{4}(?![\w-])/g;
+const CARD = new RegExp(String.raw`(?:(?<![\w.-])|(?<=%[0-9A-Fa-f]{2}|\+))(?:\d{4}(${SEP_NUM})\d{4}\1\d{4}\1\d{1,7}|\d{4}(${SEP_NUM})\d{6}\2\d{5}|[3-6]\d{14,15})(?![\w-]|\.\d)`, 'g');
+/** 番号の数字だけ（エンコードした区切りの「20」「2D」を数字に数えない） */
+const numDigits = (v: string) => v.replace(/%2[0DdEe]/g, '').replace(/\D/g, '');
+// ↑ エンコードした区切り・+ の直後の番号（?q=card%204111%201111…・?q=ssn+123-45-6789）も伏せる（%20 の 0 が語の文字なので、前を見る条件で外れた）
 const luhn = (d: string) => {
   let sum = 0;
   for (let i = 0; i < d.length; i++) { let x = d.charCodeAt(d.length - 1 - i) - 48; if (i % 2) { x *= 2; if (x > 9) x -= 9; } sum += x; }
   return d.length >= 13 && sum % 10 === 0;
 };
+/**
+ * 同じクエリにユーザー名（u・user・username・login・usr・uid・email など）があるときの p の値（Subsonic などの ?u=admin&p=<パスワード>）。
+ * p だけの名前はページ番号（?p=2）にも使うので、ユーザー名と組のときだけ伏せる。伏せ済みの値（Su…(10 chars)）は値の空白で切らずにそのまま残す
+ * （切ると「Su…(10」を伏せ直し、かけるたびに長くなった。第48回の束1のレビュー）。HTML の &amp;・エンコードした %26・; の区切りも見る
+ */
+const USER_PARAM = /(?:[?&;]|&amp;|%3F|%26)(?:u|user|username|login|usr|uid|userid|user_id|email|account)(?:=|%3D)/i;
+const P_PARAM = /((?:[?&;]|&amp;|%3F|%26)p(?:=|%3D))((?:nonce-)?[^…\s&#;"'<>=]{0,4}…\(\d+ chars\)|(?:(?!%26|&amp;)[^&\s#;"'<>])+)/gi;
+const maskUserPass = (s: string, h: Hider) => s.replace(/\?(?:…\(\d+ chars\)|[^\s#"'<>]){0,4096}/g, q => (!USER_PARAM.test(q) ? q
+  : q.replace(P_PARAM, (all: string, k: string, v: string) => (MASKED_PARAM.test(v) ? all : `${k}${h.value(v)}`))));
 function mask(s: string, h: Hider): string {
   // 順序：nonce → JSON の組（値の中の JSON を、パラメータの区切りで分ける前に見る） → パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる）
   // → ユーザー情報 → ASP.NET のセッション → パスの部分
-  const nonce = s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${h.value(v)}'`)).replace(BARE_NONCE, (all, q: string | undefined, v: string) => bareNonce(all, q, v, h));
-  return maskFreePairs(maskParams(maskJsonPairs(nonce, h), h), h)
+  // 値が「…」だけのもの（推奨対応の決まった文言 script-src 'nonce-…'）は伏せ済みとして残す（'nonce-…(1 chars)' に化けた）
+  const nonce = s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) || v === '…' ? all : `'nonce-${h.value(v)}'`)).replace(BARE_NONCE, (all, q: string | undefined, v: string) => bareNonce(all, q, v, h));
+  return maskUserPass(maskFreePairs(maskParams(maskJsonPairs(nonce, h), h), h), h)
           .replace(JWT, t => h.value(t))
           .replace(SSN, v => h.bare(v))
-          .replace(CARD, v => (luhn(v.replace(/\D/g, '')) ? h.bare(v) : v))
+          .replace(CARD, v => (luhn(numDigits(v)) ? h.bare(v) : v))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
-          .replace(URL_CRED_ENCODED, (_, sc: string, user: string) => `${sc}${user}%3A****%40`)
+          .replace(URL_CRED_PCT, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
+          .replace(URL_CRED_ENCODED, (_, sc: string, user: string, colon: string, _lv: string, at: string) => `${sc}${user}${colon}****${at}`)
+          .replace(URL_CRED_MIXED, (_, sc: string, user: string) => `${sc}${user}:****@`)
           .replace(ASPNET_COOKIELESS, (_, inner: string) => `/(${inner.replace(/([A-Z])\(([^()]+)\)/g, (__, k: string, v: string) => `${k}(${h.value(v)})`)})`)
           .replace(HASH_OR_SEGMENT, (seg, hash: string | undefined) => (hash ? seg : maskSegment(seg, h)));
 }
