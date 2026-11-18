@@ -86,7 +86,14 @@ export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   // 判定済みにしない（T-09② だけを判定し、①を確かめていないのに、前回の①（高）を「解消」とした。第48回）
   const ids = (f: Finding) => [`${f.item}\u0000${tkey(f)}`, ...(isHar(f) ? [] : [`${f.item}\u0000${f.target}`]), ...(altKey(f) ? [`${f.item}\u0000${altKey(f)}`] : [])];
   const naNow = new Set(after.filter(f => f.status === 'na' && !f.dedupedBy).flatMap(ids));
-  const evaluatedNow = new Set(after.filter(f => f.status !== 'na' || f.dedupedBy).flatMap(ids).filter(k => !naNow.has(k)));
+  // 機密でない応答だけで判定した合格（H-12 の limited）は、機密応答の条件（①）を確かめていないので判定済みに数えない。同じ項目・ターゲットに
+  // 今回の fail があれば、途中で返すルール（H-01 は②で返し④を見ない）が前回の条件を確かめていないことがあるので、前回の別の条件を「解消」にしない（第49回）
+  const failNow = new Map<string, Set<string>>();
+  for (const f of after.filter(isOpen)) for (const k of ids(f)) (failNow.get(k) ?? failNow.set(k, new Set()).get(k)!).add(f.ruleId);
+  const evaluatedNow = new Set(after.filter(f => (f.status !== 'na' || f.dedupedBy) && !f.limited).flatMap(ids).filter(k => !naNow.has(k)));
+  /** 同じ項目・ターゲットに、前回と別の条件の今回の fail があるか（同じ条件の別の配信元 cdn-a → cdn-b は、条件を確かめているので「解消」でよい） */
+  const condOf = (r: string) => Number(r.split('.').pop()) || 0;
+  const otherCondFail = (f: Finding) => ids(f).some(k => [...(failNow.get(k) ?? [])].some(r => r !== f.ruleId && condOf(r) > 0 && condOf(r) < condOf(f.ruleId)));
   const rows: DiffRow[] = [];
   const row = (kind: DiffKind, f: Finding, before?: Severity): DiffRow => ({ kind, ruleId: f.ruleId, item: f.item, condition: f.condition, title: f.title, target: f.target, severity: f.severity, before });
   // 1回目はキーで突き合わせる。2回目に、残ったものをラベルで突き合わせる：同じラベルの2つ目を足すと、1つ目のキーが「top」から
@@ -116,7 +123,7 @@ export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   }
   // ラベルだけでの判定済みの照合も、前回のキーがラベルだけのものに限る（前回が top https://a.example/ で、今回は b.example の top だけを判定したのに
   // 「解消」とした）
-  for (const [k, f] of prev) if (!used.has(k)) rows.push(row(evaluatedNow.has(`${f.item}\u0000${tkey(f)}`) || (labelOnly(f) && evaluatedNow.has(`${f.item}\u0000${f.target}`)) ? 'resolved' : 'not-rechecked', f));
+  for (const [k, f] of prev) if (!used.has(k)) rows.push(row(!otherCondFail(f) && (evaluatedNow.has(`${f.item}\u0000${tkey(f)}`) || (labelOnly(f) && evaluatedNow.has(`${f.item}\u0000${f.target}`))) ? 'resolved' : 'not-rechecked', f));
   const order: DiffKind[] = ['new', 'severity-changed', 'suppressed', 'resolved', 'not-rechecked', 'continuing'];
   return rows.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || a.ruleId.localeCompare(b.ruleId));
 }

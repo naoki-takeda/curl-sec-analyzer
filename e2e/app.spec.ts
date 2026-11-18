@@ -132,12 +132,17 @@ test('画面の改善：最初の手順の案内、入力欄を隠す、「情�
 test('HAR の Worker も含め、ページから作る Worker は外部へ通信できない（blob: Worker はページの CSP を引き継ぐ）', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute('content', /worker-src blob:/);
+  // no-cors にする（CORS の失敗でも reject されるので、CSP が効いていなくても 'blocked' になり、何も確かめていなかった。第49回）。
+  // 送られたリクエストも見る
+  const sent: string[] = [];
+  page.on('request', r => { if (r.url().startsWith('https://example.com/')) sent.push(r.url()); });
   const result = await page.evaluate(() => new Promise<string>(resolve => {
-    const src = "fetch('https://example.com/').then(() => postMessage('sent'), () => postMessage('blocked'))";
+    const src = "fetch('https://example.com/', { mode: 'no-cors' }).then(() => postMessage('sent'), () => postMessage('blocked'))";
     const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
     w.onmessage = e => resolve(String(e.data)); w.onerror = () => resolve('error');
   }));
   expect(result).toBe('blocked');
+  expect(sent).toEqual([]);
 });
 
 test('?lang= に ja・en 以外を指定しても判定できる（en-US は英語）', async ({ page }) => {

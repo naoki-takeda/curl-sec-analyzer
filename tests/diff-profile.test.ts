@@ -55,3 +55,21 @@ describe('第48回（束3〜5のレビュー）：空白を含むラベルの差
     expect(rows.filter(r => r.ruleId === 'H-01.1').map(r => r.kind).sort()).toEqual(['continuing', 'new']);
   });
 });
+
+describe('第49回：差分と Markdown', () => {
+  it('機密でない応答だけの合格（limited）で、前回の H-12①（高）を「解消」にしない', () => {
+    const page = (s: string) => `#TARGET url=https://www.example.com/mypage label=mypage ${s}\n${AT}\nHTTP/2 200\ncontent-type: text/html\ncache-control: max-age=600\n\n<p>x</p>\n`;
+    const rows = diff(evaluate(page('sensitive=1')).findings, evaluate(page('sensitive=0')).findings);
+    expect(rows.filter(r => r.ruleId === 'H-12.1').map(r => r.kind)).toEqual(['not-rechecked']);
+  });
+  it('途中で返すルールで、確かめていない別の条件の前回の指摘を「解消」にしない（同じ条件の別の配信元は「解消」のまま）', () => {
+    const page = (hsts: string) => `#TARGET url=https://www.example.com/ label=top\n${AT}\nHTTP/2 200\ncontent-type: text/html\nstrict-transport-security: ${hsts}\n\n<p>x</p>\n`;
+    const rows = diff(evaluate(page('max-age=31536000')).findings, evaluate(page('max-age=86400')).findings);
+    expect(rows.filter(r => r.ruleId === 'H-01.4').map(r => r.kind)).toEqual(['not-rechecked']);
+  });
+  it('前回と組織プロファイルが違う警告を、Markdown にも出す', async () => {
+    const { toMarkdown } = await import('../src/export/markdown');
+    const md = toMarkdown([], [], [], new Date(), { diff: { rows: [], baselineAt: '2026-11-01', profileWarning: '前回と今回で組織プロファイルが違います。' } });
+    expect(md).toContain('> 前回と今回で組織プロファイルが違います。');
+  });
+});

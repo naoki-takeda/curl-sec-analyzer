@@ -18,7 +18,7 @@ const noAutolink = (s: string) => s.replace(/(?<![A-Za-z0-9])(https?|ftp)(?=:\/\
 const cell = (v: unknown) => noAutolink(String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[|[\]!`\\]/g, '\\$&').replace(/\r\n?|\n/g, ' '));
 const ORDER = ['high', 'medium', 'low', 'info'];
 
-export interface ReportExtras { profile?: Profile; diff?: { rows: DiffRow[]; baselineAt: string; rulesetWarning?: string }; }
+export interface ReportExtras { profile?: Profile; diff?: { rows: DiffRow[]; baselineAt: string; rulesetWarning?: string; profileWarning?: string }; }
 
 export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppression[], generatedAt = new Date(), extra: ReportExtras = {}): string {
   const en = getLang() === 'en';
@@ -33,6 +33,7 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
     const s = diffSummary(extra.diff.rows);
     L.push(en ? '## Changes since previous results' : '## 前回との差分', '', `${en ? 'Previous' : '前回'}：${cell(extra.diff.baselineAt) || '-'}`, '');
     if (extra.diff.rulesetWarning) L.push(`> ${cell(extra.diff.rulesetWarning)}`, '');
+    if (extra.diff.profileWarning) L.push(`> ${cell(extra.diff.profileWarning)}`, '');   // 画面にだけ出ていた（第49回）
     L.push(`- ${(['new', 'resolved', 'severity-changed', 'suppressed', 'not-rechecked', 'continuing'] as const).map(k => `${diffLabel(k)} ${s[k]}`).join('、')}`, '');
     L.push(`| ${en ? 'Change' : '変化'} | ${en ? 'Severity' : '重要度'} | ${en ? 'Check' : '項目'} | ${en ? 'Target' : 'ターゲット'} |`, '| --- | --- | --- | --- |');
     for (const r of extra.diff.rows.filter(x => x.kind !== 'continuing'))

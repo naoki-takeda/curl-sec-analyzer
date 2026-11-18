@@ -61,14 +61,14 @@ function buildShell() {
   const fileIn = hidden('.txt,.log,.har,text/plain,application/json', openFile);
   // 設定ファイル（例外・組織プロファイル・前回の結果）も、貼り付けと同じ大きさまでにする（上限がないと、大きなファイルで画面が止まった）
   const supIn = hidden('.json,application/json', async f => {
-    if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge); return; }
+    if (f.size > MAX_BYTES) { say(() => tr().settingsTooLarge(MAX_BYTES / 1024 / 1024)); return; }
     const { list, errors } = parseSuppressions(await f.text());
     state.suppressions = list;
     const legacy = list.filter(s => legacyHarKey(s.target)).length;
     refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors, getLang())) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
   const profIn = hidden('.json,application/json', async f => {
-    if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge); return; }
+    if (f.size > MAX_BYTES) { say(() => tr().settingsTooLarge(MAX_BYTES / 1024 / 1024)); return; }
     const { profile: p, errors } = parseProfile(await f.text());
     if (p) state.profile = p;
     // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）
@@ -77,7 +77,7 @@ function buildShell() {
   });
   const baseIn = hidden('.json,application/json', async f => {
     // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超える。貼り付けと同じ上限では、自分のエクスポートを読めなかった）
-    if (f.size > HAR_MAX_BYTES) { say(() => tr().fileTooLarge); return; }
+    if (f.size > HAR_MAX_BYTES) { say(() => tr().settingsTooLarge(HAR_MAX_BYTES / 1024 / 1024)); return; }   // 上限は50MB（「上限5MB」と出ていた。第49回）
     const { baseline: b, error, skipped } = parseBaseline(await f.text());
     if (b) state.baseline = b;
     const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
@@ -90,7 +90,9 @@ function buildShell() {
         el('div', 'flex flex-wrap items-baseline gap-x-4',
           el('h1', 'text-2xl font-bold tracking-tight', 'curl-sec-analyzer'),
           el('span', 'num text-sm text-muted', T.versions(TOOL_VERSION, RULESET_VERSION)),
-          button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const m = current; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); if (m) say(m); })),
+          // ボタンの文言（English・日本語）は切り替え先の言語なので lang を付ける（WCAG 3.1.2）。作り直したあとはボタンにフォーカスを戻す（第49回）
+          Object.assign(button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const m = current; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); if (m) say(m);
+            document.querySelector<HTMLButtonElement>('#lang-switch')?.focus(); }), { id: 'lang-switch', lang: getLang() === 'ja' ? 'en' : 'ja' })),
         el('p', 'mt-1 text-muted', T.tagline),
         el('ul', 'mt-2 list-disc pl-5 text-sm text-muted', el('li', '', T.notice1), el('li', '', T.notice2), el('li', '', T.notice3),
           T.englishNote ? el('li', '', T.englishNote) : null),

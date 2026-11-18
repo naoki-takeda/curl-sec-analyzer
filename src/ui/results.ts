@@ -41,6 +41,8 @@ export function render() {
   const hints = missingLabelHints(targets);
   const parts: Child[] = [
     ledger(countBySeverity(rows)),
+    // 例外を当てた指摘の件数（重要度別の件数には含めない。ワイルドカードの例外で高が消えても、画面から気づけなかった。第49回）
+    findings.some(f => f.status === 'suppressed') ? el('p', 'mt-2 text-sm text-muted', T.suppressedCount(new Set(findings.filter(f => f.status === 'suppressed').map(f => f.ruleId)).size)) : null,
     exportBar(),
     warnings.length || hints.length ? warningList([...warnings.map(w => w.detail), ...hints]) : null,
     state.last.diff ? diffBlock(state.last.diff) : null,
@@ -82,7 +84,8 @@ export function exportBar() {
   return el('div', 'mt-3 flex flex-wrap items-center gap-2 text-sm',
     el('span', 'text-muted', T.save),
     button('Markdown', BTN, () => state.last && download(`sec-report-${stamp}.md`, 'text/markdown',
-      toMarkdown(state.last.findings, state.last.cov, state.suppressions, new Date(), { profile: state.profile, diff: state.last.diff && state.baseline ? { rows: state.last.diff, baselineAt: state.baseline.generatedAt, rulesetWarning: state.baseline.rulesetVersion && state.baseline.rulesetVersion !== RULESET_VERSION ? tr().diffRulesetWarning(state.baseline.rulesetVersion, RULESET_VERSION) : undefined } : undefined }))),
+      toMarkdown(state.last.findings, state.last.cov, state.suppressions, new Date(), { profile: state.profile, diff: state.last.diff && state.baseline ? { rows: state.last.diff, baselineAt: state.baseline.generatedAt, rulesetWarning: state.baseline.rulesetVersion && state.baseline.rulesetVersion !== RULESET_VERSION ? tr().diffRulesetWarning(state.baseline.rulesetVersion, RULESET_VERSION) : undefined,
+        profileWarning: profileDiffers(state.baseline.profile, state.profile) ? tr().diffProfileWarning : undefined } : undefined }))),
     button('JSON', BTN, () => state.last && download(`sec-report-${stamp}.json`, 'application/json', toJson(state.last.findings, state.last.cov, state.suppressions, new Date(), state.profile))),
     button(T.csv, BTN, () => state.last && download(`sec-report-${stamp}.csv`, 'text/csv', toCsv(state.last.findings, state.last.targets))),
     button(T.suppressionsFile, BTN, () => download('suppressions.json', 'application/json', suppressionsJson(state.suppressions))));
