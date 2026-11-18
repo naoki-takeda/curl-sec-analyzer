@@ -122,6 +122,8 @@ export function legacyHarKey(k?: string): boolean {
  * HAR GET * や https://a.example/admin* のような手で書いたパターンは、urlKey が変えるので含まれない
  */
 export function isCurrentKey(k: string): boolean {
-  const m = k.match(/^(?:HAR \S+|\S+) ((?:https?:\/\/|\/)\S*)(?: #\d+)?$/);
+  // ラベルは空白を含んでよい（label="top page"。: と / は含まない）。\S+ で読むと、空白を含むラベルのキーを以前の形式とみなし、伏せた部分の *
+  // を任意の文字列として照合して、別のページの指摘まで抑止した（第51回）
+  const m = k.match(/^(?:HAR \S+|[^\s:/](?:[^:/]*[^\s:/])?) ((?:https?:\/\/|\/)\S*)(?: #\d+)?$/);
   return !!m && urlKey(m[1]) === m[1];
 }

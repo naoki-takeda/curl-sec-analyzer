@@ -200,3 +200,35 @@ describe('第50回：E-09・A-07 の画面の部品の値、R-04・R-06・E-05',
       expect(api(b), b).toContain('A-07.1');
   });
 });
+
+describe('第51回：文書の仮の値・公開のクライアントのキー・H-02③ の主語・T-09 の重複', () => {
+  const page = (js: string) => `#TARGET url=https://www.example.com/docs label=t\nHTTP/2 200\ncontent-type: text/html\n\n<html><script>${js}</script></html>\n`;
+  it('E-09①：文書の仮の値は秘密の値ではない', () => {
+    for (const js of ['var c={api_key:"YOUR_API_KEY_HERE"}', 'var c={client_secret:"<your-client-secret>"}', 'var c={access_token:"INSERT_TOKEN_HERE"}'])
+      expect(ids(page(js)).filter(i => i === 'E-09.1'), js).toEqual([]);
+    expect(ids(page('var c={api_key:"sk9Fq2LmZx81PwQr"}'))).toContain('E-09.1');
+  });
+  it('A-07①：検索専用のキー（searchOnlyApiKey・DocSearch）と PostHog の公開キーは除く', () => {
+    const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/config label=api sensitive=1\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('api');
+    expect(api('{"algolia":{"appId":"ABCDEF1234","searchOnlyApiKey":"0123456789abcdef0123456789abcdef"}}')).not.toContain('A-07.1');
+    expect(api('{"docsearch":{"appId":"ABCDEF1234","apiKey":"0123456789abcdef0123456789abcdef"}}')).not.toContain('A-07.1');
+    // 管理用・マスターのキーも apiKey という名前なので、Algolia・Typesense の apiKey は除かない（束のレビュー）
+    expect(api('{"algolia":{"appId":"ABCDEF1234","apiKey":"0123456789abcdef0123456789abcdef"}}')).toContain('A-07.1');
+    expect(api('{"typesense":{"apiKey":"Xy7Qp2Lm9ZaB3cD4eF5gH6iJ7kL8mN9o"}}')).toContain('A-07.1');
+    expect(api('{"posthog":{"api_key":"phc_AbCdEf0123456789AbCdEf0123456789AbCdEf01"}}')).not.toContain('A-07.1');
+    expect(api('{"db":{"api_key":"0123456789abcdef0123456789abcdef"}}')).toContain('A-07.1');
+  });
+  it('H-02③：apex から www へ転送したとき、preload を付けたのは www と書く', () => {
+    const r = evaluate(['#TARGET url=https://example.com/ label=apex', 'HTTP/2 301', 'location: https://www.example.com/', '', 'HTTP/2 200',
+      'strict-transport-security: max-age=63072000; includeSubDomains; preload', '', ''].join('\n'));
+    expect(r.findings.filter(f => f.ruleId === 'H-02.3').map(f => f.evidence)).toEqual(['www.example.com は preload を付けているが、apex がHSTSを返さない']);
+  });
+  it('T-09①：同じバージョンのプローブが重なっても、証跡に1回だけ書く', () => {
+    const t = (i: number) => `#TARGET url=https://www.example.com/ label=tls${i}\n#TLSPROBE v=tls1 ok=0\n#TLSPROBE v=tls1_1 ok=1\n`;
+    const ev = evaluate(t(1) + t(2)).findings.find(f => f.ruleId === 'T-09.1')?.evidence ?? '';
+    expect(ev.match(/tls1_1/g)).toHaveLength(1);
+  });
+  it('（束のレビュー）example・sample を含む本物のパスワードは仮の値とみなさない', () => {
+    expect(ids(page('var c={password:"my_example_password"}')).filter(i => i === 'E-09.1')).toEqual(['E-09.1']);
+  });
+});

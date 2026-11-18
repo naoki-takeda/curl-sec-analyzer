@@ -20,3 +20,5 @@ sec-report-*
 # 認証ヘッダを書いたファイル（設計書 0.5 の推奨。中身はトークン）
 headers.txt
 auth.conf
+# 例外ファイル（ターゲットの URL と理由を含む。sec-report-* と同じ扱い）
+suppressions*.json

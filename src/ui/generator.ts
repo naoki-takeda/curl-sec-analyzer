@@ -28,7 +28,7 @@ export function commandGenerator() {
   err.setAttribute('role', 'status');   // 入力の誤りと「コピーしました」を読み上げる（WCAG 4.1.3。第50回）
   const actions = el('div', 'mt-2 hidden flex-wrap gap-2',
     button(T.copy, BTN, async () => { try { await navigator.clipboard.writeText(out.value); err.textContent = T.copied; } catch { out.select(); err.textContent = T.copyFailed; } }),
-    button(T.saveSh, BTN, () => download('run.sh', 'text/x-shellscript', out.value)));
+    button(T.saveSh, BTN, () => download('csa-collect.sh', 'text/x-shellscript', out.value)));
   const gen = button(T.make, 'rounded-md bg-primary px-4 py-2 font-bold text-primary-ink hover:opacity-90', () => {
     const v = (k: string) => inputs.get(k)!.value.trim();
     const o: CommandOptions = { host: v('host'), apex: v('apex') || undefined, apiPath: v('apiPath'), loginPath: v('loginPath'),

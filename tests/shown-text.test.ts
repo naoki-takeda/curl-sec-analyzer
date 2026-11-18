@@ -329,3 +329,30 @@ describe('第50回（束のレビュー）：括弧で始まる値・pass で終
     expect(showText('a;jsessionid=ABCDEF0123456789;foo/bar.jsp')).toMatch(/;foo\/bar\.jsp$/);
   });
 });
+
+describe('第51回：配列の空の要素・CSP の ;・エスケープした // のユーザー情報・オブジェクトの値', () => {
+  it('配列に空の文字列の要素があっても、後ろの要素を伏せる', () => {
+    for (const x of ['"password":["","Hunter2Spring"]', '{"password":["a","","Hunter2Spring"]}', '{\\"password\\":[\\"\\",\\"Hunter2Spring\\"]}',
+      'https://a.example/graphql?variables=%7B%22password%22%3A%5B%22%22%2C%22Hunter2Spring%22%5D%7D', "password: ['', 'Hunter2Spring']", 'password => ["", "Hunter2Spring"]'])
+      expect(showText(x), x).not.toContain('Hunter2Spring');
+  });
+  it('値の中の ; の続きは、CSP のディレクティブの前で切る', () => {
+    expect(showText("default-src 'self';report-uri https://o1.ingest.sentry.io/api/4/security/?sentry_key=abc123;script-src 'self' 'unsafe-inline'")).toContain(";script-src 'self' 'unsafe-inline'");
+  });
+  it('JSON でエスケープした // の、特別でないスキームのユーザー情報を伏せる', () => {
+    for (const x of ['postgres:\\/\\/alice:Hunter2Spring@db.example\\/x', 'redis:\\/\\/:Hunter2Spring@cache'])
+      expect(showText(x), x).not.toContain('Hunter2Spring');
+  });
+  it('値がオブジェクトのときも、中の値を伏せる（キーは残す）', () => {
+    expect(showText('"password":{"value":"Hunter2Spring"}')).toMatch(/"value":"Hu…\(13 chars\)"/);
+    expect(showText('password: {value: Hunter2Spring}')).toMatch(/\{value: Hu…\(13 chars\)\}/);
+  });
+  it('（束のレビュー）入れ子のオブジェクト・配列の中の秘密の名前、バックスラッシュを含むユーザー情報、CSP の名前の一覧、引用符のあるオブジェクトのキー', () => {
+    for (const x of ['{"user":{"password":{"value":"Hunter2Spring"}}}', '{"user":{"name":"bob","password":{"value":"Hunter2Spring"}}}', '{"items":[{"password":["Hunter2Spring"]}]}',
+      'smb://CORP\\alice:Hunter2Spring@fileserver/share', '"dsn":"postgres://alice:Hunter2\\\\Spring@db"', '?password=Hunter2Spring;correct-horse-battery',
+      "password: {value: 'Hunter2Spring'}", 'password: {"value": Hunter2Spring}', 'password = {"value": "Hunter2Spring"}', 'password => {"value" => "Hunter2Spring"}',
+      "{'password': {'value': 'Hunter2Spring'}}", '%22password%22%3A%7B%22value%22%3A%22Hunter2Spring%22%7D'])
+      expect(showText(x), x).not.toContain('Spring');
+    expect(showText("password: {value: 'Hunter2Spring'}")).toContain('{value: ');
+  });
+});

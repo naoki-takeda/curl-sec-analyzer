@@ -96,8 +96,12 @@ const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];
 // 名前は全角の英数字・記号（ｐａｓｓｗｏｒｄ）とゼロ幅の文字・ソフトハイフン（pass<U+200B>word）を含んでよい（含めないと、isSecretParamName の
 // 正規化を通らず、値を伏せなかった）
 // 値の中の生の ; の続き（?password=Summer;2024）。; のあとが名前=（空白を含む接続文字列の Max Pool Size= も）・Cookie の属性（Secure・
-// HttpOnly・Partitioned）・空白・引用符・区切り・終わりなら、値はそこまで（後ろの属性・設定まで伏せすぎた。束のレビュー）
-const SEMI_CONT = String.raw`;(?![\s;"'<>&#\\]|$|(?:[Ss]ecure|SECURE|[Hh]ttp[Oo]nly|HTTPONLY|[Pp]artitioned)(?![\w-])|[\w.%+[\] -]{1,300}(?:=|%(?:25)*3[Dd])|[^;\s/]{0,300}\/)`;
+// HttpOnly・Partitioned）・空白・引用符・区切り・終わりなら、値はそこまで（後ろの属性・設定まで伏せすぎた。束のレビュー）。
+// CSP のディレクティブ（;script-src 'self'。helmet は ; のあとに空白を入れない）の前でも切る（ディレクティブの名前まで伏せ、証跡の 'unsafe-inline' が
+// どのディレクティブのものか読めなかった。第51回）
+// CSP のディレクティブの名前（一覧で照合する。ハイフンでつないだ語の全般にすると、値の中の ;correct-horse-battery で切った。束のレビュー）
+const CSP_DIRECTIVE = String.raw`(?:(?:child|connect|default|font|frame|img|manifest|media|object|prefetch|script|style|worker)-src(?:-elem|-attr)?|base-uri|form-action|frame-ancestors|navigate-to|report-uri|report-to|sandbox|upgrade-insecure-requests|block-all-mixed-content|require-trusted-types-for|trusted-types|plugin-types|fenced-frame-src)`;
+const SEMI_CONT = String.raw`;(?![\s;"'<>&#\\]|$|(?:[Ss]ecure|SECURE|[Hh]ttp[Oo]nly|HTTPONLY|[Pp]artitioned)(?![\w-])|[\w.%+[\] -]{1,300}(?:=|%(?:25)*3[Dd])|[^;\s/]{0,300}\/|${CSP_DIRECTIVE}(?=[\s;]|$))`;
 const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%+[\]\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,300}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|${SEMI_CONT}|\\\/)+)`, 'g');
 // JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる。
 // 「Bearer_eyJ…」「access_token_eyJ…」のように語と _ でつないだものも含める（直前の語は _ を含めて40文字までで、その前が語の外のときだけ。
@@ -111,7 +115,11 @@ const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-])|(?<=(?:^|[^\w-])[A-Za-z0-9_]{1,4
 // ユーザー情報には引用符（' "）も入る（new URL も curl も受け付ける。除くと、https://alice:Summer'2024@host/ のパスワードをまったく伏せなかった）。
 // ただし、引用符は後ろに語の文字か @ が続くとき（パスワードの末尾の Summer2024'@ も。第49回）だけ（JSON の {"site":"https://a.example","id":"x@<トークン>"} の「","」や、属性の「' title=」の後ろを
 // ユーザー情報とみなすと、@ の後ろのトークンをホスト名として残し、メールアドレスを伏せた。第48回の束1のレビュー）
-const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)((?:[^/\s?#<>"']|["'](?=[\w@-])){1,512})@/g;
+// JSON でエスケープした「\/\/」（PHP の json_encode の既定。postgres:\/\/alice:pw@db）も含める（特別なスキームしか見ておらず、ほかのスキームの
+// パスワードを残した。第51回）
+// ユーザー情報の \ は、エスケープした「\/」（パスの始まり）の前でだけ止める（\ を止めると、smb://CORP\alice:pw@・pw に \ を含むものを伏せなかった。
+// 束のレビュー）
+const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:(?:\/\/|\\\/\\\/)|(?<![\w:/])\/\/)((?:[^/\\\s?#<>"']|\\(?!\/)|["'](?=[\w@-])){1,512})@/g;
 /**
  * 特別なスキーム（http・https・ws・wss・ftp）で、// の数が標準でないもの（https:///u:pw@h、https:\\u:pw@h、http:/u:pw@h、https:u:pw@h）。
  * WHATWG の URL はどれもユーザー情報として読む（HTML の属性・CSP の生の文字列で、パスワードをそのまま出した。第49回）。// のものは URL_CRED が見る
@@ -302,15 +310,36 @@ const ARRAY_KEY = String.raw`[\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e
 const IN_ARRAY = String.raw`((?:[^[\]]|\[[^[\]]*\]){0,65536})`;
 const E_OPEN = String.raw`%(?:25)*5[Bb]|\[`, E_CLOSE = String.raw`%(?:25)*5[Dd]|\]`, E_CH = String.raw`(?:(?!${E_OPEN}|${E_CLOSE})[^&\s"'<>#])`;
 // 要素の文字列。あとに : が続くもの（配列の中のオブジェクトのキー "v":）は伏せずに読み進める（読み飛ばすだけだと、キーの閉じの " から次の " までを
-// 文字列として伏せた。束のレビュー）
-const JSON_ARRAYS: [RegExp, RegExp][] = [
-  [new RegExp(String.raw`("(${ARRAY_KEY})"\s*:\s*\[)${IN_ARRAY}`, 'g'), /(")((?:[^"\\\r\n]|\\.)+)(")(\s*:)?/g],
-  [new RegExp(String.raw`(\\"(${ARRAY_KEY})\\"\s*:\s*\[)${IN_ARRAY}`, 'g'), /(\\")((?:[^"\\\r\n]|\\[^"\r\n])+)(\\")(\s*:)?/g],
-  [new RegExp(String.raw`(${Q}([\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}(?:${E_OPEN}))((?:${E_CH}|(?:${E_OPEN})${E_CH}*(?:${E_CLOSE})){0,65536})`, 'g'),
-    new RegExp(String.raw`(${Q})((?:(?!${Q})[^&\s"'<>#])+)(${Q})(${SP}(?:%(?:25)*3[Aa]|:))?`, 'g')],
+// 文字列として伏せた。束のレビュー）。空の文字列（""）も要素として読む（1文字以上にすると、"" の閉じと次の要素の開きを組にして、後ろの要素の
+// パスワードを残した。第51回）
+// 値がオブジェクト（"password":{"value":"…"}）のときも、中の文字列の値を伏せる（中身を伏せなかった。第51回）。中身は入れ子のない { … } の 64KB まで
+const IN_OBJECT = String.raw`([^{}]{0,65536})`;
+const O_OPEN = String.raw`%(?:25)*7[Bb]|\{`, O_CH = String.raw`(?:(?!${O_OPEN}|%(?:25)*7[Dd]|\})[^&\s"'<>#])`;
+const RAW_STR = /(")((?:[^"\\\r\n]|\\.)*)(")(\s*:)?/g, ESC_STR = /(\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")(\s*:)?/g;
+const ENC_STR = new RegExp(String.raw`(${Q})((?:(?!${Q})[^&\s"'<>#])*)(${Q})(${SP}(?:%(?:25)*3[Aa]|:))?`, 'g');
+/**
+ * [キーと開きの括弧, 中身（キーの直後から読む。y フラグ）, 中身の文字列]。キーと中身を1つの正規表現で読むと、秘密でない親のキー（"user":{）が
+ * 中身を読み込み、その中の "password":{…}・"password":[…] を伏せなかった（束のレビュー）。中身は、秘密の名前のときだけ読む
+ */
+const JSON_ARRAYS: [RegExp, RegExp, RegExp][] = [
+  [new RegExp(String.raw`"(${ARRAY_KEY})"\s*:\s*\[`, 'g'), new RegExp(IN_ARRAY, 'y'), RAW_STR],
+  [new RegExp(String.raw`\\"(${ARRAY_KEY})\\"\s*:\s*\[`, 'g'), new RegExp(IN_ARRAY, 'y'), ESC_STR],
+  [new RegExp(String.raw`${Q}([\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}(?:${E_OPEN})`, 'g'), new RegExp(String.raw`((?:${E_CH}|(?:${E_OPEN})${E_CH}*(?:${E_CLOSE})){0,65536})`, 'y'), ENC_STR],
+  [new RegExp(String.raw`"(${ARRAY_KEY})"\s*:\s*\{`, 'g'), new RegExp(IN_OBJECT, 'y'), RAW_STR],
+  [new RegExp(String.raw`\\"(${ARRAY_KEY})\\"\s*:\s*\{`, 'g'), new RegExp(IN_OBJECT, 'y'), ESC_STR],
+  [new RegExp(String.raw`${Q}([\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}(?:${O_OPEN})`, 'g'), new RegExp(String.raw`(${O_CH}{0,65536})`, 'y'), ENC_STR],
 ];
-const maskArrays = (s: string, h: Hider) => JSON_ARRAYS.reduce((acc, [re, str]) => acc.replace(re, (all: string, pre: string, k: string, body: string) =>
-  (secretParam(k, '') ? pre + body.replace(str, (a: string, o: string, v: string, c: string, colon?: string) => (colon || /…\(\d+/.test(v) ? a : `${o}${h.value(v)}${c}`)) : all)), s);
+const maskArrays = (s: string, h: Hider) => JSON_ARRAYS.reduce((acc, [keyRe, bodyRe, str]) => {
+  let out = '', last = 0; keyRe.lastIndex = 0;
+  for (let m = keyRe.exec(acc); m; m = keyRe.exec(acc)) {
+    if (!secretParam(m[1], '')) continue;   // 秘密でない名前は中身を読まずに進む（中の秘密の名前を見つけるため）
+    const end = m.index + m[0].length; bodyRe.lastIndex = end;
+    const body = bodyRe.exec(acc)?.[1] ?? '';
+    out += acc.slice(last, end) + body.replace(str, (a: string, o: string, v: string, c: string, colon?: string) => (colon || !v || /…\(\d+/.test(v) ? a : `${o}${h.value(v)}${c}`));
+    last = end + body.length; keyRe.lastIndex = last;
+  }
+  return out + acc.slice(last);
+}, s);
 const maskJsonPairs = (s: string, h: Hider) => {
   const rep = (all: string, pre: string, k: string, v: string, close: string) => (v && secretParam(k, v) && !/…\(\d+/.test(v) ? `${pre}${h.value(v)}${close}` : all);
   return JSON_PAIRS.reduce((acc, re) => acc.replace(re, rep), maskArrays(s, h))
@@ -329,8 +358,11 @@ const FREE_SEP = String.raw`\s*(?:=>|[:=]|,(?=\s*["']))\s*`;
 // 引用符で囲んだ値は、閉じの引用符まで（secret="Tr0ub4dor&3" の & で切って、残りを出した）
 // 値が配列（"password":["…"]）なら、最初の要素を伏せる（括弧の1文字を値として伏せ、中身を残した。第50回）
 const FREE_ARRAY = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*(?:=>|[:=])\s*\[)${IN_ARRAY}`, 'gi');
-const FREE_QUOTED = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2${FREE_SEP}(?:\[\s*)?(["']))((?:(?!\3)[^\\\r\n]|\\.)+)(?=\3)`, 'gi');
-const FREE_PAIR = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*[:=]\s*(?:[[{]\s*){0,2})(?![[{])((?:[^\s"'<>,;&)}\]\\]|${SEMI_CONT})+)`, 'gi');
+// 値がオブジェクト（password: {value: '…'}・password = {"value": "…"}・{'password': {'value': '…'}}・=> {"value" => "…"}）なら、最初のキーのあとの値を
+// 伏せる（キーを値として伏せ、値を残した。束のレビュー）
+const FREE_INNER_KEY = String.raw`(?:\{\s*["']?[\w$-]{1,64}["']?\s*(?::|=>)\s*)`;
+const FREE_QUOTED = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2${FREE_SEP}(?:\[\s*|${FREE_INNER_KEY})?(["']))((?:(?!\3)[^\\\r\n]|\\.)+)(?=\3)`, 'gi');
+const FREE_PAIR = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*(?:=>|[:=])\s*(?:${FREE_INNER_KEY}|(?:[[{]\s*){0,2}))(?![[{"']|[\w$-]{1,64}\s*(?::|=>))((?:[^\s"'<>,;&)}\]\\]|${SEMI_CONT})+)`, 'gi');
 // XML（<password>…</password>）と .NET の設定（<add key="Password" value="…"/>）
 const FREE_XML = new RegExp(String.raw`(<(${FREE_NAME})>)([^<]{1,512})(<\/\2>)`, 'gi');
 const FREE_KEY_VALUE = new RegExp(String.raw`(\bkey\s*=\s*(["'])${FREE_NAME}\2\s+value\s*=\s*(["']))([^"']{1,512})(?=\3)`, 'gi');
@@ -344,7 +376,7 @@ const freeValue = (all: string, pre: string, v: string, h: Hider, post = '') =>
   (v.includes('…') || (PASSWORD_NAME.test(pre) ? PASSWORD_PLAIN : FREE_PLAIN).test(v) || !/^[\x21-\x7e][\x20-\x7e]*$/.test(v) ? all : `${pre}${h.value(v)}${post}`);
 const maskFreePairs = (s: string, h: Hider) => s
   // 配列の要素：引用符で囲んだもの（オブジェクトのキーは除く）と、引用符のないもの（password: [Winter2024, Summer2025] の2つ目。束のレビュー）
-  .replace(FREE_ARRAY, (_all, pre: string, _q: string, body: string) => pre + body.replace(/[^\s,"'[\]{}]*…\(\d+ chars\)|(["'])((?:(?!\1)[^\\\r\n]|\\.)+)\1(\s*:)?|(?<=^|[\s,[])([^\s,"'[\]{}()…]+)(?=\s*[,\]]|\s*$)/g,
+  .replace(FREE_ARRAY, (_all, pre: string, _q: string, body: string) => pre + body.replace(/[^\s,"'[\]{}]*…\(\d+ chars\)|(["'])((?:(?!\1)[^\\\r\n]|\\.)*)\1(\s*:)?|(?<=^|[\s,[])([^\s,"'[\]{}()…]+)(?=\s*[,\]]|\s*$)/g,
     // 伏せ済みの値（…(N chars)。空白を含む）はそのまま（引用符のない要素として「chars)」を伏せ直し、冪等でなかった）
     (a: string, q: string | undefined, v: string | undefined, colon: string | undefined, bare: string | undefined) =>
       (q ? (colon ? a : freeValue(a, q, v!, h, q)) : bare ? freeValue(a, '', bare, h) : a)))

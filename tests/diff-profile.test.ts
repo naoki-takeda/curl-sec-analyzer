@@ -115,3 +115,14 @@ describe('第50回：プロファイルの比べ方・例外ファイル・時�
     expect(messageEn('1件目：ruleId「H-99」は項目IDではありません')).toBe('Entry 1: ruleId "H-99" is not a check ID');
   });
 });
+
+describe('第51回：空白を含むラベルの例外の照合', () => {
+  it('空白を含むラベルの「ラベル URL」のキーで登録した例外は、伏せた部分の * で別のページを抑止しない', async () => {
+    const { matches } = await import('../src/engine/suppress');
+    const { isCurrentKey } = await import('../src/engine/targetKey');
+    expect(isCurrentKey('top page https://a.example/files/*')).toBe(isCurrentKey('toppage https://a.example/files/*'));
+    const s = { ruleId: 'H-01.1', target: 'top page https://a.example/files/*', reason: 'x' };
+    const f = { item: 'H-01', ruleId: 'H-01.1', target: 'top page', targetKey: 'top page https://a.example/files/admin-console', url: 'https://a.example/files/admin-console' } as never;
+    expect(matches(s as never, f, new Set())).toBe(false);
+  });
+});

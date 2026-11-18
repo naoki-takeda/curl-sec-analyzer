@@ -1,7 +1,7 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
-import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, notSessionName, parseSetCookie } from '../parser/setCookie';
+import { MAIN_SESSION, isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, notSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
 import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
@@ -194,7 +194,7 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // 期限のない Cookie でも、名前がセッションらしくないもの（visitor_ref）は除く（同じ値で送り直しただけで①（高）にした。第49回）。
     // 除くのは、名前がセッションIDらしくないもの（sessionid・JSESSIONID・laravel_session・sid は、期限付きでも主のセッションIDなので比べる。
     // 除くと、期限付きの sessionid を再発行せずに auth_token を足しただけのログインを合格にした）
-    const after = afterC.filter(c => !(fresh && !/sess|^sid$/i.test(c.name) && before.includes(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age') || (freshSession && !looksLikeSessionName(c.name))))).map(c => `${c.name}=${c.value}`);
+    const after = afterC.filter(c => !(fresh && !MAIN_SESSION.test(c.name) && before.includes(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age') || (freshSession && !looksLikeSessionName(c.name))))).map(c => `${c.name}=${c.value}`);
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
@@ -235,7 +235,7 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // 送っただけの JSESSIONID を再発行せず auth_token だけを発行したログインを合格にした。第49回）
     // 送っただけの名前は、解析用・負荷分散などのセッションCookie でない名前を除く（Hotjar の _hjSession_123・ai_session を数え、C-09 を na に
     // した。第50回）。looksLikeSessionName で絞ると、classic ASP の ASPSESSIONIDxxxx も外して合格にした（束のレビュー）
-    const kept = [...new Set([...beforeC.map(c => c.name), ...(pre.sentCookieNames ?? []).filter(n => !notSessionName(n))].filter(n => /sess|^sid$/i.test(n) && !renewed.has(n)))];
+    const kept = [...new Set([...beforeC.map(c => c.name), ...(pre.sentCookieNames ?? []).filter(n => !notSessionName(n))].filter(n => MAIN_SESSION.test(n) && !renewed.has(n)))];
     if (kept.length)
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答で ${kept.join(', ')} を再発行せず、ほかの Cookie（${[...renewed].join(', ')}）を発行した。どちらで認証しているかは分からない`,
         `ログイン後に、ログイン前の ${kept.join('・')} だけを送って認証後のページを取得できないか、手動で確認する`)];
@@ -401,9 +401,12 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
     const httpsHop = /^https:/i.test(apex.url ?? '') ? ownChain(apex)[0]
       : chainOf(apex).find(r => { try { const u = new URL(r.url ?? ''); return u.protocol === 'https:' && u.hostname.toLowerCase() === ah; } catch { return false; } });
     if (!httpsHop && isHttps(apex) !== undefined) return [cf(apexHsts, 'apex', 'na', 'info', 'na', 'apex の https の応答がない（http の応答の HSTS はブラウザが無視する）', 'apex の https の URL（https://apexドメイン/）で採取する')];
+    // preload を付けた応答のホスト（label=apex で www へ転送した最後の応答なら www。「apex は preload を付けているが」と誤って書いた。第51回）
+    const finalHost = (() => { try { return new URL(finalResponse(preload)?.url ?? preload.url ?? '').hostname.toLowerCase(); } catch { return undefined; } })();
+    const preloadWho = finalHost && finalHost !== ah ? finalHost : preload.label;
     const v = (httpsHop ?? ownChain(apex)[0])?.headers.get('strict-transport-security')?.[0];
     return v && parseHsts(v).maxAge > 0 ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
-             : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
+             : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preloadWho} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };
 
 // ヘッダの CSP と、HTML の <head> の <meta> の CSP（H-04 と同じ。meta の CSP の nonce が固定でも⑤）。スクリプトに効くディレクティブ

@@ -28,7 +28,8 @@ const realDate = (s: string) => {
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
 };
-const LABEL_URL = /^\S+ https?:\/\//;
+// ラベルは空白を含んでよい（: と / は含まない。第51回）
+const LABEL_URL = /^[^\s:/](?:[^:/]*[^\s:/])? https?:\/\//;
 
 /** 例外の対象が今の形式のキーか（例外ごとに1回だけ調べる。指摘×例外の組ごとに urlKey をかけると遅い） */
 const currentKeyCache = new Map<string, boolean>();

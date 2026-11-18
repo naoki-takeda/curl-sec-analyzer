@@ -27,7 +27,7 @@ logout | https://www.example.com/logout | key=logout | responses=1
 after-logout | https://www.example.com/mypage | key=- | responses=1
 
 ## warnings
-unparsed-lines | どのターゲットにも属さない行が19行ありました（HTTPのステータス行より前の行など）
+unparsed-lines | どのターゲットにも属さない行が17行ありました（HTTPのステータス行より前の行など）
 orphan-block | #TARGET label=http にデータがありません
 orphan-block | #TARGET label=login にデータがありません
 orphan-block | #TARGET label=session-sample-1 にデータがありません

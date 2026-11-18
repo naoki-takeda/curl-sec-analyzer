@@ -184,12 +184,15 @@ export const isLabelText = (key: string, v: string): boolean => {
  * Stripe の公開キー（pk_live_・pk_test_）、Firebase の設定の Google API キー（AIza…。権限はセキュリティルールで絞る）。A-07①（高）にしない
  */
 export const isPublicClientValue = (v: string): boolean =>
-  /^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(v) || /^pk_(?:live|test)_[A-Za-z0-9]+$/.test(v) || /^AIza[0-9A-Za-z_-]{35}$/.test(v);
+  /^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(v) || /^pk_(?:live|test)_[A-Za-z0-9]+$/.test(v) || /^AIza[0-9A-Za-z_-]{35}$/.test(v)
+  || /^phc_[A-Za-z0-9]{20,}$/.test(v);   // PostHog のプロジェクトのキー（ブラウザから送る公開のキー。第51回）
 /**
  * 伏せ字の値（"********"、"***"、"•••"、"[REDACTED]"、Rails の "[FILTERED]"、"<hidden>"）。値を出していないので、秘密情報の露出（A-07①・E-09①）にしない
  */
 export const isPlaceholderValue = (v: string): boolean =>
-  /^(?:([*•●xX#.\-_])\1{2,}|[[(<{]?\s*(?:redacted|filtered|hidden|masked|protected|removed|omitted)\s*[\])>}]?)$/i.test(v.trim());
+  /^(?:([*•●xX#.\-_])\1{2,}|[[(<{]?\s*(?:redacted|filtered|hidden|masked|protected|removed|omitted)\s*[\])>}]?)$/i.test(v.trim())
+  // 文書・設定例の仮の値（YOUR_API_KEY_HERE・<your-client-secret>・your-secret-key・INSERT_TOKEN_HERE。開発者向けの文書のページで E-09①（高）にした。第51回）
+  || /^<[^<>]{1,64}>$/.test(v.trim()) || (/^[A-Za-z]+(?:[_-][A-Za-z]+)*$/.test(v) && /(?:^|[_-])(?:your|here|insert|replace|placeholder)(?=[_-]|$)/i.test(v));   // example・sample・dummy は本物のパスワードにも使う（my_example_password。束のレビュー）
 
 /**
  * 入力の検証の規則（Laravel・VeeValidate の required|min:8|max:64）。| でつないだ、英字の規則名（引数は数字・英字）だけのもの。

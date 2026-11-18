@@ -3,7 +3,9 @@ import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
 import { assignHopUrls, baseLabel, cookieCapWarnings, pushCookies, uniqueLabels } from './target';
 import { autoAuthScheme, cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
 
-const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
+// curl と同じ緩さで読む：HTTP/ の大文字小文字を区別しない、理由句の前の空白がなくてもよい（HTTP/1.1 200OK）、コードは先頭の3桁（curl は
+// 「HTTP/1.1 2000 OK」も 200 として受け付ける）。読めない形で応答を始めると、次の「HTTP/1.1 302 Found: x」を応答にして判定を偽装できた（第51回）
+const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})\d*(?:\s*(.*))?$/i;
 // #BODY：生成スクリプトが、ヘッダ（-D）のあと・本文（-o）の前に出す印。ここから次のマーカーまでを、直前の応答の本文としてそのまま読む
 const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE|BODY)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
 const OPENSSL_START = /^(CONNECTED\(|depth=|Certificate chain|subject=|issuer=|notBefore=|notAfter=)/;
@@ -120,6 +122,7 @@ export function parseInput(input: string): ParseResult {
     : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
   const badSensitive: Target[] = [];                   // sensitive= の値を読めなかったターゲット（ラベルは付け直したあとのものを出す）
   const badTargetAttrs: string[] = [];                 // #TARGET の読めなかった指定（書き間違えた名前、受け付けないラベル・kind）
+  let sawUnreadable = false;                          // このターゲットで、応答の前に読めない行があったか（コロンのあるステータス行の偽装の手がかり）
   let firstLine: 'pending' | 'hint' | 'other' = 'pending';   // 印のある入力で、ターゲットの最初の行が curl -v の「*」の行だったか
   // chunked の 3xx のあとに読んだホップ。-L で採取したターゲット（#META に num_redirects= がある）でなければ、トレーラの偽のホップなので捨てる
   // （curl 7.82 以前は、コロンのないトレーラの「HTTP/1.1 200 OK」も -D に書く。login の 302 のあとの偽の 200 の Set-Cookie で C-09 を合格にできた。束のレビュー）
@@ -152,7 +155,7 @@ export function parseInput(input: string): ParseResult {
       // 本文ではない。トレーラにパスワード欄を書くと、ログアウト後の画面をログインのフォームとみなさせられた。第50回）
       if (tag === 'BODY') { if (runId) for (const r of t.responses) r.body = undefined; inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
       if (tag === 'TARGET') {
-        flush(); t = newTarget(a); pendingJson.length = 0; firstLine = 'pending'; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
+        flush(); t = newTarget(a); pendingJson.length = 0; firstLine = 'pending'; sawUnreadable = false; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
         // 書き間違い（lable=）や受け付けない値（label=login/x、kind=API）は、黙って既定にすると、予約したラベルの横断の判定（C-09 など）が
         // 動かない理由が分からなかった。sensitive= と同じく知らせる（値は出さない。ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
         const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
@@ -257,6 +260,12 @@ export function parseInput(input: string): ParseResult {
     // 書く）に「HTTP/1.1 401 Unauthorized: x」と書いて応答を作り直し、A-01①・C-12①・H-01①（高）を合格にできた。トレーラの行には必ずコロンが
     // ある（curl はコロンのない行を拒む）ので、コロンのないステータス行だけを次の応答（-L・1xx・401・407・CONNECT のあと）とする（第50回）
     const trailer = !!sm && runId !== undefined && !!cur && !inHeaders && line.includes(':');
+    // 印のある入力では、コロンのあるステータス行の形の行（「HTTP/1.1 302 Found: x」）は、応答がまだないときも応答にしない（curl はこの行を
+    // ヘッダとして出す。読めないステータス行で始めた応答の2行目に書いて、本物の 200 を 302・401 にできた。第51回）
+    // 止めるのは、同じターゲットにすでに読めない行があったときだけ（最初のステータス行そのものにコロンがある「HTTP/1.1 200 OK: x」も curl は
+    // 受け付けるので、無条件に止めると本物の応答がまるごと消えた。束のレビュー）。curl が受け付ける形は STATUS_RE で読めるので、偽装は
+    // 「読めない行のあとのコロンのある行」だけで起きる
+    if (sm && runId !== undefined && !cur && line.includes(':') && sawUnreadable) { unparsed++; continue; }
     // 印のある入力で、chunked の HTTP/1.x の応答のヘッダのあと（#BODY の前）は、トレーラの行になりうる。curl 7.82 以前はコロンのない
     // トレーラの行も -D に書くので、コロンのないステータス行でも、次の応答にするのは -L・1xx・401・407 のあと（nextHopAfter）だけ
     // （200 のあとのトレーラの「HTTP/1.1 401 Unauthorized」で応答を作り直せた）。トレーラの行は本文にせず読み飛ばし、空行がなくても次の
@@ -296,7 +305,9 @@ export function parseInput(input: string): ParseResult {
       if (r) { t.responses.push(r); if (r.status === 0) pendingJson.push(r); json = null; } else if (r === null || json.length > 500) { unparsed += json.length; json = null; }
       continue;
     }
-    if (!cur) { if (line.trim()) unparsed++; continue; }
+    // curl の失敗の行（curl: (28) Operation timed out。WebSocket の 101 のあとの --max-time の時間切れなど）は、解析できない行に数えない
+    // （101 のあとに毎回「ステータス行より前の行」の警告が出た。第51回）
+    if (!cur) { if (line.trim() && !/^curl: \(\d+\) /.test(line)) { unparsed++; sawUnreadable = true; } continue; }
     if (!inHeaders) {                                  // 本文は先頭64KBまで。1行が長い本文（圧縮したHTMLなど）も途中で切る
       const room = BODY_LIMIT - (cur.body?.length ?? 0);
       if (room > 0) cur.body = (cur.body ?? '') + (line.length < room ? `${line}\n` : line.slice(0, room));

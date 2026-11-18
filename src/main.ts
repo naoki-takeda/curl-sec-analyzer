@@ -71,10 +71,15 @@ function buildShell() {
   const profIn = hidden('.json,application/json', async f => {
     if (f.size > MAX_BYTES) { say(() => tr().settingsTooLarge(MAX_BYTES / 1024 / 1024)); return; }
     const { profile: p, errors } = parseProfile(await f.text());
-    if (p) state.profile = p;
-    // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）
-    if (p && state.har) { const chains = state.har.imp.chains; withProfile(p, () => suggestLabels(chains, true)); renderHar(); }
-    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.loadProfile, joinMessages(errors, getLang())) : ''; });
+    // 形式の違うファイル（どの設定も読めず、エラーがある）では、読み込み済みのプロファイルを残す（既定の設定に置き換わった。例外ファイルと同じ。第51回）
+    const known = p && (Object.keys(p.severity).length || p.exclude.length || p.sessionCookieNames.length || p.trustedScriptOrigins.length || p.name || p.sessionMaxAgeHours !== 24);
+    const kept = !!state.profile && !(p && (known || !errors.length));
+    if (p && !kept) state.profile = p;
+    // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）。残したプロファイルでは作り直さない
+    // （捨てた既定の設定で作り直し、判定に使うプロファイルと食い違った。束のレビュー）
+    if (p && !kept && state.har) { const chains = state.har.imp.chains; withProfile(p, () => suggestLabels(chains, true)); renderHar(); }
+    // 残したときは、そのことを知らせる（「既定の24時間を使います」などのエラーの文言だけでは、古いプロファイルを使い続けることが分からなかった）
+    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.loadProfile, joinMessages(errors, getLang())) + (kept ? t.profileKept : '') : ''; });
   });
   const baseIn = hidden('.json,application/json', async f => {
     // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超える。貼り付けと同じ上限では、自分のエクスポートを読めなかった）

@@ -186,3 +186,35 @@ describe('第50回：暗号化した Cookie と解析用の Cookie', () => {
     expect(c09(input)).toEqual(['C-09.na']);
   });
 });
+
+describe('第51回：主のセッションIDの名前・期限の Cookie', () => {
+  const c09 = (input: string) => evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId);
+  it('C-09①：__Host-sid・connect.sid を同じ値で送り直し、別の Cookie を発行しただけのログインは①', () => {
+    for (const name of ['__Host-sid', 'connect.sid']) {
+      const v = 'a'.repeat(64);
+      const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, 'HTTP/2 200', `set-cookie: ${name}=${v}; Path=/; Secure; HttpOnly; Max-Age=86400`, '', '',
+        '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /home', `set-cookie: ${name}=${v}; Path=/; Secure; HttpOnly; Max-Age=86400`,
+        'set-cookie: visitor_id=Q2x8BBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly', '', ''].join('\n');
+      expect(c09(input), name).toEqual(['C-09.1']);
+    }
+  });
+  it('C-09：送っただけの connect.sid を再発行せず、auth_token だけを発行したログインは na', () => {
+    const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, '* Connected to www.example.com (192.0.2.1) port 443', '> GET /login HTTP/2',
+      '> Cookie: connect.sid=s%3AAAAAAAAAAAAAAAAAAAAAAAAAAAAA', '>', '< HTTP/2 200', '<', '',
+      '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /home', 'set-cookie: auth_token=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly', '', ''].join('\n');
+    expect(c09(input)).toEqual(['C-09.na']);
+  });
+  it('期限・時刻の Cookie（grafana_session_expiry・last_login）はセッションIDとしない。SESSIONID の数字の値はこれまでどおり', () => {
+    const page = (c: string) => evaluate(`#TARGET url=https://www.example.com/ label=top\n${AT}\nHTTP/2 200\nset-cookie: ${c}\n\n`).ids('top').filter(i => i.startsWith('C-02'));
+    expect(page('grafana_session_expiry=1763460007; Path=/; Max-Age=2592000; Secure; SameSite=Lax')).toEqual([]);
+    expect(page('last_login=1731900000; Path=/; Secure')).toEqual([]);
+    expect(page('SESSIONID=1731900000; Path=/; Secure')).toContain('C-02.1');
+  });
+  it('（束のレビュー）時刻の語のない名前の Unix 時刻の形の値（auth=1000000001）はセッションIDとして判定し、キャメルケースの sessionExpiry は除く', () => {
+    const page = (c: string) => evaluate(`#TARGET url=https://www.example.com/ label=top\n${AT}\nHTTP/2 200\nset-cookie: ${c}\n\n`).ids('top').filter(i => i.startsWith('C-02'));
+    expect(page('auth_token=1000000042; Path=/; Secure')).toContain('C-02.1');
+    expect(page('sessionExpiry=1763460007; Path=/')).toEqual([]);
+    const s = (i: number) => `#TARGET url=https://www.example.com/login label=session-sample-${i}\n${AT}\nHTTP/2 302\nlocation: /\nset-cookie: auth=100000000${i}; Path=/; Secure; HttpOnly\n\n`;
+    expect(evaluate(s(1) + s(2) + s(3)).findings.filter(f => f.item === 'C-07' && f.target === 'session-sample-*' && f.status === 'fail').length).toBeGreaterThan(0);
+  });
+});

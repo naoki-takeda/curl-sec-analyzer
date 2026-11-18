@@ -294,3 +294,33 @@ test('第50回：形式の違うファイルを例外ファイルとして読ん
   await page.getByText('設定ファイル').click();
   await expect(page.getByText(/例外 1件（有効 1件/)).toBeVisible();
 });
+
+test('第51回：HAR の一覧で操作してもフォーカスを失わず、ホスト単位の表に対象を出す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  const sel = page.locator('select[data-focus^="har-label-"]').first();
+  await expect(sel).toBeVisible();
+  await sel.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeFocused();
+});
+
+test('第51回：ホストが2つあるとき、ホスト単位の表に対象の列を出す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill(['#TARGET url=https://www.example.com/ label=tls', '#TLSPROBE v=tls1 ok=1', '#TARGET url=https://api.example.com/ label=tls2', '#TLSPROBE v=tls1 ok=1', ''].join('\n'));
+  await page.getByRole('button', { name: '判定する' }).click();
+  const cross = page.getByRole('region', { name: 'ホスト単位・ターゲット横断の判定' });
+  await expect(cross.getByRole('columnheader', { name: 'ターゲット' })).toBeVisible();
+  await expect(cross.getByText('www.example.com', { exact: false }).first()).toBeVisible();
+});
+
+test('第51回（束のレビュー）：HAR のラベルを矢印で見て回っても、ほかのエントリの予約ラベルを失わない', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  const labels = async () => page.locator('select[data-focus^="har-label-"]').evaluateAll(els => els.map(e => (e as HTMLSelectElement).value));
+  await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeVisible();
+  const before = await labels();
+  await page.locator('select[data-focus^="har-label-"]').first().focus();
+  for (const k of ['ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp']) await page.keyboard.press(k);
+  expect(await labels()).toEqual(before);
+});

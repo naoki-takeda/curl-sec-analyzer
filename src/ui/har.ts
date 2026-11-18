@@ -1,5 +1,5 @@
 // ui/har.ts：HARの読み込み（Web Worker）と、エントリ一覧の画面
-import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
+import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarChain, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
 import { withProfile } from '../engine/profile';
 import { tr } from '../i18n';
 import { showText } from '../shownText';
@@ -46,40 +46,67 @@ function removeHar() {
   else { state.last = null; renderEmpty(); }
 }
 
+/**
+ * 一覧に出す URL（マスク済み）。チェーンごとに一度だけ作る（描き直すたびに全行の URL を3回ずつマスクし直し、長い URL の多い HAR で
+ * 1回の描き直しに何十秒もかかった。第51回）
+ */
+const shownUrls = new WeakMap<HarChain, string>();
+/**
+ * 予約ラベルを移したエントリと、元のラベル。移したエントリがそのラベルを外したら戻す（Chromium は閉じた select を矢印で動かすたびに change を出す
+ * ので、選択肢を見て回るだけで、login・logout のエントリのラベルが次々に har-N になり、戻しても元に戻らなかった。束のレビュー）
+ */
+const moved = new Map<HarChain, { by: HarChain; label: string }>();
+/** 前に描いた HAR（別の HAR を読んだら、一覧は開いて先頭から表示する） */
+let shownImp: HarImport | undefined;
+const shownUrl = (c: HarChain) => { let v = shownUrls.get(c); if (v === undefined) { v = showText(c.url); shownUrls.set(c, v); } return v; };
 export function renderHar() {
   if (!state.har) { refs.harBox.replaceChildren(); return; }
+  // 一覧は描き直すので、操作した部品のフォーカス・表のスクロール位置・開閉を戻す（チェックボックス・ラベルの選択を変えるたびに、フォーカスが
+  // body に落ち、表が先頭に戻った。第51回）
+  const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
   const T = tr().har; const { imp, hosts } = state.har;
+  const same = shownImp === imp; shownImp = imp; if (!same) moved.clear();
+  const prevScroll = same ? refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? 0 : 0;
+  const prevOpen = same ? refs.harBox.querySelector('details')?.open : undefined;
   const hostBoxes = imp.hosts.map(h => {
-    const cb = el('input'); cb.type = 'checkbox'; cb.checked = hosts.has(h); cb.id = `har-host-${h}`;
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = hosts.has(h); cb.id = `har-host-${h}`; cb.dataset.focus = `har-host-${h}`;
     cb.addEventListener('change', () => { if (cb.checked) hosts.add(h); else hosts.delete(h); renderHar(); });
     return el('span', 'mr-4 inline-flex items-center gap-1', cb, labelFor(cb.id, `${h} (${imp.chains.filter(c => c.host === h).length})`, 'text-sm'));
   });
   const rows = imp.chains.filter(c => hosts.has(c.host)).map(c => {
     const base = c.suggested.startsWith('har-') || c.suggested.startsWith('error-') ? c.suggested : `har-${c.id + 1}`;
     const sel = options(el('select', 'rounded-md border border-line bg-paper px-2 py-1 text-sm'),
-      [...new Set([base, `error-${c.id + 1}`, ...HAR_LABEL_CHOICES])].map((v): [string, string] => [v, v]).concat([['__exclude', T.exclude]]),
+      // har-N は、予約ラベルをほかのエントリに移したときの戻り先なので、いつも選択肢に入れる（候補が error-N のエントリで選択肢になく、空欄に
+      // なった。第51回）
+      [...new Set([base, `har-${c.id + 1}`, `error-${c.id + 1}`, ...HAR_LABEL_CHOICES, c.label])].map((v): [string, string] => [v, v]).concat([['__exclude', T.exclude]]),
       c.excluded ? '__exclude' : c.label);
-    sel.setAttribute('aria-label', T.labelFor(c.method, showText(c.url)));   // 読み上げ用の名前も、画面の表示と同じくマスクする
+    sel.setAttribute('aria-label', T.labelFor(c.method, shownUrl(c))); sel.dataset.focus = `har-label-${c.id}`;   // 読み上げ用の名前も、画面の表示と同じくマスクする
     sel.addEventListener('change', () => {
-      if (sel.value === '__exclude') { c.excluded = true; return; }
+      // このエントリが前に予約ラベルを移していたら、そのエントリのラベルを戻す（ほかのラベルに変えていなければ）
+      for (const [o, v] of moved) if (v.by === c) { if (o.label === `har-${o.id + 1}` && !imp.chains.some(x => x !== o && x !== c && x.label === v.label)) o.label = v.label; moved.delete(o); }
+      if (sel.value === '__exclude') { c.excluded = true; renderHar(); return; }
       c.excluded = false;
-      if (HAR_LABEL_CHOICES.includes(sel.value)) for (const o of imp.chains) if (o !== c && o.label === sel.value) o.label = `har-${o.id + 1}`;   // 予約ラベルは1件だけ
+      if (HAR_LABEL_CHOICES.includes(sel.value)) for (const o of imp.chains) if (o !== c && o.label === sel.value) { moved.set(o, { by: c, label: o.label }); o.label = `har-${o.id + 1}`; }   // 予約ラベルは1件だけ
       c.label = sel.value; renderHar();
     });
     const sens = options(el('select', 'rounded-md border border-line bg-paper px-2 py-1 text-sm'),
       [['auto', T.auto(c.sentAuth)], ['1', tr().yes], ['0', tr().no]], c.sensitive === undefined ? 'auto' : c.sensitive ? '1' : '0');
-    sens.setAttribute('aria-label', T.sensFor(showText(c.url)));
+    sens.setAttribute('aria-label', T.sensFor(shownUrl(c))); sens.dataset.focus = `har-sens-${c.id}`;
     sens.addEventListener('change', () => { c.sensitive = sens.value === 'auto' ? undefined : sens.value === '1'; });
-    return el('tr', '', td('whitespace-nowrap', c.method), td('break-all font-mono text-[12px]', showText(c.url)),
+    return el('tr', '', td('whitespace-nowrap', c.method), td('break-all font-mono text-[12px]', shownUrl(c)),
       td('num whitespace-nowrap', `${c.status}${c.hops > 1 ? T.hops(c.hops) : ''}`), td('', sel), td('', sens));
   });
+  const scroller = el('div', 'mt-3 max-h-96 overflow-auto', table(tr().tables.har, [T.method, tr().cols.url, T.status, tr().cols.label, tr().cols.sensitive], rows));
+  scroller.dataset.scroll = 'har';
   const box = el('details', 'mt-4 rounded-md border border-line bg-surface p-4',
     el('summary', 'cursor-pointer font-bold', T.title(state.har.name)),
     el('p', 'mt-2 text-sm text-muted', T.note),
     imp.sanitized ? el('p', 'mt-2 text-sm text-sev-medium', T.sanitized) : null,
     el('div', 'mt-3', el('span', 'mr-2 text-sm text-muted', T.hosts), ...hostBoxes),
-    el('div', 'mt-3 max-h-96 overflow-auto', table(tr().tables.har, [T.method, tr().cols.url, T.status, tr().cols.label, tr().cols.sensitive], rows)),
+    scroller,
     el('div', 'mt-3', button(T.remove, BTN, removeHar)));
-  box.open = true;
+  box.open = prevOpen ?? true;
   refs.harBox.replaceChildren(box);
+  scroller.scrollTop = prevScroll;
+  if (focusKey) box.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focusKey)}"]`)?.focus();
 }

@@ -44,11 +44,12 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
       // OpenSSL は TLS 1.0 を「TLSv1」と出す
       const negotiated = ts.flatMap(t => ownInfo(t, host)).map(l => l.match(/SSL connection using (TLSv1(?:\.\d)?|SSLv3)\b/)?.[1]).filter((v): v is string => !!v);
       if (!probes.length && !negotiated.length) continue;         // TLSの情報がないホストは適用外
+      // 同じバージョンのプローブが2回あっても（サンプルと採取を一緒に入れたとき）、証跡には1回だけ書く（第51回）
       const accepted = probes.filter(p => p.result === 'accepted' && OLD.test(p.version.replace(/\s/g, '')));
       // C4 で旧バージョンを合意した場合も、そのバージョンで接続できたので①にする（②の「TLS 1.3 非対応」だけにしない）
       const oldNegotiated = [...new Set(negotiated.filter(v => OLD.test(v)))];
       if (accepted.length || oldNegotiated.length) out.push(hf(tlsVersion, host, 1, 'high', 'fail',
-        [accepted.length ? `接続できた旧バージョン: ${accepted.map(p => p.version).join(', ')}` : '', oldNegotiated.length ? `合意したバージョン: ${oldNegotiated.join(', ')}` : ''].filter(Boolean).join('、'),
+        [accepted.length ? `接続できた旧バージョン: ${[...new Set(accepted.map(p => p.version))].join(', ')}` : '', oldNegotiated.length ? `合意したバージョン: ${oldNegotiated.join(', ')}` : ''].filter(Boolean).join('、'),
         'TLS 1.2 と 1.3 だけを有効にする'));
       // 旧バージョンの一部が ok=err（手元の OpenSSL が非対応）なら、そのバージョンは試していないので合格にしない（設計書：ok=err は na）。
       // 1つでも拒否されたら合格にすると、tls1=err・tls1_1=0 で TLS 1.0 を確かめずに合格にした

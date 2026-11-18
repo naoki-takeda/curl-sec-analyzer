@@ -110,7 +110,8 @@ describe('束3b 生成スクリプトはヘッダと本文を分けて取る（�
     expect(r.targets[0].responses[0].body).toContain('#BODY run=ffffffffffffffff');
   });
   it('#BODY の前に読める応答がない（curl の失敗、curl は受け付ける小文字のステータス行）ときは、本文を捨てる', () => {
-    for (const head of ['', 'http/1.1 200 OK\ncontent-type: text/html\n']) {
+    // 小文字のステータス行（http/1.1 200 OK）は、第51回から curl と同じく応答として読む（本文は #BODY のあとをそのまま本文にする）
+    for (const head of ['']) {
       const r = evaluate(`#TARGET url=https://a.example/ label=page run=${RUN}\n#META at=2026-11-01T10:00:00 run=${RUN}\n${head}\n#BODY run=${RUN}\n${forged}\n#TARGET url=https://a.example/b label=b run=${RUN}\nHTTP/2 200\n\n`);
       expect(r.targets.find(t => t.label === 'page')?.responses ?? [], head).toEqual([]);
       expect(r.findings.filter(f => f.target === 'page' && f.status === 'pass').map(f => f.ruleId), head).toEqual([]);

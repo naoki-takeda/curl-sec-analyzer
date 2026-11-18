@@ -42,6 +42,8 @@ export function render() {
   // 絞り込み・表示の切り替えの部品は描き直すので、操作した部品にフォーカスを戻す（data-focus で同じ部品を探す。select を矢印で変えると、
   // 1回でフォーカスが body に落ちた。第50回）
   const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
+  // 章で絞り込んだ行（見出しの件数と「情報」の件数を、表の行数と合わせる。束のレビュー）
+  const chapterRows = rows.filter(r => !state.view.chapter || chapterOf(r.item) === state.view.chapter);
   const parts: Child[] = [
     ledger(countBySeverity(rows)),
     // 例外を当てた指摘の件数（重要度別の件数には含めない。ワイルドカードの例外で高が消えても、画面から気づけなかった。第49回）
@@ -49,7 +51,8 @@ export function render() {
     exportBar(),
     warnings.length || hints.length ? warningList([...warnings.map(w => w.detail), ...hints]) : null,
     state.last.diff ? diffBlock(state.last.diff) : null,
-    heading(T.findings, findingsCount(rows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(rows.filter(r => r.severity === 'info').length), chapterFilter())),
+    // 件数は、章で絞り込んだ表の行数と合わせる（絞り込む前の全体の件数を出していた。第51回）
+    heading(T.findings, findingsCount(chapterRows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(chapterRows.filter(r => r.severity === 'info').length), chapterFilter())),
     rows.length ? overallTable(rows.filter(r => (!state.view.chapter || chapterOf(r.item) === state.view.chapter) && (state.view.showInfo || r.severity !== 'info'))) : el('p', 'text-muted', T.noFindings),
     heading(T.perTarget, T.count(targets.length), focusable(button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); }), 'show-all')),
     targetSummary(targets, byTarget),
@@ -143,13 +146,15 @@ export const STATUS_ORDER = ['fail', 'suppressed', 'na', 'pass'];
 /** 指摘を先に、重要度の高い順、項目IDの順に並べる */
 export const byImportance = (a: Finding, b: Finding) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
   || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.ruleId.localeCompare(b.ruleId);
-export function findingsTable(fs: Finding[], label: string) {
+/** withTarget：対象（ホスト・ラベルの組）の列を出す。ホスト単位・横断の表で、どのホストの指摘かが画面から分からなかった（第51回） */
+export function findingsTable(fs: Finding[], label: string, withTarget = false) {
   const T = tr();
   const shown = mergeNa(fs.filter(f => state.view.showAll || (f.status === 'fail' && (state.view.showInfo || f.severity !== 'info'))).sort(byImportance));
   if (!shown.length) return el('p', 'mt-1 text-sm text-muted', T.nothingToShow);
-  return table(label, [T.cols.severity, T.cols.item, T.cols.status, T.cols.evidence, T.cols.recommendation, ''], shown.map(x =>
+  return table(label, [T.cols.severity, T.cols.item, ...(withTarget ? [T.cols.target] : []), T.cols.status, T.cols.evidence, T.cols.recommendation, ''], shown.map(x =>
     el('tr', '', x.status === 'fail' ? sevCell(x.severity, x.originalSeverity) : td('text-muted', '—'),
       td('whitespace-nowrap num', x.items ? x.items.join(getLang() === 'en' ? ', ' : '・') : `${x.item}${circled(x.condition)}`),
+      withTarget ? td('break-all', showText(x.target)) : null,
       td(`whitespace-nowrap ${x.status === 'pass' ? 'text-ok' : x.status === 'fail' ? '' : 'text-muted'}`, statusLabel(x.status)),
       td('font-mono text-[12px] break-all', x.evidence || '—'),
       td('', x.status === 'suppressed' ? T.suppressedNote(x.suppressedBy!.reason, x.suppressedBy!.approver, x.suppressedBy!.until) : rec(x.recommendation) || '—'),
@@ -179,7 +184,7 @@ export function crossBlock(findings: Finding[]) {
   if (!fs.length) return null;
   const d = el('details', 'mt-3 rounded-md border border-line bg-surface',
     el('summary', 'summary-custom flex cursor-pointer flex-wrap items-baseline gap-x-3 px-3 py-2', disclosure(), el('span', 'font-bold', tr().crossTitle), counts(fs)),
-    el('div', 'border-t border-line p-2', findingsTable(fs, tr().crossTitle)));
+    el('div', 'border-t border-line p-2', findingsTable(fs, tr().crossTitle, true)));
   d.open = state.view.showAll || fs.some(x => x.status === 'fail' && x.severity !== 'info');
   return d;
 }

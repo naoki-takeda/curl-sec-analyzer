@@ -16,7 +16,7 @@ tls | https://www.example.com/ | key=- | responses=0
 ## findings
 after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200
 apex | H-01.1 | high | fail | (ヘッダなし)
-apex | H-02.3 | low | fail | top は preload を付けているが、apex がHSTSを返さない
+apex | H-02.3 | low | fail | www.example.com は preload を付けているが、apex がHSTSを返さない
 apex | H-02.na | info | na | HSTSがない（H-01で判定）
 cors-reflect | R-01.1 | high | fail | Origin: https://evil.example → ACAO: https://evil.example / ACAC: true
 cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）

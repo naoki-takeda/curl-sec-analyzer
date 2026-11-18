@@ -29,7 +29,9 @@ const PATTERNS = ['<!--', '<!-- x', '<script ', '<a href="', '<form ', '<input t
   'https:\\a:', 'http:/a:', "a'@", '#u=a&p=', '?パ=',
   // 第50回：値の中の生の ;、長いパラメータの名前、pass で終わる名前、配列の値
   '?password=a;', ';a', '&aaaaaaaaaa', 'xpass=', 'password":["',
-  '"password":[[', 'password: [a, ', ';a a ', '%22password%22%3A%5B', 'password":[{"v":"'];
+  '"password":[[', 'password: [a, ', ';a a ', '%22password%22%3A%5B', 'password":[{"v":"',
+  // 第51回：配列の空の要素、オブジェクトの値、CSP の ;、エスケープした //
+  '"password":["",', '"password":{"v":"', ';script-src ', 'a:\\/\\/b:'];
 
 describe('2乗の時間にならない', { tags: ['perf'] }, () => {
   it.each(PATTERNS)('本文・ヘッダに「%s」の繰り返し', p => {

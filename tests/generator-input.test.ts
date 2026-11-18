@@ -62,7 +62,7 @@ describe('第48回：生成スクリプト', () => {
   it('openssl がない・指定を受け付けないときは、C12・C23 を err（試していない）にする', () => {
     expect(s).toContain("OSSL_ERR='unknown option|no protocols available|no cipher match|invalid command|error with command|ssl_conf_cmd|command not found'");
     // 証明書の検証の行（depth=・verify）を除いてから照合する（subject に「O=unknown option」と書いた証明書で err にさせない）
-    expect(s.match(/if \[ \$rc -ge 126 \] \|\| grep -vE '\^\(depth=\|verify \(error\|return\)\)' "\$terr" \| grep -qiE "\$OSSL_ERR"; then r=err/g)).toHaveLength(2);
+    expect(s.match(/if \[ \$rc -ge 124 \] \|\| grep -vE '\^\(depth=\|verify \(error\|return\)\)' "\$terr" \| grep -qiE "\$OSSL_ERR"; then r=err/g)).toHaveLength(2);
   });
   it('印のある入力で、小文字のステータス行のあとの「* Connected to」を -v の手がかりにしない', () => {
     const input = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'http/1.1 200 OK', '* Connected to: x', '> Cookie: sessionid=abc',
@@ -93,7 +93,10 @@ describe('第48回（束2の第2回のレビュー）：-v は、ターゲット
     for (const status of ['HTTP/1.1 20 OK', 'HTTP/1.1 +20 OK', ' HTTP/1.1 200 OK']) {
       const input = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, status, '* Connected to: x', '> Cookie: sessionid=abc',
         'HTTP/1.1 200 OK:x', 'content-type: application/json', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com","role":"admin"}', ''].join('\n');
-      expect(ids(input, 'A-01'), status).toContain('A-01.1');
+      // 読めないステータス行のあとのコロンのある「HTTP/1.1 200 OK:x」は、第51回から応答にしない（読めない行で始めて、本物の 200 を
+      // 302・401 に偽装できた）。応答がないので判定はできないが、合格にはしない
+      expect(ids(input, 'A-01'), status).not.toContain('A-01.ok');
+      expect(parseInput(input).targets[0]?.verbose, status).toBeFalsy();
     }
   });
   it('デバッグ版の curl の WARNING の行のあとの -v は、-v として読む', () => {
@@ -259,5 +262,38 @@ describe('第50回（束のレビュー）：古い curl のトレーラ・転�
     const r = evaluate(input);
     expect(r.targets.find(t => t.label === 'login')!.responses.map(x => x.status)).toEqual([302]);
     expect(r.findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.1']);
+  });
+});
+
+describe('第51回：読めないステータス行・curl の失敗の行・openssl の時間の上限', () => {
+  const R = '0123456789abcdef', A = `#META at=2026-11-01T10:00:00 run=${R}`;
+  it('curl が受け付ける緩いステータス行（200OK・小文字・4桁）を読み、次のコロンのあるステータス行で応答を作り直さない', () => {
+    for (const st of ['HTTP/1.1 200OK', 'http/1.1 200 OK', 'Http/1.1 200 OK', 'HTTP/1.1 2000 OK']) {
+      const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${R}`, A, st, 'HTTP/1.1 401 Unauthorized: x', 'Content-Type: application/json', '',
+        `#BODY run=${R}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
+      expect(r.targets[0].responses.map(x => x.status), st).toEqual([200]);
+      expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId), st).toEqual(['A-01.1']);
+    }
+  });
+  it('読めないステータス行のあとのコロンのあるステータス行も、応答にしない', () => {
+    const r = parseInput([`#TARGET url=https://www.example.com/mypage label=after-logout run=${R}`, A, 'HTTP/1.1 20 OK', 'HTTP/1.1 302 Found: x', 'Location: /login', '', ''].join('\n'));
+    expect(r.targets[0]?.responses ?? []).toEqual([]);
+  });
+  it('curl の失敗の行（WebSocket の 101 のあとの時間切れ）を、解析できない行に数えない', () => {
+    const r = parseInput([`#TARGET url=https://www.example.com/ws label=websocket run=${R}`, A, '* Connected to www.example.com (192.0.2.1) port 443', '> GET /ws HTTP/1.1',
+      '> Origin: https://evil.example', '>', '< HTTP/1.1 101 Switching Protocols', '< Upgrade: websocket', '<', 'curl: (28) Operation timed out after 5001 milliseconds with 0 bytes received', ''].join('\n'));
+    expect(r.warnings.map(w => w.kind)).not.toContain('unparsed-lines');
+  });
+  it('openssl の s_client には時間の上限を付け、時間切れは err にする', () => {
+    const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous: false });
+    expect(s).toMatch(/^if timeout --foreground 1 true 2>\/dev\/null; then ossl\(\) \{ timeout --foreground 20 openssl "\$@"; \}$/m);
+    expect(s).toMatch(/^else ossl\(\) \{ openssl "\$@"; \}; fi$/m);
+    expect(s).not.toMatch(/(?<!ossl )openssl s_client/);
+    expect(s.match(/if \[ \$rc -ge 124 \]/g)).toHaveLength(2);
+  });
+  it('（束のレビュー）最初のステータス行そのものにコロンがあっても（curl は受け付ける）、応答として読む', () => {
+    const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${R}`, A, 'HTTP/1.1 200 OK: x', 'Content-Type: application/json', '',
+      `#BODY run=${R}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
+    expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId)).toEqual(['A-01.1']);
   });
 });

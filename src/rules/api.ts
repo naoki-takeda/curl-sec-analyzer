@@ -229,6 +229,9 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
     const p = prefix ? `${prefix}.${k}` : k;
     // 入力の検証の規則・autocomplete の値・正規表現と、エラーの項目の中の値（errors.password の TOO_SHORT）は秘密の値ではない（第49回）。
     // パス・URL・項目の名前（{"menu":{"password":"/settings/password"}}）も、E-09 と同じく除く（第50回）
+    // 検索専用のキー（searchOnlyApiKey・search_api_key と、DocSearch の apiKey）は、ブラウザから使う公開のキー（HTML の docsearch と同じ。第51回）。
+    // Algolia・Meilisearch・Typesense の apiKey は、管理用・マスターのキーも同じ名前なので除かない（束のレビュー）
+    if (typeof x === 'string' && (/^search_?(?:only_?)?(?:api_?)?key$/i.test(k) || (/(?:^|\.)docsearch(?:\[\])?$/i.test(prefix) && /^api_?key$/i.test(k)))) continue;
     if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x) && !isPlaceholderValue(x) && !stateWord(x)
       && !notSecretFormat(x) && !notSecretText(x) && !/(?:^|\.)(?:errors?|validation(?:_?errors)?)(?:\[\])?$/i.test(prefix)) out.add(p);   // errors・validation の直下だけ（束のレビュー）
     secretValuedKeys(x, p, out, depth + 1);
