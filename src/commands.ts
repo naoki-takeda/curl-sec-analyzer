@@ -160,8 +160,11 @@ export function generateScript(o: CommandOptions): string {
   }
 
   L.push('', '# ---- 第2章：ログアウトと、ログアウト後の旧Cookie（C18） ----', 'cp jar.txt old.txt');
-  t('logout', `${H}${o.logoutPath}`); L.push(`curl -sS -v -o /dev/null -c jar.txt -b jar.txt "$H"${q(o.logoutPath)} 2>&1`);
-  t('after-logout', `${H}${o.mypagePath}`, ' sensitive=1'); L.push(`curl -sS -D - -o /dev/null -b old.txt "$H"${q(o.mypagePath)}`);
+  // logout は送った Cookie の名前（H-15）を使うので -v のまま、本文を別に取って #BODY の印のあとに出す（GET ではログアウトの確認画面を返すだけの
+  // アプリを見分ける。第48回。-v の出力に本文を混ぜると、パーサは本文を読まず、本文に書いた「< HTTP/1.1 200」などで偽の応答を作れた）。
+  // after-logout は本文も取る（#BODY の形。本文がないと、ログインのフォーム・SPA の殻・データのない JSON を見分けられず C-12①（高）にした）
+  t('logout', `${H}${o.logoutPath}`); L.push(`: > "$body"; curl -sS -v -o "$body" -c jar.txt -b jar.txt "$H"${q(o.logoutPath)} 2>&1; echo "#BODY run=$RUN"; head -c 196608 "$body"; echo`);
+  t('after-logout', `${H}${o.mypagePath}`, ' sensitive=1'); L.push(`curl -sS -i -b old.txt "$H"${q(o.mypagePath)}`);
 
   L.push('} > out.txt', 'rm -f "$hdr" "$body"', `echo 'out.txt に書き出しました。ツールで読み込んだら、パスワードやCookieを含むファイルも削除してください：rm -f out.txt login.txt jar.txt old.txt s1.txt s2.txt s3.txt' >&2`);
   // 本文を取るコマンド（ここでは curl -sS -i と書く）は、ヘッダ（-D）と本文（-o）を別のファイルに取り、「ヘッダ・#BODY の印・本文」の順に出す。

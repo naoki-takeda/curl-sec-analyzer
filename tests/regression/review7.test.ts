@@ -99,7 +99,10 @@ describe('%{header_json}', () => {
   const logout = t('logout', 'https://a.example/logout', 'HTTP/2 302\nlocation: /\nset-cookie: sid=; Max-Age=0');
   const after = (meta: string) => `#TARGET url=https://a.example/mypage label=after-logout\n{"content-type":["text/html"],"date":["Mon, 16 Nov 2026 00:00:00 GMT"]}\n${meta}`;
   it('あとの #META response_code をステータスにする（C-12① を見逃さない）', () => {
-    expect(evaluate(logout + after('#META response_code=200\n')).findings.map(f => f.ruleId)).toContain('C-12.1');
+    // %{header_json} は本文を採取しないので、200 は na（第48回）。na の理由に、あとの response_code から読んだステータスが出る
+    const c12 = evaluate(logout + after('#META response_code=200\n')).findings.filter(f => f.item === 'C-12' && f.target === 'after-logout');
+    expect(c12.map(f => f.ruleId)).toEqual(['C-12.na']);
+    expect(c12[0].evidence).toContain('HTTP 200');
   });
   it('ステータスが分からなければ C-12・A-01 は判定しない（合格にしない）', () => {
     expect(evaluate(logout + after('')).findings.filter(f => f.item === 'C-12' && f.target === 'after-logout').map(f => f.ruleId)).toEqual(['C-12.na']);

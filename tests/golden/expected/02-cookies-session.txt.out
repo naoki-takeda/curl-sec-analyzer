@@ -13,7 +13,7 @@ http | http://app.example.com/ | key=http | responses=1
 ## warnings
 
 ## findings
-after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200
+after-logout | C-12.na | info | na | 旧Cookieでの認証後ページが HTTP 200（本文を採取していないので、旧Cookie が使えたかは分からない）
 cookies | A-02.ok | info | pass | URL・Location・本文にトークンなし
 cookies | C-01.3 | low | fail | tracking=…(1 chars); Domain=.example.com（ホストはHSTSあり）
 cookies | C-02.ok | info | pass | __host-sid, session_id, PHPSESSID
@@ -181,7 +181,7 @@ C-08 | evaluated | fails=3
 C-09 | evaluated | fails=1
 C-10 | evaluated | fails=1
 C-11 | evaluated | fails=2
-C-12 | evaluated | fails=1
+C-12 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 C-13 | evaluated | fails=1
 C-14 | manual | fails=0
 C-15 | manual | fails=0

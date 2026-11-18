@@ -115,14 +115,26 @@ export const PROBE_UNREACHED_REC = 'ネットワークの状態を確かめて C
  * 保護データを返していないので、A-01①・C-12①（高）にしない
  */
 const AUTH_FLAG = /^(?:is_?)?(?:authenticated|authorized|logged_?in|signed_?in|auth|ok|success|valid)$/i;
-export const noDataJson = (body: string | undefined): boolean => {
+// false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
+const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
+  || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+const parseJson = (body: string | undefined): unknown => {
   const b = (body ?? '').trim();
-  if (!/^[{[]|^null$/.test(b)) return false;
-  let j: unknown; try { j = JSON.parse(b); } catch { return false; }
-  // false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
-  const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
-    || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+  if (!/^[{[]|^null$/.test(b)) return undefined;
+  try { return JSON.parse(b); } catch { return undefined; }
+};
+export const noDataJson = (body: string | undefined): boolean => {
+  const j = parseJson(body);
+  if (j === undefined) return false;
   return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && (Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)) || errorEnvelope(j as Record<string, unknown>, blank)));
+};
+/**
+ * エラーだけを返した JSON か（errorEnvelope。{"success":false,"error":"invalid_credentials"}）。空の {} や値がすべて空のものは含めない
+ * （ログインの成功でも {} を返すアプリがある）。C-09 で、200 の JSON で返したログインの失敗を見分けるのに使う
+ */
+export const errorJson = (body: string | undefined): boolean => {
+  const j = parseJson(body);
+  return typeof j === 'object' && j !== null && !Array.isArray(j) && errorEnvelope(j as Record<string, unknown>, blank);
 };
 /**
  * エラーだけを返した JSON（200 で {"success":false,"error":"Unauthorized","message":"Please log in"}）。エラーの項目（error・errors など）か

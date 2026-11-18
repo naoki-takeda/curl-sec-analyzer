@@ -3,7 +3,7 @@ import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
+import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
 import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
 
 const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
@@ -127,6 +127,8 @@ function loginRejected(login: Target, pre: Target): string | undefined {
     }
   }
   if (first.status >= 200 && first.status < 300 && PASSWORD_FIELD.test(first.body ?? '')) return `HTTP ${first.status} でパスワード欄のある画面を返した`;
+  // JSON の API のログインが、200 でエラーだけの JSON（{"success":false,"error":"invalid_credentials"}）を返した（①（高）にした。第48回）
+  if (first.status >= 200 && first.status < 300 && errorJson(first.body)) return `HTTP ${first.status} でエラーの JSON を返した`;
   return undefined;
 }
 
@@ -273,6 +275,9 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
       const gql = graphqlError(r.body);
       if (gql === 'denied') return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev}（GraphQL の認証エラー。データは null）`, '')];
       if (gql || noDataJson(r.body)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（データのない JSON。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
+      // 本文を採取していない（-D - -o /dev/null、HAR の本文なし）と、ログインのフォーム・SPA の殻・データのない JSON を見分けられない。
+      // 生成スクリプトの出力でいつもこの形になり、①（高）にした（C-09① の本文のないログインと同じ。第48回）
+      if (!r.body?.trim()) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（本文を採取していないので、旧Cookie が使えたかは分からない）`, NO_BODY_REC)];
       if (spaShell(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（SPA の画面。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
       return [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', ev, 'ログアウト時にサーバ側のセッションを破棄する')];
     }

@@ -1,4 +1,5 @@
 import type { HttpResponse, ParseWarning, ResponseKind, Target } from '../model';
+import { looksLikeSessionName } from './setCookie';
 
 /** 付け直したラベル（http#2 など）の元のラベル。ラベル対応表やラベルで判定を変えるルールは、この元のラベルで判定する */
 export const baseLabel = (label: string) => label.replace(/#\d+$/, '');
@@ -172,4 +173,35 @@ export const firstStatus = (t: Target): number => ownChain(t)[0]?.status ?? 0;
  * ログアウトの応答が失敗（4xx・5xx）しているか。GET の /logout に 405 を返すアプリなどでは、ログアウトしていないので、
  * C-12（ログアウト後の無効化・Cookie の削除）と H-15 を判定しない
  */
-export const logoutFailed = (t: Target): boolean => firstStatus(t) >= 400;
+export const logoutFailed = (t: Target): boolean => {
+  const s = firstStatus(t);
+  return s >= 400 || (s >= 200 && s < 300 && logoutConfirmPage(t));
+};
+/**
+ * ログアウトの確認画面（GET では「ログアウトしますか」のフォームを返すだけで、POST でログアウトする作り。ASP.NET Core Identity の既定の画面、
+ * Spring Security の既定のログアウトの確認画面）。ログアウトしていないのに、C-12①（高）と H-15 を判定した（第48回）。次のすべてに当たるもの：
+ * - セッションCookie らしい名前の Cookie を消しも発行し直しもせず、Clear-Site-Data もない（AWSALB のような毎回の Cookie は見ない）
+ * - 本文に、送信先（action）に logout・signout・logoff の語がある POST のフォームがあり、その中にログアウトのボタンの文言がある
+ *   （action のないフォームや購読のフォームを置くだけで、本物のログアウトの C-12① を na に隠せたので、送信先と文言の両方を見る）
+ * - パスワード欄（ログアウトのあとのログインの画面）と、ASP.NET WebForms の __VIEWSTATE（ページ全体を囲むフォーム）がない
+ * タグは indexOf で切り出して線形の時間で読む（正規表現の先読みで読むと、<form の繰り返しで3乗の時間がかかった）
+ */
+const LOGOUT_WORD = /log[-_ ]?out|sign[-_ ]?out|log[-_ ]?off|ログアウト|サインアウト/i;
+function logoutConfirmPage(t: Target): boolean {
+  const chain = ownChain(t);
+  if (chain.some(r => r.headers.has('clear-site-data') || (r.headers.get('set-cookie') ?? []).some(c => looksLikeSessionName(c.split('=')[0].trim())))) return false;
+  const body = (finalResponse(t)?.body ?? '').slice(0, 65536);
+  if (/type\s*=\s*["']?password/i.test(body) || /__VIEWSTATE/i.test(body)) return false;
+  const low = body.toLowerCase();
+  for (let i = low.indexOf('<form'), n = 0; i >= 0 && n < 50; i = low.indexOf('<form', i + 5), n++) {
+    const end = low.indexOf('>', i); if (end < 0 || end - i > 2000) continue;
+    const tag = low.slice(i, end);
+    const method = tag.match(/\bmethod\s*=\s*["']?(\w+)/)?.[1];
+    const action = tag.match(/\baction\s*=\s*["']?([^"'\s>]*)/)?.[1] ?? '';
+    if (method !== 'post' || !LOGOUT_WORD.test(action)) continue;
+    const close = low.indexOf('</form', end);
+    const inner = body.slice(end + 1, close < 0 ? end + 4000 : Math.min(close, end + 4000));
+    if (LOGOUT_WORD.test(inner.replace(/<[^>]{0,500}>/g, ' ')) || /value\s*=\s*["'][^"']{0,40}(?:log\s*out|sign\s*out|ログアウト)/i.test(inner)) return true;
+  }
+  return false;
+}

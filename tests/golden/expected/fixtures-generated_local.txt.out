@@ -41,7 +41,7 @@ tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応してい�
 tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
 
 ## findings
-after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200
+after-logout | C-12.na | info | na | 旧Cookieでの認証後ページが HTTP 200（本文を採取していないので、旧Cookie が使えたかは分からない）
 apex | H-01.1 | high | fail | (ヘッダなし)
 apex | H-02.na | info | na | HSTSがない（H-01で判定）
 api | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -259,7 +259,7 @@ C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, lo
 C-09 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: pre-login, login
 C-10 | missing-input | fails=0 | 必要なラベル: http
 C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
-C-12 | evaluated | fails=2
+C-12 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-14 | manual | fails=0
 C-15 | manual | fails=0

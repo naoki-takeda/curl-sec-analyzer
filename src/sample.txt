@@ -84,6 +84,8 @@ HTTP/2 200
 content-type: text/html; charset=utf-8
 cache-control: no-store
 
+<h1>マイページ</h1>
+
 #TARGET url=https://www.example.com/ label=probes
 #PROBE path=/.git/HEAD code=200 size=21 head=cmVmOiByZWZzL2hlYWRzL21haW4K ct=text/plain
 #PROBE path=/.env code=404 size=0 head= ct=text/html; charset=utf-8

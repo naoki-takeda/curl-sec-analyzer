@@ -115,7 +115,7 @@ describe('C-09・C-12・H-15：ログイン・ログアウトの失敗', () => {
   const pre = t('pre-login', 'https://a.example/login', `${HTML}\nset-cookie: sid=AAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly; SameSite=Lax`);
   const login = (status: number) => t('login', 'https://a.example/login', `HTTP/2 ${status}\ncontent-type: text/html`, '', 'sensitive=1');
   const logout = (status: number) => t('logout', 'https://a.example/logout', `HTTP/2 ${status}\ncontent-type: text/html`);
-  const after = t('after-logout', 'https://a.example/mypage', HTML, '', 'sensitive=1');
+  const after = t('after-logout', 'https://a.example/mypage', HTML, '<h1>My page</h1>', 'sensitive=1');   // 本文のない 200 は na（第48回）
   const mypage = (status: number) => t('mypage', 'https://a.example/mypage', `HTTP/2 ${status}\ncontent-type: text/html`, '', 'sensitive=1');
   const ids = (input: string, item: string) => evaluate(input).findings.filter(f => f.item === item).map(f => f.ruleId);
   it('ログインが 403 で失敗したら、C-09① にしない', () => {
