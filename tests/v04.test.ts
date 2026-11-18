@@ -66,7 +66,8 @@ describe('前回との差分', () => {
   it('Markdown は証跡のHTMLタグを実体参照にする', () => {
     const fs = evaluate(t('top', 'https://www.example.com/', 'HTTP/2 200\ncontent-type: text/html\n\n<img src="http://cdn.example/a.png">')).findings;
     const md = toMarkdown(fs, coverage(fs, IMPLEMENTED), []);
-    expect(md).toContain('&lt;img src="http://cdn.example/a.png"&gt;');
+    // 裸の URL はゼロ幅の空白（&#8203;）で自動リンクにしない（第42回）
+    expect(md).toContain('&lt;img src="http&#8203;://cdn.example/a.png"&gt;');
     expect(md).not.toMatch(/<img/i);
   });
   it('エクスポートしたJSONを前回の結果として読み込める', () => {

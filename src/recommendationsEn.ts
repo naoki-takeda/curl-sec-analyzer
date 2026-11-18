@@ -1,6 +1,6 @@
 // recommendationsEn.ts：推奨対応の英訳（v0.4：英語UIで推奨対応だけを英訳する）
 // キーはルールが返す日本語の文言そのもの。新しい文言を追加したら、ここにも追加する（tests/i18n.test.ts が漏れを検出する）
-const EXACT: Record<string, string> = {
+export const EXACT: Record<string, string> = {
   // 第1章
   'Strict-Transport-Security: max-age=63072000; includeSubDomains': 'Strict-Transport-Security: max-age=63072000; includeSubDomains',
   "Content-Security-Policy: frame-ancestors 'none'（旧ブラウザ向けに X-Frame-Options: DENY も併用）": "Content-Security-Policy: frame-ancestors 'none' (add X-Frame-Options: DENY for older browsers)",
@@ -60,6 +60,7 @@ const EXACT: Record<string, string> = {
   'ログイン成功時にセッションIDを再発行する': 'Issue a new session ID when login succeeds',
   '暗号論的に安全な乱数でセッションIDを生成する': 'Generate session IDs with a cryptographically secure random number generator',
   '同じ名前のセッションCookieを2回以上採取する': 'Capture the same session cookie at least twice',
+  '秒をまたいで session-sample を採取し直す': 'Capture session-sample again, at least a second apart',
   'ログアウト時にサーバ側のセッションを破棄する': 'Destroy the server-side session on logout',
   // 第3章
   '送信したOriginが分からない。-v 付きで再取得する': 'The Origin that was sent is unknown. Capture again with -v',
@@ -151,6 +152,7 @@ const EXACT: Record<string, string> = {
   'robots.txt に機密パスを書かない（アクセス制御で守る）': 'Do not list sensitive paths in robots.txt (protect them with access control)',
   'Contact と Expires を書く': 'Include Contact and Expires',
   'Expires を更新する': 'Update Expires',
+  'Expires を RFC 3339 の日時（2027-01-01T00:00:00Z）で書く': 'Write Expires as an RFC 3339 date-time (2027-01-01T00:00:00Z)',
   '本番では introspection を無効にする': 'Disable introspection in production',
   'introspection のクエリ（{"query":"{__schema{types{name}}}"}）を POST して採取する': 'Capture a POST of an introspection query ({"query":"{__schema{types{name}}}"})',
   'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）': 'Do not expose actuator in production (enable only the endpoints you need, behind authentication)',
@@ -192,6 +194,9 @@ const EXACT: Record<string, string> = {
   'エラー応答を1つの形式（例：application/problem+json）にそろえる': 'Use one format for error responses (for example application/problem+json)',
   // ホスト単位・横断
   'apex ドメインもHSTS（includeSubDomains; preload）を返す': 'The apex domain must also send HSTS (includeSubDomains; preload)',
+  'apex の https の URL（https://apexドメイン/）で採取する': 'Capture the https URL of the apex domain (https://apex-domain/)',
+  'Cookie で認証しないなら乗っ取りにはならない。Origin の許可リストでの照合も行う': 'Without cookie authentication this is not hijackable; still check Origin against an allowlist',
+  '<meta name="referrer"> を削除するか strict-origin-when-cross-origin にする': 'Remove <meta name="referrer"> or set it to strict-origin-when-cross-origin',
   'nonce は応答ごとに新しい乱数で生成する': 'Generate a new random nonce for every response',
 };
 
@@ -205,6 +210,8 @@ Object.assign(EXACT, {
   '機密応答かどうか分からない': 'Unknown whether the response is sensitive',
   'ログイン前にセッションCookieが発行されていない': 'No session cookie was set before login',
   'CSPにnonceがない': 'The CSP has no nonce',
+  '本文を取得して（C2）、Contact と Expires があるか確かめる': 'Fetch the body (C2) and check that it has Contact and Expires',
+  'CSPのスクリプトのディレクティブにnonceがない': 'The CSP script directives (script-src, script-src-elem, script-src-attr, default-src) have no nonce',
   '比較できるセッションCookieがない': 'No session cookies to compare',
   'HTTPのバージョンが分からない': 'Unknown HTTP version',
   'JSONを解析できない（64KBを超えて切れた可能性）': 'Cannot parse the JSON (it may have been cut off at 64 KB)',
@@ -220,6 +227,8 @@ const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^必要なラベル: (.+)$/, m => `Required labels: ${m[1].replace(/（一般）/g, '(general)').replace(/（2つ以上）/g, ' (2 or more)').replace(/（同じURLを2回取得）/g, ' (fetch the same URL twice)').replace(/（APIのエラー応答を2つ以上）/g, ' (2 or more API error responses)').replace(/（https:\/\/apexドメイン\/）/g, ' (https://apex-domain/)')}`],
   [/^使っていなければ (.+) を無効にする$/, m => `Disable ${m[1].replace(/・/g, ', ')} if unused`],
   [/^(\S+) として数える（(.+)）$/, m => `Counted as ${m[1]} (avoids double counting)`],
+  [/^ログイン後に、ログイン前の (.+) だけを送って認証後のページを取得できないか、手動で確認する$/,
+    m => `After logging in, check manually whether a page behind login can be fetched by sending only the pre-login ${m[1].replace(/・/g, ', ')}`],
 ];
 
 /** 推奨対応を英訳する。辞書にない文言はそのまま返す */

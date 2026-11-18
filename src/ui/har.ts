@@ -2,7 +2,7 @@
 import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
 import { withProfile } from '../engine/profile';
 import { tr } from '../i18n';
-import { maskText } from '../mask';
+import { showText } from '../shownText';
 import { BTN, button, el, labelFor, options, table, td } from './dom';
 import HarWorker from '../worker.ts?worker&inline';
 import { type Message, actions, refs, state } from './state';
@@ -59,7 +59,7 @@ export function renderHar() {
     const sel = options(el('select', 'rounded-md border border-line bg-paper px-2 py-1 text-sm'),
       [...new Set([base, `error-${c.id + 1}`, ...HAR_LABEL_CHOICES])].map((v): [string, string] => [v, v]).concat([['__exclude', T.exclude]]),
       c.excluded ? '__exclude' : c.label);
-    sel.setAttribute('aria-label', T.labelFor(c.method, maskText(c.url)));   // 読み上げ用の名前も、画面の表示と同じくマスクする
+    sel.setAttribute('aria-label', T.labelFor(c.method, showText(c.url)));   // 読み上げ用の名前も、画面の表示と同じくマスクする
     sel.addEventListener('change', () => {
       if (sel.value === '__exclude') { c.excluded = true; return; }
       c.excluded = false;
@@ -68,9 +68,9 @@ export function renderHar() {
     });
     const sens = options(el('select', 'rounded-md border border-line bg-paper px-2 py-1 text-sm'),
       [['auto', T.auto(c.sentAuth)], ['1', tr().yes], ['0', tr().no]], c.sensitive === undefined ? 'auto' : c.sensitive ? '1' : '0');
-    sens.setAttribute('aria-label', T.sensFor(maskText(c.url)));
+    sens.setAttribute('aria-label', T.sensFor(showText(c.url)));
     sens.addEventListener('change', () => { c.sensitive = sens.value === 'auto' ? undefined : sens.value === '1'; });
-    return el('tr', '', td('whitespace-nowrap', c.method), td('break-all font-mono text-[12px]', maskText(c.url)),
+    return el('tr', '', td('whitespace-nowrap', c.method), td('break-all font-mono text-[12px]', showText(c.url)),
       td('num whitespace-nowrap', `${c.status}${c.hops > 1 ? T.hops(c.hops) : ''}`), td('', sel), td('', sens));
   });
   const box = el('details', 'mt-4 rounded-md border border-line bg-surface p-4',

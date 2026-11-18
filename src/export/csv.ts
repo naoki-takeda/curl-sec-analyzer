@@ -16,7 +16,11 @@ const noFormula = (v: string) => (v !== '-' && /^[=+\-@\t\r]/.test(v) ? `'${v}` 
 const HOST_SOURCES: Record<string, string[]> = { 'T-09': ['tls', 'top'], 'T-10': ['tls'], 'T-11': ['tls'], 'E-03': ['probes'] };
 
 /** ラベルとホストからターゲットを引く索引（指摘ごとに全ターゲットを探すと、指摘の数 × ターゲットの数の時間がかかる） */
-interface MetaIndex { byLabel: Map<string, Target[]>; byHost: Map<string, Target[]>; targets: Target[]; memo: Map<string, { at: string; cmd: string }> }
+interface MetaIndex {
+  byLabel: Map<string, Target[]>; byHost: Map<string, Target[]>; targets: Target[]; memo: Map<string, { at: string; cmd: string }>;
+  /** ターゲットごとの実施コマンドの要約（・で分けたもの）。指摘ごとに要約し直さない */
+  cmds: Map<Target, string[]>;
+}
 function indexTargets(targets: Target[]): MetaIndex {
   const byLabel = new Map<string, Target[]>(), byHost = new Map<string, Target[]>();
   const add = (m: Map<string, Target[]>, k: string | undefined, t: Target) => {
@@ -25,7 +29,7 @@ function indexTargets(targets: Target[]): MetaIndex {
     if (list) list.push(t); else m.set(k, [t]);
   };
   for (const t of targets) { add(byLabel, t.label, t); add(byHost, hostOf(t), t); }
-  return { byLabel, byHost, targets, memo: new Map() };
+  return { byLabel, byHost, targets, memo: new Map(), cmds: new Map() };
 }
 
 /**
@@ -50,11 +54,18 @@ function sourceMeta(f: Finding, ix: MetaIndex): { at: string; cmd: string } {
       src = ix.targets.filter(t => parts.some(p => (p.endsWith('*') ? t.label.startsWith(p.slice(0, -1)) : t.label === p)));
     }
   }
-  const cmds = [...new Set(src.flatMap(t => (t.meta.cmd ?? '').split('・')).filter(Boolean))];
   // 最も新しい日時は、時刻として比べる（文字列で並べると、T 区切りと空白区切りが混ざったとき、時刻に関係なく T 区切りを選んだ）
   const at = src.map(t => t.meta.at ?? '').filter(Boolean).sort((a, b) => (Date.parse(a.replace(' ', 'T')) || 0) - (Date.parse(b.replace(' ', 'T')) || 0) || (a < b ? -1 : a > b ? 1 : 0)).at(-1) ?? '';
   // 実施日時と実施コマンドは、残してよい形だけを残す（export/cmdSummary.ts。手で書いた #META の値の秘密を出さない）
-  const out = { at: summarizeAt(at), cmd: summarizeCommand(cmds.join('・')) };
+  // コマンドはターゲットごとの値（#META cmd= の1つの値）ごとに要約してから、重複を除いてつなぐ（つないでから要約すると、別のターゲットのコマンドの @ で
+  // URL を伏せた。要約は値の中の @ で URL を伏せる）
+  const cmdOf = (t: Target) => {
+    let c = ix.cmds.get(t);
+    if (!c) { c = summarizeCommand(t.meta.cmd ?? '').split('・').filter(Boolean); ix.cmds.set(t, c); }
+    return c;
+  };
+  const cmd = [...new Set(src.flatMap(cmdOf))].join('・');
+  const out = { at: summarizeAt(at), cmd };
   ix.memo.set(key, out);
   return out;
 }

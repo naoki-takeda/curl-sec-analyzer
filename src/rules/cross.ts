@@ -1,6 +1,6 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument } from '../parser/target';
+import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
 import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
@@ -11,7 +11,9 @@ const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Se
      target, evidence, recommendation, references: rule.basis, score: 0 });
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
-const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.now(); return (t?.responses ?? []).flatMap(r => r.headers.get('set-cookie') ?? [])
+// 対象のサイトの応答だけを見る（C-01〜C-07 と同じ siteResponses）。-L でたどった外部の IdP の Cookie（idp_session）を、アプリが
+// セッションIDを再発行したものとみなし、C-09① を合格にした
+const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.now(); return (t ? siteResponses(t) : []).flatMap(r => r.headers.get('set-cookie') ?? [])
   .map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, now) && looksLikeSession(c, now) && !isChunkMarker(c)); };   // 値を比べるので、分割の印は除く
 
 /**
@@ -160,6 +162,14 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
     if (!after.length || after.some(a => before.includes(a)))
       return [cf(sessionFixation, 'pre-login/login', 1, 'high', 'fail', 'login 応答でセッションIDが再発行されていない', 'ログイン成功時にセッションIDを再発行する')];
+    // pre-login で発行した主のセッションID（名前に sess・sid を含むもの）を、login で新しい値にせず、別の Cookie（auth_token・
+    // ASP.NET Core の .AspNetCore.Identity.Application）だけを発行した。認証を新しい Cookie で持つなら固定化はないが、ログイン前の ID の
+    // セッションに認証を結び付けるなら固定化になる。どちらかは応答からは分からないので、合格にしない（新しい Cookie があるだけで合格にした）
+    const renewed = new Set(afterC.filter(c => !before.includes(`${c.name}=${c.value}`)).map(c => c.name));
+    const kept = [...new Set(beforeC.filter(c => /sess|^sid$/i.test(c.name) && !renewed.has(c.name)).map(c => c.name))];
+    if (kept.length)
+      return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答で ${kept.join(', ')} を再発行せず、ほかの Cookie（${[...renewed].join(', ')}）を発行した。どちらで認証しているかは分からない`,
+        `ログイン後に、ログイン前の ${kept.join('・')} だけを送って認証後のページを取得できないか、手動で確認する`)];
     return [cf(sessionFixation, 'pre-login/login', 'ok', 'info', 'pass', 'ログイン時にセッションIDを再発行している', '')];
   } };
 
@@ -202,6 +212,17 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
     for (const [rawName, vals] of byName) {
       if (vals.length < 2) continue;
       const name = rawName || '（名前なし）';   // 値だけの Set-Cookie（rules/cookies.ts の cookieName と同じ表示）
+      // 署名付きのトークン（JWT・Flask・Django）がすべて同じ値なのは、同じ秒に同じ内容で署名したため（HS256 は同じ入力から同じ署名になる）。
+      // 署名の鍵がなければ作れないので、推測できる（②（高））とはしない
+      // 採取の時刻（#META at）が分かり、60秒より離れているときは②（時刻を見ずに na にすると、15分おきに採取した同じ JWT も「同じ秒」とした）。
+      // #META at は手元の時刻で、トークンの iat はサーバの時刻なので、同じ秒かどうかでは比べない（秒をまたいだ採取を②（高）にした）。
+      // 署名付きの形は、JWT・itsdangerous と、署名が20文字以上の Django の形（固定の値 guest:1:admin は署名付きではない）
+      const times = samples.map(t => (t.meta.at ? Date.parse(t.meta.at.replace(' ', 'T')) : NaN));
+      const far = times.every(v => !Number.isNaN(v)) && Math.max(...times) - Math.min(...times) > 60e3;
+      if (new Set(vals).size === 1 && !far && /^(?:(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.[\w-]+|\.?[\w-]+:[\w-]+:[\w-]{20,})$/.test(vals[0])) {
+        out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：署名付きのトークンが同じ値（同じ秒に同じ内容で署名した可能性）`, '秒をまたいで session-sample を採取し直す'));
+        continue;
+      }
       const why = predictable(vals);
       out.push(why ? cf(sessionPredictable, 'session-sample-*', 2, 'high', 'fail', `${name}：${why}（${vals.map(maskValue).join(' / ')}）`, '暗号論的に安全な乱数でセッションIDを生成する')
                    : cf(sessionPredictable, 'session-sample-*', 'ok', 'info', 'pass', `${name}：${vals.length}件に共通部分・連番なし`, ''));
@@ -295,25 +316,37 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
     if (!preload) return [];
     // apex 自身の応答（転送の最初のホップ）で見る。-L や HAR で www への転送をたどった最後の応答は www のもの
     // max-age=0 は HSTS を解除する指定なので、返していないのと同じ（H-01①と同じ）
-    const v = ownChain(apex)[0]?.headers.get('strict-transport-security')?.[0];
+    // apex 自身の https の応答で見る。http で採取して https の apex に転送したもの（http://a.example → https://a.example → www）は、その https の
+    // ホップ。https の apex の応答がなければ、HSTS を返すかは分からない（「HSTSを返さない」とは言わない。http の応答の HSTS はブラウザが無視する）
+    const httpsHop = /^https:/i.test(apex.url ?? '') ? ownChain(apex)[0]
+      : chainOf(apex).find(r => { try { const u = new URL(r.url ?? ''); return u.protocol === 'https:' && u.hostname.toLowerCase() === ah; } catch { return false; } });
+    if (!httpsHop && isHttps(apex) !== undefined) return [cf(apexHsts, 'apex', 'na', 'info', 'na', 'apex の https の応答がない（http の応答の HSTS はブラウザが無視する）', 'apex の https の URL（https://apexドメイン/）で採取する')];
+    const v = (httpsHop ?? ownChain(apex)[0])?.headers.get('strict-transport-security')?.[0];
     return v && parseHsts(v).maxAge > 0 ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preload.label} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };
 
-// ヘッダの CSP と、HTML の <head> の <meta> の CSP（H-04 と同じ。meta の CSP の nonce が固定でも⑤）
-const nonceOf = (t: Target) => [...splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? []), ...metaCspFromHtml(finalResponse(t)?.body ?? '')]
-  .flatMap(v => [...parseCsp(v).values()].flat()).map(v => v.match(/^'nonce-([^']+)'$/)?.[1]).filter((v): v is string => !!v);
+// ヘッダの CSP と、HTML の <head> の <meta> の CSP（H-04 と同じ。meta の CSP の nonce が固定でも⑤）。スクリプトに効くディレクティブ
+// （<script> の要素に効くもの）の nonce だけ。どのディレクティブでも最初の nonce を
+// 比べると、style-src の固定の nonce で⑤（高）を出し、script-src の固定の nonce を見逃した
+// <script> の要素に効くのは、CSP3 のとおり script-src-elem、なければ script-src、なければ default-src（script-src があるときの default-src の
+// nonce は、スクリプトには効かない）。'nonce-' の部分は大文字・小文字を区別しない（値は区別する）
+const nonceOf = (t: Target) => new Set([...splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? []), ...metaCspFromHtml(finalResponse(t)?.body ?? '')]
+  .flatMap(v => { const d = parseCsp(v); return d.get('script-src-elem') ?? d.get('script-src') ?? d.get('default-src') ?? []; })
+  .map(v => v.match(/^'nonce-([^']+)'$/i)?.[1]).filter((v): v is string => !!v));
 export const fixedNonce: Rule = { id: 'H-04', title: 'CSP：script-src', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP CSP CS', 'Google csp_evaluator'],
   runCross(x) {
     const samples = x.withPrefix('csp-sample-');
     if (samples.length < 2) return na(fixedNonce, 'csp-sample-*', 'csp-sample-1, csp-sample-2（同じURLを2回取得）');
     const nonces = samples.map(nonceOf);
-    if (nonces.some(n => !n.length)) return [cf(fixedNonce, 'csp-sample-*', 'na', 'info', 'na', 'CSPにnonceがない', '')];
-    const firsts = nonces.map(n => n[0]);
-    return new Set(firsts).size < firsts.length
-      ? [cf(fixedNonce, 'csp-sample-*', 5, 'high', 'fail', `応答ごとに同じnonce（${maskValue(firsts[0])}）`, 'nonce は応答ごとに新しい乱数で生成する')]
-      : [cf(fixedNonce, 'csp-sample-*', 'ok', 'info', 'pass', `${firsts.length}件のnonceはすべて異なる`, '')];
+    if (nonces.some(n => !n.size)) return [cf(fixedNonce, 'csp-sample-*', 'na', 'info', 'na', 'CSPのスクリプトのディレクティブにnonceがない', '')];
+    // 2つ以上の応答に現れた nonce（同じ応答の中で同じ nonce を繰り返すのは固定ではない）
+    const seen = new Set<string>();
+    const fixed = nonces.flatMap(n => { const dup = [...n].filter(v => seen.has(v)); n.forEach(v => seen.add(v)); return dup; });
+    return fixed.length
+      ? [cf(fixedNonce, 'csp-sample-*', 5, 'high', 'fail', `応答ごとに同じnonce（${maskValue(fixed[0])}）`, 'nonce は応答ごとに新しい乱数で生成する')]
+      : [cf(fixedNonce, 'csp-sample-*', 'ok', 'info', 'pass', `${nonces.length}件の応答のnonceはすべて異なる`, '')];
   } };
 
 export const CROSS_RULES: Rule[] = [sessionFixation, sessionPredictable, logoutInvalidation, apexHsts, fixedNonce];

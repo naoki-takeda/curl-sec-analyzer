@@ -145,8 +145,9 @@ describe('23〜28 マスク・要約・エクスポート・HAR', () => {
     expect(() => toCsv(r.findings, r.targets)).not.toThrow();
   });
   it('26 要約：パス・クエリの @ のある URL と、sudo・timeout のあとの curl を読む', () => {
-    expect(summarizeCommand('curl "https://a.example/s?email=alice@example.com&page=2"')).toContain('https://a.example/s');
-    expect(summarizeCommand('curl https://mastodon.example/@alice/1')).toContain('https://mastodon.example/');
+    // 第33回（T9）：URL のあとに @ がある URL は、ユーザー情報の途中で切れた URL と見分けないので **** にする（伏せすぎを選ぶ）。秘密は出ない
+    expect(summarizeCommand('curl "https://a.example/s?email=alice@example.com&page=2"')).toBe('curl ****');
+    expect(summarizeCommand('curl https://mastodon.example/@alice/1')).toBe('curl ****');
     expect(summarizeCommand('sudo curl -u a:b https://a.example/')).toBe('sudo curl -u **** https://a.example/');
     expect(summarizeCommand('timeout 10 curl -sS https://a.example/')).toBe('timeout 10 curl -sS https://a.example/');
     // パスワードに / のあるユーザー情報は、今までどおり ****
@@ -173,7 +174,6 @@ describe('コミット前のレビュー', () => {
     for (const c of ['curl https://alice.smith:2024/p/w@host.example/', 'curl "https://bob.example:1234/x/y/z@host.example"', String.raw`curl https://alice.smith:1\2\3@host.example/`,
       'curl https://alice.smith:12//pw@host.example/', 'curl https://alice.smith:1?x=y@host.example/', 'curl https://alice.smith:1#a/b@host.example/', 'curl HTTPS://alice.smith:77/a/b@host.example',
       'wget https://alice.smith:2024/p/w@host.example/']) expect(summarizeCommand(c)).not.toMatch(/alice|bob|2024|1234|p\/w|pw/);
-    expect(summarizeCommand('curl https://mastodon.example/@alice/1')).toContain('https://mastodon.example/');
   });
   it('P7 要約：前置きのプログラム（time・nohup・exec・stdbuf・command）のあとも、もう一度かけて変わらない。sudo のあとの数字は出さない', () => {
     for (const c of ['time curl -u alice:secret https://a.example/', 'nohup curl -u alice:secret https://a.example/', 'exec curl https://a.example/', 'sudo nohup curl -u a:b https://a.example/',

@@ -6,7 +6,8 @@ import { isLabelText, isPlaceholderValue, isPublicClientValue, mk } from './util
 import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
-export interface Tag { name: string; attrs: Map<string, string>; evidence: string; index: number; }
+/** inert：<script> などテキストの要素の中身か <template> の中のタグ（ブラウザは文書の要素として使わない。H-09 の meta の referrer など） */
+export interface Tag { name: string; attrs: Map<string, string>; evidence: string; index: number; inert?: boolean; }
 
 /**
  * 証跡に値を出す属性。判定に使う属性（読み込み先・送信先・種類）だけにする。
@@ -36,18 +37,52 @@ export const decodeEntities = (v: string) => v.replace(/&(?:#(\d{1,7})|#[xX]([0-
  * data-config='{"min":">100"}'）。止めると、残りの値が属性名として証跡に出てしまう（値は伏せられるが、属性名は出る）。
  * 「位置と引用符の状態」ごとに結果を覚え、同じところを二度走査しない。> のない本文（<script の繰り返し）や閉じていない引用符でも、
  * 全体の時間が本文の長さに比例する（正規表現で書くと、タグの始まりごとに末尾まで走査し、本文の長さの2乗の時間がかかる）。長い属性にも上限を付けない
+ * 状態はブラウザの字句解析（HTML の tokenizer）の開始タグの部分と同じ。引用符が値を囲むのは、属性名と = のあと（空白を挟んでよい）だけで、
+ * 引用符のない値の中の = と引用符（<img src=/x?a="1>）、属性名の前の = （<p =" x>）、= のあとでない引用符（<p class=it's>）は普通の文字。
+ * ずれると、ほかのタグを読み飛ばすときに本物の > を越え、後ろの <form>・<script> を見逃す
  */
+const enum Q { TagName, BeforeAttr, AttrName, AfterAttr, BeforeValue, Unquoted, Double, Single, AfterQuoted }
+const isSpace = (c: number) => c === 32 || c === 9 || c === 10 || c === 12 || c === 13;
+function nextQ(q: Q, c: number): Q {
+  switch (q) {
+    case Q.TagName: return isSpace(c) || c === 47 ? Q.BeforeAttr : Q.TagName;                         // 空白 /
+    case Q.BeforeAttr: return isSpace(c) || c === 47 ? Q.BeforeAttr : Q.AttrName;                     // 名前の最初の = も名前の文字
+    case Q.AttrName: case Q.AfterAttr: return c === 61 ? Q.BeforeValue : c === 47 ? Q.BeforeAttr      // =
+      : isSpace(c) ? Q.AfterAttr : Q.AttrName;
+    case Q.BeforeValue: return isSpace(c) ? Q.BeforeValue : c === 34 ? Q.Double : c === 39 ? Q.Single : Q.Unquoted;
+    case Q.Unquoted: return isSpace(c) ? Q.BeforeAttr : Q.Unquoted;
+    case Q.Double: return c === 34 ? Q.AfterQuoted : Q.Double;
+    case Q.Single: return c === 39 ? Q.AfterQuoted : Q.Single;
+    default: return isSpace(c) || c === 47 ? Q.BeforeAttr : Q.AttrName;                               // 閉じた引用符のあと
+  }
+}
+/**
+ * 位置 lt の「<!--」で始まるコメントの終わり（閉じの > の位置。閉じがなければ -1）を探す関数を作る。「-->」（「<!-->」「<!--->」は空のコメント）と
+ * 「--!>」で閉じる（ブラウザと同じ）。前に探した結果を覚え、同じところを探し直さない（閉じのない「<!--」の繰り返しや、遠くにしかない「--!>」で、
+ * 位置ごとに本文の終わりまで探し、入力の長さの2乗の時間がかかる）。lt は前に進むだけ（戻ると、覚えた結果が正しくない）
+ */
+function commentEndFinder(html: string): (lt: number) => number {
+  const nextOf = (pat: string) => { let at = -2; let none = false; return (k: number) => { if (none) return -1; if (at < k) { at = html.indexOf(pat, k); none = at < 0; } return at; }; };
+  let close = nextOf('-->'), bang = nextOf('--!>');
+  let last = -1;
+  return (lt: number) => {
+    if (lt < last) { close = nextOf('-->'); bang = nextOf('--!>'); }   // 戻ったら覚えた結果を捨てる
+    last = lt;
+    const a = close(lt + 2), b = bang(lt + 4);
+    return a < 0 ? (b < 0 ? -1 : b + 3) : b < 0 ? a + 2 : Math.min(a + 2, b + 3);
+  };
+}
 function tagEndFinder(html: string): (from: number) => number {
-  const memo = new Int32Array(html.length * 3);    // 0：未走査、-1：閉じない、k+1：位置 k の > で閉じる
+  const memo = new Int32Array(html.length * 9);    // 0：未走査、-1：閉じない、k+1：位置 k の > で閉じる
   return (from: number) => {
-    const path: number[] = []; let q = 0; let res = -1;
+    const path: number[] = []; let q: Q = Q.TagName; let res = -1;
     for (let j = from; j < html.length; j++) {
-      const key = j * 3 + q; const m = memo[key];
+      const key = j * 9 + q; const m = memo[key];
       if (m !== 0) { res = m < 0 ? -1 : m - 1; break; }
       path.push(key);
       const c = html.charCodeAt(j);
-      if (q === 0) { if (c === 62) { res = j; break; } if (c === 34) q = 1; else if (c === 39) q = 2; }   // > " '
-      else if ((q === 1 && c === 34) || (q === 2 && c === 39)) q = 0;
+      if (c === 62 && q !== Q.Double && q !== Q.Single) { res = j; break; }   // 引用符の外の >
+      q = nextQ(q, c);
     }
     const v = res < 0 ? -1 : res + 1;
     for (const k of path) memo[k] = v;
@@ -59,16 +94,45 @@ export function tags(html: string, names: string[]): Tag[] {
   const start = new RegExp(`<(${names.join('|')})\\b`, 'iy');
   const endOf = tagEndFinder(html);
   const out: Tag[] = [];
+  // 中身をテキストとして読む要素（中の「<!--」はコメントではない）。<noscript> はスクリプトが有効なブラウザでテキスト。
+  // 名前のあとは空白・/・> だけ（\b だと、カスタム要素 <iframe-wrapper> を、閉じのない <iframe> として本文の終わりまでテキストにした）
+  const raw = /<(script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)(?=[\s/>])/iy;
+  let lower: string | undefined;                       // 閉じタグを探すため（初めて要るときに一度だけ小文字にする。タグごとに小文字にすると、<script の多い本文で2乗の時間になる）
+  let rawEnd = -1;                                     // <script> などの中身（コメントにならない）の終わり
+  let templateEnd = -1;                                // <template> の中身の終わり（中のタグは inert）
+  const template = /<template(?=[\s/>])/iy;
+  const commentEnd = commentEndFinder(html);
   for (let i = html.indexOf('<'); i >= 0; i = html.indexOf('<', i + 1)) {
+    // コメント（<!-- … -->）の中のタグは、ブラウザが読まない（コメントアウトしたフォーム・スクリプトで E-10①（高）・E-07① などを誤って出した）。
+    // <script>・<style>・<textarea>・<title> の中身の「<!--」（var s='<!--'）はコメントではない。閉じのない「<!--」は、コメントとして
+    // 読み飛ばさない（読み飛ばすと、後ろのタグをすべて見逃し、E-08・E-10① を合格にした）。「<!-->」「<!--->」は空のコメント
+    // 「--!>」もコメントを閉じる（ブラウザと同じ）
+    const outside = i > rawEnd;
+    if (outside && html.startsWith('<!--', i)) {
+      const e = commentEnd(i);
+      if (e >= 0) { i = e; continue; }
+    }
+    if (outside) {
+      raw.lastIndex = i;
+      const r = raw.exec(html);
+      if (r) { lower ??= html.toLowerCase(); const close = lower.indexOf(`</${r[1].toLowerCase()}`, i + r[0].length); rawEnd = close < 0 ? html.length : close; }
+      template.lastIndex = i;
+      if (i > templateEnd && template.test(html)) { lower ??= html.toLowerCase(); const close = lower.indexOf('</template', i + 9); templateEnd = close < 0 ? html.length : close; }
+    }
     start.lastIndex = i;
     const m = start.exec(html);
-    if (!m) continue;
+    if (!m) {
+      // ほかの開始タグも、属性の値の中（<div title="<!--">）を読み飛ばす（値の中の「<!--」をコメントの始まりとして、後ろのフォームを見逃した）。
+      // <script> などの中身では読み飛ばさない（スクリプトの「a<b」をタグとして読まない）
+      if (outside && /[a-z]/i.test(html[i + 1] ?? '')) { const e = endOf(i + 1); if (e >= 0) i = e; }
+      continue;
+    }
     const from = i + m[0].length; const end = endOf(from);
     if (end < 0) continue;                           // 閉じていないタグ（ブラウザはタグとして扱わない）
     const attrs = new Map<string, string>();
     for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), decodeEntities(a[2] ?? a[3] ?? a[4] ?? ''));
     const name = m[1].toLowerCase();
-    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i });
+    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i, ...(!outside || i < templateEnd ? { inert: true } : {}) });
     i = end;                                         // 属性の中の < をタグの始まりとして読まない（正規表現の matchAll と同じ）
   }
   return out;
@@ -76,6 +140,16 @@ export function tags(html: string, names: string[]): Tag[] {
 
 /** HTML本文があるか（-i・C2 で取得したもの） */
 export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ctx.final?.body?.trim() ? ctx.final.body : undefined);
+/**
+ * HTML を返したページの URL とホスト。-L で別のホスト（apex から www など）に転送されたときは、ターゲットの URL ではなく転送先（最後のホップ）。
+ * ターゲットのホストと比べると、転送先と同じホストのスクリプト（WordPress の絶対 URL）を第三者のもの（E-08）とし、相対の src も違う基準で解決した
+ */
+const pageUrlOf = (ctx: RuleContext) => ctx.final?.url ?? ctx.target.url;
+const pageHostOf = (ctx: RuleContext): string | undefined => {
+  const u = pageUrlOf(ctx);
+  try { if (u) return new URL(u).host; } catch { /* 読めなければターゲットのホスト */ }
+  return hostOf(ctx.target);
+};
 
 /**
  * HTML の <meta http-equiv="Content-Security-Policy"> の CSP（ポリシーごと）。ヘッダを付けられない GitHub Pages・S3 などの配信では普通の形で、
@@ -95,9 +169,10 @@ export function metaCspPolicies(ctx: RuleContext): string[] {
  */
 function bodyStart(html: string): number {
   const lower = html.toLowerCase();
+  const commentEnd = commentEndFinder(lower);        // tags() と同じ閉じ（「--!>」も。違うと、<head> のコメントを「--!>」で閉じた本文の meta の CSP を読んだ）
   for (let i = 0; i < lower.length;) {
     const lt = lower.indexOf('<', i); if (lt < 0) return -1;
-    if (lower.startsWith('<!--', lt)) { const e = lower.indexOf('-->', lt + 4); if (e < 0) return -1; i = e + 3; continue; }
+    if (lower.startsWith('<!--', lt)) { const e = commentEnd(lt); if (e < 0) return -1; i = e + 1; continue; }
     if (/^<script[\s>]/.test(lower.slice(lt, lt + 8))) { const e = lower.indexOf('</script', lt + 7); if (e < 0) return -1; i = e + 8; continue; }
     if (/^<body[\s>]/.test(lower.slice(lt, lt + 6))) return lt;
     i = lt + 1;
@@ -141,7 +216,7 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
   run(ctx) {
     const html = htmlBody(ctx);
     if (!html) return [];
-    const host = hostOf(ctx.target);
+    const host = pageHostOf(ctx);
     const trusted = ctx.profile?.trustedScriptOrigins ?? [];
     // 外部オリジンの script を配信元（オリジン）ごとにまとめる。組織プロファイルで自社の配信元とした所は対象外
     const byOrigin = new Map<string, { total: number; missing: Tag[] }>();
@@ -149,11 +224,12 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
     for (const t of tags(html, ['script'])) {
       const src = t.attrs.get('src');
       if (!src || !/^(https?:)?\/\//i.test(src)) continue;
-      let u: URL; try { u = new URL(src, ctx.target.url ?? 'https://invalid.invalid/'); } catch { continue; }
+      let u: URL; try { u = new URL(src, pageUrlOf(ctx) ?? 'https://invalid.invalid/'); } catch { continue; }
       if (u.host === host) continue;
       if (isTrustedOrigin(u, trusted)) { skipped++; continue; }
       const g = byOrigin.get(u.origin) ?? { total: 0, missing: [] };
-      g.total++; if (!t.attrs.has('integrity')) g.missing.push(t);
+      // 空の integrity=""（空白だけを含む）は、ブラウザが検証しない（integrity なしと同じ。合格にした）
+      g.total++; if (!t.attrs.get('integrity')?.trim()) g.missing.push(t);
       byOrigin.set(u.origin, g);
     }
     const fails = [...byOrigin].filter(([, g]) => g.missing.length).map(([origin, g]) =>
@@ -225,7 +301,8 @@ export function devCommentWord(html: string): string | undefined {
     if (end < 0) return undefined;
     // Knockout の制御のコメント（<!-- ko if: showDebug -->・<!-- /ko -->）は、開発用のコメントではない
     const c = html.slice(i + 4, end); const m = /^\s*\/?ko\b/.test(c) ? null : c.match(DEV_CODE_WORD) ?? c.match(DEV_WORD);
-    if (m) return m[0];
+    // 一致した語だけを返す。「pass Summer2024」のように値まで一致した部分を返すと、「中身は表示しない」と書いた証跡にパスワードが出た
+    if (m) return /^pass/i.test(m[0]) && !/^passwords?$/i.test(m[0]) ? 'pass' : m[0];
     i = html.indexOf('<!--', end + 3);
   }
   return undefined;
@@ -244,7 +321,7 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
       .map(i => [i.index, html.indexOf('>', i.index) + 1] as const).filter(([, e]) => e > 0).sort((a, b) => b[0] - a[0]);
     const scan = posted.reduce((h, [s, e]) => h.slice(0, s) + h.slice(e), html);
     for (const [name, re] of SECRETS) if (re.test(scan)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
-    const iu = internalUrl(html, hostOf(ctx.target)?.toLowerCase());
+    const iu = internalUrl(html, pageHostOf(ctx)?.toLowerCase());
     if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
     // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す
     const dc = devCommentWord(html);
@@ -268,6 +345,11 @@ function forms(html: string): { form: Tag; inputs: Tag[] }[] {
   });
 }
 
+/** フォームの送信先が http か（ページの URL が分からなければ、送信先そのものが http:// で始まるか） */
+const sendsInClear = (action: string, page?: string): boolean => {
+  try { return new URL(action.trim(), page).protocol === 'http:'; } catch { return /^\s*http:\/\//i.test(action); }
+};
+
 export const passwordForm: Rule = { id: 'E-10', title: 'HTML本文：パスワードフォーム', appliesTo: 'html', scope: 'target',
   basis: ['IPA', 'OWASP Authentication CS'],
   run(ctx) {
@@ -278,7 +360,9 @@ export const passwordForm: Rule = { id: 'E-10', title: 'HTML本文：パスワ�
     const out = [];
     for (const { form } of pw) {
       const action = form.attrs.get('action') ?? '';
-      if (/^http:\/\//i.test(action)) out.push(mk(passwordForm, ctx, 1, 'high', 'fail', form.evidence, 'フォームの送信先を https:// にする'));
+      // 送信先はページの URL を基準に読む（ブラウザと同じ）。http のページの相対の送信先（/login・空・//host/login）も平文で送る
+      // （http:// で始まるものだけを見ると、http のページのフォームを合格にし、「https・POST」と事実と違う証跡を出した）
+      if (sendsInClear(action, pageUrlOf(ctx))) out.push(mk(passwordForm, ctx, 1, 'high', 'fail', form.evidence, 'フォームの送信先を https:// にする'));
       if ((form.attrs.get('method') ?? 'get').toLowerCase() !== 'post') out.push(mk(passwordForm, ctx, 2, 'medium', 'fail', form.evidence, 'パスワードは method="post" で送る（URLに残さない）'));
     }
     return out.length ? out : [mk(passwordForm, ctx, 'ok', 'info', 'pass', `パスワードフォーム${pw.length}件は https・POST`, '')];

@@ -12,7 +12,13 @@ export const SESSION_PARAM_NAMES = ['PHPSESSID', 'JSESSIONID', 'sid', 'sessionid
 // OAuth・OpenID Connect の nonce、ワンタイムの番号（passcode・pin）、ハッシュ（パスワードの再設定やログインの検証に使う）、
 // JWT のクライアント認証（client_assertion）と SAML のアサーション
 const MASK_PARAM_NAMES = [...TOKEN_PARAM_NAMES, ...SESSION_PARAM_NAMES, 'code', 'password', 'passwd', 'pass', 'pw', 'secret', 'key', 'signature', 'sig',
-  'ticket', 'oauth_verifier', 'SAMLResponse', 'SAMLart', 'SAMLAssertion', 'accesskey', 'nonce', 'passcode', 'pin', 'hash', 'client_assertion', 'mac'];   // mac は名前全体が mac のときだけ（mac_address・isMac は残す）
+  'ticket', 'oauth_verifier', 'SAMLResponse', 'SAMLart', 'SAMLAssertion', 'accesskey', 'nonce', 'passcode', 'pin', 'hash', 'client_assertion',
+  'mac',   // mac は名前全体が mac のときだけ（mac_address・isMac は残す）
+  // 略したパスワードの名前（pswd・psw、フランス語の mdp）と、暗証番号（pin_number）
+  'pswd', 'psw', 'mdp', 'pin_number', 'pinnumber',
+  // 個人の番号（米国の社会保障番号、カード番号とセキュリティコード）。値の形でも伏せる（SSN・CARD）
+  // cc だけの名前は、mailto の宛先（?cc=team@…）や国のコード（?cc=US）と区別できないので含めない
+  'ssn', 'ccnum', 'cc_number', 'cardnumber', 'card_number', 'creditcard', 'credit_card', 'cvv', 'cvv2', 'cvc'];
 const alt = (names: string[]) => names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 /** クエリ（?・&）、フラグメント（#）、パス引数（;）のどれに置かれても一致する */
 export const paramRegex = (names: string[], flags = 'i') => new RegExp(`([?&#;](?:${alt(names)})=)([^&\\s#;"'<>]+)`, flags);
@@ -20,7 +26,9 @@ const MASK_EXACT = new Set(MASK_PARAM_NAMES.map(n => n.toLowerCase()));
 /** 区切った語にこれがあればマスクする（x-amz-security-token、x-goog-signature、private_token、x-api-key、access-token など） */
 const MASK_WORDS = new Set(['token', 'secret', 'signature', 'sig', 'credential', 'credentials', 'password', 'passwd', 'pwd', 'pass', 'pw', 'key', 'apikey',
   'accesskey', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'jwt', 'code', 'otp', 'ticket', 'verifier', 'samlresponse', 'samlart', 'samlassertion',
-  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf', 'hmac', 'hdnts', 'hdnea', 'bearer', 'authentication']);   // hdnts・hdnea は Akamai の署名トークン（acl=/* の値は持参人の資格情報）   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
+  'assertion', 'nonce', 'passcode', 'hash', 'csrf', 'xsrf', 'hmac', 'hdnts', 'hdnea', 'bearer', 'authentication',
+  // マジックリンク・招待・確認の番号（?magic=abcd-efgh-ijkl-mnop、?verification=482910、?invite=…）。短い番号や区切った番号は許可リストで残るため
+  'magic', 'invite', 'verification']);   // hdnts・hdnea は Akamai の署名トークン（acl=/* の値は持参人の資格情報）   // pin は名前全体が pin のときだけ（pin_lat のような地図のピンを伏せない。pin_code は語 code で伏せる）
 /**
  * 語 code と組み合わせても秘密ではない語（country_code、zip_code、error_code、currency_code）。名前の語が code とこれらだけなら伏せない。
  * code だけの名前と、auth_code・verification_code・otp_code・device_code のように秘密の語と組み合わせたものは伏せる
@@ -38,6 +46,8 @@ const plainStateValue = (v: string) => v.length < 8 || (v.length < 16 && /^[A-Za
 export const isSecretParamName = (name: string): boolean => {
   let n: string;
   try { n = decodeURIComponent(name); } catch { n = name.replace(/%5[bd]/gi, '_'); }   // 不正なエンコードを含む名前は、角かっこだけ区切りにする
+  // 全角の英数字（ｐａｓｓｗｏｒｄ）は半角にし、ゼロ幅の文字・ソフトハイフンと、末尾の + と空白（password+= は「password 」と読まれる）は除く
+  n = n.normalize('NFKC').replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, '').replace(/[+\s]+$/, '');
   // 語の末尾の数字は外して照合する（WordPress のパスワードの再設定の pass1・pass2、pw1・otp1・key1 を伏せなかった）
   if (MASK_EXACT.has(n.toLowerCase()) || STRIP_DIGIT_WORDS.has(n.toLowerCase().replace(/\d+$/, ''))) return true;
   // 語の末尾の数字は外す（otp1・pw2_hash の otp・pw を語として見る）
@@ -69,7 +79,10 @@ const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];
 // 伏せ済みとみなしてトークンを残した：#META cmd= の ?access_token=<トークン>_-L_-F_token=vi…(17 chars)）
 // 伏せ済みの値（先頭の4文字までと印。nonce- を先に伏せたものを含む）は、印の終わりで値を終える（続けて読むと、#META cmd= の
 // &token=00…(16 chars)_-o_out.txt_https://… の後ろの引数まで値に入れて伏せた）
-const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%[\]-]{1,100}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|\\\/)+)`, 'g');
+// 名前は + を含んでよい（password+= は、フォームの読み方で「password 」という名前になる。+ で名前が切れて、値を伏せなかった）
+// 名前は全角の英数字・記号（ｐａｓｓｗｏｒｄ）とゼロ幅の文字・ソフトハイフン（pass<U+200B>word）を含んでよい（含めないと、isSecretParamName の
+// 正規化を通らず、値を伏せなかった）
+const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%+[\]\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,100}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|\\\/)+)`, 'g');
 // JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる。
 // 「Bearer_eyJ…」「access_token_eyJ…」のように語と _ でつないだものも含める（直前の語は _ を含めて40文字までで、その前が語の外のときだけ。
 // 「_eyJ」の繰り返しで2乗の時間にしない）。JWE（5つの部分。鍵の部分が空の dir 形式「eyJ….. iv.暗号文.タグ」を含む）は5つ目まで、JWS は3つ目まで伏せる
@@ -233,19 +246,50 @@ const bareNonce = (all: string, q: string | undefined, v: string, h: Hider) =>
  * 値は閉じの引用符まで（長さの上限は付けない。繰り返しは入れ子でないので線形）。グループは「値の前・名前・値・値の後」
  */
 const Q = '%(?:25)*22', SP = '(?:%(?:25)*20|\\+)*';
+// キーは全角の英数字・ゼロ幅の文字を含んでよい（{"ｐａｓｓｗｏｒｄ":"…"}。secretParam が正規化してから照合する。ANY_PARAM と同じ）
 const JSON_PAIRS: RegExp[] = [
-  /("([\w.$-]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
-  /(\\"([\w.$-]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
+  /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
+  /(\\"([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
   new RegExp(`(${Q}([\\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}${Q})((?:(?!${Q})[^&\\s"'<>#])*)(${Q})`, 'g'),
 ];
-// 数値の値は、ワンタイムの番号・パスワードらしい名前だけ（"code":404・"status":500 のようなエラーの番号は残す）
-const JSON_NUMBER = /("([\w.$-]{1,64})"\s*:\s*)(\d{4,})(?![\d.])()/g;
-const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token/i;
+// 数値の値は、ワンタイムの番号・パスワード・個人の番号らしい名前だけ（"code":404・"status":500 のようなエラーの番号は残す）。
+// 3桁から（カードのセキュリティコード "cvv":123）
+const JSON_NUMBER = /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})"\s*:\s*)(\d{3,})(?![\d.])()/g;
+const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token|ssn|cvv|cvc|card|ccnum/i;
 const maskJsonPairs = (s: string, h: Hider) => {
   const rep = (all: string, pre: string, k: string, v: string, close: string) => (v && secretParam(k, v) && !/…\(\d+/.test(v) ? `${pre}${h.value(v)}${close}` : all);
   return JSON_PAIRS.reduce((acc, re) => acc.replace(re, rep), s)
     .replace(JSON_NUMBER, (all, pre: string, k: string, v: string) => (NUMERIC_SECRET.test(k) ? rep(all, pre, k, v, '') : all));
 };
+
+/**
+ * URL・JSON の外で名前を付けた秘密（コメントの password=hunter2、JS の password: "hunter2"・{'password': 'x'}、X-Auth-Token: x）。
+ * 短い合言葉は形では見分けられない（shownText.ts の許可リストは hunter2 を語として残す）ので、名前で伏せる。名前は、最後の語が
+ * password・secret・token・api_key などのものだけ（Access-Control-Allow-Credentials・token_type は対象外）。値は ASCII の文字だけ
+ */
+// 名前の前置きは64文字まで（SPRING_DATASOURCE_PRIMARY_CONNECTIONPOOL_PASSWORD）
+const FREE_NAME = String.raw`(?:[A-Za-z][\w-]{0,62}[_-])?(?:password|passwd|passphrase|pwd|pass|secret|api[_-]?key|apikey|token|private[_-]?key|ssn|cvv2?|cvc|card[_-]?number|ccnum)`;
+// 名前と値の区切り：= : と、PHP の配列の =>、define('DB_PASSWORD', '…') のカンマ（値が引用符で囲まれているときだけ）
+const FREE_SEP = String.raw`\s*(?:=>|[:=]|,(?=\s*["']))\s*`;
+// 引用符で囲んだ値は、閉じの引用符まで（secret="Tr0ub4dor&3" の & で切って、残りを出した）
+const FREE_QUOTED = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2${FREE_SEP}(["']))((?:(?!\3)[^\\\r\n]|\\.)+)(?=\3)`, 'gi');
+const FREE_PAIR = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*[:=]\s*)([^\s"'<>,;&)}\]\\]+)`, 'gi');
+// XML（<password>…</password>）と .NET の設定（<add key="Password" value="…"/>）
+const FREE_XML = new RegExp(String.raw`(<(${FREE_NAME})>)([^<]{1,512})(<\/\2>)`, 'gi');
+const FREE_KEY_VALUE = new RegExp(String.raw`(\bkey\s*=\s*(["'])${FREE_NAME}\2\s+value\s*=\s*(["']))([^"']{1,512})(?=\3)`, 'gi');
+// 状態を表す語・Cookie の属性（secret: none、XSRF-TOKEN: Secure）は秘密ではないので伏せない（証跡が読めなくなった）
+const FREE_PLAIN = /^(?:true|false|yes|no|none|null|nil|empty|set|unset|required|optional|enabled|disabled|secure|httponly|samesite|lax|strict|present|missing|n\/a|-)$/i;
+// パスワードの名前（password: secure）では、Cookie の属性の語（secure・strict・lax など）も値として伏せる（弱いパスワードがその語のことがある）。
+// 残すのは真偽値・空の値だけ。名前は語（_ - とキャメルケースの境目で区切る）として見る（compass_token・passport_api_key・bypass_secret は対象外）
+const PASSWORD_NAME = { test: (pre: string) => /(?:^|[^a-z])(?:pass(?:word|wd|phrase|code)?|pwd|psw)(?:[^a-z]|$)/i.test(pre.replace(/([a-z\d])([A-Z])/g, '$1_$2')) };
+const PASSWORD_PLAIN = /^(?:true|false|null|nil|empty|n\/a|-)$/i;
+const freeValue = (all: string, pre: string, v: string, h: Hider, post = '') =>
+  (v.includes('…') || (PASSWORD_NAME.test(pre) ? PASSWORD_PLAIN : FREE_PLAIN).test(v) || !/^[\x21-\x7e][\x20-\x7e]*$/.test(v) ? all : `${pre}${h.value(v)}${post}`);
+const maskFreePairs = (s: string, h: Hider) => s
+  .replace(FREE_XML, (all, open: string, _n: string, v: string, close: string) => freeValue(all, open, v, h, close))
+  .replace(FREE_KEY_VALUE, (all, pre: string, _q1: string, _q2: string, v: string) => freeValue(all, pre, v, h))
+  .replace(FREE_QUOTED, (all, pre: string, _q1: string, _q2: string, v: string) => freeValue(all, pre, v, h))
+  .replace(FREE_PAIR, (all, pre: string, _q: string, v: string) => freeValue(all, pre, v, h));
 
 /**
  * パラメータの値をマスクする。秘密でない名前の値も、その中に埋め込まれたパラメータ（エンコードした URL）を見る。
@@ -261,12 +305,27 @@ function maskParams(s: string, h: Hider, depth = 0): string {
   });
 }
 
+/**
+ * 名前によらず値の形で伏せる個人の番号：米国の社会保障番号（123-45-6789）と、Luhn の検査に通るカード番号（4つずつ空白か - で区切ったもの
+ * （4111 1111 1111 1111、0738-9781-0828-3555。. で区切ったものと、American Express の 4-6-5 の区切り 3782 822463 10005 も）と、
+ * 区切りのない15・16桁で 3〜6 で始まるもの）。13桁のミリ秒の時刻などは対象外。
+ * 前後が英数字・_・- のもの（パスのトークンの途中 ab12…123-45-6789ij…）は対象外（途中を伏せると、残りのかけらが短くなり、パスの部分として伏せられなくなった）
+ */
+const SSN = /(?<![\w-])\d{3}-\d{2}-\d{4}(?![\w-])/g;
+const CARD = /(?<![\w.-])(?:\d{4}([ .-])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ .-])\d{6}\2\d{5}|[3-6]\d{14,15})(?![\w-]|\.\d)/g;
+const luhn = (d: string) => {
+  let sum = 0;
+  for (let i = 0; i < d.length; i++) { let x = d.charCodeAt(d.length - 1 - i) - 48; if (i % 2) { x *= 2; if (x > 9) x -= 9; } sum += x; }
+  return d.length >= 13 && sum % 10 === 0;
+};
 function mask(s: string, h: Hider): string {
   // 順序：nonce → JSON の組（値の中の JSON を、パラメータの区切りで分ける前に見る） → パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる）
   // → ユーザー情報 → ASP.NET のセッション → パスの部分
   const nonce = s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${h.value(v)}'`)).replace(BARE_NONCE, (all, q: string | undefined, v: string) => bareNonce(all, q, v, h));
-  return maskParams(maskJsonPairs(nonce, h), h)
+  return maskFreePairs(maskParams(maskJsonPairs(nonce, h), h), h)
           .replace(JWT, t => h.value(t))
+          .replace(SSN, v => h.bare(v))
+          .replace(CARD, v => (luhn(v.replace(/\D/g, '')) ? h.bare(v) : v))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
           .replace(URL_CRED_ENCODED, (_, sc: string, user: string) => `${sc}${user}%3A****%40`)
           .replace(ASPNET_COOKIELESS, (_, inner: string) => `/(${inner.replace(/([A-Z])\(([^()]+)\)/g, (__, k: string, v: string) => `${k}(${h.value(v)})`)})`)
@@ -318,9 +377,15 @@ const PROBE_PATTERNS: [string, string, RegExp, RegExp][] = [
   ['backup',        'E-03', /\/backup\.zip$/,        /^PK\x03\x04/],
   ['phpinfo',       'E-03', /\/phpinfo\.php$/,       /phpinfo\(\)|PHP Version/],
   ['server-status', 'E-03', /\/server-status$/,      /Apache Server Status|Server Version:/],
-  ['security-txt',  'E-04', /\/security\.txt$/,      /^(Contact|Expires):/m],
+  // security.txt はコメント（# で始まる行）から始めてよい（先頭の64バイトがコメントだけのものを「ない」とした）。HTML・JSON のエラー画面は # で始まらない
+  // コメントで始まるのは、ファイルの先頭が「#」のときだけ（行の始めの # を見ると、CSS の #app{ を含む HTML の画面まで security.txt とした）
+  // 先頭の64バイトに Contact・Expires がなくコメントだけのもの（security-txt-comment）は、本当の security.txt かが分からない（どのパスにも
+  // 「# …」の平文を返すサーバもある）ので、E-04 は合格にせず na にする
+  ['security-txt',  'E-04', /\/security\.txt$/,      /^(Contact|Expires):/im],   // フィールド名は大文字・小文字を区別しない（RFC 9116）
+  ['security-txt-comment', 'E-04', /\/security\.txt$/, /(?<![\s\S])#/],
   ['robots',        'E-04', /\/robots\.txt$/,        /^(User-agent|Disallow|Allow|Sitemap):/im],
-  ['source-map',    'E-13', /\.map$/,                /^\s*\{\s*"(?:version|file|sources|sourceRoot|mappings|names|sections)"\s*:/]];
+  // XSSI 対策の前置き（)]}' の行）を付けたソースマップもある（ブラウザの開発ツールは読む。前置きがあると「取得できない」とした）
+  ['source-map',    'E-13', /\.map$/,                /^(?:\)\]\}'[^\n]*\n)?\s*\{\s*"(?:version|file|sources|sourceRoot|mappings|names|sections)"\s*:/]];
 /**
  * プローブのパスと中身が既知のファイルに一致するか。取得できた（HTTP 2xx の）ときだけ一致とする。
  * 404・403 のエラーページの中身（JSON・XML）がパターンに一致しても、そのファイルを取得できたことにはならない

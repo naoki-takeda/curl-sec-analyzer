@@ -63,7 +63,8 @@ export const hostInjection: Rule = { id: 'T-07', title: 'Host・X-Forwarded-Host
     const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(l => HOST_INJ_VALUE.test(l));
     const ok2xx = ctx.final.status >= 200 && ctx.final.status < 300;
     if (!loc && ok2xx && !ctx.final.body?.trim()) return [mk(hostInjection, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
-    const body = ctx.final.body?.match(/https?:\/\/[^\s"'<>]*evil\.example[^\s"'<>]*/i)?.[0];
+    // スキームのない URL（<script src="//evil.example/app.js">）も、ブラウザは同じスキームの外部ホストとして読み込む
+    const body = ctx.final.body?.match(/(?:https?:)?\/\/[^\s"'<>/]*evil\.example[^\s"'<>]*/i)?.[0];
     if (loc || body) return [mk(hostInjection, ctx, 2, 'medium', 'fail', loc ? `Location: ${loc}` : `本文の絶対URL: ${body}`, '絶対URLは設定値のホスト名から作り、Host・X-Forwarded-Host を信頼しない')];
     return [mk(hostInjection, ctx, 'ok', 'info', 'pass', 'テスト値（evil.example）は応答に現れない', '')];
   } };
@@ -98,6 +99,27 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
   } };
 
 const OPEN_REDIRECT_REC = 'next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す';
+/**
+ * 転送先の URL が、テスト値（evil.example）を持ったままか（エンコードしたものを含む）。ホスト名をそろえる転送（example.com → www.example.com）や
+ * パスの書き換え（/redirect → /en/redirect）はテスト値を次の応答に渡すだけで、転送先を検証したことにはならない（合格にした）
+ */
+const carriesTestValue = (loc: string) => {
+  let d = loc;
+  for (let i = 0; i < 2; i++) { try { d = decodeURIComponent(d); } catch { break; } }
+  return /evil\.example/i.test(d);
+};
+/**
+ * Refresh ヘッダの転送先（HTML Standard の shared declarative refresh steps）。「秒数」のあとの ; か , と「url=」は省略できる
+ * （Refresh: 0; https://evil.example/ も転送する。url= があるものだけを見ると、外部への転送を合格にした）。転送先がなければ undefined（読み込み直し）
+ */
+export function refreshTarget(v: string): string | undefined {
+  const m = v.match(/^\s*[\d.]+\s*(?:[;,]\s*)?([\s\S]*)$/);
+  if (!m) return undefined;
+  let rest = m[1].match(/^url\s*=\s*([\s\S]*)$/i)?.[1] ?? m[1];
+  const quote = rest[0];
+  if (quote === '"' || quote === "'") { const end = rest.indexOf(quote, 1); rest = end < 0 ? rest.slice(1) : rest.slice(1, end); }
+  return rest.trim() || undefined;
+}
 export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレクト', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Unvalidated Redirects CS', 'IPA'],
   run(ctx) {
@@ -110,7 +132,7 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
     const evil = (l: string) => { try { return /(?:^|\.)evil\.example\.?$/i.test(new URL(l.trim(), base).hostname); } catch { return false; } };
     const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(evil);
     // Refresh ヘッダ（Refresh: 0; url=https://evil.example/）による転送も見る
-    const refresh = ctx.target.responses.flatMap(r => r.headers.get('refresh') ?? []).map(v => v.match(/url\s*=\s*['"]?([^'"\s;]+)/i)?.[1] ?? '').find(evil);
+    const refresh = ctx.target.responses.flatMap(r => r.headers.get('refresh') ?? []).map(v => refreshTarget(v) ?? '').find(evil);
     if (loc || refresh) return [mk(openRedirect, ctx, 1, 'medium', 'fail', loc ? `Location: ${loc}` : `Refresh: url=${refresh}`, '転送先は許可リスト（または相対パス）に限る')];
     // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）
     // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面への転送（next= を持ち越した /login?next=…evil.example。ログインのあとで使う）と、
@@ -121,11 +143,26 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
       // 転送先を検証して止めたので合格
       const loc = r.headers.get('location')?.[0] ?? '';
       let path = ''; try { path = new URL(loc, r.url ?? base).pathname; } catch { /* 解釈できない */ }
-      return !LOGIN_PATH.test(path.length > 1 ? path.replace(/\/+$/, '') : path) && !sameDocument(r, ctx.target.url);
+      return !LOGIN_PATH.test(path.length > 1 ? path.replace(/\/+$/, '') : path) && !sameDocument(r, ctx.target.url) && !passedOn(r);
     };
-    const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location') && tested(r)) || r.headers.has('refresh'));
+    // テスト値を持ったまま、同じ入口（パスの最後の部分が同じ。/redirect → www の /redirect・/en/redirect）へ転送した。転送先の検証はその先で行う。
+    // 別の画面へのテスト値つきの転送（/home?blocked=https%3A%2F%2Fevil.example）は、検証して止めたので試した転送とする
+    const lastSegment = (u: string, b: string) => { try { return new URL(u, b).pathname.replace(/\/+$/, '').split('/').pop() ?? ''; } catch { return undefined; } };
+    const passedOn = (r: HttpResponse) => {
+      const loc = r.headers.get('location')?.[0] ?? '';
+      return carriesTestValue(loc) && lastSegment(loc, r.url ?? base) === lastSegment(r.url ?? base, base);
+    };
+    // Refresh は、別のページへ転送するものだけ（Refresh: 5 のような読み込み直しや、同じページへの Refresh は、転送先の検証を試していない）
+    const refreshes = (r: HttpResponse) => (r.headers.get('refresh') ?? []).some(v => {
+      const to = refreshTarget(v); if (!to) return false;
+      try { const a = new URL(to, r.url ?? base), b = new URL(r.url ?? base); a.hash = ''; b.hash = ''; return a.href !== b.href; } catch { return false; }
+    });
+    const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location') && tested(r)) || refreshes(r));
+    const carried = ctx.target.responses.some(r => r.status >= 300 && r.status < 400 && passedOn(r));
     return redirected ? [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')]
-      : [mk(openRedirect, ctx, 'na', 'info', 'na', ctx.target.responses.some(r => r.status >= 300 && r.status < 400)
+      : [mk(openRedirect, ctx, 'na', 'info', 'na', carried
+        ? `HTTP ${ctx.final.status}（テスト値を持ったまま、同じサイトの別の URL へ転送した。その先で転送先を検証しているかは分からない）`
+        : ctx.target.responses.some(r => r.status >= 300 && r.status < 400)
         ? `HTTP ${ctx.final.status}（ログイン画面か同じページへの転送。転送先を検証しているかは分からない）`
         : `HTTP ${ctx.final.status}（転送しなかった。転送先を検証しているかは分からない）`, OPEN_REDIRECT_REC)];
   } };

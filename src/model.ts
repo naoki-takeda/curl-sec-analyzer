@@ -14,7 +14,7 @@ export interface HttpResponse {
   url?: string;                     // そのホップのリクエストのURL（HAR は記録から、curl はターゲットの URL から Location をたどって付ける）
 }
 export interface ParseWarning {
-  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label';
+  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'proxy-only' | 'invalid-attr';
   detail: string;
   label?: string;                   // unknown-url：URLが分からないターゲットのラベル（画面のURL欄で補ったものだけ警告を消すため）
 }
@@ -29,6 +29,8 @@ export interface Target {
   /** 機密応答の推定（第0章 0.3②）：Authorization か、セッションCookieらしい名前の Cookie を送った。組織プロファイルの名前で engine/run.ts が作り直す */
   sentAuth: boolean;
   sentAuthorization?: boolean; sentCookieNames?: string[];   // 送った Authorization の有無と Cookie の名前（値は持たない。-v と HAR だけ）
+  /** ブラウザが自動で送る方式（Basic・Digest・Negotiate・NTLM）の Authorization を送った。Bearer はページのスクリプトが付けるので、クロスサイトで送られない（R-09） */
+  sentAutoAuth?: boolean;
   sentTokens: string[];             // -v の送信ヘッダにあったJWT。A-03 のデコードにだけ使い、画面・エクスポートには出さない
   meta: Record<string, string>; probes: Probe[]; tlsProbes: TlsProbe[]; cipherProbes: CipherProbe[]; openssl: string[];
 }
@@ -68,7 +70,7 @@ export interface Finding {
   partial?: boolean;                // 横断・ホスト単位の条件が入力不足で na（診断カバレッジで「一部の条件は入力不足」と示す）
   limited?: boolean;                // 機密でない応答（静的リソースなど）だけで判定した（H-12。項目のすべてがこれなら、カバレッジで「機密応答では判定していない」と示す）
   keyUrl?: string;                  // 対象の URL の突き合わせのキー（engine/targetKey.ts の urlKey。マスクした url ではなく生の URL から作る。例外の「ラベル URL」の照合に使う）
-  targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（マスク済み）」
+  targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（engine/targetKey.ts の urlKey。マスクとは別に作る）」
   evidence: string; recommendation: string; references: string[];
   score: number;                    // obsId があるルール以外は常に0
   suppressedBy?: Suppression;       // 例外に該当したとき

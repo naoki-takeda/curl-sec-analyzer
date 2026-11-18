@@ -30,7 +30,6 @@ cors-preflight | R-02.na | info | na | Origin: https://evil.example（null で�
 cors-preflight | R-04.ok | info | pass | ACAO: https://evil.example
 cors-preflight | R-05.1 | medium | fail | ACAO: https://evil.example / Allow-Methods: *
 cors-preflight | R-05.2 | info | fail | Access-Control-Max-Age: 86400
-cors-preflight | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
 cors-reflect | R-01.1 | high | fail | Origin: https://evil.example → ACAO: https://evil.example / ACAC: true
 cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）
 cors-reflect | R-04.ok | info | pass | ACAO: https://evil.example
@@ -89,7 +88,7 @@ R-02 | evaluated | fails=1
 R-03 | evaluated | fails=1
 R-04 | evaluated | fails=1
 R-05 | evaluated | fails=2
-R-06 | evaluated | fails=4
+R-06 | evaluated | fails=3
 R-07 | evaluated | fails=2
 R-08 | missing-input | fails=0 | 必要なラベル: （一般）
 R-09 | evaluated | fails=1

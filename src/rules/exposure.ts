@@ -41,7 +41,8 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     if (!b) return [];
     const out = [];
     // E-09 に任せるのは、そのラベルで E-09 を判定するときだけ（error-* のラベルは E-01 と A-10 だけを判定するので、任せると見逃した）
-    const e09 = ctx.responseKind === 'html' && allowedItems(ctx.target.label).allowsItem('E-09');
+    // 組織プロファイルで E-09 を対象外にしたときも任せない（任せると、HTML の AWS のキーをどの項目でも指摘しなかった）
+    const e09 = ctx.responseKind === 'html' && allowedItems(ctx.target.label).allowsItem('E-09') && !ctx.profile?.exclude.includes('E-09');
     const cred = CREDENTIALS.some(re => re.test(b)) || (!e09 && AWS_KEY.test(b));
     if (cred)
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
@@ -84,7 +85,8 @@ function actuatorDefault(p: string, b: string): boolean {
   let j: unknown; try { j = JSON.parse(b); } catch { return false; }
   if (!j || typeof j !== 'object' || Array.isArray(j)) return false;
   const o = j as Record<string, unknown>;
-  if (/\/actuator\/(?:health|info)\/?$/i.test(p))
+  // ヘルスのグループ（Kubernetes の /actuator/health/liveness・readiness。Spring Boot が既定で公開する）も、状態だけなら既定の応答
+  if (/\/actuator\/(?:health(?:\/[\w-]+)?|info)\/?$/i.test(p))
     return Object.entries(o).every(([k, v]) => (k === 'status' && typeof v === 'string' && /^[A-Z_]+$/.test(v)) || (k === 'groups' && Array.isArray(v) && v.every(x => typeof x === 'string')));
   if (/\/actuator\/?$/i.test(p) && Object.keys(o).length === 1 && o._links && typeof o._links === 'object')
     return Object.keys(o._links as object).length > 0 && Object.keys(o._links as object).every(k => /^(?:self|health|health-path|info)$/.test(k));
@@ -117,12 +119,15 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     if (probe) {                                              // C13 の存在確認（probes ラベル）
       if (!probe.code) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP 000、接続できなかった）`, PROBE_UNREACHED_REC)];
       const hit = probePattern(probe.path, probe.headB64, probe.code);
+      if (hit?.name === 'security-txt-comment') return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。先頭の64バイトがコメントだけで、Contact・Expires があるかは分からない）`, '本文を取得して（C2）、Contact と Expires があるか確かめる')];
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
         : [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `${probe.path}（HTTP ${probe.code}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
     }
     // 本文を取得したターゲット（一般のターゲット）。2xx でなければファイルがない（404 のエラーページの本文を、ファイルの中身として読まない）
     const st = ctx.final?.status ?? 0; const got = !st || (st >= 200 && st < 300);
     if (/\/robots\.txt$/.test(p) && (b || !got)) {
+      // 転送（3xx）を -L なしで採取したものは、転送先の robots.txt を見ていない（「なし」として合格にした）
+      if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
       // どのパスにも index.html を返す SPA の 200 は、robots.txt ではない（security.txt と同じ扱い）
       // HTML かは本文で見る（robots.txt を text/html で返すサーバの User-agent・Disallow の行を見逃さない。robots.txt は < で始まらない）
@@ -139,6 +144,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
         return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `HTML の画面が返った（security.txt ではない。HTTP ${st || '不明'}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
       const ex = b!.match(/^Expires:\s*(.+)$/im)?.[1]; const contact = /^Contact:/im.test(b!);
       if (!contact || !ex) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Contact: ${contact ? 'あり' : 'なし'} / Expires: ${ex ?? 'なし'}`, 'Contact と Expires を書く')];
+      // 読めない Expires（never など）は、期限が書かれていないのと同じ（RFC 9116 は RFC 3339 の日時を求める）。NaN との比べは常に偽なので合格にしていた
+      if (Number.isNaN(Date.parse(ex.trim()))) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Expires: ${ex}（日時として読めない）`, 'Expires を RFC 3339 の日時（2027-01-01T00:00:00Z）で書く')];
       if (Date.parse(ex) < ctx.now) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Expires: ${ex}（期限切れ）`, 'Expires を更新する')];
       return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `Expires: ${ex}`, '')];
     }
@@ -270,7 +277,8 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     // JSON の API の応答（/api/files/123.json など、パスがアップロード先らしくても）は、ダウンロードではない（DOWNLOAD_CT で +json を除くのと同じ）
     // Content-Type で見る（kind=api を明示したターゲットの SVG・PDF まで除かないため）
     if (/^\s*application\/(?:[\w.-]+\+)?json\b/i.test(ct) && !cd) return [];
-    if (uploadPath && ACTIVE_CT.test(ct) && !/attachment/i.test(cd))
+    // 種類（最初のトークン）で見る。値のどこかに attachment があるかで見ると、inline; filename="attachment.html" を見逃した（RFC 6266）
+    if (uploadPath && ACTIVE_CT.test(ct) && !/^\s*attachment\s*(?:;|$)/i.test(cd))
       return [mk(downloadResponse, ctx, 1, 'high', 'fail', `Content-Type: ${ct} / Content-Disposition: ${cd || '(なし)'}`, '利用者がアップロードしたファイルは別オリジンから attachment で配信する')];
     // ビルドした CSS・JS・フォント（Drupal の /sites/default/files/css/…、Next.js の /_next/static/media/…）は、ページが読み込むもので、ダウンロードではない
     if (!cd && BUILD_ASSET_CT.test(ct)) return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Type: ${ct}（CSS・JS・フォント）`, '')];

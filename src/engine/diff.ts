@@ -19,8 +19,12 @@ function validFinding(x: unknown): Finding | undefined {
   if (!SEVERITIES.includes(f.severity as Severity) || !STATUSES.includes(f.status as Finding['status'])) return undefined;
   if (f.item !== undefined && f.item !== m[1]) return undefined;               // ruleId と item が食い違うものは信用しない
   const condition = /^\d+$/.test(m[2]) ? Number(m[2]) : undefined;              // 条件番号は ruleId から作り直す
-  return { ...(f as Finding), item: m[1], condition, title: typeof f.title === 'string' ? f.title : '',
-           targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined };
+  // 差分で使う項目だけを、型を確かめて取り出す（ほかの項目をそのまま持ち込むと、"evidence": 1 のような値で差分の計算が例外になり、
+  // 前回の結果を外すまで、判定がすべて失敗した）
+  // 長さは切らない（証跡を切ると、大きな CSP の証跡の後ろのホスト名が前回のキーからだけ落ち、同じ結果どうしの差分が新規と解消になった）
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  return { ruleId: f.ruleId!, item: m[1], condition, title: str(f.title), severity: f.severity!, status: f.status!, target: str(f.target),
+           targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined, evidence: str(f.evidence), recommendation: '', references: [], score: 0 };
 }
 
 export function parseBaseline(text: string): { baseline?: Baseline; error?: string; skipped: number } {
@@ -38,7 +42,28 @@ export function parseBaseline(text: string): { baseline?: Baseline; error?: stri
 
 /** 突き合わせのキー。targetKey がない以前のJSONはラベルで突き合わせる */
 const tkey = (f: Finding) => f.targetKey ?? f.target;
-const key = (f: Finding) => `${f.ruleId}\u0000${tkey(f)}`;
+/**
+ * 証跡の突き合わせの形：証跡に出てくるホスト名（URL・CSP の配信元）の一覧。同じルール・ターゲットで別の配信元の指摘（E-08 の cdn-a と cdn-b、
+ * E-07 の読み込み先）を別の指摘として突き合わせる（ルールとターゲットだけで突き合わせると、cdn-a を直して cdn-b が増えても「継続」の1行になった）。
+ * ホスト名だけを使うのは、証跡のほかの部分は画面のマスク（mask.ts・shownText.ts）で形が変わるため（突き合わせのキーはマスクに依存しない。
+ * 証跡の全体で比べると、マスクの規則を変えただけで、変わらない指摘を新規と解消にした）。ホスト名はマスクしない。
+ * ホスト名はサイトにまとめない（まとめると、ajax.googleapis.com に storage.googleapis.com のスクリプトが増えたことや、*.github.io・
+ * *.cloudfront.net の別の持ち主の配信元を、1つの「継続」にして新規を黙って落とした）。そのため、A-01② の転送先が同じサイトの別のサーバ
+ * （web-03 → web-07）に変わっただけでも「解消」と「新規」に分かれる（見逃すより安全なので、そのままにする）
+ */
+// 「//」の位置ごとに、その後ろの決まった長さだけを見る（正規表現の任意のスキームの部分が、長い英数字の並びで位置ごとに読み直し、
+// 入力の長さの2乗の時間がかかった。40KB の証跡で4秒）
+const AFTER_SLASHES = /^(?:[^/\s@]{0,256}@)?([a-z0-9.-]{1,253}\.[a-z]{2,63})/i;
+const evidenceKey = (e: unknown): string => {
+  const s = typeof e === 'string' ? e : '';
+  const hosts = new Set<string>();
+  for (let i = s.indexOf('//'); i >= 0; i = s.indexOf('//', i + 2)) {
+    const m = AFTER_SLASHES.exec(s.slice(i + 2, i + 600));
+    if (m) hosts.add(m[1].toLowerCase());
+  }
+  return [...hosts].sort().join(',');
+};
+const key = (f: Finding) => `${f.ruleId}\u0000${tkey(f)}\u0000${evidenceKey(f.evidence)}`;
 /** 指摘として残っているもの。例外を適用した指摘（suppressed）も、直ってはいないので含める */
 const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
 
@@ -62,10 +87,11 @@ export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   // HAR のラベル（har-4）は記録し直すと別の応答を指すので、ラベルでは突き合わせない
   const isHar = (f: Finding) => tkey(f).startsWith('HAR ');
   const byLabel = new Map<string, string>();
-  for (const [k, f] of prev) if (!used.has(k) && !isHar(f)) { const l = `${f.ruleId}\u0000${f.target}`; if (!byLabel.has(l)) byLabel.set(l, k); }
+  const labelKey = (f: Finding) => `${f.ruleId}\u0000${f.target}\u0000${evidenceKey(f.evidence)}`;
+  for (const [k, f] of prev) if (!used.has(k) && !isHar(f)) { const l = labelKey(f); if (!byLabel.has(l)) byLabel.set(l, k); }
   for (const [k, f] of now) {
     if (pairs.has(k)) continue;
-    const pk = isHar(f) ? undefined : byLabel.get(`${f.ruleId}\u0000${f.target}`);
+    const pk = isHar(f) ? undefined : byLabel.get(labelKey(f));
     if (pk && !used.has(pk)) { pairs.set(k, prev.get(pk)); used.add(pk); } else pairs.set(k, undefined);
   }
   for (const [k, f] of now) {

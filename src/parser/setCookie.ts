@@ -14,7 +14,13 @@ export function parseSetCookie(raw: string): SetCookie {
   for (const a of rest) {
     const j = a.indexOf('=');
     const k = (j >= 0 ? a.slice(0, j) : a).trim().toLowerCase();
-    if (k) attrs.set(k, j >= 0 ? a.slice(j + 1).trim() : true);
+    const v = j >= 0 ? a.slice(j + 1).trim() : true;
+    // ブラウザが無視する属性は、前の正しい値を上書きしない（RFC 6265 5.2.1〜5.2.3：数字でない Max-Age、日付として読めない Expires、
+    // 空の Domain）。上書きすると Max-Age=0; Max-Age=abc の削除を生きている Cookie とみなし、Domain=a.com; Domain= を Domain なしとみなした
+    if (k === 'max-age' && (typeof v !== 'string' || !/^-?\d+$/.test(v))) continue;
+    if (k === 'expires' && (typeof v !== 'string' || Number.isNaN(cookieDate(v)))) continue;
+    if (k === 'domain' && (typeof v !== 'string' || !v)) continue;
+    if (k) attrs.set(k, v);
   }
   return { name, value, attrs, raw };
 }
@@ -41,9 +47,20 @@ export function splitSetCookie(v: string): string[] {
 export function isDeletion(c: SetCookie, now = Date.now()): boolean {
   if (c.value === '' || c.value === '""') return true;
   const ma = c.attrs.get('max-age');
-  if (typeof ma === 'string' && /^-?\d+$/.test(ma.trim()) && Number(ma) <= 0) return true;   // 空や数字でない Max-Age は無視する（RFC 6265 5.2.2）
+  // 空や数字でない Max-Age は無視する（RFC 6265 5.2.2）。正しい Max-Age があれば Expires より優先する（RFC 6265 5.3 の手順3。C-05 と同じ）。
+  // 過去の Expires を先に見ると、Max-Age=3600 の生きている Cookie を削除とみなし、C-01・C-02 の判定から外して C-09①（高）まで誤って出した
+  if (typeof ma === 'string' && /^-?\d+$/.test(ma.trim())) return Number(ma) <= 0;
   const ex = c.attrs.get('expires');
-  return typeof ex === 'string' && Date.parse(ex) < now;
+  return typeof ex === 'string' && cookieDate(ex) < now;
+}
+
+/**
+ * Cookie の Expires の日時（読めなければ NaN）。2桁の年は RFC 6265 5.1.1 のとおり、70〜99 を 19xx、0〜69 を 20xx にする
+ * （Date.parse は 50〜69 を 19xx と読み、Expires=Wed, 01-Oct-69 … の生きている Cookie を削除とみなした）
+ */
+export function cookieDate(s: string): number {
+  const v = s.replace(/(\b\d{1,2}[-\s]+[A-Za-z]{3,9}[-\s]+)(\d{2})(?!\d)/, (_, pre: string, yy: string) => `${pre}${Number(yy) >= 70 ? 1900 + Number(yy) : 2000 + Number(yy)}`);
+  return Date.parse(v);
 }
 
 // 設計書：セッションCookieは、名前のパターンと期限がないことで推定する。
@@ -100,6 +117,8 @@ export const looksLikeSessionName = (name: string): boolean =>
  * Authorization か、セッションCookieらしい名前（組織プロファイルの指定があればそれ）の Cookie を送ったときだけ数える。curl と HAR で同じ判定にする
  */
 export const sentAuthOf = (authorization: boolean, cookieNames: string[]) => authorization || cookieNames.some(looksLikeSessionName);
+/** ブラウザが自動で送る（クロスサイトのリクエストにも付く）認証の方式か。Authorization の値の最初の語で見る */
+export const autoAuthScheme = (authorization: string) => /^\s*(?:basic|digest|negotiate|ntlm)\b/i.test(authorization);
 /** リクエストの Cookie ヘッダの値から名前だけを取り出す */
 export const cookieNames = (v: string) => v.split(';').map(c => c.split('=')[0].trim()).filter(Boolean);
 

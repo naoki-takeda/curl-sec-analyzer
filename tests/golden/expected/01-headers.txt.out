@@ -11,7 +11,7 @@ robots | https://shop.example.com/robots.txt | key=robots | responses=1
 ## findings
 apex | H-02.na | info | na | 
 asset | A-02.ok | info | pass | URL・Location・本文にトークンなし
-asset | E-13.2 | low | fail | 参照: app-Dk3x9Lq2.js.map
+asset | E-13.2 | low | fail | 参照: app-…(8 chars).js.map
 asset | H-01.1 | high | fail | (ヘッダなし)
 asset | H-02.na | info | na | HSTSがない（H-01で判定）
 asset | H-08.1 | medium | fail | (ヘッダなし)

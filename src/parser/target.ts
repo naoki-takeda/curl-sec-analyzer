@@ -79,13 +79,15 @@ export function assignHopUrls(t: Target): void {
 }
 
 /**
- * http の URL で採取し、-L で同じホストの https に転送された（最後のホップが https）。http ラベル（T-04）以外は、HTTPS の応答として判定する。
+ * http の URL で採取し、-L で同じサイトの https に転送された（最後のホップが https）。http ラベル（T-04）以外は、HTTPS の応答として判定する。
  * URL が http のままだと、H-・C- の項目がすべて黙って適用外になる（HAR では取り込みでターゲットの URL を https にしている）
  */
 const upgradedToHttps = (t: Target): boolean => {
   if (baseLabel(t.label) === 'http' || !/^http:/i.test(t.url ?? '')) return false;
   const last = chainOf(t).at(-1)?.url;
-  try { return !!last && new URL(last).protocol === 'https:' && new URL(last).hostname === new URL(t.url!).hostname; } catch { return false; }
+  // 同じサイト（apex と www）の https への転送も含める（finalResponse と同じ。http://example.com → https://www.example.com のよくある形で、
+  // H-・C- の項目が黙って適用外になった）
+  try { return !!last && new URL(last).protocol === 'https:' && siteOf(new URL(last).hostname.toLowerCase()) === siteOf(new URL(t.url!).hostname.toLowerCase()); } catch { return false; }
 };
 
 /**
@@ -146,11 +148,15 @@ export const isSensitive = (t: Target): boolean | undefined => t.sensitive ?? (t
 export function capturedAt(t: Target): number {
   const at = t.meta.at ? Date.parse(t.meta.at) : NaN;   // 「2026-11-12T10:00:00」（タイムゾーンなし）は手元の時刻として読む
   if (!Number.isNaN(at)) return at;
+  // 未来の Date（時計のずれの5分より先）は使わない。Date は診断対象のサーバが書くので、Date: 2030 として、Expires=2031 の Cookie の期限を短く
+  // 見せ、C-05①（中）を合格にできた（1日まで認めると、C-05 の既定の基準の24時間と同じ幅で期限を短く見せられた）。過去の Date は、前に採取した
+  // 出力を読み直したときの正しい基準（期限を長く見せる向きにはならない）
+  const now = Date.now();
   for (const r of t.responses) {
     const d = Date.parse(r.headers.get('date')?.[0] ?? '');
-    if (!Number.isNaN(d)) return d;
+    if (!Number.isNaN(d) && d <= now + 5 * 60e3) return d;
   }
-  return Date.now();
+  return now;
 }
 
 export function hostOf(t: Target): string | undefined {

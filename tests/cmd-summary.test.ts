@@ -62,6 +62,14 @@ const USER_PLACES: ((u: string) => string[])[] = [
   u => [`https://svc_${u}:Passw0rd@api.example.com/v1`], u => [`https://${u}.ext_x:pw@h.example/`], u => ['-x', `http://proxy_${u}:Secret99@proxy.local:3128`],
   u => [`https://${u}:12345_x@a.example/`], u => [`https://${u}:"Secret 1"@h.example/`], u => [`https://CONTOSO\\${u}:Secret1@a.example/`],
   u => [`HTTPS://${u}_x:pw@a.example/`], u => [`ftp://${u}_adm:pw@ftp.example/data.tar`], u => [`https://a.example/reset?${u}`], u => [`https://a.example/x?sort=${u}`],
+  // 「.」を含むユーザー名で、URL がユーザー情報の途中で切れるもの（引用符・\"・・・閉じない引用符・数字だけのパスワード・パスの /@。T9 のレビュー）と、
+  // 「_」で区切ったコマンドで URL のあとの値の @（-u・-d・-F）
+  u => [`https://${u}.doe:2024/@api.example.com/v1`], u => [`'https://${u}.doe:'"$PASS"'@api.example.com/v1'`], u => [`"https://${u}.doe:\\"Pw\\"@api.example.com/v1"`],
+  u => [`"https://${u}.doe_svc:Secret@corp.example/`], u => [`https://${u}.doe:1234・abc@a.example.com/x`], u => [`https://${u}.doe:2024#x@localhost:8080/`],
+  u => [`https://${u}.doe:p@ss.word_1@host.example/`], u => ['-u', `${u}.doe@corp.example:2024`], u => ['-d', `@${u}-cv.json`], u => ['-F', `file=@${u}-cv.pdf`],
+  // 引用符の中の空白・\ ・・の前の引用符・引用符の入れ子で切れるもの（第33回の2回目のコミット前のレビュー）
+  u => [`https://${u}.doe:2024"my secret"@api.example.com/`], u => [`https://${u}.doe:1234\\ abc@a.example.com/`], u => [`https://${u}.doe:2024"・"y@api.example.com/`],
+  u => [`"https://${u}.doe:2024'x・y@api.example.com/"`], u => [`email=x@${u}.example`], u => [`cv=@${u}-cv.pdf`],
 ];
 const PLAIN: string[][] = [['-sS'], ['-L'], ['-k'], ['--compressed'], ['-i'], ['-v'], ['-X', 'POST'], ['--max-time', '10'], ['-o', '/dev/null'], ['-w', '%{http_code}'],
   ['--http1.1'], ['-H', 'Accept: */*'], ['https://a.example/login'], ['|'], ['grep', '-i'], [';'], ['&&']];
@@ -129,6 +137,19 @@ describe('実施コマンドの要約の性質', () => {
     summarizeCommand(`curl_https://h/${'a_'.repeat(50000)}`);
     summarizeCommand(`curl_${'A_'.repeat(50000)}`);
     expect(performance.now() - t).toBeLessThan(2000);
+  });
+
+  it('URL・引用符・・の多い入力でも、長さを4倍にして時間が4倍程度（2乗なら16倍）', () => {
+    // 閉じない引用符と \"、空のコマンド、ポートのある URL、次のコマンドがあるときの URL の繰り返し（第33回）。URL は1つずつキーの形にするので
+    // 1つの時間が長い。合計の時間ではなく、長さを4倍にしたときの増え方を見る（並べて動かしたときの遅さで失敗しないように）
+    const time = (s: string) => { const t = performance.now(); summarizeCommand(s); return performance.now() - t; };
+    for (const make of [(n: number) => `curl${' "\\"'.repeat(n)}`, (n: number) => `curl${' -d "\\'.repeat(n)}`, (n: number) => `curl${'・'.repeat(n)}`,
+      (n: number) => `curl${' https://h.example:1・'.repeat(n)}`, (n: number) => `curl${'_https://a:1'.repeat(n)}`, (n: number) => `curl${'_x@'.repeat(n)}`,
+      (n: number) => `curl${' https://a'.repeat(n)}・curl`]) {
+      time(make(1000));
+      const small = time(make(4000)), large = time(make(16000));
+      expect(large, make(2).slice(0, 40)).toBeLessThan(small * 8 + 100);
+    }
   });
 });
 

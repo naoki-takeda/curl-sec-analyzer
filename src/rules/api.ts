@@ -20,6 +20,9 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     const out = [];
     // kind=api を明示したターゲットでも、text/html で返していれば①（自動判定では text/html は API 応答にならないため、上の分岐で見る）
     if (/^\s*text\/html/i.test(ct)) out.push(mk(jsonHeaders, ctx, 1, 'medium', 'fail', `Content-Type: ${ct}（API応答）`, 'JSONは application/json で返す（text/html だとXSSの原因になる）'));
+    // 本文のない応答（204・304、Location のある 3xx、Content-Length: 0）は、スニッフィングされる本文がない（H-08 と同じ。②（中）・③にした）
+    const empty = f.status === 204 || f.status === 304 || (f.status >= 300 && f.status < 400 && f.headers.has('location')) || header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
+    if (empty) return out.length ? out : [mk(jsonHeaders, ctx, 'na', 'info', 'na', `HTTP ${f.status}（本文のない応答）`, '本文のある応答（200 など）で採取する（204・304 は対象外）')];
     if (!isNosniff(ctx)) out.push(mk(jsonHeaders, ctx, 2, 'medium', 'fail', 'nosniff なし', 'X-Content-Type-Options: nosniff'));
     if (!header(ctx, 'content-security-policy').length) out.push(mk(jsonHeaders, ctx, 3, 'info', 'fail', 'CSPなし', "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"));
     return out.length ? out : [mk(jsonHeaders, ctx, 'ok', 'info', 'pass', ct, '')];
@@ -104,6 +107,13 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
       if (gql) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（GraphQL のエラー。データは null で、認証で断られたかは分からない）`, '認証が必要なクエリ（me など）で採取し直す')];
       // データのない JSON（{}・[]・null・値がすべて null のもの。NextAuth の未認証の /api/auth/session は {} を返す）は、保護データを返していない
       if (emptyJson(ctx)) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（データのない JSON。保護データを返したかは分からない）`, '認証が必要なデータを返す API の URL で採取し直す')];
+      // 本文のない応答（204、content-length: 0）はデータを返していない。本文を採取していない（-o /dev/null）なら、データを返したかが分からない
+      // （どちらも①（高）にした。text/html の同じ場合は na にしていた）
+      if (!hopBody(ctx)?.trim()) {
+        const empty = s === 204 || header(ctx, 'content-length')[0]?.trim() === '0';
+        return [mk(unauthAccess, ctx, 'na', 'info', 'na', empty ? `HTTP ${s}（本文のない応答。データを返していない）` : `HTTP ${s}（本文を採取していないので、データを返したかは分からない）`,
+          empty ? '認証が必要なデータを返す API の URL で採取し直す' : NO_BODY_REC)];
+      }
       return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
     }
     if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${sameDocumentHop(ctx.target).hop?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
@@ -223,7 +233,43 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   return out;
 }
 // salt は秘密ではない（パスワードのハッシュと一緒に漏れると総当たりの手がかりになるが、事前認証の API が返す設計もある）ので②（内部属性）で数える
-const SECRET_KEY = /(^|[._[\]])(password|passwd|password_?hash|pass_?hash|secret|client_?secret|api_?key|private_?key|otp_?secret|mfa_?secret)$/i;
+/**
+ * 秘密の値を入れるキーか。キーの最後の部分を語（_ - とキャメルケースの境目）に分けて見る：password・passwd・passphrase を含むもの
+ * （Rails の password_digest、hashedPassword・dbPassword・userPassword）と、secret・api_key・private_key・secret_key・secret_access_key などで
+ * 終わるもの（stripeSecretKey・awsSecretAccessKey）。最後の語が状態・設定を表すもの（password_policy・password_updated_at・passwordLength）と、
+ * has・is で始まるもの（hasPassword）は除く。以前は名前全体が password・secret などのものだけで、password_digest を見逃した（A-07① の見逃し）
+ */
+const NOT_SECRET_LAST = new Set(['policy', 'policies', 'updated', 'changed', 'at', 'on', 'date', 'time', 'length', 'len', 'expiry', 'expires', 'expired', 'expiration',
+  'required', 'reset', 'set', 'hint', 'strength', 'rules', 'rule', 'min', 'max', 'last', 'age', 'count', 'type', 'method', 'enabled', 'exists', 'status', 'state', 'version', 'url', 'link', 'id',
+  // 設定・画面の部品・パスの名前（passwordPattern・changePasswordUri・passwordEncoder・passwordComplexity・forgotPasswordPath・password_regex）
+  'uri', 'path', 'route', 'endpoint', 'page', 'encoder', 'encoding', 'algorithm', 'algo', 'complexity', 'pattern', 'regex', 'regexp', 'format', 'validator',
+  'validation', 'validators', 'field', 'label', 'placeholder', 'input', 'form', 'mode', 'prompt', 'message', 'msg', 'text', 'title', 'error', 'errors', 'help', 'requirements', 'options', 'config', 'settings',
+  // ハッシュの方式・変更した人（passwordScheme・password_hasher・password_changed_by・passwordRounds）
+  'scheme', 'schemes', 'hasher', 'kdf', 'cost', 'rounds', 'iterations', 'by',
+  // password_salt は②（内部属性。INTERNAL_KEY）で数える（salt は秘密ではない）
+  'salt']);
+// 操作と password の2語の名前（forgotPassword・lostPassword：画面・API のパスを入れる）。resetPassword・changePassword・updatePassword は、
+// 管理者がリセットした仮のパスワードや、送ったパスワードを返す API があるので①のまま。resetAdminPassword・forgotPasswordToken も①のまま
+const PASSWORD_ACTION = new Set(['forgot', 'forgotten', 'lost', 'recover', 'show', 'toggle', 'request']);
+// 公開して使う API キー（publicApiKey、browserApiKey、Supabase の anonKey）。値をブラウザに渡す設計。search は語として除くと、
+// Bing・Azure AI Search・Elastic などのサーバ側の秘密のキー（azureSearchApiKey）を見逃すので、Algolia などの検索専用キーの名前だけ
+const PUBLIC_KEY_WORD = new Set(['public', 'publishable', 'anon', 'browser']);
+const SEARCH_ONLY_KEY = /^(?:algolia_|typesense_|meili(?:search)?_)?search(?:_only)?_api_?key$/;
+const SECRET_KEY = { test: (path: string): boolean => {
+  const last = path.split(/[.[\]]+/).filter(Boolean).pop() ?? '';   // キーの区切りは . と []（_ はキーの中の語の区切り）
+  const words = last.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[_-]+/).filter(Boolean);
+  if (!words.length || NOT_SECRET_LAST.has(words[words.length - 1]) || words[0] === 'has' || words[0] === 'is') return false;
+  const j = words.join('_');
+  if (words.length === 2 && PASSWORD_ACTION.has(words[0]) && /^pass(?:word|wd|phrase)$/.test(words[1])) return false;
+  if (/(?:^|_)(?:api_?key|apikey)$/.test(j) && (words.some(w => PUBLIC_KEY_WORD.has(w)) || SEARCH_ONLY_KEY.test(j))) return false;
+  // Django のフォームの password1・password2・new_password1、db_pwd・user_pwd（pwd だけの名前は、環境変数の PWD（作業ディレクトリ）と区別できないので見ない）、
+  // WordPress の user_pass などのアカウントの _pass
+  return words.some(w => w === 'password' || w === 'passwd' || w === 'passphrase' || /^pass(?:word|wd)\d$/.test(w)) || (words.length > 1 && words.includes('pwd'))
+    || /(?:^|_)(?:pass_?hash|secret|api_?key|apikey|private_?key|secret_?key|secret_access_key|access_secret|otp_secret|mfa_secret)$/.test(j)
+    // Rails の secret_key_base・secret_token、Laravel の remember_token（APP_KEY は Pusher の公開の app_key と区別できないので見ない）、Rails の master_key、Supabase の service_role_key（service_role だけはロールの名前（"viewer"）と区別できないので見ない）
+    || /(?:^|_)(?:secret_key_base|secret_token|master_key|service_role_key|remember_token)$/.test(j)
+    || /^(?:user|db|database|smtp|mail|ftp|login|admin)_pass$/.test(j);
+} };
 /**
  * 状態を表す短い語・真偽値の文字列（{"password":"set"}、{"otp_secret":"configured"}、{"password":"true"}）。値を出していないので①にしない。
  * 決まった状態の語と真偽値だけ（英小文字の語をすべて除くと、英小文字だけのパスワード（"hunter"）を見逃す）
@@ -260,9 +306,13 @@ export const requestContentType: Rule = { id: 'A-08', title: 'リクエストの
     if (!s) return [mk(requestContentType, ctx, 'na', 'info', 'na', '応答がない', '')];
     // 認証・認可・パスで断られた応答（401・403・404）は、Content-Type を確かめるところまで届いていない
     if (s === 401 || s === 403 || s === 404) return [mk(requestContentType, ctx, 'na', 'info', 'na', `HTTP ${s}（Content-Type を確かめる前に断られた）`, '認証情報を付けて、存在する API の URL で採取し直す')];
-    return s >= 200 && s < 300
-      ? [mk(requestContentType, ctx, 1, 'medium', 'fail', `Content-Type: text/plain のJSONが HTTP ${s} で処理された`, 'application/json 以外は 415 で拒否する（CSRFの単純リクエスト対策）')]
-      : [mk(requestContentType, ctx, 'ok', 'info', 'pass', `HTTP ${s}`, '')];
+    if (s >= 200 && s < 300)
+      return [mk(requestContentType, ctx, 1, 'medium', 'fail', `Content-Type: text/plain のJSONが HTTP ${s} で処理された`, 'application/json 以外は 415 で拒否する（CSRFの単純リクエスト対策）')];
+    // 合格は、Content-Type で断ったと分かる応答（415）と、それ以外の 4xx（405 を除く）。ログイン画面への転送（3xx）・5xx・405 は、
+    // Content-Type を確かめるところまで届いたかが分からない（合格にした。A-11 と同じ考え方）
+    if ((s >= 300 && s < 400) || s >= 500 || s === 405)
+      return [mk(requestContentType, ctx, 'na', 'info', 'na', `HTTP ${s}（Content-Type を確かめるところまで届いたかが分からない）`, '認証情報を付けて、存在する API の URL で採取し直す')];
+    return [mk(requestContentType, ctx, 'ok', 'info', 'pass', `HTTP ${s}`, '')];
   } };
 
 const A11_REC = '認証情報を付けて採取し直す（401・403・ログイン画面への転送では、認証の内側で動くかが分からない）';

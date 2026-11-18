@@ -1,0 +1,48 @@
+#TARGET url=https://www.example.com/ label=page
+#META at=2026-11-01T10:00:00 cmd=C2
+HTTP/2 200
+content-type: text/html; charset=utf-8
+
+<html><!-- admin login: pass Summer2024CANARY --><!--<form action="http://old.example/login"><input name=u><input type=password name=p></form>--><script src="https://cdn.other.example/a.js" integrity=""></script></html>
+
+#TARGET url=https://www.example.com/api/me label=unauth-api
+#META at=2026-11-01T10:00:00 cmd=C2
+HTTP/2 200
+content-type: application/json
+
+{"status":401,"message":"Unauthorized"}
+
+#TARGET url=https://www.example.com/api/me label=unauth-me
+#META at=2026-11-01T10:00:00 cmd=C2
+HTTP/2 200
+content-type: application/json
+
+{"user":{"id":1,"password_digest":"$2b$10$CANARYabcdefghijklmnop"}}
+
+#TARGET url=https://example.com/redirect?url=https://evil.example label=open-redirect
+#META at=2026-11-01T10:00:00 cmd=C19
+HTTP/2 301
+location: https://www.example.com/redirect?url=https://evil.example
+
+#TARGET url=https://www.example.com/api/me label=ctype
+#META at=2026-11-01T10:00:00 cmd=C26
+HTTP/2 302
+location: /login
+
+#TARGET url=https://www.example.com/actuator/health/liveness label=actuator
+#META at=2026-11-01T10:00:00 cmd=C2
+HTTP/2 200
+content-type: application/json
+
+{"status":"UP"}
+
+#TARGET url=https://www.example.com/robots.txt label=robots
+#META at=2026-11-01T10:00:00 cmd=C2
+HTTP/2 301
+location: https://www.example.com/robots2.txt
+
+#TARGET url=https://www.example.com/ label=tls
+#META at=2026-11-01T10:00:00 cmd=C11・C12・C23
+#CIPHERPROBE c=DES-CBC3-SHA ok=err
+#CIPHERPROBE c=RC4-SHA ok=0
+#TLSPROBE v=tls1_2 ok=1

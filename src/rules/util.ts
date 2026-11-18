@@ -69,19 +69,35 @@ export function parseCsp(v: string): Map<string, string[]> {
 export function parseHsts(v: string | undefined): { valid: boolean; maxAge: number } {
   if (!v) return { valid: false, maxAge: 0 };
   const seen = new Set<string>(); let maxAge: number | undefined;
-  for (const raw of v.split(';')) {
+  for (const raw of hstsParts(v)) {
     const d = raw.trim(); if (!d) continue;
-    const m = d.match(/^([!#$%&'*+.^_`|~0-9A-Za-z-]+)(?:\s*=\s*(?:"([^"]*)"|([!#$%&'*+.^_`|~0-9A-Za-z-]+)))?$/);
+    const m = d.match(/^([!#$%&'*+.^_`|~0-9A-Za-z-]+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([!#$%&'*+.^_`|~0-9A-Za-z-]+)))?$/);
     if (!m) return { valid: false, maxAge: 0 };
     const name = m[1].toLowerCase();
     if (seen.has(name)) return { valid: false, maxAge: 0 };
     seen.add(name);
-    if (name === 'max-age') { const val = m[2] ?? m[3] ?? ''; if (!/^\d+$/.test(val)) return { valid: false, maxAge: 0 }; maxAge = Number(val); }
+    if (name === 'max-age') { const val = (m[2] ?? m[3] ?? '').replace(/\\(.)/g, '$1'); if (!/^\d+$/.test(val)) return { valid: false, maxAge: 0 }; maxAge = Number(val); }
   }
   return maxAge === undefined ? { valid: false, maxAge: 0 } : { valid: true, maxAge };
 }
+/**
+ * HSTS のディレクティブを「;」で分ける。引用符の文字列（\ のエスケープを含む）の中の「;」では分けない（foo="a;b" を2つに分け、
+ * ブラウザが受け付けるヘッダを H-01③（高）にした）
+ */
+function hstsParts(v: string): string[] {
+  const out: string[] = []; let start = 0, q = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (q) { if (c === '\\') i++; else if (c === '"') q = false; }
+    else if (c === '"') q = true;
+    else if (c === ';') { out.push(v.slice(start, i)); start = i + 1; }
+  }
+  out.push(v.slice(start));
+  return out;
+}
+/** ブラウザが受け付ける（parseHsts で有効な）ヘッダにそのディレクティブがあるか。無効なヘッダはブラウザが無視するので、ないのと同じ */
 export const hstsDirective = (v: string | undefined, name: 'includesubdomains' | 'preload'): boolean =>
-  (v ?? '').split(';').some(d => d.trim().toLowerCase() === name);
+  !!v && parseHsts(v).valid && hstsParts(v).some(d => d.trim().toLowerCase() === name);
 
 /** ログイン・ログアウトに失敗した採取での判定不能（na）の推奨対応（C-09・C-12・H-15） */
 export const LOGOUT_FAILED_REC = 'ログアウトの方法（POST など）に合わせて logout を採取し直す';
@@ -106,7 +122,23 @@ export const noDataJson = (body: string | undefined): boolean => {
   // false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
   const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
     || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
-  return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)));
+  return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && (Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)) || errorEnvelope(j as Record<string, unknown>, blank)));
+};
+/**
+ * エラーだけを返した JSON（200 で {"success":false,"error":"Unauthorized","message":"Please log in"}）。エラーの項目（error・errors など）か
+ * success:false・ok:false があり、ほかの項目がエラーの包みの決まった名前（message・code・status・timestamp など。値は文字・数値・真偽値）だけで、
+ * data・result は空のもの。エラーの文言はデータではないので、空でない値があっても保護データとしない（A-01①（高）にした）
+ */
+const ERROR_KEYS = /^(?:error|errors|err|fault|error_?(?:code|message|description|type)|errorcode|errormessage)$/i;
+const ENVELOPE_KEYS = /^(?:message|msg|status|status_?code|statuscode|code|success|ok|timestamp|time|path|request_?id|trace_?id|correlation_?id|detail|title|type|instance)$/i;
+const errorEnvelope = (j: Record<string, unknown>, blank: (v: unknown, k?: string) => boolean): boolean => {
+  const entries = Object.entries(j);
+  // 状態の番号だけのエラー（{"status":401,"message":"Unauthorized"}・{"code":401,"msg":"not logged in"}・{"status":"fail"}）も含める
+  const failed = entries.some(([k, v]) => (ERROR_KEYS.test(k) && !blank(v)) || (/^(?:success|ok)$/i.test(k) && v === false)
+    || (/^(?:status|status_?code|statuscode|code)$/i.test(k) && ((typeof v === 'number' && v >= 400 && v < 600) || (typeof v === 'string' && /^(?:[45]\d\d|fail(?:ed|ure)?|error|unauthori[sz]ed|forbidden|denied)$/i.test(v)))));
+  return failed && entries.every(([k, v]) => ERROR_KEYS.test(k)
+    || (/^(?:data|result)$/i.test(k) && blank(v))
+    || (ENVELOPE_KEYS.test(k) && (v === null || ['string', 'number', 'boolean'].includes(typeof v))));
 };
 /**
  * GraphQL のエラーの応答（200 で {"errors":[…],"data":null}）。errors があり、data が null か値がすべて null のもの。

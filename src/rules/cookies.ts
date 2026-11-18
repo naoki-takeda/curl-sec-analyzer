@@ -1,7 +1,7 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
-import { isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
+import { cookieDate, isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
 import { baseLabel, firstStatus, hostOf, logoutFailed, siteResponses } from '../parser/target';
 import { LOGOUT_FAILED_REC, mk } from './util';
 
@@ -115,7 +115,7 @@ export const cookieLifetime: Rule = { id: 'C-05', title: 'Expires・Max-Age', ap
       // 空や数字でない Max-Age はブラウザが無視し、Expires が効く（RFC 6265 5.2.2。parser/setCookie.ts の isDeletion と同じ）
       const ma = c.attrs.get('max-age'), ex = c.attrs.get('expires');
       const validMa = typeof ma === 'string' && /^-?\d+$/.test(ma.trim());
-      const exSec = typeof ex === 'string' ? (Date.parse(ex) - ctx.now) / 1000 : NaN;
+      const exSec = typeof ex === 'string' ? (cookieDate(ex) - ctx.now) / 1000 : NaN;
       const sec = validMa ? Number(ma) : Number.isNaN(exSec) ? 0 : exSec;
       const limit = sessionConfig.maxAgeHours * 3600;
       return sec > limit
@@ -140,7 +140,11 @@ export const cookiePrefix: Rule = { id: 'C-06', title: '__Host-・__Secure-プ�
   } };
 
 /** 値の文字種から推定したエントロピー（ビット）。実際の乱数性は分からないため目安 */
-export function estimateBits(v: string): number {
+export function estimateBits(raw: string): number {
+  // 値を囲む引用符（sid="…"。RFC 6265 の DQUOTE）と、パーセントエンコード（%2B は1文字）は乱数の量に数えない（数えると、記号を含むとみなして
+  // 64種で数え、20桁の16進数（80bit）を約132bitとして合格にした）
+  let v = raw.replace(/^"(.*)"$/s, '$1');
+  try { v = decodeURIComponent(v); } catch { /* 壊れた %XX はそのまま */ }
   // 小文字と数字だけ（ASP.NET_SessionId の base32 など）・大文字と数字だけは36種で数える（62種で数えると、24文字の約120bitを約142bitとして見逃した）
   const size = /^[0-9]+$/.test(v) ? 10 : /^[0-9a-f]+$/i.test(v) ? 16 : /^[0-9a-z]+$/.test(v) || /^[0-9A-Z]+$/.test(v) ? 36 : /^[0-9A-Za-z]+$/.test(v) ? 62 : 64;
   return Math.floor(v.length * Math.log2(size));

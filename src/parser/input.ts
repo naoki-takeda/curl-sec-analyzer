@@ -1,10 +1,11 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、#META、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
-import { assignHopUrls, uniqueLabels } from './target';
-import { cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
+import { assignHopUrls, baseLabel, uniqueLabels } from './target';
+import { autoAuthScheme, cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
 
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
-const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
+// #BODY：生成スクリプトが、ヘッダ（-D）のあと・本文（-o）の前に出す印。ここから次のマーカーまでを、直前の応答の本文としてそのまま読む
+const MARKER_RE = /^#(TARGET|META|PROBE|TLSPROBE|CIPHERPROBE|BODY)\b(.*)$/;   // 既知のマーカーだけ。他の # 行は本文
 const OPENSSL_START = /^(CONNECTED\(|depth=|Certificate chain|subject=|issuer=|notBefore=|notAfter=)/;
 // OpenSSL 3.5 は CONNECTED( の前に「Connecting to 127.0.0.1」を出す（読まないと、C11 の採取のたびに解析できない行の警告が出た）
 const CONNECTING = /^Connecting to \S+\s*$/;
@@ -38,17 +39,34 @@ const METER_PREFIX = new RegExp(String.raw`${METER}(?=(?:< )?HTTP\/[\d.]+ \d{3}|
 // key=value を解析。ct= 以降は行末まで1つの値（空白を含むContent-Type対策）
 export function attrs(s: string): Record<string, string> {
   const out: Record<string, string> = {};
+  const line = s;
   const ct = s.match(/(?:^|\s)ct=(.*)$/);
   if (ct) { out.ct = ct[1].trim(); s = s.slice(0, ct.index); }
   // 値は引用符で囲んでもよい（url="https://…"、label="top page"）。引用符をそのまま値にすると、url が URL として読めず、警告なしで
   // HTTPS ではないものとして扱った
-  for (const m of s.matchAll(/(?:^|\s)([^\s=]+)=(?:"([^"]*)"|'([^']*)'|(\S*))/g)) out[m[1]] = m[2] ?? m[3] ?? m[4] ?? '';
+  for (const m of s.matchAll(/(?:^|\s)([^\s=]+)=(?:"([^"]*)"|'([^']*)'|(\S*))/g)) {
+    out[m[1]] = m[2] ?? m[3] ?? m[4] ?? '';
+    // cmd= の値が引用符・空白で切れ、行のあとに @ が残ったもの（cmd="curl 'https://first.last:'"$PASS"'@host/'"）は、値の終わりに「 @」を付ける。
+    // CSV の実施コマンドの要約は、URL のあとの @ で URL を伏せる（export/cmdSummary.ts）。付けないと、ユーザー情報の終わりの @ が値から外れ、
+    // 切れる前のユーザー名と数字のパスワードがホストとポートとして出た（第33回）
+    if (m[1] === 'cmd' && line.slice(m.index + m[0].length).includes('@')) out.cmd += ' @';
+  }
   return out;
 }
 
+/**
+ * ラベルとして受け付ける形（英数字・日本語などの文字と _ . - *、64文字まで）。それ以外（引用符・空白・記号を含むもの）は invalid-label にする。
+ * ラベルは画面・エクスポート・例外ファイルにそのまま出るので、本文に入れた「#TARGET label=…」の残り（"password":"…"）を出さない
+ */
+// 引用符で囲んだラベルの中の空白（label="top page"）は認める（第29回）
+const LABEL_OK = /^[\p{L}\p{N}_.*-](?:[\p{L}\p{N}_.* -]{0,62}[\p{L}\p{N}_.*-])?$/u;
+const SENS_TRUE = /^(?:1|true|yes)$/i, SENS_FALSE = /^(?:0|false|no)$/i;
+/** #TARGET で読む名前（run= は採取の印） */
+const TARGET_KEYS = new Set(['url', 'label', 'kind', 'sensitive', 'run']);
 const newTarget = (a: Record<string, string>): Target => ({
-  label: a.label ?? 'default', url: a.url, kind: (['html', 'api'].includes(a.kind) ? a.kind : 'auto') as Target['kind'],
-  sensitive: a.sensitive === '1' ? true : a.sensitive === '0' ? false : undefined,
+  label: a.label === undefined ? 'default' : LABEL_OK.test(a.label) ? a.label : 'invalid-label', url: a.url, kind: (['html', 'api'].includes(a.kind?.toLowerCase() ?? '') ? a.kind.toLowerCase() : 'auto') as Target['kind'],   // kind=API も受け付ける
+  // sensitive は 1・true・yes と 0・false・no を受け付ける。ほかの値は読まずに警告する（黙って無視すると、機密応答の項目が na や弱い判定になった）
+  sensitive: SENS_TRUE.test(a.sensitive ?? '') ? true : SENS_FALSE.test(a.sensitive ?? '') ? false : undefined,
   verbose: false, responses: [], sentAuth: false, sentTokens: [], info: [], meta: {}, probes: [], tlsProbes: [], cipherProbes: [], openssl: [],
 });
 const hasData = (t: Target) =>
@@ -71,7 +89,8 @@ export function parseInput(input: string): ParseResult {
   const pendingJson: HttpResponse[] = [];            // ステータスがまだない %{header_json} の応答（あとの #META response_code= で補う）   // 送った Cookie の名前（重なりを除くため）
   let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
   let connectReq = false;                             // -v で「> CONNECT」を送った（プロキシのトンネル）。その応答のあとは本文がない
-  const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; };
+  let vHeaders = false;                               // 読み中の応答を -v の「< 」のステータス行で始めた
+  const close = () => { if (cur) t.responses.push(cur); cur = null; inHeaders = false; last = ''; vHeaders = false; };
   const inBody = () => cur !== null && !inHeaders;
   const flush = () => { if (hasData(t)) targets.push(t); else if (t.label !== 'default') emptyTargets.push(t.label); };
 
@@ -79,17 +98,55 @@ export function parseInput(input: string): ParseResult {
   // （CR CR LF を CR LF と CR に分けて読むと、受信ヘッダの各行のあとに空行ができ、ヘッダがすべて失われる）
   // CR の並びの先頭でだけ LF を探す（/\r+\n|\r/ は、LF の付かない長い CR の並びで、位置ごとに並びの終わりまで読み直し、入力の長さの2乗の時間がかかった）。
   // LF の付かない CR は1つずつ改行にする（古い Mac の改行。CR CR は空行）。結果は /\r+\n|\r/ と同じ
-  const lines = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n').replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
+  const normalized = input.replace(/(?<!\r)\r+\n/g, '\n').replace(/\r/g, '\n');
+  // 採取の印（run=）：コマンド生成器のスクリプトは、実行ごとの乱数を全部のマーカー行に付ける。最初の #TARGET に印があれば、同じ印のマーカー行だけを
+  // マーカーとして読む。診断対象のサーバは印を知らないので、応答の本文に書いた「#TARGET label=login」「#META at=」「#PROBE」で、ターゲットを
+  // 作ったり分けたりできない（印のないマーカーで偽の login を作り、C-09①（高）を合格にできた）。印のない手書きの入力は、これまでどおり読む
+  // 印は、入力の最初の #TARGET の行からだけ取る（設計書のとおり）。印のある行ならどれでも取ると、手書きの入力で、診断対象のサーバが本文に書いた
+  // 「#TARGET … run=<乱数>」で印を有効にし、利用者の本物のマーカーをすべて本文として読ませられた
+  const firstTarget = normalized.match(/(?:^|\n)#TARGET[ \t]([^\n]*)/)?.[1];
+  const runId = firstTarget !== undefined ? attrs(firstTarget).run?.match(/^[0-9a-f]{16,64}$/)?.[0] : undefined;
+  const lines = runId
+    // 印のある入力では、くっついたマーカーも印のあるものだけを分ける（行の中のマーカーの位置で分け、印のある部分だけを新しい行にする。
+    // 先読みの正規表現で分けると、本文の1行に「#META 」が続く入力で、位置ごとに行の終わりまで読み直し、入力の長さの2乗の時間がかかった）
+    ? splitRunMarkers(normalized, runId)
+    : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
+  const badSensitive: Target[] = [];                   // sensitive= の値を読めなかったターゲット（ラベルは付け直したあとのものを出す）
+  const badTargetAttrs: string[] = [];                 // #TARGET の読めなかった指定（書き間違えた名前、受け付けないラベル・kind）
+  let ignoredMarkers = 0;                              // 印のない（違う）#TARGET の行の数。本文として読んだことを知らせる
+  let inRaw = false;                                   // #BODY のあと：次のマーカーまでを本文としてそのまま読む（ステータス行・openssl の行・-v の行として読まない）
+  let rawBody: HttpResponse | undefined;              // 本文を足す応答。#BODY の前に応答がない（curl が失敗した、curl は受け付けるがここでは読めないステータス行
+                                                       // （小文字の http/1.1）など）ときは、本文を捨てる（ふつうに読むと、本文の偽のステータス行が応答になった）
+  const isMarker = (l: string) => { const m = l.match(MARKER_RE); const x = m ? attrs(m[2]) : undefined; return !!m && !!x && (!runId || x.run === runId); };
   for (let li = 0; li < lines.length; li++) {
-    let line = lines[li];
+    let line = lines[li]; let fromV = false;   // fromV：-v の「< 」の行（受信ヘッダ）
+    // #BODY のあとの本文は、次のマーカーまでそのまま本文に足す（本文の「HTTP/1.1 200 OK」・偽のヘッダ・CONNECTED(n) を読まない）
+    if (inRaw && !isMarker(line)) {
+      if (runId && /^#TARGET\b/.test(line)) ignoredMarkers++;   // 印の違う #TARGET は、本文の中でも知らせる
+      if (!rawBody) { if (line.trim()) unparsed++; continue; }
+      const room = BODY_LIMIT - (rawBody.body?.length ?? 0);
+      if (room > 0) rawBody.body = (rawBody.body ?? '') + (line.length < room ? `${line}\n` : line.slice(0, room));
+      continue;
+    }
     if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;
     line = line.replace(METER_PREFIX, '');
     const mk = line.match(MARKER_RE);
-    if (mk) {                                          // マーカー行は必ず応答を閉じる
+    const a = mk ? attrs(mk[2]) : undefined;
+    if (mk && runId && a?.run !== runId && mk[1] === 'TARGET') ignoredMarkers++;
+    if (mk && a && (!runId || a.run === runId)) {      // マーカー行は必ず応答を閉じる
       // 前のターゲットの状態（CONNECT を送った、など）を持ち越さない（持ち越すと、次のターゲットの本物の 200 をプロキシの応答とみなした）
-      close(); inOpenssl = false; vBody = false; connectReq = false; if (json) { unparsed += json.length; json = null; }
-      const [, tag, rest] = mk; const a = attrs(rest);
-      if (tag === 'TARGET') { flush(); t = newTarget(a); pendingJson.length = 0; }
+      close(); inOpenssl = false; vBody = false; connectReq = false; inRaw = false; rawBody = undefined; if (json) { unparsed += json.length; json = null; }
+      const [, tag] = mk;
+      if (tag === 'BODY') { inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
+      if (tag === 'TARGET') {
+        flush(); t = newTarget(a); pendingJson.length = 0; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
+        // 書き間違い（lable=）や受け付けない値（label=login/x、kind=API）は、黙って既定にすると、予約したラベルの横断の判定（C-09 など）が
+        // 動かない理由が分からなかった。sensitive= と同じく知らせる（値は出さない。ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
+        const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
+        if (unknown.length) badTargetAttrs.push(`${t.label}：${unknown.slice(0, 3).map(k => (/^[A-Za-z_][\w-]{0,30}$/.test(k) ? k : '…')).join('・')}=（使える名前は url・label・kind・sensitive）`);
+        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push('invalid-label：label= に使えるのは英数字・日本語などの文字と _ . * - と空白（64文字まで）');
+        if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push(`${t.label}：kind= は html・api・auto のいずれか`);
+      }
       else if (tag === 'META') {
         Object.assign(t.meta, a);
         // %{header_json} のあとに出した response_code（-w '%{header_json}' のあとの #META）も、その応答のステータスにする
@@ -117,7 +174,10 @@ export function parseInput(input: string): ParseResult {
     // 同じターゲットで HTTP の応答に続けた openssl の出力（CONNECTED( の行、Connecting to と CONNECTED( の2行）は、応答の本文の中でも
     // openssl の出力の始まりとして応答を閉じる（本文に入れると t.openssl が空になり、T-10・T-11 で使えなかった）。ほかの始まりの行（depth= など）は本文の外だけ
     const opensslHead = /^CONNECTED\(\d+\)\s*$/.test(line) || (CONNECTING.test(line) && /^CONNECTED\(/.test(lines[li + 1] ?? ''));
-    if ((!inBody() && (OPENSSL_START.test(line) || opensslHead)) || (inBody() && opensslHead)) { close(); inOpenssl = true; }
+    // 生成スクリプトの出力（印のある入力）では、本文の中の「CONNECTED(n)」を openssl の出力の始まりとするのは tls のラベルだけ（生成スクリプトは
+    // tls 以外で openssl を実行しない。診断対象のサーバが本文に書くと、そのあとの本文がすべて openssl の出力になり、E-07〜E-09・E-12 が消えた）。
+    // 手書きの入力は、HTTP の応答に続けた openssl の出力をどのラベルでも読む（これまでどおり）
+    if ((!inBody() && (OPENSSL_START.test(line) || opensslHead)) || (inBody() && opensslHead && (!runId || baseLabel(t.label) === 'tls'))) { close(); inOpenssl = true; }
     if (inOpenssl && !STATUS_RE.test(line) && !/^[*<>] /.test(line)) { t.openssl.push(line); continue; }
     inOpenssl = false;
     if (!inBody() && VERBOSE_HINT.test(line)) t.verbose = true;
@@ -131,7 +191,7 @@ export function parseInput(input: string): ParseResult {
         const h = line.slice(2);
         if (/^CONNECT /i.test(h)) connectReq = true;
         const o = h.match(/^origin:\s*(.*)$/i); if (o) t.sentOrigin = o[1].trim();
-        const ck = h.match(/^cookie:\s*(.*)$/i), au = /^authorization:/i.test(h);
+        const ck = h.match(/^cookie:\s*(.*)$/i), auv = h.match(/^authorization:(.*)$/i), au = !!auv;
         // 名前は増えた分だけを見る（行ごとに全体をコピーして推定し直すと、Cookie の行が多い -v で2乗の時間がかかった）
         const added: string[] = [];
         if (ck) {
@@ -139,7 +199,7 @@ export function parseInput(input: string): ParseResult {
           let seen = sentNames.get(t); if (!seen) { seen = new Set(names); sentNames.set(t, seen); }
           for (const n of cookieNames(ck[1])) if (!seen.has(n)) { seen.add(n); names.push(n); added.push(n); }
         }
-        if (au) t.sentAuthorization = true;
+        if (auv) { t.sentAuthorization = true; if (autoAuthScheme(auv[1])) t.sentAutoAuth = true; }
         if (ck || au) { t.sentAuth = t.sentAuth || sentAuthOf(au, added); for (const tok of h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) t.sentTokens.push(tok); }
         continue;
       }
@@ -154,12 +214,19 @@ export function parseInput(input: string): ParseResult {
         close(); vBody = st >= 200 && !tunnel; if (tunnel || (connectReq && st >= 200)) connectReq = false;
         continue;
       }  // 受信ヘッダの終端。-v では本文を解析しない
-      if (line.startsWith('< ')) line = line.slice(2);
+      // -i（-D -）と -v を一緒に端末で採取すると、-v の「< 」の行（標準エラー）と -i の同じ行（標準出力）が1行ずつ交互に並ぶ。
+      // 「< 」の行で始めた応答のヘッダの途中にある「< 」のない行は、-i の写しとして読まない（読むと、写しのステータス行で応答を閉じて
+      // 中身のない応答を作り、ヘッダをすべて二重に入れて、C-06 などを2回出した）
+      if (vHeaders && cur && inHeaders && !line.startsWith('< ')) continue;
+      if (line.startsWith('< ')) { line = line.slice(2); fromV = true; }
       else if (/^[{}] \[/.test(line)) continue;
     }
     const sm = line.match(STATUS_RE);
-    if (sm && !inBody()) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue; }
+    if (sm && !inBody()) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; vHeaders = fromV; continue; }
     // 本文の直前の行が空行かは、本文の末尾だけを見る（本文全体を split すると、本文の中のステータス行らしい行ごとに64KBを分けることになり、入力の長さの2乗の時間がかかる）
+    // -i の出力では、本文と次の応答を見分けられない（本文が「HTTP/1.1 200 OK」と偽のヘッダで始まると、次の応答として読む）。ヘッダの形で
+    // プロキシの応答を見分ける作りは、本物のプロキシの応答（ヘッダを足すもの）を壊し、3xx・401 の本文からの偽装も止められなかったのでやめた。
+    // 生成スクリプトは、ヘッダ（-D）と本文（-o）を分けて採取し、#BODY の印のあとを本文として読む（この分かれ目はサーバが作れない）
     if (sm && inBody() && (cur!.body === undefined || nextHopAfter(cur!.status)) && /^\s*$/.test(lastLine(cur!.body ?? ''))) {   // -L で次のホップが続く場合
       close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue;
     }
@@ -206,14 +273,20 @@ export function parseInput(input: string): ParseResult {
     // 最初の応答（T-04・A-01・C-09・C-12 などが見るステータス）にしない。プロキシの 407 を最初の応答にすると、T-04 が「HTTP を拒否」と合格にする
     const retried = i < tg.responses.length - 1;
     if (r.status > 0 && r.status < 200) r.kind = 'informational';
-    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '')) || proxyReply || (r.status === 407 && retried)) r.kind = 'connect';
+    // 407 はプロキシだけが返すので、あとに応答が続かなくても（プロキシの認証に失敗して諦めた）サイトの応答にしない
+    // （最終応答にすると、プロキシの 407 で H-01①（高）などを判定した）
+    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '')) || proxyReply || r.status === 407) r.kind = 'connect';
     else if (r.status === 401 && retried) r.kind = 'challenge';
     else if (r.status >= 300 && r.status < 400 && r.headers.has('location')) r.kind = 'redirect';
     if (r.body !== undefined && !r.body.trim()) r.body = undefined;
   });
   for (const tg of targets) assignHopUrls(tg);
   const dup = uniqueLabels(targets);
-  return { targets, warnings: [...dup, ...collectWarnings(targets, unparsed, emptyTargets)] };
+  const ignored: ParseWarning[] = ignoredMarkers ? [{ kind: 'ignored-marker',
+    detail: `採取の印（run=）が最初の #TARGET と違う #TARGET の行が${ignoredMarkers}行あり、応答の本文として読みました（診断対象が本文に書いたもの、または別の採取の出力を付け足したもの。付け足した出力は別に判定してください）` }] : [];
+  const badAttr: ParseWarning[] = badSensitive.length ? [{ kind: 'invalid-attr', detail: `sensitive= の値を読めませんでした（${badSensitive.slice(0, 5).map(x => x.label).join(', ')}${badSensitive.length > 5 ? ' など' : ''}）。1（機密）か 0（機密でない）を指定してください` }] : [];
+  if (badTargetAttrs.length) badAttr.push({ kind: 'invalid-attr', detail: `#TARGET の指定を読めませんでした（${badTargetAttrs.slice(0, 5).join('、')}${badTargetAttrs.length > 5 ? ' など' : ''}）` });
+  return { targets, warnings: [...dup, ...ignored, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets)] };
 }
 
 // %{header_json} にほぼ必ずある応答ヘッダ。どれもない JSON（{"tags":["a"]} など）はヘッダとみなさない
@@ -238,6 +311,27 @@ function headerJson(text: string, code?: string): HttpResponse | null | undefine
 }
 
 /** 本文の最後の行（本文は「行 + 改行」でつなぐので、最後の改行の前の行。body.split('\n').at(-2) と同じ）。改行がなければ空 */
+/**
+ * 印のある入力の行分け：行の中のマーカー（#TARGET・#META など）の位置で部分に分け、自分の部分に「run=<印>」があるものだけを新しい行にする
+ * （改行のない本文の直後にくっついた本物のマーカーを分ける）。ほかの部分は前の部分につなぎ直す。時間は入力の長さに比例する
+ */
+const MARK_START = /#(?:TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)[ \t]/g;
+function splitRunMarkers(text: string, runId: string): string[] {
+  const own = new RegExp(String.raw`[ \t]run=${runId}(?![\w])`);
+  return text.split('\n').flatMap(line => {
+    if (!line.includes(`run=${runId}`)) return [line];
+    const starts = [...line.matchAll(MARK_START)].map(m => m.index).filter(i => i > 0);
+    if (!starts.length) return [line];
+    const out: string[] = []; let cur = line.slice(0, starts[0]);
+    starts.forEach((s, i) => {
+      const seg = line.slice(s, starts[i + 1] ?? line.length);
+      if (own.test(seg)) { out.push(cur); cur = seg; } else cur += seg;
+    });
+    out.push(cur);
+    return out;
+  });
+}
+
 function lastLine(body: string): string {
   const e = body.lastIndexOf('\n');
   return e < 0 ? '' : body.slice(body.lastIndexOf('\n', e - 1) + 1, e);
@@ -254,5 +348,9 @@ function collectWarnings(targets: Target[], unparsed: number, emptyTargets: stri
     w.push({ kind: 'unknown-url', label: t.label, detail: `ターゲット「${t.label}」の url= を URL として読めません。HTTPSかどうかを使う項目は判定できません（https:// から書いてください）` });
   for (const t of targets) for (const p of [...t.tlsProbes, ...t.cipherProbes]) if (p.result === 'error')
     w.push({ kind: 'tls-probe-error', detail: `ターゲット「${t.label}」：手元のOpenSSLが対応していないプローブがあります（判定不能）` });
+  // 応答がプロキシのもの（407・CONNECT）だけのターゲットは、サイトの応答を判定できない。黙って判定から消えないよう知らせる
+  // WebSocket の 101（1xx）だけの応答は、プロキシの応答ではない
+  for (const t of targets) if (t.responses.some(r => r.kind === 'connect') && t.responses.every(r => r.kind === 'connect' || r.kind === 'informational'))
+    w.push({ kind: 'proxy-only', label: t.label, detail: `ターゲット「${t.label}」：プロキシの応答（HTTP ${t.responses.map(r => r.status).join('・')}）しかなく、サイトの応答を判定できません（プロキシの認証を確かめて採取し直してください）` });
   return w;
 }

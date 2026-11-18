@@ -2,7 +2,7 @@
 // - request.postData（ログインのパスワードなど）は読まない。本文は HTML と JSON の先頭64KBだけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
-import { cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
+import { autoAuthScheme, cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
 import { baseLabel } from './target';
 
@@ -24,17 +24,20 @@ export interface HarChain {
   responses: HttpResponse[];        // 各応答の url はそのホップのリクエストのURL（parser/target.ts の ownChain が使う）
   sentAuth: boolean;                // 一覧の表示用の推定（Authorization か、セッションCookieらしい名前の Cookie を送った）
   sentAuthorization: boolean; sentCookieNames: string[];   // 全ホップのリクエストで送った Authorization の有無と Cookie の名前（値は持たない）
+  sentAutoAuth?: boolean;           // ブラウザが自動で送る方式（Basic など）の Authorization を送った
+  sentOrigin?: string;              // 最後のホップのリクエストで送った Origin（R-06：Origin を送らずに返した ACAO は固定の値。curl の -v と同じ）
   sentTokens: string[];             // Authorization・Cookie で送った JWT。A-03 のデコードにだけ使い、画面・エクスポートには出さない（curl の -v と同じ）
   at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
 }
-export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; total: number; failed: number; }   // failed：応答のない（status 0）エントリの数
+export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; total: number; failed: number; internal?: number; }   // failed：応答のない（status 0）エントリの数
 
 export const isHar = (text: string) => /^\s*\{[\s\S]{0,200}"log"\s*:/.test(text);
 
 /** HTTPのバージョン表記（h2、HTTP/2.0、http/1.1 など）を 1.1・2・3 にそろえる */
-export function normalizeVersion(v?: string): string {
-  const s = (v ?? '').toLowerCase();
+export function normalizeVersion(v?: unknown): string {
+  // 文字列でない値（"httpVersion": 2）は文字列にして読む（toLowerCase で例外になり、HAR 全体を読めなかった）
+  const s = (typeof v === 'string' ? v : v == null ? '' : String(v)).toLowerCase();
   if (/h3|http\/3/.test(s)) return '3';
   if (/h2|http\/2/.test(s)) return '2';
   if (/1\.0/.test(s)) return '1.0';
@@ -74,20 +77,38 @@ const JWT_IN_HEADER = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 const named = (hs: (HarHeader | null | undefined)[] | undefined): HarHeader[] => (Array.isArray(hs) ? hs : []).filter((h): h is HarHeader => typeof h?.name === 'string');
 const jwtsIn = (hs: HarHeader[]) => [...new Set(hs.filter(h => /^(?:authorization|cookie)$/i.test(h.name)).flatMap(h => String(h.value ?? '').match(JWT_IN_HEADER) ?? []))];
 const hostOfUrl = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
+/** 突き合わせ用の URL（フラグメントを除き、URL として読み直した形） */
+const normalizedUrl = (u: string) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return withoutHash(u); } };
 
 /** HAR の JSON を読み、チェーンにまとめる。request.postData はここで捨てる */
 export function importHar(text: string): HarImport {
-  const har = JSON.parse(text) as { log?: { entries?: HarEntry[] } };
-  const all = (har.log?.entries ?? []).filter(e => e?.request?.url && e.response && /^https?:/i.test(e.request.url));
+  const har = JSON.parse(text) as { log?: { entries?: unknown } } | null;
+  // 型の違う値は、例外で HAR 全体を読めなくしないよう、ここでそろえる（entries がオブジェクト、url が配列、startedDateTime が数値など）。
+  // url が配列だと /^https?:/ の確認を文字列にして通り、画面の showText で例外になって「読み込み中」のまま止まった
+  const raw = har?.log?.entries;
+  const all = (Array.isArray(raw) ? raw as HarEntry[] : []).filter(e => typeof e?.request?.url === 'string' && e.response && /^https?:/i.test(e.request.url));
+  for (const e of all) {
+    if (e.request.method !== undefined && typeof e.request.method !== 'string') e.request.method = String(e.request.method);
+    if (e.startedDateTime !== undefined && typeof e.startedDateTime !== 'string') e.startedDateTime = undefined;
+  }
   // status 0 は、ブロック・キャンセル・CORSの失敗などで応答がなかったエントリ。ヘッダがないので判定に使うと誤検知になる
   // ブラウザが内部で作った転送（HSTS・HTTPS-Upgrades の 307 Internal Redirect。Non-Authoritative-Reason ヘッダが付く）も、サーバの応答では
   // ないので除く（http のラベルで T-04・C-10 を、http で接続していないのに判定した）
-  const internal = (e: HarEntry) => /internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name));
-  const entries = all.filter(e => Number(e.response.status) > 0 && !internal(e));
+  // 印（理由句・ヘッダ）はサーバも返せるので、307 で、ネットワークに出ていない（serverIPAddress がない）ものだけを内部の転送とする
+  // （印だけで除くと、診断対象のサーバがログインの POST や http から https への転送を黙って判定から外せた）
+  const internal = (e: HarEntry) => e.response.status === 307 && !String((e as { serverIPAddress?: unknown }).serverIPAddress ?? '').trim()
+    && (/internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name)));
+  // 状態コードは数値にそろえる（文字列の "304" を書き出すツールがあり、そのままだと 304 の除外や === 401 などの比べ方が効かなかった）
+  // 応答がオブジェクトでないエントリ（"response": 1）は、書き換えずに除く（書き換えると例外になり、HAR 全体を読めなかった）
+  for (const e of all) if (typeof e.response === 'object') { const st = Number(e.response.status); e.response.status = Number.isInteger(st) ? st : 0; }
+  const internalCount = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && internal(e)).length;
+  const entries = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && !internal(e));
   const used = new Set<number>(); const chains: HarChain[] = [];
-  // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）
+  // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）。
+  // 表のキーも、引くときと同じく URL として読み直した形（new URL().href）にする。書き方の違い（https://a.example:443/、エンコードしていない
+  // /日本）で転送先が見つからず、http から https への転送の連なりが切れた
   const byUrl = new Map<string, number[]>();
-  entries.forEach((x, k) => { const u = withoutHash(x.request.url); (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
+  entries.forEach((x, k) => { const u = normalizedUrl(x.request.url); (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
   // URL ごとに、使い済みの先頭を読み飛ばす位置を持つ（同じ URL へ転送する 3xx が多い HAR で、毎回先頭からなめて2乗の時間がかかった）
   const firstUnused = new Map<string, number>();
   const nextEntry = (href: string, from: number): number => {
@@ -120,19 +141,21 @@ export function importHar(text: string): HarImport {
     // 送った認証情報は全ホップのリクエストから見る。Secure の Cookie は https のホップでしか送らないため、最初の http のリクエストだけでは分からない
     const reqHeaders = hops.flatMap(h => named(h.request.headers));
     const sentAuthorization = reqHeaders.some(h => h.name.toLowerCase() === 'authorization');
+    const sentAutoAuth = reqHeaders.some(h => h.name.toLowerCase() === 'authorization' && autoAuthScheme(String(h.value ?? '')));
     const sentCookieNames = [...new Set(reqHeaders.filter(h => h.name.toLowerCase() === 'cookie').flatMap(h => cookieNames(String(h.value ?? ''))))];
     const sentAuth = sentAuthOf(sentAuthorization, sentCookieNames);
     if (sentAuthorization || sentCookieNames.length || hops.some(h => named(h.response.headers).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
     chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(h => ({ ...toResponse(h), url: h.request.url })),
-      sentAuth, sentAuthorization, sentCookieNames, sentTokens: jwtsIn(reqHeaders), at: e.startedDateTime,
+      sentAuth, sentAuthorization, sentAutoAuth, sentCookieNames, sentTokens: jwtsIn(reqHeaders), at: e.startedDateTime,
+      sentOrigin: named(cur.request.headers).find(h => h.name.toLowerCase() === 'origin')?.value?.toString().trim() || undefined,
       // 304（ブラウザのキャッシュの再検証）は、サーバがセキュリティヘッダを付け直さなくてよい応答（RFC 9110 15.4.5）。
       // 通常の応答として判定すると H-01①（高）などの誤検知になるので、既定で除外する（画面でラベルを選べば判定する）
       suggested: '', label: '', sensitive: undefined, excluded: cur.response.status === 304 });
   });
   suggestLabels(chains);
   const hosts = [...new Set(chains.map(c => c.host))];
-  return { chains, hosts, sanitized: chains.length > 0 && !anyCookie, total: entries.length, failed: all.length - entries.length };
+  return { chains, hosts, sanitized: chains.length > 0 && !anyCookie, total: entries.length, failed: all.length - entries.length - internalCount, internal: internalCount };
 }
 
 /**
@@ -187,10 +210,11 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ（parser/target.ts の ownChain）
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
       // 送った認証情報の推定は、組織プロファイルのセッションCookieの名前で作り直す（Worker の中ではプロファイルが分からない）
-      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens.filter(tok => !tokensSeen.has(tok) && !!tokensSeen.add(tok)), info: [],
+      responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentAutoAuth: c.sentAutoAuth, sentOrigin: c.sentOrigin, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens.filter(tok => !tokensSeen.has(tok) && !!tokensSeen.add(tok)), info: [],
       meta: { source: 'har', cmd: 'HAR', method: c.method, ...(c.at ? { at: c.at } : {}) }, probes: [], tlsProbes: [], cipherProbes: [], openssl: [] });
   }
   if (imp.failed) warnings.push({ kind: 'har-excluded', detail: `HAR：応答のない（status 0）エントリが${imp.failed}件あり、判定に使いませんでした（ブロック・キャンセルされた通信など）` });
+  if (imp.internal) warnings.push({ kind: 'har-excluded', detail: `HAR：ブラウザの内部の転送（HSTS などの 307 Internal Redirect）のエントリが${imp.internal}件あり、判定に使いませんでした` });
   if (revalidated) warnings.push({ kind: 'har-excluded', detail: `HAR：304（キャッシュの再検証）のエントリが${revalidated}件あり、判定に使いませんでした。開発者ツールで「キャッシュを無効にする」を選んで記録し直すと判定できます` });
   if (excluded) warnings.push({ kind: 'har-excluded', detail: `HAR：${excluded}件のエントリ（対象外のホスト、または除外したもの）を判定に使いませんでした` });
   if (imp.sanitized) warnings.push({ kind: 'har-sanitized', detail: 'HAR：Cookie・Set-Cookie が含まれていません。機密情報を除いた形式で書き出された可能性があります。第2章（Cookie）の項目は判定できません' });
