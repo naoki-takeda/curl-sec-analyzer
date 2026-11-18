@@ -12,9 +12,10 @@ export interface HttpResponse {
   // challenge：curl が認証し直した 401（--digest・--ntlm・--negotiate・--anyauth）。connect にはプロキシの 407 も含む
   kind: 'final' | 'redirect' | 'informational' | 'connect' | 'challenge';
   url?: string;                     // そのホップのリクエストのURL（HAR は記録から、curl はターゲットの URL から Location をたどって付ける）
+  droppedCookies?: number;          // 上限（MAX_SET_COOKIES）を超えて読まなかった Set-Cookie の数
 }
 export interface ParseWarning {
-  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'mixed-run' | 'proxy-only' | 'invalid-attr';
+  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'mixed-run' | 'proxy-only' | 'invalid-attr' | 'too-many-cookies';
   detail: string;
   label?: string;                   // unknown-url：URLが分からないターゲットのラベル（画面のURL欄で補ったものだけ警告を消すため）
 }

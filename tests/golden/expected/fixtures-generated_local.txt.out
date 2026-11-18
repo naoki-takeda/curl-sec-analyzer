@@ -37,8 +37,7 @@ orphan-block | #TARGET label=cors-preflight にデータがありません
 orphan-block | #TARGET label=options にデータがありません
 orphan-block | #TARGET label=trace にデータがありません
 orphan-block | #TARGET label=method-override にデータがありません
-tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
-tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
+tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（RC4-SHA・DES-CBC3-SHA。判定不能）
 
 ## findings
 after-logout | C-12.na | info | na | 旧Cookieでの認証後ページが HTTP 200（本文を採取していないので、旧Cookie が使えたかは分からない）

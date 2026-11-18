@@ -4,7 +4,7 @@
 import type { HttpResponse, ParseWarning, Target } from '../model';
 import { autoAuthScheme, cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
-import { baseLabel } from './target';
+import { baseLabel, cookieCapWarnings, pushCookies } from './target';
 
 const BODY_LIMIT = 64 * 1024;
 export const HAR_MAX_BYTES = 50 * 1024 * 1024;
@@ -45,7 +45,7 @@ export function normalizeVersion(v?: unknown): string {
 }
 
 function toResponse(e: HarEntry): HttpResponse {
-  const headers = new Map<string, string[]>(); const rawNames: string[] = [];
+  const headers = new Map<string, string[]>(); const rawNames: string[] = []; let dropped = 0;
   // 名前のある要素だけ（headers が配列でない {}・null のエントリが1件あるだけで、HAR の取り込み全体が TypeError で失敗した）
   for (const h of named(e.response.headers)) {
     if (h.name.startsWith(':')) continue;               // HTTP/2 の疑似ヘッダは除外
@@ -54,7 +54,7 @@ function toResponse(e: HarEntry): HttpResponse {
     // 証跡（値は先頭の name=value だけをマスクする）に生の値が出てしまう
     const vals = k === 'set-cookie' ? String(h.value ?? '').split(/\r?\n/).flatMap(splitSetCookie) : [String(h.value ?? '')];
     const list = headers.get(k) ?? headers.set(k, []).get(k)!;
-    for (const x of vals) list.push(x);   // push(...) に広げない（長い Set-Cookie でスタックがあふれる）
+    if (k === 'set-cookie') dropped += pushCookies(list, vals); else for (const x of vals) list.push(x);   // push(...) に広げない（長い Set-Cookie でスタックがあふれる）
   }
   if (e.response.redirectURL && !headers.has('location') && e.response.status >= 300 && e.response.status < 400) headers.set('location', [e.response.redirectURL]);
   let body: string | undefined;
@@ -67,7 +67,7 @@ function toResponse(e: HarEntry): HttpResponse {
   }
   const status = e.response.status;
   return { httpVersion: normalizeVersion(e.response.httpVersion), status, reason: e.response.statusText, headers, rawNames, body,
-           kind: status >= 300 && status < 400 && headers.has('location') ? 'redirect' : 'final' };
+           kind: status >= 300 && status < 400 && headers.has('location') ? 'redirect' : 'final', ...(dropped ? { droppedCookies: dropped } : {}) };
 }
 
 const withoutHash = (u: string) => { const i = u.indexOf('#'); return i >= 0 ? u.slice(0, i) : u; };
@@ -240,6 +240,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
   if (imp.internal) warnings.push({ kind: 'har-excluded', detail: `HAR：ブラウザの内部の転送（HSTS などの 307 Internal Redirect）のエントリが${imp.internal}件あり、判定に使いませんでした` });
   if (revalidated) warnings.push({ kind: 'har-excluded', detail: `HAR：304（キャッシュの再検証）のエントリが${revalidated}件あり、判定に使いませんでした。開発者ツールで「キャッシュを無効にする」を選んで記録し直すと判定できます` });
   if (excluded) warnings.push({ kind: 'har-excluded', detail: `HAR：${excluded}件のエントリ（対象外のホスト、または除外したもの）を判定に使いませんでした` });
+  warnings.push(...cookieCapWarnings(targets));
   if (imp.sanitized) warnings.push({ kind: 'har-sanitized', detail: 'HAR：Cookie・Set-Cookie が含まれていません。機密情報を除いた形式で書き出された可能性があります。第2章（Cookie）の項目は判定できません' });
   return { targets, warnings };
 }

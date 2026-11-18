@@ -10,7 +10,7 @@ hsts-comma | https://www.example.com/hsts | key=hsts-comma | responses=1
 cors-partial | https://www.example.com/api/me | key=cors-partial | responses=1
 
 ## warnings
-tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
+tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（tls1。判定不能）
 
 ## findings
 cors-null | R-01.na | info | na | Origin: null を送った応答（R-02 で判定する）

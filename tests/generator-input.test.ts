@@ -191,3 +191,73 @@ describe('第49回：HAR の転送のつなぎ方', () => {
     expect(hops('GET', 300, 'GET')).toBe(1);
   });
 });
+
+describe('第50回：トレーラ・1xx・Set-Cookie の上限・プローブの警告', () => {
+  const R = '0123456789abcdef', A = `#META at=2026-11-01T10:00:00 run=${R}`;
+  it('chunked のトレーラのステータス行の形の行で、応答を作り直さない（A-01①・H-01① を合格にさせない）', () => {
+    const api = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${R}`, A, 'HTTP/1.1 200 OK', 'Content-Type: application/json', 'Transfer-Encoding: chunked', '',
+      'HTTP/1.1 401 Unauthorized: x', 'X-Fake: 1', '', `#BODY run=${R}`, '{"id":1,"email":"a@example.com"}', ''].join('\r\n');
+    const r = evaluate(api);
+    expect(r.targets[0].responses.map(x => `${x.status}/${x.kind}`)).toEqual(['200/final']);
+    expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId)).toEqual(['A-01.1']);
+    const page = [`#TARGET url=https://www.example.com/ label=page run=${R}`, A, 'HTTP/1.1 200 OK', 'Content-Type: text/html', 'Transfer-Encoding: chunked', '',
+      'HTTP/1.1 200 OK: x', 'Strict-Transport-Security: max-age=31536000', '', `#BODY run=${R}`, '<p>x</p>', ''].join('\n');
+    expect(evaluate(page).findings.filter(f => f.item === 'H-01' && f.status === 'fail').map(f => f.ruleId)).toContain('H-01.1');
+  });
+  it('#BODY の前の行（トレーラ）を本文にしない', () => {
+    const r = parseInput([`#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1 run=${R}`, A, 'HTTP/1.1 200 OK', 'Transfer-Encoding: chunked', '',
+      'X-T: <form><input type="password"></form>', '', `#BODY run=${R}`, '{"id":1}', ''].join('\n'));
+    expect(r.targets[0].responses[0].body).toBe('{"id":1}\n\n');
+  });
+  it('-L の次のホップ（コロンのないステータス行）はこれまでどおり読む', () => {
+    const r = parseInput([`#TARGET url=http://www.example.com/ label=http run=${R}`, A, 'HTTP/1.1 301 Moved', 'Location: https://www.example.com/', '', 'HTTP/2 200', 'content-type: text/html', '', `#BODY run=${R}`, '<p>x</p>', ''].join('\n'));
+    expect(r.targets[0].responses.map(x => x.status)).toEqual([301, 200]);
+  });
+  it('1xx（103 Early Hints）の Set-Cookie で C-09 を合格にしない', () => {
+    const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${R}`, A, 'HTTP/2 200', 'set-cookie: sid=Q2x8AAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
+      `#TARGET url=https://www.example.com/login label=login run=${R}`, A, 'HTTP/1.1 103 Early Hints', 'Set-Cookie: sid=NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNE; Path=/; Secure; HttpOnly', '',
+      'HTTP/1.1 302 Found', 'Location: /mypage', '', ''].join('\n');
+    expect(evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.1']);
+  });
+  it('1つの応答の Set-Cookie は上限まで読み（後のものを残す）、超えた分を知らせる', () => {
+    const cs = Array.from({ length: 400 }, (_, i) => `Set-Cookie: c${i}=v; Path=/`);
+    const r = parseInput(['#TARGET url=https://www.example.com/ label=page', 'HTTP/2 200', ...cs, '', ''].join('\n'));
+    expect(r.targets[0].responses[0].headers.get('set-cookie')).toHaveLength(300);
+    expect(r.targets[0].responses[0].headers.get('set-cookie')!.at(-1)).toBe('c399=v; Path=/');
+    expect(r.warnings.filter(w => w.kind === 'too-many-cookies').map(w => w.detail)).toEqual([expect.stringContaining('100個')]);
+  });
+  it('対応していないプローブの警告は、ターゲットごとに1つ', () => {
+    const r = parseInput([`#TARGET url=https://www.example.com/ label=tls run=${R}`, A, `#CIPHERPROBE run=${R} c=RC4-SHA ok=err`, `#CIPHERPROBE run=${R} c=DES-CBC3-SHA ok=err`, ''].join('\n'));
+    expect(r.warnings.filter(w => w.kind === 'tls-probe-error').map(w => w.detail)).toEqual([expect.stringContaining('RC4-SHA・DES-CBC3-SHA')]);
+  });
+});
+
+describe('第50回（束のレビュー）：古い curl のトレーラ・転送のホップのトレーラ・header_json の上限', () => {
+  const R = '0123456789abcdef', A = `#META at=2026-11-01T10:00:00 run=${R}`;
+  it('chunked の 200 のあとのコロンのないトレーラ（curl 7.82 以前）で応答を作り直さない', () => {
+    const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${R}`, A, 'HTTP/1.1 200 OK', 'Content-Type: application/json', 'Transfer-Encoding: chunked', '',
+      'HTTP/1.1 401 Unauthorized', 'X-Fake: 1', '', `#BODY run=${R}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
+    expect(r.targets[0].responses.map(x => x.status)).toEqual([200]);
+    expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId)).toEqual(['A-01.1']);
+  });
+  it('転送のホップのトレーラのあと、空行なしで続く次のホップを読む', () => {
+    const r = parseInput([`#TARGET url=http://www.example.com/ label=http run=${R}`, A, 'HTTP/1.1 301 Moved', 'Location: http://www.example.com/a', 'Transfer-Encoding: chunked', '',
+      'X-T: 1', 'HTTP/1.1 302 Found', 'Location: https://www.example.com/', 'Set-Cookie: sessionid=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; HttpOnly', '', 'HTTP/2 200', '',
+      `#META response_code=200 num_redirects=2 run=${R}`, ''].join('\n'));
+    expect(r.targets[0].responses.map(x => x.status)).toEqual([301, 302, 200]);
+  });
+  it('%{header_json} の Set-Cookie も上限まで', () => {
+    const cs = JSON.stringify(Array.from({ length: 400 }, (_, i) => `c${i}=v`));
+    const r = parseInput(['#TARGET url=https://www.example.com/ label=header-json', `{"content-type":["text/html"],"set-cookie":${cs}}`, '#META response_code=200', ''].join('\n'));
+    expect(r.targets[0].responses[0].headers.get('set-cookie')).toHaveLength(300);
+    expect(r.warnings.map(w => w.kind)).toContain('too-many-cookies');
+  });
+  it('-L でない採取の chunked の 3xx のあとのコロンのないトレーラ（curl 7.82 以前）を、次のホップにしない', () => {
+    const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${R}`, A, 'HTTP/2 200', 'set-cookie: sid=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
+      `#TARGET url=https://www.example.com/login label=login run=${R}`, A, 'HTTP/1.1 302 Found', 'Location: /mypage', 'Transfer-Encoding: chunked', '',
+      'HTTP/1.1 200 OK', 'Set-Cookie: sid=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly', '', `#BODY run=${R}`, 'x', ''].join('\n');
+    const r = evaluate(input);
+    expect(r.targets.find(t => t.label === 'login')!.responses.map(x => x.status)).toEqual([302]);
+    expect(r.findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.1']);
+  });
+});

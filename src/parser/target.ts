@@ -51,11 +51,34 @@ const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowe
  * 消しただけのログアウトを合格にした）。http の同じサイトのホップは含める（C-10 が見る）
  */
 export const siteResponses = (t: Target): HttpResponse[] => {
+  // 1xx（103 Early Hints など）とプロキシの応答（CONNECT・407）は除く。ブラウザは 1xx の Set-Cookie・Clear-Site-Data を使わない（103 の Set-Cookie で
+  // C-09 を、103 の削除の Set-Cookie・Clear-Site-Data で C-12②・H-15 を合格にできた。第50回）。プロキシの応答はサイトの応答ではない
+  const rs = t.responses.filter(r => r.kind !== 'informational' && r.kind !== 'connect');
   const host = hostnameOf(t.url);
-  if (!host) return t.responses;
+  if (!host) return rs;
   const site = siteOf(host);
-  return t.responses.filter(r => { const h = hostnameOf(r.url); return !r.url || !h || siteOf(h) === site; });
+  return rs.filter(r => { const h = hostnameOf(r.url); return !r.url || !h || siteOf(h) === site; });
 };
+/**
+ * 1つの応答で読む Set-Cookie の上限。ブラウザも1つのドメインに約180個までしか保存しない。上限がないと、5MB の Set-Cookie の行で
+ * Cookie の項目ごとに数万件の指摘を作り、判定に数十秒かかった（第50回）。超えた分は警告で知らせる
+ */
+export const MAX_SET_COOKIES = 300;
+/**
+ * Set-Cookie の値を一覧に足す。上限を超えたら古いもの（先のもの）を捨てて、後のものを残す（ブラウザも古いものから追い出す。先の300個を
+ * 残すと、301個目の Secure なしのセッションCookie を判定せず、C-01① などを合格にした。束のレビュー）。捨てた数を返す
+ */
+export const pushCookies = (list: string[], vals: string[]): number => {
+  let dropped = 0;
+  for (const x of vals) list.push(x);   // push(...) に広げない（長い Set-Cookie でスタックがあふれる）
+  if (list.length > MAX_SET_COOKIES) { dropped = list.length - MAX_SET_COOKIES; list.splice(0, dropped); }
+  return dropped;
+};
+/** 上限を超えた Set-Cookie のあるターゲットの警告 */
+export const cookieCapWarnings = (targets: Target[]): ParseWarning[] => targets.flatMap(t => {
+  const n = t.responses.reduce((a, r) => a + (r.droppedCookies ?? 0), 0);
+  return n ? [{ kind: 'too-many-cookies' as const, label: t.label, detail: `ターゲット「${t.label}」：1つの応答の Set-Cookie が${MAX_SET_COOKIES}個を超えたので、先の${n}個を判定に使いませんでした（ブラウザも1つのドメインに約180個までしか保存せず、古いものから捨てます）` }] : [];
+});
 /** 登録ドメインの近似（最後の2つのラベル。co.jp・com.au のような2段の国別ドメインは3つ）。IP アドレスはそのまま */
 const siteOf = (h: string): string => {
   if (/^[\d.]+$|:/.test(h)) return h;

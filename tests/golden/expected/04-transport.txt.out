@@ -10,7 +10,7 @@ http | http://www.example.com/ | key=http | responses=1
 tls | https://www.example.com/ | key=- | responses=0
 
 ## warnings
-tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
+tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（RC4-SHA。判定不能）
 
 ## findings
 chain | A-02.ok | info | pass | URL・Location・本文にトークンなし

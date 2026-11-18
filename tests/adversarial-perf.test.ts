@@ -77,3 +77,13 @@ describe('第49回：HAR の転送のつなぎ方が2乗の時間にならない
     expect(ms(() => importHar(har)), 'importHar').toBeLessThan(4000);
   });
 });
+
+describe('第50回：Set-Cookie の多い応答の判定が長くならない', { tags: ['perf'] }, () => {
+  it('5MB の Set-Cookie の行', () => {
+    const lines = ['#TARGET url=https://a.example/ label=page', 'HTTP/2 200', 'content-type: text/html'];
+    for (let n = 0, len = 0; len < 5_000_000; n++) { const l = `set-cookie: sess${n}=v${n}abcdefghijklmnop; Path=/; Secure; HttpOnly; SameSite=Lax`; lines.push(l); len += l.length + 1; }
+    lines.push('', '<html></html>', '');
+    const input = lines.join('\n');
+    expect(ms(() => runAll(parseInput(input).targets)), 'parse+runAll').toBeLessThan(4000);
+  });
+});

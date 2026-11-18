@@ -1,6 +1,6 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、#META、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
-import { assignHopUrls, baseLabel, uniqueLabels } from './target';
+import { assignHopUrls, baseLabel, cookieCapWarnings, pushCookies, uniqueLabels } from './target';
 import { autoAuthScheme, cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
 
 const STATUS_RE = /^HTTP\/(1\.0|1\.1|2|3)(?:\.0)?\s+(\d{3})(?:\s+(.*))?$/;
@@ -121,6 +121,9 @@ export function parseInput(input: string): ParseResult {
   const badSensitive: Target[] = [];                   // sensitive= の値を読めなかったターゲット（ラベルは付け直したあとのものを出す）
   const badTargetAttrs: string[] = [];                 // #TARGET の読めなかった指定（書き間違えた名前、受け付けないラベル・kind）
   let firstLine: 'pending' | 'hint' | 'other' = 'pending';   // 印のある入力で、ターゲットの最初の行が curl -v の「*」の行だったか
+  // chunked の 3xx のあとに読んだホップ。-L で採取したターゲット（#META に num_redirects= がある）でなければ、トレーラの偽のホップなので捨てる
+  // （curl 7.82 以前は、コロンのないトレーラの「HTTP/1.1 200 OK」も -D に書く。login の 302 のあとの偽の 200 の Set-Cookie で C-09 を合格にできた。束のレビュー）
+  const trailerHops = new WeakSet<HttpResponse>();
   let ignoredMarkers = 0;                              // 印のない（違う）#TARGET の行の数。本文として読んだことを知らせる
   let inRaw = false;                                   // #BODY のあと：次のマーカーまでを本文としてそのまま読む（ステータス行・openssl の行・-v の行として読まない）
   let rawBody: HttpResponse | undefined;              // 本文を足す応答。#BODY の前に応答がない（curl が失敗した、curl は受け付けるがここでは読めないステータス行
@@ -145,7 +148,9 @@ export function parseInput(input: string): ParseResult {
       // 前のターゲットの状態（CONNECT を送った、など）を持ち越さない（持ち越すと、次のターゲットの本物の 200 をプロキシの応答とみなした）
       close(); inOpenssl = false; vBody = false; connectReq = false; inRaw = false; rawBody = undefined; if (json) { unparsed += json.length; json = null; }
       const [, tag] = mk;
-      if (tag === 'BODY') { inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
+      // #BODY の前に本文として読んだ行（chunked の応答のトレーラ・curl の失敗の行）は捨てる。本文は #BODY のあとだけ（トレーラはブラウザの
+      // 本文ではない。トレーラにパスワード欄を書くと、ログアウト後の画面をログインのフォームとみなさせられた。第50回）
+      if (tag === 'BODY') { if (runId) for (const r of t.responses) r.body = undefined; inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
       if (tag === 'TARGET') {
         flush(); t = newTarget(a); pendingJson.length = 0; firstLine = 'pending'; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
         // 書き間違い（lable=）や受け付けない値（label=login/x、kind=API）は、黙って既定にすると、予約したラベルの横断の判定（C-09 など）が
@@ -248,6 +253,23 @@ export function parseInput(input: string): ParseResult {
       else if (/^[{}] \[/.test(line)) continue;
     }
     const sm = line.match(STATUS_RE);
+    // 印のある入力では、ヘッダの終わりの空行のあとのコロンのあるステータス行の形の行は、次の応答にしない。chunked の応答のトレーラ（curl は -D に
+    // 書く）に「HTTP/1.1 401 Unauthorized: x」と書いて応答を作り直し、A-01①・C-12①・H-01①（高）を合格にできた。トレーラの行には必ずコロンが
+    // ある（curl はコロンのない行を拒む）ので、コロンのないステータス行だけを次の応答（-L・1xx・401・407・CONNECT のあと）とする（第50回）
+    const trailer = !!sm && runId !== undefined && !!cur && !inHeaders && line.includes(':');
+    // 印のある入力で、chunked の HTTP/1.x の応答のヘッダのあと（#BODY の前）は、トレーラの行になりうる。curl 7.82 以前はコロンのない
+    // トレーラの行も -D に書くので、コロンのないステータス行でも、次の応答にするのは -L・1xx・401・407 のあと（nextHopAfter）だけ
+    // （200 のあとのトレーラの「HTTP/1.1 401 Unauthorized」で応答を作り直せた）。トレーラの行は本文にせず読み飛ばし、空行がなくても次の
+    // ホップのステータス行を読む（curl はトレーラのあとに空行を書かずに次のホップを出すので、転送のホップを本文に吸い込んで消した。束のレビュー）
+    if (runId && cur && !inHeaders && /^1/.test(cur.httpVersion) && (cur.headers.get('transfer-encoding') ?? []).some(v => /chunked/i.test(v))) {
+      if (sm && !trailer && nextHopAfter(cur.status)) {
+        const redirect = cur.status >= 300 && cur.status < 400;
+        close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; vHeaders = fromV;
+        if (redirect) trailerHops.add(cur);   // -L でなければ、3xx のあとにホップは来ない（あとで #META の num_redirects= で確かめる）
+        continue;
+      }
+      if (line.trim()) continue;
+    }
     // 印のある入力では、ヘッダの途中（cur があり、まだヘッダを読んでいる）のステータス行の形の行は、新しい応答にしない（curl はコロンのある
     // 「HTTP/1.1 401 Unauthorized: x」をヘッダとして受け付けて出す。診断対象のサーバがこの行で応答を作り直し、本物の 200 をプロキシの応答に
     // して A-01①・C-12①（高）を合格にできた。第49回）。-D・-v のどちらも、次の応答の前には空行（-v は「<」の行）がある
@@ -256,7 +278,7 @@ export function parseInput(input: string): ParseResult {
     // -i の出力では、本文と次の応答を見分けられない（本文が「HTTP/1.1 200 OK」と偽のヘッダで始まると、次の応答として読む）。ヘッダの形で
     // プロキシの応答を見分ける作りは、本物のプロキシの応答（ヘッダを足すもの）を壊し、3xx・401 の本文からの偽装も止められなかったのでやめた。
     // 生成スクリプトは、ヘッダ（-D）と本文（-o）を分けて採取し、#BODY の印のあとを本文として読む（この分かれ目はサーバが作れない）
-    if (sm && inBody() && (cur!.body === undefined || nextHopAfter(cur!.status)) && /^\s*$/.test(lastLine(cur!.body ?? ''))) {   // -L で次のホップが続く場合
+    if (sm && !trailer && inBody() && (cur!.body === undefined || nextHopAfter(cur!.status)) && /^\s*$/.test(lastLine(cur!.body ?? ''))) {   // -L で次のホップが続く場合
       close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue;
     }
     // C10：ヘッダ名が小文字のJSON。-v の本文や、応答のあとの本文（{"items":[...]} など）は対象にしない
@@ -292,9 +314,17 @@ export function parseInput(input: string): ParseResult {
     const val = line.slice(i + 1).trim();
     // 値を push(...) に広げない（5MB の Set-Cookie の行で、引数が多すぎてスタックがあふれ、解析全体が止まった）
     const list = cur.headers.get(last) ?? cur.headers.set(last, []).get(last)!;
-    for (const x of last === 'set-cookie' ? splitSetCookie(val) : [val]) list.push(x);
+    if (last === 'set-cookie') { const d = pushCookies(list, splitSetCookie(val)); if (d) cur.droppedCookies = (cur.droppedCookies ?? 0) + d; }
+    else list.push(val);
   }
   close(); flush();
+  if (runId) for (const tg of targets) {
+    const k = tg.responses.findIndex(r => trailerHops.has(r));
+    if (k > 0 && tg.meta.num_redirects === undefined) {
+      const body = tg.responses.at(-1)!.body;   // #BODY の本文は最後の応答に付けたので、本物の最後の応答に移す
+      tg.responses.length = k; tg.responses[k - 1].body = body;
+    }
+  }
   for (const tg of targets) tg.responses.forEach((r, i) => {
     // CONNECT（プロキシ）の応答：理由句が「Connection established」のもの。理由句が違っても、本文のない 2xx のあとに応答が続くなら、それはプロキシの応答
     const proxyReply = r.status >= 200 && r.status < 300 && i < tg.responses.length - 1 && !r.body?.trim() && r.reason !== 'header_json';
@@ -324,7 +354,7 @@ export function parseInput(input: string): ParseResult {
   const mixedRun: ParseWarning[] = !runId && /(?:^|\n)#TARGET[ \t](?:[^\n]*[ \t])?run=[0-9a-f]{16,64}(?=[ \t\n]|$)/.test(normalized) ? [{ kind: 'mixed-run',
     detail: '生成スクリプトの出力（run= の印のある #TARGET）の前に、印のない #TARGET があります。この場合は印を使わずに読むので、応答の本文に書かれた #TARGET などのマーカーもターゲットとして読みます。生成スクリプトの出力だけを先頭から貼り付け、手書きの出力は別に貼り付けて判定してください' }] : [];
   if (badTargetAttrs.length) badAttr.push({ kind: 'invalid-attr', detail: `#TARGET の指定を読めませんでした（${badTargetAttrs.slice(0, 5).join('、')}${badTargetAttrs.length > 5 ? ' など' : ''}）` });
-  return { targets, warnings: [...dup, ...ignored, ...mixedRun, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets)] };
+  return { targets, warnings: [...dup, ...ignored, ...mixedRun, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets), ...cookieCapWarnings(targets)] };
 }
 
 // %{header_json} にほぼ必ずある応答ヘッダ。どれもない JSON（{"tags":["a"]} など）はヘッダとみなさない
@@ -342,10 +372,12 @@ function headerJson(text: string, code?: string): HttpResponse | null | undefine
   const isHeaders = entries.some(([k]) => TYPICAL_HEADER.test(k.toLowerCase()))
     && entries.every(([k, v]) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(k) && Array.isArray(v) && v.every(x => typeof x === 'string'));
   if (!isHeaders) return null;
-  const headers = new Map<string, string[]>();
+  const headers = new Map<string, string[]>(); let dropped = 0;
   for (const [k, v] of entries)
-    headers.set(k.toLowerCase(), k.toLowerCase() === 'set-cookie' ? (v as string[]).flatMap(splitSetCookie) : (v as string[]));
-  return { httpVersion: '', status: Number(code) || 0, reason: 'header_json', headers, rawNames: [...headers.keys()], kind: 'final' };
+    if (k.toLowerCase() === 'set-cookie') { const list: string[] = []; dropped += pushCookies(list, (v as string[]).flatMap(splitSetCookie)); headers.set('set-cookie', list); }
+    else headers.set(k.toLowerCase(), v as string[]);
+  // %{header_json} の Set-Cookie も上限まで（上限がなく、64KB の JSON で約6,400個の Cookie を判定した。束のレビュー）
+  return { httpVersion: '', status: Number(code) || 0, reason: 'header_json', headers, rawNames: [...headers.keys()], kind: 'final', ...(dropped ? { droppedCookies: dropped } : {}) };
 }
 
 /** 本文の最後の行（本文は「行 + 改行」でつなぐので、最後の改行の前の行。body.split('\n').at(-2) と同じ）。改行がなければ空 */
@@ -384,8 +416,11 @@ function collectWarnings(targets: Target[], unparsed: number, emptyTargets: stri
   // url= はあるが、スキームのある URL として読めない（a.example/r、https:/a.example）。HTTPS かどうかを使う項目が黙って適用外になる
   else if (t.url && !/^[a-z][\w+.-]*:\/\/[^/?#\s]/i.test(t.url))
     w.push({ kind: 'unknown-url', label: t.label, detail: `ターゲット「${t.label}」の url= を URL として読めません。HTTPSかどうかを使う項目は判定できません（https:// から書いてください）` });
-  for (const t of targets) for (const p of [...t.tlsProbes, ...t.cipherProbes]) if (p.result === 'error')
-    w.push({ kind: 'tls-probe-error', detail: `ターゲット「${t.label}」：手元のOpenSSLが対応していないプローブがあります（判定不能）` });
+  // ターゲットごとに1つにまとめ、どのプローブかを書く（プローブごとに同じ文言を出し、OpenSSL 3 では RC4-SHA・DES-CBC3-SHA で毎回2つ並んだ。第50回）
+  for (const t of targets) {
+    const errs = [...t.tlsProbes.map(p => p.result === 'error' ? p.version : ''), ...t.cipherProbes.map(p => p.result === 'error' ? p.cipher : '')].filter(Boolean);
+    if (errs.length) w.push({ kind: 'tls-probe-error', detail: `ターゲット「${t.label}」：手元のOpenSSLが対応していないプローブがあります（${[...new Set(errs)].slice(0, 10).join('・')}。判定不能）` });
+  }
   // 応答がプロキシのもの（407・CONNECT）だけのターゲットは、サイトの応答を判定できない。黙って判定から消えないよう知らせる
   // WebSocket の 101（1xx）だけの応答は、プロキシの応答ではない
   for (const t of targets) if (t.responses.some(r => r.kind === 'connect') && t.responses.every(r => r.kind === 'connect' || r.kind === 'informational'))
