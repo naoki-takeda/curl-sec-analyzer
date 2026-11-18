@@ -232,3 +232,46 @@ describe('第48回（束1の第2回のレビュー）', () => {
     expect(showText('/invite/QWER-TYUI-ZXCV-ASDF')).not.toContain('ZXCV');
   });
 });
+
+// 第49回のレビュー（マスキング・エクスポート）
+describe('第49回：URL のユーザー情報・p=・名前・伏せすぎ', () => {
+  it('パスワードの末尾・前後の引用符でも、パスワードを伏せる', () => {
+    for (const s of ["https://alice:Summer2024'@stg.example/", 'https://alice:"Summer2024"@host.example/', 'https://alice:Summer2024"@host.example/']) {
+      expect(showText(s), s).not.toContain('Summer2024');
+      expect(showText(s), s).toContain('stg.example'.includes('stg') && s.includes('stg') ? 'stg.example' : 'host.example');
+    }
+    // JSON の "," の後ろはユーザー情報にしない（第48回のまま）
+    expect(showText('{"site":"https://a.example","email":"bob@example.com"}')).toContain('"email":"bob@example.com"');
+  });
+  it('// の数が標準でない特別なスキームの URL のユーザー情報も伏せる', () => {
+    for (const s of ['<script src="https:///dave:Kirin2024@cdn3.other.example/b.js">', 'https:\\dave:Kirin2024@h.example/', 'http:/dave:Kirin2024@h.example/', 'https:dave:Kirin2024@h.example/']) {
+      expect(showText(s), s).not.toContain('Kirin2024');
+    }
+  });
+  it('mail・user_name・login_id と組の p=、フラグメントの p= を伏せる', () => {
+    for (const s of ['https://a.example/rest/ping?mail=alice@example.com&p=Kirin2024', '?user_name=alice&p=Kirin2024', '?login_id=alice&p=Kirin2024', 'https://a.example/app#u=alice&p=Kirin2024']) {
+      expect(showText(s), s).not.toContain('Kirin2024');
+    }
+  });
+  it('日本語・外国語のパスワードの名前の値を伏せる', () => {
+    for (const s of ['https://a.example/?パスワード=Kirin2024', `https://a.example/?${encodeURIComponent('パスワード')}=Kirin2024`, '{"暗証番号":"4821"}', '{"暗証番号":4821}', '?senha=Kirin2024', '?wachtwoord=Kirin2024']) {
+      expect(showText(s), s).not.toMatch(/Kirin2024|4821/);
+    }
+  });
+  it('製品名・ヘッダ名・暗号の名前を伏せすぎない', () => {
+    for (const s of ['CherryPy/18.9.0', 'WebSEAL/10.0.6.0', 'Proxy-Authorization', 'Proxy-Authenticate', 'X-Proxy-Cache', 'Zyxel', 'DHE-RSA-CAMELLIA256-SHA', 'CAMELLIA256-SHA', 'X25519MLKEM768']) {
+      expect(showText(s), s).toBe(s);
+    }
+  });
+});
+
+describe('第49回：Markdown の自動リンク', () => {
+  it('_ の直後の URL・www. もリンクにしない', async () => {
+    const { toMarkdown } = await import('../src/export/markdown');
+    const { coverage } = await import('../src/engine/coverage');
+    const { IMPLEMENTED } = await import('../src/rules/ruleset');
+    const fs = evaluate('#TARGET url=https://www.example.com/ label=page\n#META at=2026-11-01T10:00:00\nHTTP/2 200\ncontent-type: text/html\n\n<script src="https://cdn.other.example/lib_https://evil.example/x.js"></script>\n').findings;
+    const md = toMarkdown(fs, coverage(fs, IMPLEMENTED), []);
+    expect(md).not.toMatch(/_https:\/\//);
+  });
+});

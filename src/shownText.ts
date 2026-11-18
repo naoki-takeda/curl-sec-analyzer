@@ -19,7 +19,7 @@ const MIXED_STEMS = new Set(('sha md aes rc des chacha poly secp sect prime ed c
   'chrome firefox safari edge android ios macos jre asvs api level l a').split(' '));
 const STEM_DIGITS = /^([a-z]{1,10})(\d{1,5})(?:([a-z]{1,2})\d{1,3})?$/i;
 /** 日時（2026-11-01T10:00:00Z の 01T10）と、数字に単位を付けたもの（30s・500ms・64KB・2xx・1st） */
-const DATE_OR_UNIT = /^(?:x25519|x448|\d{1,2}T\d{1,2}|\d{1,6}(?:ms|s|m|h|d|w|y|kb|mb|gb|tb|px|em|rem|vh|vw|x|xx|st|nd|rd|th|k)|\d{1,3}(?:ubuntu|deb|el|fc|build|beta|alpha|rc|dev|p|pl)\d{1,3})$/i;
+const DATE_OR_UNIT = /^(?:x25519(?:mlkem768|kyber768draft00)?|x448|secp256r1mlkem768|secp384r1mlkem1024|mlkem(?:512|768|1024)|\d{1,2}T\d{1,2}|\d{1,6}(?:ms|s|m|h|d|w|y|kb|mb|gb|tb|px|em|rem|vh|vw|x|xx|st|nd|rd|th|k)|\d{1,3}(?:ubuntu|deb|el|fc|build|beta|alpha|rc|dev|p|pl)\d{1,3})$/i;
 
 /**
  * 英字の語と数字をつないだ語（oauth2・app01・CookiesC1・sha1WithRSAEncryption・1024bit）：英字と数字のかたまりが3つまでで、英字のかたまりは
@@ -32,8 +32,10 @@ function joinedWords(w: string): boolean {
   // 単位（KB・ms・k）は数字の直後だけ（K7MDENG の K を単位と読んだ）。大文字だけのかたまりは5文字まで（AKIAIOSFODNN7EXAMPLE を残さない）。
   // 英字のかたまりは、短くてもまれな2文字の並びが半分未満のもの（GitLab のトークンのかけら rbdO66tkD の rbd・tkD を語とみなした）
   return chunks.length <= 3 && digits <= 4 && chunks.every((c, i) => /^\d/.test(c) || (UNITS.test(c) && i > 0 && /^\d/.test(chunks[i - 1]))
+    || CRYPTO_CHUNKS.has(c.toLowerCase())   // 暗号の名前（CAMELLIA256・ARIA128）は大文字6文字以上でも残す（T-10③ の証跡が読めなかった。第49回）
     || (c.length >= 3 && wordLike(c) && !/^[A-Z]{6,}$/.test(c) && rareBigrams(stem(c).toLowerCase()) < 0.5));
 }
+const CRYPTO_CHUNKS = new Set(['camellia', 'aria', 'chacha', 'poly', 'mlkem', 'kyber']);
 /** 末尾の1文字の大文字（分割した Cookie の CookiesC の C）を除いた部分 */
 const stem = (c: string) => (/[a-z][A-Z]$/.test(c) ? c.slice(0, -1) : c);
 const UNITS = /^(?:bit|bits|byte|bytes|ms|s|m|h|d|w|y|kb|mb|gb|tb|px|em|rem|vh|vw|x|xx|st|nd|rd|th|k)$/i;
@@ -56,7 +58,7 @@ export function allowedWord(w: string): boolean {
 // （?ref=bob@<トークン> の @ のあとをホスト名とみなした）。伏せた印「…(N chars)」はユーザー情報の中にあってよい（もう一度かけても同じ結果にする）
 // ユーザー情報は256文字まで（上限がないと、「@」の多い入力で、位置ごとに「//」まで読み戻して、入力の長さの2乗の時間がかかった）
 // 引用符（' "）は、後ろに語の文字が続くときだけユーザー情報に入る（mask.ts の URL_CRED と同じ）
-const USERINFO = String.raw`(?:[^/\s?#@<>"']|["'](?=[\w-])|…\(\d+ chars\)){0,256}@`;
+const USERINFO = String.raw`(?:[^/\s?#@<>"']|["'](?=[\w@-])|…\(\d+ chars\)){0,256}@`;
 // 英小文字のドメイン名（スキームのない CSP のホスト ajax.aspnetcdn.com、Via の app01.prod.example.com）。決まった最上位ドメインのものだけ
 // （/reset/<トークン>.pdf のようなファイル名を残さない）
 const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost)(?![\w-])`;

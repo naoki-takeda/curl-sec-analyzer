@@ -14,7 +14,7 @@ import { recommendationEn } from '../recommendationsEn';
 // レポートを開いたときに外部から読み込まれないようにするため。改行（CR だけの改行も、CommonMark では行の区切り）も空白にし、見出しなどを差し込めないようにする
 // 裸の URL・www.・メールアドレスは、GitHub の Markdown（GFM の自動リンク）がリンクにする。診断対象のサーバが返した Location: https://evil.example/…
 // がレポートの中のリンクになるので、ゼロ幅の空白（&#8203;）を挟んで自動リンクにしない（表示は変わらない）
-const noAutolink = (s: string) => s.replace(/\b(https?|ftp)(?=:\/\/)/gi, '$1&#8203;').replace(/\b(www)(?=\.)/gi, '$1&#8203;').replace(/@/g, '&#8203;@');
+const noAutolink = (s: string) => s.replace(/(?<![A-Za-z0-9])(https?|ftp)(?=:\/\/)/gi, '$1&#8203;').replace(/(?<![A-Za-z0-9])(www)(?=\.)/gi, '$1&#8203;').replace(/@/g, '&#8203;@');
 const cell = (v: unknown) => noAutolink(String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[|[\]!`\\]/g, '\\$&').replace(/\r\n?|\n/g, ' '));
 const ORDER = ['high', 'medium', 'low', 'info'];
 

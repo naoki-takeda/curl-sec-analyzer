@@ -55,11 +55,17 @@ export const isSecretParamName = (name: string): boolean => {
   // 最後の語が type・method などの名前は、種類や設定を表す公開の値（client_assertion_type=urn:…、token_type=Bearer、code_challenge_method=S256、
   // token_endpoint_auth_method、key_size=2048、max_password_length=64）。伏せると、PKCE の方式のようなセキュリティ上意味のある値が読めなくなる
   if (words.length > 1 && PUBLIC_LAST_WORDS.has(words[words.length - 1])) return false;
+  // 日本語と主な外国語のパスワード・暗証番号の名前（?パスワード=…、{"暗証番号":"4821"}、?senha=…。伏せなかった。第49回）
+  if (LOCAL_SECRET.test(n) || words.some(w => LOCAL_WORDS.has(w)) || /mot[-_]?de[-_]?passe/i.test(n)) return true;
   if (words.includes('code') && words.every(w => w === 'code' || PLAIN_CODE_WORDS.has(w))) return false;
   // 区切りのない1語の名前（authtoken、apitoken、secretkey、cftoken、sesskey、passphrase など）は、部分一致でも見る（伏せすぎるほうが安全）
   return words.some(w => MASK_WORDS.has(w)) || SECRET_PART.test(n.toLowerCase());
 };
 /** 末尾の数字を外して照合する語（pass1・pass2・otp1・token2）。key1・code128・mac1・pin2・hash1 は、例や品番などにも使うので外さない */
+// ラテン文字以外の名前は部分一致（パスワード確認・新しい暗証番号）、ラテン文字の名前は区切った語の完全一致（hasLogin の haslo・
+// 「語」の意味の parola を伏せない。束のレビュー）
+const LOCAL_SECRET = /パスワード|暗証番号|合言葉|ワンタイム|密码|密碼|비밀번호|пароль/i;
+const LOCAL_WORDS = new Set(['senha', 'wachtwoord', 'contrasena', 'contraseña', 'passwort', 'kennwort', 'motdepasse', 'hasło', 'haslo', 'lösenord', 'salasana', 'adgangskode']);
 const STRIP_DIGIT_WORDS = new Set(['password', 'passwd', 'pass', 'pw', 'pwd', 'otp', 'token', 'secret', 'passcode']);
 const PUBLIC_LAST_WORDS = new Set(['type', 'method', 'methods', 'size', 'length', 'len', 'policy', 'timeout', 'ttl', 'alg', 'algorithm']);
 // pw で終わる名前（userpw・loginpw）と nonce（WordPress の CSRF トークン _wpnonce）も含める
@@ -82,7 +88,7 @@ const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];
 // 名前は + を含んでよい（password+= は、フォームの読み方で「password 」という名前になる。+ で名前が切れて、値を伏せなかった）
 // 名前は全角の英数字・記号（ｐａｓｓｗｏｒｄ）とゼロ幅の文字・ソフトハイフン（pass<U+200B>word）を含んでよい（含めないと、isSecretParamName の
 // 正規化を通らず、値を伏せなかった）
-const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%+[\]\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,100}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|\\\/)+)`, 'g');
+const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%+[\]\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,100}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|\\\/)+)`, 'g');
 // JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる。
 // 「Bearer_eyJ…」「access_token_eyJ…」のように語と _ でつないだものも含める（直前の語は _ を含めて40文字までで、その前が語の外のときだけ。
 // 「_eyJ」の繰り返しで2乗の時間にしない）。JWE（5つの部分。鍵の部分が空の dir 形式「eyJ….. iv.暗号文.タグ」を含む）は5つ目まで、JWS は3つ目まで伏せる
@@ -93,9 +99,14 @@ const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-])|(?<=(?:^|[^\w-])[A-Za-z0-9_]{1,4
 // スキームの前が数字のとき（エンコードした引用符 %22https://…、%3Dhttps://…）も含める（\b だと「2」と「h」の間を語の先頭とみなさず、パスワードを残した）。
 // スキームは英字の直後でないところから始める（「-」「.」の直後も含める。除くと、32文字を超える corp-egress-…-https://user:pw@ を見逃した）
 // ユーザー情報には引用符（' "）も入る（new URL も curl も受け付ける。除くと、https://alice:Summer'2024@host/ のパスワードをまったく伏せなかった）。
-// ただし、引用符は後ろに語の文字が続くときだけ（JSON の {"site":"https://a.example","id":"x@<トークン>"} の「","」や、属性の「' title=」の後ろを
+// ただし、引用符は後ろに語の文字か @ が続くとき（パスワードの末尾の Summer2024'@ も。第49回）だけ（JSON の {"site":"https://a.example","id":"x@<トークン>"} の「","」や、属性の「' title=」の後ろを
 // ユーザー情報とみなすと、@ の後ろのトークンをホスト名として残し、メールアドレスを伏せた。第48回の束1のレビュー）
-const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)((?:[^/\s?#<>"']|["'](?=[\w-])){1,512})@/g;
+const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)((?:[^/\s?#<>"']|["'](?=[\w@-])){1,512})@/g;
+/**
+ * 特別なスキーム（http・https・ws・wss・ftp）で、// の数が標準でないもの（https:///u:pw@h、https:\\u:pw@h、http:/u:pw@h、https:u:pw@h）。
+ * WHATWG の URL はどれもユーザー情報として読む（HTML の属性・CSP の生の文字列で、パスワードをそのまま出した。第49回）。// のものは URL_CRED が見る
+ */
+const URL_CRED_SPECIAL = /((?<![A-Za-z])(?:https?|wss?|ftp):)([\\/]*)((?:[^/\\\s?#<>"']|["'](?=[\w@-])){1,512})@/gi;
 /**
  * コロンだけをエンコードしたスキームの URL（パラメータの値の https%3A//alice:<パスワード>@idp…。伏せなかった）。ユーザー情報には、エンコードした
  * / ? #（%2F・%3F・%23）を含めない（?next=https%3A//a.example%2Fcb%3Fe=bob@example.com のパスの中のメールアドレスを、ユーザー情報とみなさない）
@@ -263,14 +274,14 @@ const bareNonce = (all: string, q: string | undefined, v: string, h: Hider) =>
 const Q = '%(?:25)*22', SP = '(?:%(?:25)*20|\\+)*';
 // キーは全角の英数字・ゼロ幅の文字を含んでよい（{"ｐａｓｓｗｏｒｄ":"…"}。secretParam が正規化してから照合する。ANY_PARAM と同じ）
 const JSON_PAIRS: RegExp[] = [
-  /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
-  /(\\"([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
+  /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
+  /(\\"([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
   new RegExp(`(${Q}([\\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}${Q})((?:(?!${Q})[^&\\s"'<>#])*)(${Q})`, 'g'),
 ];
 // 数値の値は、ワンタイムの番号・パスワード・個人の番号らしい名前だけ（"code":404・"status":500 のようなエラーの番号は残す）。
 // 3桁から（カードのセキュリティコード "cvv":123）
-const JSON_NUMBER = /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})"\s*:\s*)(\d{3,})(?![\d.])()/g;
-const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token|ssn|cvv|cvc|card|ccnum/i;
+const JSON_NUMBER = /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,64})"\s*:\s*)(\d{3,})(?![\d.])()/g;
+const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token|ssn|cvv|cvc|card|ccnum|暗証番号|パスワード/i;
 const maskJsonPairs = (s: string, h: Hider) => {
   const rep = (all: string, pre: string, k: string, v: string, close: string) => (v && secretParam(k, v) && !/…\(\d+/.test(v) ? `${pre}${h.value(v)}${close}` : all);
   return JSON_PAIRS.reduce((acc, re) => acc.replace(re, rep), s)
@@ -344,9 +355,9 @@ const luhn = (d: string) => {
  * p だけの名前はページ番号（?p=2）にも使うので、ユーザー名と組のときだけ伏せる。伏せ済みの値（Su…(10 chars)）は値の空白で切らずにそのまま残す
  * （切ると「Su…(10」を伏せ直し、かけるたびに長くなった。第48回の束1のレビュー）。HTML の &amp;・エンコードした %26・; の区切りも見る
  */
-const USER_PARAM = /(?:[?&;]|&amp;|%3F|%26)(?:u|user|username|login|usr|uid|userid|user_id|email|account)(?:=|%3D)/i;
-const P_PARAM = /((?:[?&;]|&amp;|%3F|%26)p(?:=|%3D))((?:nonce-)?[^…\s&#;"'<>=]{0,4}…\(\d+ chars\)|(?:(?!%26|&amp;)[^&\s#;"'<>])+)/gi;
-const maskUserPass = (s: string, h: Hider) => s.replace(/\?(?:…\(\d+ chars\)|[^\s#"'<>]){0,4096}/g, q => (!USER_PARAM.test(q) ? q
+const USER_PARAM = /(?:[?&;#]|&amp;|%3F|%26)(?:u|user|username|user_name|login|login_id|loginid|usr|uid|userid|user_id|email|mail|account)(?:=|%3D)/i;
+const P_PARAM = /((?:[?&;#]|&amp;|%3F|%26)p(?:=|%3D))((?:nonce-)?[^…\s&#;"'<>=]{0,4}…\(\d+ chars\)|(?:(?!%26|&amp;)[^&\s#;"'<>])+)/gi;
+const maskUserPass = (s: string, h: Hider) => s.replace(/[?#](?:…\(\d+ chars\)|[^\s"'<>]){0,4096}/g, q => (!USER_PARAM.test(q) ? q
   : q.replace(P_PARAM, (all: string, k: string, v: string) => (MASKED_PARAM.test(v) ? all : `${k}${h.value(v)}`))));
 function mask(s: string, h: Hider): string {
   // 順序：nonce → JSON の組（値の中の JSON を、パラメータの区切りで分ける前に見る） → パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる）
@@ -358,6 +369,7 @@ function mask(s: string, h: Hider): string {
           .replace(SSN, v => h.bare(v))
           .replace(CARD, v => (luhn(numDigits(v)) ? h.bare(v) : v))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
+          .replace(URL_CRED_SPECIAL, (all: string, sc: string, sl: string, u: string) => (sl === '//' ? all : `${sc}${sl}${maskUserinfo(u, h)}@`))
           .replace(URL_CRED_PCT, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
           .replace(URL_CRED_ENCODED, (_, sc: string, user: string, colon: string, _lv: string, at: string) => `${sc}${user}${colon}****${at}`)
           .replace(URL_CRED_MIXED, (_, sc: string, user: string) => `${sc}${user}:****@`)
