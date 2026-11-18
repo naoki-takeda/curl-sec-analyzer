@@ -61,8 +61,10 @@ export function attrs(s: string): Record<string, string> {
 // 引用符で囲んだラベルの中の空白（label="top page"）は認める（第29回）
 const LABEL_OK = /^[\p{L}\p{N}_.*-](?:[\p{L}\p{N}_.* -]{0,62}[\p{L}\p{N}_.*-])?$/u;
 const SENS_TRUE = /^(?:1|true|yes)$/i, SENS_FALSE = /^(?:0|false|no)$/i;
+/** #TARGET で読む名前（run= は採取の印） */
+const TARGET_KEYS = new Set(['url', 'label', 'kind', 'sensitive', 'run']);
 const newTarget = (a: Record<string, string>): Target => ({
-  label: a.label === undefined ? 'default' : LABEL_OK.test(a.label) ? a.label : 'invalid-label', url: a.url, kind: (['html', 'api'].includes(a.kind) ? a.kind : 'auto') as Target['kind'],
+  label: a.label === undefined ? 'default' : LABEL_OK.test(a.label) ? a.label : 'invalid-label', url: a.url, kind: (['html', 'api'].includes(a.kind?.toLowerCase() ?? '') ? a.kind.toLowerCase() : 'auto') as Target['kind'],   // kind=API も受け付ける
   // sensitive は 1・true・yes と 0・false・no を受け付ける。ほかの値は読まずに警告する（黙って無視すると、機密応答の項目が na や弱い判定になった）
   sensitive: SENS_TRUE.test(a.sensitive ?? '') ? true : SENS_FALSE.test(a.sensitive ?? '') ? false : undefined,
   verbose: false, responses: [], sentAuth: false, sentTokens: [], info: [], meta: {}, probes: [], tlsProbes: [], cipherProbes: [], openssl: [],
@@ -110,6 +112,7 @@ export function parseInput(input: string): ParseResult {
     ? splitRunMarkers(normalized, runId)
     : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
   const badSensitive: Target[] = [];                   // sensitive= の値を読めなかったターゲット（ラベルは付け直したあとのものを出す）
+  const badTargetAttrs: string[] = [];                 // #TARGET の読めなかった指定（書き間違えた名前、受け付けないラベル・kind）
   let ignoredMarkers = 0;                              // 印のない（違う）#TARGET の行の数。本文として読んだことを知らせる
   let inRaw = false;                                   // #BODY のあと：次のマーカーまでを本文としてそのまま読む（ステータス行・openssl の行・-v の行として読まない）
   let rawBody: HttpResponse | undefined;              // 本文を足す応答。#BODY の前に応答がない（curl が失敗した、curl は受け付けるがここでは読めないステータス行
@@ -135,7 +138,15 @@ export function parseInput(input: string): ParseResult {
       close(); inOpenssl = false; vBody = false; connectReq = false; inRaw = false; rawBody = undefined; if (json) { unparsed += json.length; json = null; }
       const [, tag] = mk;
       if (tag === 'BODY') { inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
-      if (tag === 'TARGET') { flush(); t = newTarget(a); pendingJson.length = 0; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t); }
+      if (tag === 'TARGET') {
+        flush(); t = newTarget(a); pendingJson.length = 0; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
+        // 書き間違い（lable=）や受け付けない値（label=login/x、kind=API）は、黙って既定にすると、予約したラベルの横断の判定（C-09 など）が
+        // 動かない理由が分からなかった。sensitive= と同じく知らせる（値は出さない。ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
+        const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
+        if (unknown.length) badTargetAttrs.push(`${t.label}：${unknown.slice(0, 3).map(k => (/^[A-Za-z_][\w-]{0,30}$/.test(k) ? k : '…')).join('・')}=（使える名前は url・label・kind・sensitive）`);
+        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push('invalid-label：label= に使えるのは英数字・日本語などの文字と _ . * - と空白（64文字まで）');
+        if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push(`${t.label}：kind= は html・api・auto のいずれか`);
+      }
       else if (tag === 'META') {
         Object.assign(t.meta, a);
         // %{header_json} のあとに出した response_code（-w '%{header_json}' のあとの #META）も、その応答のステータスにする
@@ -274,6 +285,7 @@ export function parseInput(input: string): ParseResult {
   const ignored: ParseWarning[] = ignoredMarkers ? [{ kind: 'ignored-marker',
     detail: `採取の印（run=）が最初の #TARGET と違う #TARGET の行が${ignoredMarkers}行あり、応答の本文として読みました（診断対象が本文に書いたもの、または別の採取の出力を付け足したもの。付け足した出力は別に判定してください）` }] : [];
   const badAttr: ParseWarning[] = badSensitive.length ? [{ kind: 'invalid-attr', detail: `sensitive= の値を読めませんでした（${badSensitive.slice(0, 5).map(x => x.label).join(', ')}${badSensitive.length > 5 ? ' など' : ''}）。1（機密）か 0（機密でない）を指定してください` }] : [];
+  if (badTargetAttrs.length) badAttr.push({ kind: 'invalid-attr', detail: `#TARGET の指定を読めませんでした（${badTargetAttrs.slice(0, 5).join('、')}${badTargetAttrs.length > 5 ? ' など' : ''}）` });
   return { targets, warnings: [...dup, ...ignored, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets)] };
 }
 

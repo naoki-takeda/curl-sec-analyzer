@@ -930,3 +930,23 @@
 | T-06 | `url=`のない`Refresh: 0; https://evil.example/`を見逃し、転送しない`Refresh: 5`で合格にした | HTML Standard のとおりに転送先を読む。転送先のない Refresh・同じページへの Refresh は転送を試していないとする | `src/rules/transport.ts`、設計書 |
 | E-11① | `inline; filename="attachment.html"`を、値に attachment があるので attachment とみなした（①高の見逃し） | Content-Disposition は最初のトークン（種類）で見る | `src/rules/exposure.ts`、設計書 |
 | E-10① | http のページの相対の送信先（`/login`）のパスワードフォームを合格にし、「https・POST」と事実と違う証跡を出した | 送信先をページの URL を基準に読む | `src/rules/html.ts`、設計書 |
+
+### レビュー指摘への対応（第42回、第41回のレビューの重要度「低」の指摘）
+
+第41回で積み残した重要度「低」の指摘を直した。版を 0.4.55 にする。
+
+| 対象 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 生成スクリプト | ポート付きのホストで、http の採取を `http://host:8443/` に送り（400 で T-04 を合格にした）、部分一致の Origin を `https://host:8443.evil.net` にした。前からある `out.txt` などは `umask` が効かず、緩い権限のまま Cookie を書いた。証明書の SAN に改行と `notAfter=2099…` を入れて期限を偽装できた（x509 は SAN の名前を改行ごと出す） | http と Origin はポートを除く。最初に出力ファイルを消す。期限と SAN を別に出し、SAN は見出しと値の2行だけを取る | `src/commands.ts`、設計書 |
+| run.sh | `sh`（dash）では `$RANDOM` がなく、`set -u` で止まった。`~/.curlrc` を読み、時間の上限がなかった | 決まったパスにし、`curl -q`・時間の上限を付け、http はポートを除き、最初に `out.txt` を消す | `run.sh` |
+| T-11 | `#META at` のない採取で、サーバの過去の `Date` を証明書の期限の基準にし、期限の近い証明書を合格にした | `#META at` がなければ判定した時刻で見る | `src/rules/hostRules.ts`、設計書 |
+| HAR | 文字列でない値（`"httpVersion": 2`、オブジェクトの `entries`、配列の `url`、数値の `startedDateTime`）で、取り込みや CSV が例外で止まった | 取り込みで型をそろえる | `src/parser/har.ts` |
+| openssl | 失敗したハンドシェイクの `Cipher : 0000` を合意した暗号として T-10 の証跡に出した | `0000`・`(NONE)` は暗号として読まず、そのセッションの版も使わない | `src/parser/openssl.ts` |
+| #TARGET | 書き間違えた名前（`lable=`）、受け付けない形のラベル、知らない `kind` を黙って既定にした | 解析警告（invalid-attr）で知らせる。`kind=API` は受け付ける | `src/parser/input.ts`、設計書 |
+| Set-Cookie | 同じ属性が重なると、後ろの無効な値（`Max-Age=abc`、空の `Domain`）が前の正しい値を上書きした | ブラウザが無視する属性は読まない（RFC 6265 5.2） | `src/parser/setCookie.ts` |
+| 組織プロファイル | `sessionMaxAgeHours` の `true`・`"12"` を数に変えて受け付け、存在しない項目（`H-99`）の重要度・除外を黙って受け付けた。ポート付きの配信元が `trustedScriptOrigins` に当たらなかった | 数値だけ、チェックリストにある項目だけを受け付ける。ポートを書かない登録はどのポートにも当てる | `src/engine/profile.ts`、設計書 |
+| 例外ファイル | `until: false`・`0` を期限なし、`2026-13-45` を期限として受け付けた。件数に上限がなく、大きなファイルで画面が長く止まった | 実在する日付の文字列だけ。1000件まで。項目が違う例外ではパターンを照合しない | `src/engine/suppress.ts`、設計書 |
+| 推奨対応 | C-09 の推奨対応に入力の Cookie の名前がそのまま入った | 推奨対応も許可リスト（showText）を通す（決まった文言が変わらないことをテストで確かめる。`Azure` を語に足す） | `src/engine/run.ts`、`src/tokenShape.ts`、設計書 |
+| パーセントエンコード | `%XX` を1つずつ区切りとして残し、エンコードしたバイナリ・暗号文がそのまま出た | 4つ以上の並びは戻して見て、読めないものを伏せる（エンコードした日本語は残す） | `src/shownText.ts`、設計書 |
+| Markdown | 診断対象が返した裸の URL が、GitHub の自動リンクでレポートのリンクになった | ゼロ幅の空白で自動リンクにしない | `src/export/markdown.ts`、設計書 |
+| H-15・H-10 | 引用符のない `Clear-Site-Data`、Structured Field として読めない `Permissions-Policy`（ブラウザが無視する）を合格にした | ないのと同じ①にする | `src/rules/headers.ts`、設計書 |

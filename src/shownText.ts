@@ -50,7 +50,7 @@ export function allowedWord(w: string): boolean {
 }
 
 // 語として見ずにそのまま残す部分：伏せた印、CSP・SRI のハッシュ（長さちょうどのもの。mask.ts の HASH_SOURCE と同じ）、URL のホスト名（ユーザー情報のあと）
-// パーセントエンコードした文字（%2F。二重エンコードの %252F も）は区切りとして残す（%2Fv1 を1つの語 2Fv1 と読んで伏せた）
+// パーセントエンコードした文字（%2F。二重エンコードの %252F も）は区切りとして残す（%2Fv1 を1つの語 2Fv1 と読んで伏せた）。4つ以上の並びは escapeRun で見る
 // URL のホスト名は、ユーザー情報（user:****@）のあとか、ユーザー情報のない URL の「//」の直後だけ。「//」の直後をいつも残すと、ユーザー名に
 // 置いたトークン（https://<トークン>:x-oauth-basic@api…）をホスト名として残した。ユーザー情報には ? # / と空白・引用符・<> を含めない
 // （?ref=bob@<トークン> の @ のあとをホスト名とみなした）。伏せた印「…(N chars)」はユーザー情報の中にあってよい（もう一度かけても同じ結果にする）
@@ -59,7 +59,7 @@ const USERINFO = String.raw`(?:[^/\s?#@<>"']|…\(\d+ chars\)){0,256}@`;
 // 英小文字のドメイン名（スキームのない CSP のホスト ajax.aspnetcdn.com、Via の app01.prod.example.com）。決まった最上位ドメインのものだけ
 // （/reset/<トークン>.pdf のようなファイル名を残さない）
 const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost)(?![\w-])`;
-const KEEP = String.raw`…\(\d+ chars\)|%(?:25)*[0-9A-Fa-f]{2}|(?<![\w-])(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)(?![\w+/=-])|(?<=:\/\/${USERINFO})[A-Za-z0-9.-]+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|${DOMAIN}`;
+const KEEP = String.raw`…\(\d+ chars\)|(?<![\w-])(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)(?![\w+/=-])|(?<=:\/\/${USERINFO})[A-Za-z0-9.-]+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|${DOMAIN}`;
 // ↑ ユーザー情報のない URL のホスト名は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない）。
 // 区切り直すと、長いホスト名らしい並びのあとに @ がある入力（Location: https://a.a.a…@evil/）で、1文字ずつ短くするたびに @ まで読み直し、
 // 入力の長さの2乗の時間がかかった（64KB で4秒）
@@ -67,7 +67,10 @@ const KEEP = String.raw`…\(\d+ chars\)|%(?:25)*[0-9A-Fa-f]{2}|(?<![\w-])(?:sha
 // パーセントエンコードした + / =（%2B・%2F・%3D、二重エンコードを含む）も並びの区切りとする（エンコードした Base64 のトークンが、%XX で
 // 短いかけらに分かれて残った）。区切りは「- _ +」の並びか、エンコードした文字の並び
 const JOIN = String.raw`(?:[-_+]|%(?:25)*(?:2[BbFf]|3[Dd]))+`;
-const WORDS = new RegExp(`(${KEEP})|[A-Za-z0-9]+(?:${JOIN}[A-Za-z0-9]+)*`, 'g');
+// パーセントエンコードした文字の並び（%2F。二重エンコードの %252F も）。1つずつを区切りとして残すと、エンコードしたバイナリ・暗号文
+// （?d=%8F%1A%C3%77%E2%99…）がそのまま残ったので、並びとして見る（escapeRun）
+const ESCAPES = String.raw`(?:%(?:25)*[0-9A-Fa-f]{2})+`;
+const WORDS = new RegExp(`(${ESCAPES})|(${KEEP})|[A-Za-z0-9]+(?:${JOIN}[A-Za-z0-9]+)*`, 'g');
 const JOIN_SPLIT = new RegExp(`(${JOIN})`);
 /**
  * 語の並びの、残してよい部分。かけらを1つずつ見ると、- _ で区切った乱数のトークン（URL-safe の Base64・GitLab の glpat-…）の短いかけらが
@@ -93,7 +96,20 @@ function allowRun(run: string): string {
 }
 
 /** 残してよい形の語だけを残す（それ以外は「…(N chars)」） */
-export const allowText = (s: string): string => s.replace(WORDS, (w: string, keep: string | undefined) => (keep ? w : allowRun(w)));
+export const allowText = (s: string): string => s.replace(WORDS, (w: string, esc: string | undefined, keep: string | undefined) => (esc ? escapeRun(esc) : keep ? w : allowRun(w)));
+
+/**
+ * パーセントエンコードした文字の並び。3つまで（区切りの %2F・%3D、1文字の日本語）はそのまま残す。4つ以上は戻して見て、読める文字
+ * （日本語などの文字・数字・記号・空白。ASCII の語は残してよい形のもの）だけならそのまま、それ以外（UTF-8 として読めないバイト、制御文字、
+ * 残せない形の ASCII の語）は伏せる。エンコードした日本語のパス（/%E3%81%8A%E7%9F%A5%E3%82%89%E3%81%9B）は残す
+ */
+function escapeRun(run: string): string {
+  if ((run.match(/%/g) ?? []).length < 4) return run;
+  let d = run;
+  for (let i = 0; i < 3 && /%[0-9A-Fa-f]{2}/.test(d); i++) { try { d = decodeURIComponent(d); } catch { return `…(${run.length} chars)`; } }
+  if (!/^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]*$/u.test(d) || /\uFFFD/.test(d)) return `…(${run.length} chars)`;
+  return (d.match(/[A-Za-z0-9]+/g) ?? []).every(allowedWord) ? run : `…(${run.length} chars)`;
+}
 
 /** 画面・エクスポートに出す文字列（証跡・URL）：名前による伏せ方（maskText）のあとに、許可リストを通す */
 // もう一度かけても変わらないようにする（伏せた語「…(8 chars)」の直後の「//…@」をユーザー情報として伏せ直すなど、1回目の結果が2回目の手がかりを変える）。

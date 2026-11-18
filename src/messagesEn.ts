@@ -17,6 +17,7 @@ const EXACT: Record<string, string> = {
 const FIELD: Record<string, string> = { API: 'API', ログイン: 'Login', 認証後ページ: 'Page after login', ログアウト: 'Logout', 静的リソース: 'Static resource', WebSocket: 'WebSocket' };
 const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：ruleId が不正です$/, m => `Entry ${m[1]}: invalid ruleId`],
+  [/^例外は(\d+)件までです（(\d+)件のうち、(\d+)件目からは読みません）$/, m => `At most ${m[1]} exceptions are read (the file has ${m[2]}; entries from ${m[3]} on are ignored)`],
   [/^(\d+)件目：target がありません$/, m => `Entry ${m[1]}: target is missing`],
   [/^(\d+)件目：target が長すぎます（(\d+)文字まで）$/, m => `Entry ${m[1]}: target is too long (${m[2]} characters at most)`],
   [/^(\d+)件目：reason（理由）がありません$/, m => `Entry ${m[1]}: reason is missing`],

@@ -35,8 +35,9 @@ export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boo
 export const isHar = (text: string) => /^\s*\{[\s\S]{0,200}"log"\s*:/.test(text);
 
 /** HTTPのバージョン表記（h2、HTTP/2.0、http/1.1 など）を 1.1・2・3 にそろえる */
-export function normalizeVersion(v?: string): string {
-  const s = (v ?? '').toLowerCase();
+export function normalizeVersion(v?: unknown): string {
+  // 文字列でない値（"httpVersion": 2）は文字列にして読む（toLowerCase で例外になり、HAR 全体を読めなかった）
+  const s = (typeof v === 'string' ? v : v == null ? '' : String(v)).toLowerCase();
   if (/h3|http\/3/.test(s)) return '3';
   if (/h2|http\/2/.test(s)) return '2';
   if (/1\.0/.test(s)) return '1.0';
@@ -81,8 +82,15 @@ const normalizedUrl = (u: string) => { try { const x = new URL(u); x.hash = ''; 
 
 /** HAR の JSON を読み、チェーンにまとめる。request.postData はここで捨てる */
 export function importHar(text: string): HarImport {
-  const har = JSON.parse(text) as { log?: { entries?: HarEntry[] } };
-  const all = (har.log?.entries ?? []).filter(e => e?.request?.url && e.response && /^https?:/i.test(e.request.url));
+  const har = JSON.parse(text) as { log?: { entries?: unknown } } | null;
+  // 型の違う値は、例外で HAR 全体を読めなくしないよう、ここでそろえる（entries がオブジェクト、url が配列、startedDateTime が数値など）。
+  // url が配列だと /^https?:/ の確認を文字列にして通り、画面の showText で例外になって「読み込み中」のまま止まった
+  const raw = har?.log?.entries;
+  const all = (Array.isArray(raw) ? raw as HarEntry[] : []).filter(e => typeof e?.request?.url === 'string' && e.response && /^https?:/i.test(e.request.url));
+  for (const e of all) {
+    if (e.request.method !== undefined && typeof e.request.method !== 'string') e.request.method = String(e.request.method);
+    if (e.startedDateTime !== undefined && typeof e.startedDateTime !== 'string') e.startedDateTime = undefined;
+  }
   // status 0 は、ブロック・キャンセル・CORSの失敗などで応答がなかったエントリ。ヘッダがないので判定に使うと誤検知になる
   // ブラウザが内部で作った転送（HSTS・HTTPS-Upgrades の 307 Internal Redirect。Non-Authoritative-Reason ヘッダが付く）も、サーバの応答では
   // ないので除く（http のラベルで T-04・C-10 を、http で接続していないのに判定した）

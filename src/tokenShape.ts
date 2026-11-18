@@ -26,7 +26,7 @@ export function rareBigrams(x: string): number {
 
 // ---- 英字の語として読めるか。画面の許可リスト（shownText.ts）と突き合わせのキー（engine/targetKey.ts）で共有する ----
 /** 語として残す、英語の読み方の規則に当たらない名前（製品・プロトコル） */
-const KNOWN_WORDS = new Set(['xmlrpc', 'nginx', 'lighttpd', 'nodejs', 'nextjs', 'nuxtjs', 'webpack', 'fastly', 'varnish', 'wsgi', 'cgi', 'fcgi', 'grpc', 'hsts', 'csrf', 'xsrf', 'jwks', 'jsdelivr', 'cloudflare', 'akamai', 'csrftoken', 'xsrftoken', 'aspnetmvc', 'aspnet']);
+const KNOWN_WORDS = new Set(['xmlrpc', 'nginx', 'lighttpd', 'nodejs', 'nextjs', 'nuxtjs', 'webpack', 'fastly', 'varnish', 'wsgi', 'cgi', 'fcgi', 'grpc', 'hsts', 'csrf', 'xsrf', 'jwks', 'jsdelivr', 'cloudflare', 'akamai', 'csrftoken', 'xsrftoken', 'aspnetmvc', 'aspnet', 'azure']);
 /** キャメルケースの2文字の部分として残してよい語（By・Id・Of・My。乱数の Dg・Ng・Xk を残さない）。大文字だけの略語（JS・IO・DB）は別に認める */
 const SHORT_WORDS = new Set('of by id to in on at is my no or up if as be do go it me us we ok'.split(' '));
 /**

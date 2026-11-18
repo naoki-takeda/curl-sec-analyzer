@@ -27,6 +27,9 @@ export function validate(o: CommandOptions): string[] {
 
 export function generateScript(o: CommandOptions): string {
   const H = `https://${o.host}`;
+  // ポートを除いたホスト名。http の採取（C5）は 80 番に送り（https の 8443 番に http で送ると 400 になり、T-04 を「HTTP を断る」と合格にした）、
+  // 部分一致の Origin（C6）は origin として正しい形にする（https://app.example.com:8443.evil.net は origin ではない）
+  const hostname = o.host.replace(/:\d+$/, '');
   const L: string[] = [];
   // 各ターゲットの前に #TARGET と #META（実施日時と推奨コマンドのID）を出す。CSV（第8章の様式）の「実施日時」「実施コマンド」に使う
   // どのマーカー行にも、実行ごとの乱数の印（run=$RUN）を付ける。ツールは最初の #TARGET の印と同じマーカー行だけを読む（parser/input.ts。
@@ -40,7 +43,8 @@ export function generateScript(o: CommandOptions): string {
     '#   ログインには必ずテスト用アカウントを使い、login.txt（ログインのPOST本文）を用意して chmod 600 にする',
     '#   Gitリポジトリの中で実行する場合、出力ファイルは .gitignore で除外されていることを確認する',
     '# 実行後に：rm -f out.txt login.txt jar.txt old.txt s1.txt s2.txt s3.txt（login.txt にはパスワードが入っている）',
-    'set -u', 'umask 077', `H=${q(H)}`,
+    // umask は新しく作るファイルにだけ効く。前からある out.txt・old.txt・jar.txt（手で実行した curl のもの）は緩い権限のまま Cookie を書くので、先に消す
+    'set -u', 'umask 077', 'rm -f out.txt old.txt jar.txt s1.txt s2.txt s3.txt', `H=${q(H)}`,
     '# 実行ごとの印（応答の本文に書かれたマーカーと見分けるため）',
     "RUN=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
     '# 本文を取るコマンドのヘッダと本文の一時ファイル（ヘッダと本文を分けて出す。#BODY の印のあとが本文）', 'hdr=$(mktemp); body=$(mktemp)',
@@ -58,8 +62,8 @@ export function generateScript(o: CommandOptions): string {
   L.push('for i in 1 2; do', `  echo "#TARGET url=$H/ label=csp-sample-$i run=$RUN"; ${meta('C24')}; curl -sS -D - -o /dev/null "$H/"   # C24`, 'done');
 
   L.push('', '# ---- 第4章：HTTP→HTTPS（C5・C15） ----');
-  t('http', `http://${o.host}/`);
-  L.push(`curl -sS -L -D - -o /dev/null -w '\\n#META response_code=%{response_code} num_redirects=%{num_redirects} url_effective=%{url_effective} http_version=%{http_version} run='"$RUN"'\\n' ${q(`http://${o.host}/`)}`);
+  t('http', `http://${hostname}/`);
+  L.push(`curl -sS -L -D - -o /dev/null -w '\\n#META response_code=%{response_code} num_redirects=%{num_redirects} url_effective=%{url_effective} http_version=%{http_version} run='"$RUN"'\\n' ${q(`http://${hostname}/`)}`);
   if (o.apex) {
     t('apex', `https://${o.apex}/`); L.push(`curl -sS -D - -o /dev/null ${q(`https://${o.apex}/`)}`);
   }
@@ -73,7 +77,7 @@ export function generateScript(o: CommandOptions): string {
   t('unauth-api', `${H}${o.apiPath}`); L.push(`curl -sS -i "$H"${q(o.apiPath)}   # A-01：Cookie・Authorization を付けない`);
 
   L.push('', '# ---- 第3章：CORS（C6・C7・C8） ----');
-  for (const [label, origin] of [['cors-reflect', 'https://evil.example'], ['cors-null', 'null'], ['cors-partial', `https://${o.host}.evil.net`]]) {
+  for (const [label, origin] of [['cors-reflect', 'https://evil.example'], ['cors-null', 'null'], ['cors-partial', `https://${hostname}.evil.net`]]) {
     t(label, `${H}${o.apiPath}`, ' sensitive=1');
     L.push(`curl -sS -v -o /dev/null -b jar.txt -H ${q(`Origin: ${origin}`)} "$H"${q(o.apiPath)} 2>&1`);
   }
@@ -112,13 +116,16 @@ export function generateScript(o: CommandOptions): string {
 
   L.push('', '# ---- 第4章：TLS（C11・C12・C23） ----');
   t('tls', `${H}/`);
-  const hp = o.host.includes(':') ? o.host : `${o.host}:443`, sni = o.host.replace(/:\d+$/, '');
+  const hp = o.host.includes(':') ? o.host : `${o.host}:443`, sni = hostname;
   // 診断対象のサーバは、ハンドシェイクのあとに任意のデータを送れ、s_client はそれを標準出力に出す（「unsupported protocol」「DNS:…」
   // 「notAfter=…」「New, TLSv1, Cipher is …」を書いて、T-09・T-10・T-11 の判定を変えられた）。サーバのデータは、ハンドシェイクの要約の
   // 最初の「Verify return code:」の行より後にしか出ないので、そこで切る。エラーは手元の openssl が標準エラーに出すものだけを見る
   const cut = `sed '/^ *Verify return code:/q'`;
   L.push(`openssl s_client -connect ${q(hp)} -servername ${q(sni)} -showcerts </dev/null 2>&1 | ${cut}`,
-    `openssl s_client -connect ${q(hp)} -servername ${q(sni)} </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName`,
+    // SAN は x509 が名前をそのまま（改行を含めて）出すので、見出しと値の2行だけを取る。証明書の SAN に改行と「notAfter=2099…」を入れて、
+    // 期限や SAN を偽装できた（パーサは後ろの notAfter・SAN を使う）。証明書を受け取れなかったときは x509 を実行しない
+    `cert=$(openssl s_client -connect ${q(hp)} -servername ${q(sni)} </dev/null 2>/dev/null | openssl x509)`,
+    `if [ -n "$cert" ]; then printf '%s\\n' "$cert" | openssl x509 -noout -subject -issuer -dates; printf '%s\\n' "$cert" | openssl x509 -noout -ext subjectAltName | head -n 2; fi`,
     'tout=$(mktemp); terr=$(mktemp)',
     'for v in tls1 tls1_1 tls1_2 tls1_3; do',
     `  openssl s_client -connect ${q(hp)} -servername ${q(sni)} -$v -cipher 'DEFAULT@SECLEVEL=0' </dev/null >"$tout" 2>"$terr"; rc=$?`,

@@ -14,7 +14,13 @@ export function parseSetCookie(raw: string): SetCookie {
   for (const a of rest) {
     const j = a.indexOf('=');
     const k = (j >= 0 ? a.slice(0, j) : a).trim().toLowerCase();
-    if (k) attrs.set(k, j >= 0 ? a.slice(j + 1).trim() : true);
+    const v = j >= 0 ? a.slice(j + 1).trim() : true;
+    // ブラウザが無視する属性は、前の正しい値を上書きしない（RFC 6265 5.2.1〜5.2.3：数字でない Max-Age、日付として読めない Expires、
+    // 空の Domain）。上書きすると Max-Age=0; Max-Age=abc の削除を生きている Cookie とみなし、Domain=a.com; Domain= を Domain なしとみなした
+    if (k === 'max-age' && (typeof v !== 'string' || !/^-?\d+$/.test(v))) continue;
+    if (k === 'expires' && (typeof v !== 'string' || Number.isNaN(cookieDate(v)))) continue;
+    if (k === 'domain' && (typeof v !== 'string' || !v)) continue;
+    if (k) attrs.set(k, v);
   }
   return { name, value, attrs, raw };
 }

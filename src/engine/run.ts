@@ -130,7 +130,9 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
       if (rule.appliesTo === 'html' && rule.id !== 'E-09' && isRedirectWithLocation(ctx.final)) continue;
       if (rule.appliesTo === 'api' && ctx.responseKind !== 'api') continue;
       for (const f of safeRun(rule, () => rule.run?.(ctx), t.label).filter(x => allow.allowsFinding(x))) {   // ②⑤
-        const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: showText(f.evidence) };
+        // 推奨対応も許可リストを通す（C-09 の推奨対応に、入力の Cookie の名前がそのまま入り、証跡では伏せた名前が画面・エクスポートに出た）。
+        // 決まった文言は変わらないことを tests/review26.test.ts で確かめる
+        const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: showText(f.evidence), recommendation: showText(f.recommendation) };
         if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') g.severity = 'info';   // ⑥
         findings.push(g);
       }
@@ -139,6 +141,6 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   const x = crossContext(targets, findings);
   for (const rule of [...hostRules, ...crossRules])           // ③④
     // 横断・ホスト単位のルールの na は、その条件だけが入力不足（ほかの条件はターゲット単位で判定しているかもしれない）。カバレッジで示すため印を付ける
-    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: showText(f.evidence), ...(f.status === 'na' ? { partial: true } : {}) });
+    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: showText(f.evidence), recommendation: showText(f.recommendation), ...(f.status === 'na' ? { partial: true } : {}) });
   return findings;
 }

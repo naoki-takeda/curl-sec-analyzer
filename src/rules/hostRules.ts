@@ -172,8 +172,10 @@ export const certificate: Rule = { id: 'T-11', title: '証明書', appliesTo: 'a
       if (!cap) continue;
       const { t: src, info } = cap;
       if (!hasCertificate(info)) { out.push(hf(certificate, host, 'na', 'info', 'na', '証明書の情報がない（ハンドシェイクに失敗した可能性）', 'C11 の出力にエラーがないか確認して採取し直す')); continue; }
-      // 期限は採取した時刻（#META at）を基準にする。古い出力を読み直しても、採取時の状態で判定する
-      const now = capturedAt(src);
+      // 期限は採取した時刻（#META at）を基準にする。古い出力を読み直しても、採取時の状態で判定する。#META at がなければ判定した時刻
+      // （応答の Date は使わない。Date は診断対象のサーバが書くので、過去の Date（CDN のキャッシュの古い応答を含む）で、期限の近い・切れた
+      // 証明書を合格にできた。Cookie の期限（C-05）とは逆に、過去の基準が甘い向きになる）
+      const now = src.meta.at ? capturedAt(src) : Date.now();
       const asOf = src.meta.at ? `、${src.meta.at} 時点` : '';
       const before = out.length;
       const hostname = host.replace(/:\d+$/, '');

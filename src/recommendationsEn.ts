@@ -1,6 +1,6 @@
 // recommendationsEn.ts：推奨対応の英訳（v0.4：英語UIで推奨対応だけを英訳する）
 // キーはルールが返す日本語の文言そのもの。新しい文言を追加したら、ここにも追加する（tests/i18n.test.ts が漏れを検出する）
-const EXACT: Record<string, string> = {
+export const EXACT: Record<string, string> = {
   // 第1章
   'Strict-Transport-Security: max-age=63072000; includeSubDomains': 'Strict-Transport-Security: max-age=63072000; includeSubDomains',
   "Content-Security-Policy: frame-ancestors 'none'（旧ブラウザ向けに X-Frame-Options: DENY も併用）": "Content-Security-Policy: frame-ancestors 'none' (add X-Frame-Options: DENY for older browsers)",

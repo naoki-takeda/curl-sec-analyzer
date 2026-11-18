@@ -19,6 +19,14 @@ export function wildcardMatch(pattern: string, text: string): boolean {
   return p === pattern.length;
 }
 const MAX_PATTERN = 500;
+/** 読み込む例外の数の上限。例外の数×指摘の数だけ照合するので、多すぎるファイルで画面が長く止まった（2,000件で約2秒、判定のたびに） */
+export const MAX_SUPPRESSIONS = 1000;
+/** 実在する日付（YYYY-MM-DD）か。2026-13-45 を受け付けると、文字列の比較で期限が意図とずれた */
+const realDate = (s: string) => {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/); if (!m) return false;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+};
 const LABEL_URL = /^\S+ https?:\/\//;
 
 /** 例外の対象が今の形式のキーか（例外ごとに1回だけ調べる。指摘×例外の組ごとに urlKey をかけると遅い） */
@@ -38,6 +46,7 @@ const isKeyTarget = (target: string): boolean => {
  */
 export function matches(s: Suppression, f: Finding, currentKeys?: ReadonlySet<string>): boolean {
   const ruleOk = s.ruleId === f.item || s.ruleId === f.ruleId;
+  if (!ruleOk) return false;   // 項目が違えば対象（パターンの照合）を見ない
   // URL のパターンは、画面に出す（マスクした）URL のほかに、突き合わせのキーの URL（マスクとは別に作る。マスクの一覧を変えても変わらない）とも照合する。
   // マスクした URL とだけ比べると、マスクの一覧を変えるたびに、伏せ方の変わった URL のパターンが黙って外れた
   // キーの最後の絶対 URL（「 #2」を除く）。ラベルの中の「/admin」のような語は URL にしない
@@ -52,7 +61,7 @@ export function matches(s: Suppression, f: Finding, currentKeys?: ReadonlySet<st
     // ときだけ比べる（組ごとに URL を解析し直すと、例外の照合が33倍遅くなった）
     || (!!f.keyUrl && LABEL_URL.test(s.target) && s.target === `${baseLabel(f.target)} ${f.keyUrl}`)
     || s.target === '*';   // HAR は「HAR メソッド URL」で照合
-  return ruleOk && targetOk;
+  return targetOk;
 }
 
 /** 手元の日付（YYYY-MM-DD）。toISOString は UTC なので、日本では 0〜9時に前日の日付になる */
@@ -79,14 +88,16 @@ export function parseSuppressions(text: string): { list: Suppression[]; errors: 
   try { data = JSON.parse(text); } catch { return { list, errors: ['JSONとして読めません'] }; }
   const arr = Array.isArray(data) ? data : (data as { suppressions?: unknown })?.suppressions;
   if (!Array.isArray(arr)) return { list, errors: ['配列、または suppressions を持つオブジェクトが必要です'] };
-  arr.forEach((x, i) => {
+  if (arr.length > MAX_SUPPRESSIONS) errors.push(`例外は${MAX_SUPPRESSIONS}件までです（${arr.length}件のうち、${MAX_SUPPRESSIONS + 1}件目からは読みません）`);
+  arr.slice(0, MAX_SUPPRESSIONS).forEach((x, i) => {
     const s = (x && typeof x === 'object' ? x : {}) as Partial<Suppression>;   // null や数値の要素でも落ちない（fast-check で検出）
     if (typeof s.ruleId !== 'string' || !/^[A-Z]-\d\d(\.\d+)?$/.test(s.ruleId)) errors.push(`${i + 1}件目：ruleId が不正です`);
     else if (typeof s.target !== 'string' || !s.target) errors.push(`${i + 1}件目：target がありません`);
     else if (s.target.length > MAX_PATTERN) errors.push(`${i + 1}件目：target が長すぎます（${MAX_PATTERN}文字まで）`);
     else if (typeof s.reason !== 'string' || !s.reason.trim()) errors.push(`${i + 1}件目：reason（理由）がありません`);
     else if (s.approver !== undefined && typeof s.approver !== 'string') errors.push(`${i + 1}件目：approver は文字列で書きます`);
-    else if (s.until && !/^\d{4}-\d{2}-\d{2}$/.test(s.until)) errors.push(`${i + 1}件目：until は YYYY-MM-DD で書きます`);
+    // 期限なしは、書かないか空の文字列（null も）。false・0 のような値を期限なしとして受け付けると、期限のない例外になった
+    else if (s.until !== undefined && s.until !== null && s.until !== '' && (typeof s.until !== 'string' || !realDate(s.until))) errors.push(`${i + 1}件目：until は YYYY-MM-DD で書きます`);
     else list.push({ ruleId: s.ruleId, target: s.target, reason: s.reason, approver: s.approver ?? '', until: s.until ?? '' });
   });
   return { list, errors };

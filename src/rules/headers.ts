@@ -295,14 +295,26 @@ export const referrerPolicy: Rule = { id: 'H-09', title: 'Referrer-Policy', appl
     return [mk(referrerPolicy, ctx, 'ok', 'info', 'pass', raw, '')];
   } };
 
+/**
+ * Permissions-Policy の値が Structured Field の辞書（RFC 8941）として読めるか。メンバーは「機能=値」（値は ()・(self "https://…")・*・self）
+ * か、値のない機能（?1 と同じ）で、カンマで区切る。パラメータ（;report-to=…）も認める。機能の名前は小文字（Camera= は読めない）
+ */
+const SF_ITEM = String.raw`(?:[A-Za-z*][\w:/!#$%&'*+.^|~-]*|"(?:[^"\\]|\\.)*"|\?[01]|-?\d+(?:\.\d+)?)`;
+const SF_PARAMS = String.raw`(?:\s*;\s*[a-z*][a-z0-9_.*-]*(?:=${SF_ITEM})?)*`;
+const PP_MEMBER = new RegExp(String.raw`^[a-z*][a-z0-9_.*-]*(?:=(?:\(\s*(?:${SF_ITEM}${SF_PARAMS}(?:\s+${SF_ITEM}${SF_PARAMS})*)?\s*\)|${SF_ITEM}))?${SF_PARAMS}$`);
+export const validPermissionsPolicy = (v: string): boolean => v.split(',').every(m => PP_MEMBER.test(m.trim()));
+
 export const permissionsPolicy: Rule = { id: 'H-10', title: 'Permissions-Policy', appliesTo: 'html', scope: 'target',
   basis: ['MDN', 'OWASP Secure Headers'],
   run(ctx) {
     if (!ctx.final) return [mk(permissionsPolicy, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const pp = header(ctx, 'permissions-policy')[0];
-    if (pp) return [mk(permissionsPolicy, ctx, 'ok', 'info', 'pass', pp, '')];
-    const fp = header(ctx, 'feature-policy')[0];
+    const pps = header(ctx, 'permissions-policy');
+    const pp = pps.join(', ');
     const rec = 'Permissions-Policy: camera=(), microphone=(), geolocation=()';
+    if (pps.length && validPermissionsPolicy(pp)) return [mk(permissionsPolicy, ctx, 'ok', 'info', 'pass', pp, '')];
+    // 構文の誤ったもの（Feature-Policy の書き方の camera 'none'）は、ブラウザがヘッダ全体を捨てるので、ないのと同じ
+    if (pps.length) return [mk(permissionsPolicy, ctx, 1, 'info', 'fail', `Permissions-Policy: ${pp}（構文の誤り。ブラウザはヘッダ全体を無視する）`, rec)];
+    const fp = header(ctx, 'feature-policy')[0];
     return fp ? [mk(permissionsPolicy, ctx, 2, 'low', 'fail', `Feature-Policy のみ: ${fp}`, rec)]
               : [mk(permissionsPolicy, ctx, 1, 'info', 'fail', '(ヘッダなし)', rec)];
   } };
@@ -372,9 +384,13 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
     if (baseLabel(ctx.target.label) !== 'logout') return [];          // ログアウト応答だけ
     if (!ctx.final) return [mk(clearSiteData, ctx, 'na', 'info', 'na', '応答がない', '')];
     if (logoutFailed(ctx.target)) return [mk(clearSiteData, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
-    const csd = siteResponses(ctx.target).flatMap(r => r.headers.get('clear-site-data') ?? [])[0];
-    return csd ? [mk(clearSiteData, ctx, 'ok', 'info', 'pass', csd, '')]
-               : [mk(clearSiteData, ctx, 1, 'info', 'fail', '(ヘッダなし)', 'Clear-Site-Data: "cache", "cookies", "storage"')];
+    const csd = siteResponses(ctx.target).flatMap(r => r.headers.get('clear-site-data') ?? []).join(', ');
+    const rec = 'Clear-Site-Data: "cache", "cookies", "storage"';
+    if (!csd) return [mk(clearSiteData, ctx, 1, 'info', 'fail', '(ヘッダなし)', rec)];
+    // 値は引用符で囲んだ種類（"cookies"）。引用符のない Clear-Site-Data: cookies, storage はブラウザが無視するので、ないのと同じ（C-12 と同じ見方）
+    return /"(?:cache|cookies|storage|executionContexts|clientHints|prefetchCache|prerenderCache|\*)"/i.test(csd)
+      ? [mk(clearSiteData, ctx, 'ok', 'info', 'pass', csd, '')]
+      : [mk(clearSiteData, ctx, 1, 'info', 'fail', `Clear-Site-Data: ${csd}（引用符で囲んだ種類がなく、ブラウザは無視する）`, rec)];
   } };
 
 const PRODUCT_HEADERS = ['server', 'x-powered-by', 'x-aspnet-version', 'x-aspnetmvc-version', 'x-generator'];

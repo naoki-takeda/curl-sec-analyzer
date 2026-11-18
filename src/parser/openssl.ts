@@ -48,6 +48,7 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
   let pem: string[] | undefined, firstPem: string | undefined, pemSeen = false;
   let cur = -1;                            // 直前の「N s:」の証明書の番号（a: の行をその証明書に対応させる）
   let afterSummary = false;                // s_client のハンドシェイクの要約（最初の Verify return code:）のあと
+  let noCipher = false;                    // ハンドシェイクに失敗したセッション（Cipher : 0000・Cipher is (NONE)）
   for (const raw of lines) {
     const l = raw.trim();
     if (pem) {
@@ -61,7 +62,9 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
     let m: RegExpMatchArray | null;
     if ((m = l.match(/^Protocol\s*:\s*(\S+)/))) info.protocol ??= m[1];
     else if ((m = l.match(/^New, (TLSv[\d.]+|SSLv3), Cipher is (\S+)/))) { info.protocol ??= m[1]; info.cipher ??= m[2]; }
-    else if ((m = l.match(/^Cipher\s*:\s*(\S+)/))) info.cipher ??= m[1];
+    // 失敗したハンドシェイクの「Cipher : 0000」「Cipher : (NONE)」は暗号ではない（0000 を合意した暗号として T-10 の証跡に出した）
+    else if ((m = l.match(/^Cipher\s*:\s*(\S+)/))) { if (/^(?:0+|\(NONE\))$/i.test(m[1])) noCipher = true; else info.cipher ??= m[1]; }
+    else if (/^New, \(NONE\), Cipher is \(NONE\)/.test(l)) noCipher = true;
     else if ((m = l.match(/^Verify return code:\s*(\d+)\s*\((.*)\)/))) { info.verifyCode ??= Number(m[1]); info.verifyText ??= m[2]; afterSummary = true; }
     // notAfter・SAN は、後ろのもの（x509 の出力。s_client のあとに実行する）を使う。s_client のあとにサーバが送ったデータ（手で採取した、切っていない
     // 出力）は x509 の出力より前に出るので、後ろのものが本物になる
@@ -87,6 +90,8 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
     }
     else if ((m = l.match(/^Server public key is (\d+) bit/))) info.keyBits ??= Number(m[1]);
   }
+  // 暗号を合意しなかったセッションの「Protocol : TLSv1.2」は、試みた版で、合意した版ではない
+  if (noCipher && !info.cipher) info.protocol = undefined;
   // x509 -ext subjectAltName の出力に SAN の行があれば、PEM によらず SAN はある
   info.sanExtension = sanLine || info.sans.length ? true : firstPem ? pemHasSan(firstPem) : undefined;
   return info;

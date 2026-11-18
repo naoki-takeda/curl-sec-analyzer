@@ -1,9 +1,13 @@
 // engine/profile.ts：組織プロファイル（v0.4）
 import type { Finding, Profile, Severity } from '../model';
 import { sessionConfig } from '../parser/setCookie';
+import ITEMS from './items.json';
 
 const SEV: Severity[] = ['high', 'medium', 'low', 'info'];
 const ID = /^[HCRTEA]-\d\d(\.\d+)?$/;
+/** チェックリストにある項目か（H-99 のような存在しない項目を、黙って受け付けない） */
+const ITEM_IDS = new Set((ITEMS as { id: string }[]).map(i => i.id));
+const knownItem = (id: string) => ID.test(id) && ITEM_IDS.has(id.replace(/\.\d+$/, ''));
 const PROFILE_KEYS = ['name', 'severity', 'exclude', 'sessionCookieNames', 'sessionMaxAgeHours', 'trustedScriptOrigins'];
 // 配列にする項目が配列でない（"exclude": "T-12"）なら、黙って空にせずエラーにする（既定の設定のまま判定したことに気づけなかった）
 const notArray = (v: unknown) => v !== undefined && !Array.isArray(v);
@@ -19,11 +23,11 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   const sevOk = d.severity === undefined || (!!d.severity && typeof d.severity === 'object' && !Array.isArray(d.severity));
   if (!sevOk) errors.push('severity：項目ID（例：H-10）と重要度の組のオブジェクトにしてください');
   for (const [k, v] of Object.entries(sevOk ? (d.severity as Record<string, unknown> | undefined) ?? {} : {})) {
-    if (!ID.test(k)) errors.push(`severity：「${k}」は項目IDではありません`);
+    if (!knownItem(k)) errors.push(`severity：「${k.slice(0, 40)}」は項目IDではありません`);
     else if (!SEV.includes(v as Severity)) errors.push(`severity：「${k}」の重要度は high・medium・low・info のいずれか`);
     else severity[k] = v as Severity;
   }
-  const exclude = Array.isArray(d.exclude) ? (d.exclude as unknown[]).filter((x): x is string => typeof x === 'string' && /^[HCRTEA]-\d\d$/.test(x)) : [];
+  const exclude = Array.isArray(d.exclude) ? (d.exclude as unknown[]).filter((x): x is string => typeof x === 'string' && /^[HCRTEA]-\d\d$/.test(x) && knownItem(x)) : [];
   if (notArray(d.exclude) || (Array.isArray(d.exclude) && exclude.length !== d.exclude.length)) errors.push('exclude：項目ID（例：H-17）の配列にしてください');
   const names = Array.isArray(d.sessionCookieNames) ? (d.sessionCookieNames as unknown[]).filter((x): x is string => typeof x === 'string' && /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(x)) : [];
   const ORIGIN = /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d+)?$/i;
@@ -31,7 +35,8 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   const origins = rawOrigins.filter((x): x is string => typeof x === 'string' && ORIGIN.test(x));
   if (notArray(d.trustedScriptOrigins) || origins.length !== rawOrigins.length) errors.push('trustedScriptOrigins：https://cdn.example.com や *.example.com の形の配列にしてください');
   if (notArray(d.sessionCookieNames) || (Array.isArray(d.sessionCookieNames) && names.length !== d.sessionCookieNames.length)) errors.push('sessionCookieNames：Cookie名（英数字と記号）の配列にしてください');
-  const hours = d.sessionMaxAgeHours === undefined ? 24 : Number(d.sessionMaxAgeHours);
+  // 数値だけを受け付ける（Number() で変換すると true が1時間、"12"・[12] が12時間になり、書き誤りに気づけなかった）
+  const hours = d.sessionMaxAgeHours === undefined ? 24 : typeof d.sessionMaxAgeHours === 'number' ? d.sessionMaxAgeHours : NaN;
   const hoursOk = hours > 0 && hours <= 24 * 400;
   if (!hoursOk) errors.push('sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）');
   // エラーにした値は使わない（既定値に戻す）
@@ -71,13 +76,19 @@ export const profileTemplate = (): string => JSON.stringify({
   trustedScriptOrigins: ['https://assets.example.com'],
 }, null, 2);
 
-/** 配信元が自社のものとして登録されているか（https://cdn.example.com・cdn.example.com・*.example.com） */
+/**
+ * 配信元が自社のものとして登録されているか（https://cdn.example.com・cdn.example.com・*.example.com、ポート付きの cdn.example.com:8443）。
+ * ポートを書かない登録は、そのホストのどのポートにも当てはまる。書いた登録は、そのポートだけ（既定のポート :443・:80 は、書かないものと同じ。
+ * URL の host は既定のポートを持たないので、https://cdn.example.com:443 の登録がどれにも当たらなかった。*.example.com は :8443 の配信元に当たらなかった）
+ */
 export function isTrustedOrigin(url: URL, list: string[] = []): boolean {
+  const urlPort = url.port || (url.protocol === 'http:' ? '80' : '443');
   return list.some(e => {
-    const m = e.match(/^(?:(https?):\/\/)?(.+)$/i)!;
+    const m = e.match(/^(?:(https?):\/\/)?(.+?)(?::(\d+))?$/i)!;
     if (m[1] && `${m[1].toLowerCase()}:` !== url.protocol) return false;
-    const host = m[2].toLowerCase();
-    return host.startsWith('*.') ? url.host.endsWith(host.slice(1)) : url.host === host;
+    if (m[3] !== undefined && String(Number(m[3])) !== urlPort) return false;
+    const host = m[2].toLowerCase(), h = url.hostname.toLowerCase();
+    return host.startsWith('*.') ? h.endsWith(host.slice(1)) : h === host;
   });
 }
 
