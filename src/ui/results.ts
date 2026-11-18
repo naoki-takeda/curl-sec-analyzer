@@ -5,7 +5,7 @@ import { coverageRate } from '../engine/coverage';
 import { localDate } from '../engine/suppress';
 import { labelRow, RESERVED_HINTS } from '../engine/labels';
 import { type DiffRow, diffSummary, profileDiffers } from '../engine/diff';
-import { SEVERITIES, circled, countBySeverity, overall } from '../engine/summarize';
+import { SEVERITIES, circled, countBySeverity, mergeNa, overall } from '../engine/summarize';
 import { RULESET_VERSION } from '../rules/ruleset';
 import { toMarkdown } from '../export/markdown';
 import { suppressionsJson, toJson } from '../export/json';
@@ -135,11 +135,11 @@ export const byImportance = (a: Finding, b: Finding) => STATUS_ORDER.indexOf(a.s
   || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.ruleId.localeCompare(b.ruleId);
 export function findingsTable(fs: Finding[], label: string) {
   const T = tr();
-  const shown = fs.filter(f => state.view.showAll || (f.status === 'fail' && (state.view.showInfo || f.severity !== 'info'))).sort(byImportance);
+  const shown = mergeNa(fs.filter(f => state.view.showAll || (f.status === 'fail' && (state.view.showInfo || f.severity !== 'info'))).sort(byImportance));
   if (!shown.length) return el('p', 'mt-1 text-sm text-muted', T.nothingToShow);
   return table(label, [T.cols.severity, T.cols.item, T.cols.status, T.cols.evidence, T.cols.recommendation, ''], shown.map(x =>
     el('tr', '', x.status === 'fail' ? sevCell(x.severity, x.originalSeverity) : td('text-muted', '—'),
-      td('whitespace-nowrap num', `${x.item}${circled(x.condition)}`),
+      td('whitespace-nowrap num', x.items ? x.items.join(getLang() === 'en' ? ', ' : '・') : `${x.item}${circled(x.condition)}`),
       td(`whitespace-nowrap ${x.status === 'pass' ? 'text-ok' : x.status === 'fail' ? '' : 'text-muted'}`, statusLabel(x.status)),
       td('font-mono text-[12px] break-all', x.evidence || '—'),
       td('', x.status === 'suppressed' ? T.suppressedNote(x.suppressedBy!.reason, x.suppressedBy!.approver, x.suppressedBy!.until) : rec(x.recommendation) || '—'),

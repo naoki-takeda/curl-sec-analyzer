@@ -4,6 +4,7 @@ import { clip, probePattern } from '../mask';
 import { NO_BODY_REC, PROBE_UNREACHED_REC, bodyTruncated, header, isStaticResource, mk } from './util';
 import { ownChain } from '../parser/target';
 import { allowedItems } from '../engine/labels';
+import { noHtmlBody } from './html';
 
 const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : undefined);
 
@@ -99,7 +100,8 @@ export const dirListing: Rule = { id: 'E-02', title: 'ディレクトリリス�
     // オブジェクトストレージの一覧（S3・GCS の <ListBucketResult>、Azure Blob の <EnumerationResults>）も一覧表示（XML の応答）
     const bucket = b && /^\s*(?:<\?xml[^>]*>\s*)?<(?:ListBucketResult|EnumerationResults)\b/.test(b) ? b.match(/<(?:ListBucketResult|EnumerationResults)\b/) : null;
     if (bucket) return [mk(dirListing, ctx, 1, 'medium', 'fail', `${bucket[0].slice(1)}（オブジェクトストレージの一覧）`, 'バケット・コンテナの一覧の公開を無効にする（S3 のブロックパブリックアクセス、Azure のコンテナのアクセスレベルを private に）')];
-    if (!b || ctx.responseKind !== 'html') return [];
+    if (ctx.responseKind !== 'html') return [];
+    if (!b) return noHtmlBody(dirListing, ctx);
     // nginx・Apache の「Index of /」、Python の http.server、IIS の「[To Parent Directory]」、Tomcat の「Directory Listing For [/…]」、
     // Jetty の「<title>Directory: /…」、Express の serve-index の「listing directory /…」
     const m = b.match(/<title>\s*Index of \/[^<]*<\/title>|<h1>\s*Index of \/|Directory listing for \/|\[To Parent Directory\]|Directory Listing For \[?\/|<title>\s*Directory: \/|<title>\s*listing directory \//i);

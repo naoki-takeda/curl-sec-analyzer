@@ -70,6 +70,12 @@ mypage | C-06.1 | info | fail | sessionid=AbCd…(29 chars); Path=/; Max-Age=360
 mypage | C-08.ok | info | pass | sessionid
 mypage | C-11.ok | info | pass | sessionid
 mypage | C-13.ok | info | pass | 共有キャッシュの指定なし
+mypage | E-02.na | info | na | 本文を採取していない
+mypage | E-07.na | info | na | 本文を採取していない
+mypage | E-08.na | info | na | 本文を採取していない
+mypage | E-09.na | info | na | 本文を採取していない
+mypage | E-10.na | info | na | 本文を採取していない
+mypage | E-12.na | info | na | 本文を採取していない
 mypage | H-01.1 | high | fail | (ヘッダなし)
 mypage | H-02.na | info | na | HSTSがない（H-01で判定）
 mypage | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
@@ -138,7 +144,7 @@ www.example.com | T-10.3 | medium | fail | TLS 1.2で接続できたCBC・静的
 ## coverage
 H-01 | evaluated | fails=4
 H-02 | missing-input | fails=0 | HSTSがない（H-01で判定） / max-age=63072000, includeSubDomains, preload（HSTSの構文の誤り。H-01③で判定）
-H-03 | evaluated | fails=2
+H-03 | evaluated | fails=2 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=3
@@ -147,7 +153,7 @@ H-08 | evaluated | fails=4
 H-09 | evaluated | fails=3
 H-10 | evaluated | fails=3
 H-11 | evaluated | fails=4
-H-12 | evaluated | fails=2
+H-12 | evaluated | fails=2 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=3
 H-15 | missing-input | fails=0 | 必要なラベル: logout
@@ -168,12 +174,12 @@ C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
 C-13 | evaluated | fails=0
 C-14 | manual | fails=0
 C-15 | manual | fails=0
-R-01 | evaluated | fails=0
-R-02 | evaluated | fails=1
+R-01 | evaluated | fails=0 | 一部のターゲット（2件）は入力不足 / C6 のとおり許可外の Origin（https://evil.example）で採取する / 送信したOriginが分からない。-v 付きで再取得する
+R-02 | evaluated | fails=1 | 一部のターゲット（2件）は入力不足 / C7 のとおり Origin: null を送って採取する
 R-03 | evaluated | fails=1
 R-04 | evaluated | fails=0
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
-R-06 | evaluated | fails=2
+R-06 | evaluated | fails=2 | 一部のターゲット（1件）は入力不足 / -v を付けて、Origin を送って採取し直す
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-08 | missing-input | fails=0 | 必要なラベル: （一般）
 R-09 | missing-input | fails=0 | 必要なラベル: websocket
@@ -191,17 +197,17 @@ T-11 | missing-input | fails=0 | 必要なラベル: tls
 T-12 | evaluated | fails=0
 T-13 | manual | fails=0
 E-01 | evaluated | fails=0
-E-02 | evaluated | fails=0
+E-02 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-03 | missing-input | fails=0 | 必要なラベル: probes
 E-04 | evaluated | fails=1
 E-05 | missing-input | fails=0 | 必要なラベル: （一般）
 E-06 | missing-input | fails=0 | 必要なラベル: （一般）
-E-07 | evaluated | fails=0
-E-08 | evaluated | fails=1
-E-09 | evaluated | fails=0
-E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-08 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-09 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-10 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-11 | missing-input | fails=0 | 必要なラベル: （一般）
-E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
 A-01 | missing-input | fails=0 | 認証が必要なデータを返す API の URL で採取し直す
 A-02 | evaluated | fails=0

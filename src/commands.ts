@@ -70,7 +70,9 @@ export function generateScript(o: CommandOptions): string {
 
   L.push('', '# ---- 第2章：ログインの流れ（C18）。login.txt にログインのPOST本文を書いておく ----');
   t('pre-login', `${H}${o.loginPath}`); L.push(`curl -sS -v -o /dev/null -c jar.txt -b jar.txt "$H"${q(o.loginPath)} 2>&1`);
-  t('login', `${H}${o.loginPath}`, ' sensitive=1'); L.push(`curl -sS -v -o /dev/null -c jar.txt -b jar.txt -X POST --data @login.txt "$H"${q(o.loginPath)} 2>&1`);
+  // login は本文も取る（#BODY の形。下の置き換え）。本文を捨てる（-v -o /dev/null）と、パスワード欄のある画面を 200 で返し直す失敗（Django・
+  // ASP.NET Identity・WordPress）を成功と見分けられず、新しいセッションIDがないので C-09①（高）にした
+  t('login', `${H}${o.loginPath}`, ' sensitive=1'); L.push(`curl -sS -i -c jar.txt -b jar.txt -X POST --data @login.txt "$H"${q(o.loginPath)}`);
   L.push('for i in 1 2 3; do', `  echo "#TARGET url=$H${o.loginPath} label=session-sample-$i run=$RUN"; ${meta('C18')}`, `  curl -sS -D - -o /dev/null -c "s$i.txt" -X POST --data @login.txt "$H"${q(o.loginPath)}`, 'done');
   t('mypage', `${H}${o.mypagePath}`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(o.mypagePath)}`);
   t('api', `${H}${o.apiPath}`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(o.apiPath)}`);

@@ -224,6 +224,7 @@ Object.assign(EXACT, {
 const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^機密応答かどうか分からない（(.*)）$/, m => `Unknown whether the response is sensitive (${m[1]})`],
   [/^HTTP (\d+)（Allow ヘッダなし）$/, m => `HTTP ${m[1]} (no Allow header)`],
+  [/^一部のターゲット（(\d+)件）は入力不足$/, m => `Some targets (${m[1]}) lack input`],
   [/^必要なラベル: (.+)$/, m => `Required labels: ${m[1].replace(/（一般）/g, '(general)').replace(/（2つ以上）/g, ' (2 or more)').replace(/（同じURLを2回取得）/g, ' (fetch the same URL twice)').replace(/（APIのエラー応答を2つ以上）/g, ' (2 or more API error responses)').replace(/（https:\/\/apexドメイン\/）/g, ' (https://apex-domain/)')}`],
   [/^使っていなければ (.+) を無効にする$/, m => `Disable ${m[1].replace(/・/g, ', ')} if unused`],
   [/^(\S+) として数える（(.+)）$/, m => `Counted as ${m[1]} (avoids double counting)`],

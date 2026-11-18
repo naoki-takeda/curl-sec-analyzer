@@ -16,6 +16,12 @@ program | https://www.example.com/program?session=…(2 chars)&pass1=CA…(11 ch
 
 ## findings
 about | A-02.ok | info | pass | URL・Location・本文にトークンなし
+about | E-02.na | info | na | 本文を採取していない
+about | E-07.na | info | na | 本文を採取していない
+about | E-08.na | info | na | 本文を採取していない
+about | E-09.na | info | na | 本文を採取していない
+about | E-10.na | info | na | 本文を採取していない
+about | E-12.na | info | na | 本文を採取していない
 about | H-01.3 | high | fail | max-age=31536000, includeSubDomains（構文の誤り・ディレクティブの重複。ブラウザはこのヘッダを無視する）
 about | H-02.na | info | na | max-age=31536000, includeSubDomains（HSTSの構文の誤り。H-01③で判定）
 about | H-03.na | info | na | CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）
@@ -159,17 +165,17 @@ unauth-session | A-07.ok | info | pass | キー0種に秘密情報・内部属�
 ## coverage
 H-01 | evaluated | fails=6
 H-02 | missing-input | fails=0 | max-age=31536000, includeSubDomains（HSTSの構文の誤り。H-01③で判定） / HSTSがない（H-01で判定）
-H-03 | evaluated | fails=2
+H-03 | evaluated | fails=2 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=4
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-08 | evaluated | fails=4
+H-08 | evaluated | fails=4 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（204・304 は対象外）
 H-09 | evaluated | fails=4
 H-10 | evaluated | fails=4
-H-11 | evaluated | fails=3
-H-12 | evaluated | fails=1 | 機密応答では判定していない（静的リソース・機密でない応答だけ）
-H-13 | evaluated | fails=0
+H-11 | evaluated | fails=3 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-12 | evaluated | fails=1 | 機密応答では判定していない（静的リソース・機密でない応答だけ） / 一部のターゲット（5件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-13 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 転送先の URL を別のターゲットとして採取する
 H-14 | evaluated | fails=4
 H-15 | evaluated | fails=1
 H-16 | evaluated | fails=0
@@ -212,19 +218,19 @@ T-11 | missing-input | fails=0 | 必要なラベル: tls
 T-12 | evaluated | fails=0
 T-13 | manual | fails=0
 E-01 | evaluated | fails=0
-E-02 | evaluated | fails=0
+E-02 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-03 | missing-input | fails=0 | 必要なラベル: probes
 E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
 E-05 | evaluated | fails=0
 E-06 | missing-input | fails=0 | 必要なラベル: （一般）
-E-07 | evaluated | fails=0
-E-08 | evaluated | fails=0
-E-09 | evaluated | fails=1
-E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-08 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-09 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-10 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-11 | evaluated | fails=0
-E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
-A-01 | evaluated | fails=1
+A-01 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 認証が必要なデータを返す API の URL で採取し直す
 A-02 | evaluated | fails=0
 A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
 A-04 | manual | fails=0

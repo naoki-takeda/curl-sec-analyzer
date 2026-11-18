@@ -220,23 +220,23 @@ video | R-04.ok | info | pass | ACAO: https://app.example.com
 video | T-12.ok | info | pass | HTTP/2
 
 ## coverage
-H-01 | evaluated | fails=10
+H-01 | evaluated | fails=10 | 一部のターゲット（1件）は入力不足 / #TARGET に url= を付ける
 H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
 H-03 | evaluated | fails=2
 H-04 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | evaluated | fails=2
 H-06 | evaluated | fails=4
 H-07 | evaluated | fails=0
-H-08 | evaluated | fails=7
+H-08 | evaluated | fails=7 | 一部のターゲット（3件）は入力不足 / 本文のある応答（200 など）で採取する（204・304 は対象外） / 応答がない
 H-09 | evaluated | fails=4
 H-10 | evaluated | fails=4
-H-11 | evaluated | fails=4
-H-12 | evaluated | fails=3
-H-13 | evaluated | fails=0
+H-11 | evaluated | fails=4 | 一部のターゲット（4件）は入力不足 / 本文のある応答（200 など）で採取する（204・304 は対象外） / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける / 応答がない
+H-12 | evaluated | fails=3 | 一部のターゲット（7件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける / 本文のある応答（200 など）で採取する（204・304 は対象外） / 機密データを返す 200 の応答（認証後ページなど）で採取する / 応答がない
+H-13 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 応答がない
 H-14 | evaluated | fails=4
 H-15 | evaluated | fails=1
-H-16 | evaluated | fails=0
-H-17 | evaluated | fails=0
+H-16 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 応答がない
+H-17 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 応答がない
 C-01 | evaluated | fails=0
 C-02 | evaluated | fails=0
 C-03 | evaluated | fails=0
@@ -255,7 +255,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 応答がない
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
@@ -295,6 +295,6 @@ A-05 | manual | fails=0
 A-06 | manual | fails=0
 A-07 | evaluated | fails=0
 A-08 | missing-input | fails=0 | 必要なラベル: ctype
-A-09 | evaluated | fails=1
+A-09 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 応答がない
 A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）
 A-11 | evaluated | fails=0

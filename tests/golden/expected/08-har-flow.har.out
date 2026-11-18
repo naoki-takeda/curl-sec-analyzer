@@ -183,7 +183,7 @@ H-08 | evaluated | fails=5
 H-09 | evaluated | fails=4
 H-10 | evaluated | fails=4
 H-11 | evaluated | fails=4
-H-12 | evaluated | fails=3
+H-12 | evaluated | fails=3 | 一部のターゲット（3件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=4
 H-15 | evaluated | fails=1

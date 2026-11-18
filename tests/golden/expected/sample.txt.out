@@ -89,6 +89,12 @@ top | C-06.ok | info | pass | ui_pref
 top | C-08.ok | info | pass | ui_pref
 top | C-11.ok | info | pass | ui_pref
 top | C-13.2 | low | fail | Cache-Control: public, max-age=300
+top | E-02.na | info | na | 本文を採取していない
+top | E-07.na | info | na | 本文を採取していない
+top | E-08.na | info | na | 本文を採取していない
+top | E-09.na | info | na | 本文を採取していない
+top | E-10.na | info | na | 本文を採取していない
+top | E-12.na | info | na | 本文を採取していない
 top | H-01.ok | info | pass | max-age=31536000; includeSubDomains; preload
 top | H-02.ok | info | pass | max-age=31536000; includeSubDomains; preload
 top | H-03.ok | info | pass | default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; object-src 'none'
@@ -125,7 +131,7 @@ H-08 | evaluated | fails=0
 H-09 | evaluated | fails=0
 H-10 | evaluated | fails=1
 H-11 | evaluated | fails=1
-H-12 | evaluated | fails=1
+H-12 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=1
 H-15 | evaluated | fails=1
@@ -169,17 +175,17 @@ T-11 | missing-input | fails=0 | 必要なラベル: tls
 T-12 | evaluated | fails=0
 T-13 | manual | fails=0
 E-01 | evaluated | fails=0
-E-02 | evaluated | fails=0
+E-02 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-03 | evaluated | fails=2
 E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
 E-05 | missing-input | fails=0 | 必要なラベル: （一般）
 E-06 | missing-input | fails=0 | 必要なラベル: （一般）
-E-07 | evaluated | fails=0
-E-08 | evaluated | fails=0
-E-09 | evaluated | fails=0
-E-10 | missing-input | fails=0 | 必要なラベル: （一般）
+E-07 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-08 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-09 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+E-10 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-11 | missing-input | fails=0 | 必要なラベル: （一般）
-E-12 | missing-input | fails=0 | 必要なラベル: （一般）
+E-12 | missing-input | fails=0 | 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-13 | missing-input | fails=0 | 必要なラベル: （一般）, probes
 A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
 A-02 | evaluated | fails=0
