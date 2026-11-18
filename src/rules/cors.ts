@@ -142,7 +142,7 @@ export const corsPreflight: Rule = { id: 'R-05', title: 'プリフライト応�
     const anyMethod = !!methods && /(?:^|,)\s*\*\s*(?:,|$)/.test(methods) && !credOf(ctx);
     if (methods && foreign && (/\b(PUT|DELETE|PATCH)\b/i.test(methods) || anyMethod))
       out.push(mk(corsPreflight, ctx, 1, 'medium', 'fail', `ACAO: ${acao} / Allow-Methods: ${methods}`, '許可外のOriginに状態を変えるメソッドを許可しない'));
-    if (maxAge && Number(maxAge) > 7200) out.push(mk(corsPreflight, ctx, 2, 'info', 'fail', `Access-Control-Max-Age: ${maxAge}`, 'Chromeは7200秒で打ち切る。必要な長さにする'));
+    if (maxAge && Number(maxAge) > 7200) out.push(mk(corsPreflight, ctx, 2, 'info', 'fail', `Access-Control-Max-Age: ${maxAge}`, 'Chromeは7200秒、Safariは600秒で打ち切る。必要な長さにする'));
     return out.length ? out : [mk(corsPreflight, ctx, 'ok', 'info', 'pass', `Allow-Methods: ${methods ?? '-'} / Max-Age: ${maxAge ?? '-'}`, '')];
   } };
 

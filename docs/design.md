@@ -38,7 +38,7 @@ curlとopensslの出力で判定できる「設定系」の項目は本書のチ
 | ISOG-J/OWASP Japan Webアプリケーション脆弱性診断ガイドライン | 第1.2.4版（2023年11月） | 情報露出・範囲外項目 |
 | IPA 安全なウェブサイトの作り方 | 改訂第7版（2021年3月、第4刷） | 項番（4-(iii)、2.3-1)など）を参考文献列に記載（原典で確認済み） |
 | OWASP Secure Headers Project、Cheat Sheet Series | 2026-10時点の最新 | ヘッダの推奨値とActive/Deprecatedの区分 |
-| Mozilla Server Side TLS | v5.7として参照 | 最新版は要確認 |
+| Mozilla Server Side TLS | v5.7として参照 | 最新は6.0（2026-11-18に確認。5.8でIntermediateからDHEを外し、6.0でOldを廃止）。T-10のDHEの扱いは判断の根拠15 |
 | MDN HTTP Observatory | 2026-10時点の最新 | スコアの参考値。配点は要確認 |
 
 ### 0.2 重要度と判定ステータス
@@ -196,7 +196,7 @@ curl -sS -v -o /dev/null --http1.1 --max-time 5 -b jar.txt -H 'Connection: Upgra
 | R-02 | null許可 | C7 | `null`を許可しない（`-v`でOriginを送っていなければna。R-01も同じ。CORSのミドルウェアの多くはOriginがあるときだけACAOを返すので、ACAOがないことは合格の根拠にならない） | ①`ACAO: null`＋ACAC:true ②`ACAO: null` | sandboxed iframeからの窃取 | ①高 ②中 | PortSwigger、ASVS 5.0.0 3.4.2 |
 | R-03 | 部分一致の不備 | `example.com.evil.net`、`evilexample.com`などをOriginに指定（`-v`必須。送ったOriginが見えない`-i`の`cors-partial`は、ACAOが似せたOriginならそれを送ったものとみなし、そうでなければna）。対象がサブドメイン（`api.example.com`）でも、そのドメイン（`example.com`）に似せたOriginはR-03で判定する（ドメインは最後の2つのラベル（`co.jp`などの国別の第2レベルなら3つ）の目安で、公開接尾辞の一覧は持たない。同じドメインのサブドメインは似せたものではなくR-01で判定する） | 完全一致で判定 | ①許可される＋ACAC:true ②許可される（ACACなし） | 同上 | ①高 ②中 | PortSwigger、ASVS 5.0.0 3.4.2 |
 | R-04 | ワイルドカード | C6 | `*`は公開データのみ | ①機密応答（0.3）に`*` ②`*`＋ACAC:true（仕様上ブラウザが拒否。設定ミスの兆候） ③公開データに`*` | 公開すべきでないデータの露出 | ①中 ②低 ③情報 | MDN、MDN HTTP Observatory、ASVS 5.0.0 3.4.2 |
-| R-05 | プリフライト応答 | C8 | Allow-Methods/Allow-Headersは必要最小限（許可外のOriginはR-01と同じく、送ったOrigin（自サイト以外）を反射したもの。送ったOriginが分からない`-i`では、テスト値のACAO） | ①許可外OriginにPUT・DELETEなど状態を変えるメソッドを許可（`Access-Control-Allow-Methods: *`も、ACAC:trueがなければすべてのメソッドの許可。ACAC:trueのときは「*」という名前のメソッドの意味なので対象外） ②`Access-Control-Max-Age`が極端に長い（Chromeは7200秒で打ち切り） | 他サイトからの状態変更、設定変更が反映されない | ①中 ②情報 | MDN、OWASP WSTG、ASVS 5.0.0 3.4.2, 4.1.4 |
+| R-05 | プリフライト応答 | C8 | Allow-Methods/Allow-Headersは必要最小限（許可外のOriginはR-01と同じく、送ったOrigin（自サイト以外）を反射したもの。送ったOriginが分からない`-i`では、テスト値のACAO） | ①許可外OriginにPUT・DELETEなど状態を変えるメソッドを許可（`Access-Control-Allow-Methods: *`も、ACAC:trueがなければすべてのメソッドの許可。ACAC:trueのときは「*」という名前のメソッドの意味なので対象外） ②`Access-Control-Max-Age`が極端に長い（Chromeは7200秒、Safariは600秒で打ち切り。Firefoxは86400秒） | 他サイトからの状態変更、設定変更が反映されない | ①中 ②情報 | MDN、OWASP WSTG、ASVS 5.0.0 3.4.2, 4.1.4 |
 | R-06 | Vary: Origin | C6 | ACAOを動的に返すなら`Vary: Origin`（`-v`かHARでOriginを送っていないのに返したACAOは、Originによらない固定の値なので適用外） | ①ない（カンマで区切った1つの値として`Origin`か`*`があるかで見る。`X-Origin-Id`のような名前の一部は対象外）送ったOriginが分からない（`-v`なし・`Origin`の指定なしで、HARでもない）ときの固定のACAOはna（Originによって変わる値かが分からない。ただしACAOが既知のテスト値（`https://evil.example`）なら、R-01と同じく送ったOriginを反射した値とみなして判定する）。プリフライト（`cors-preflight`）の応答はHTTPのキャッシュに保存されない（RFC 9110 9.3.7）ので対象外。 | キャッシュ経由で別Origin向けの応答が配信される | ①低 | MDN |
 | R-07 | Access-Control-Expose-Headers | C6 | 必要なヘッダのみ（レート制限の項目（`x-ratelimit-remaining-tokens`）と利用量の項目（`X-Tokens-Used`・`X-Total-Count`。`used`・`count`・`limit`は語として見る。`X-Account-Token`は対象）も対象外。除外はtokenを含む名前だけに使う） | ①認証トークンや内部ヘッダを公開（名前に token を含んでも、CSRF対策やページ送りのトークン（`X-CSRF-Token`、`X-Next-Page-Token`）は認証のトークンではないので対象外。`Set-Cookie`は禁止された応答ヘッダで、書いてもスクリプトに公開されないので対象外） ②`*` | クロスオリジンでのヘッダ情報の漏えい | ①中 ②低 | MDN |
 | R-08 | Timing-Allow-Origin | C1（機密応答のターゲット） | 不要なら付けない。付けるなら限定 | ①機密応答（0.3）に`*` | タイミング情報の漏えい（XS-Leaks） | ①低 | MDN |
@@ -410,17 +410,17 @@ C13の`#PROBE`は、HTTP 2xxで取得でき、パスと先頭64バイトの両�
 
 | パターン名 | 対象パス | 中身の目安（先頭64バイト） | 判定する項目 | 一致したとき |
 | --- | --- | --- | --- | --- |
-| git-head | /.git/HEAD | `ref: refs/`で始まる | E-03 | ①（高） |
+| git-head | /.git/HEAD | `ref: refs/`で始まる。またはコミットのID（40桁・64桁の16進数）だけの1行（detached HEAD。CI・デプロイで多い） | E-03 | ①（高） |
 | svn-entries | /.svn/entries | 数字だけの行、または`<wc-entries` | E-03 | ① |
 | ds-store | /.DS\_Store | マジックバイト（`00 00 00 01 Bud1`） | E-03 | ① |
-| dotenv | /.env | `KEY=value`の行 | E-03 | ① |
+| dotenv | /.env | `KEY=value`の行（`export KEY=`、`KEY = value`も。名前は英大文字・数字・`_`だけ。小文字の名前はほかの平文の応答と見分けにくいので入れない） | E-03 | ① |
 | web-xml | /WEB-INF/web.xml | `<web-app`または`<!DOCTYPE web-app` | E-03 | ① |
-| package-json、composer-json | /package.json、/composer.json | `{`の直後に、そのファイルらしいキー（`"name"`、`"version"`、`"require"`など） | E-03 | ① |
+| package-json、composer-json | /package.json、/composer.json | 先頭64バイトに、そのファイルに特有のキー（package.jsonは`"private"`・`"scripts"`・`"dependencies"`・`"main"`など、composer.jsonは`"require"`・`"autoload"`など）か、名前の形（`"@scope/名前"`、`"vendor/名前"`）。`"name"`・`"version"`・`"type"`のような一般的なキーだけでは一致としない（どのパスにも`{"name":"api","version":"1.0"}`を返すAPIで①（高）の誤検知になるため）。特有のキーが64バイトより後ろにある本物のファイルは②になる | E-03 | ① |
 | backup | /backup.zip | ZIPのマジックバイト（`PK\x03\x04`） | E-03 | ① |
-| phpinfo、server-status | /phpinfo.php、/server-status | 「PHP Version」「Apache Server Status」。先頭64バイトに現れないことが多い | E-03 | 一致すれば①。200で一致しなければ②（判定保留） |
-| security-txt | /.well-known/security.txt | `Contact:`または`Expires:`（大文字・小文字を区別しない。先頭の64バイトがコメント`#`で始まり、どちらもないもの（security-txt-comment）は、本当のsecurity.txtかが分からない（どのパスにも`# …`の平文を返すサーバもある）のでE-04をnaにする） | E-04 | E-04②をpassにする |
+| phpinfo、server-status | /phpinfo.php、/server-status | 「PHP Version」「Apache Server Status」。Webの出力では先頭64バイトに現れない（phpinfoは長いDOCTYPEとCSSのあと、mod\_statusもDOCTYPEのあと）ので、ほぼ常に②になる | E-03 | 一致すれば①。200で一致しなければ②（判定保留） |
+| security-txt | /.well-known/security.txt | RFC 9116のフィールド（`Contact:`・`Expires:`・`Canonical:`・`Policy:`・`Encryption:`など）で始まる行（大文字・小文字を区別しない。先頭の64バイトがコメント`#`で始まり、どちらもないもの（security-txt-comment）は、本当のsecurity.txtかが分からない（どのパスにも`# …`の平文を返すサーバもある）のでE-04をnaにする） | E-04 | E-04②をpassにする |
 | robots | /robots.txt | `User-agent:`など | E-04 | 存在確認のみ（E-04①は本文で判定） |
-| source-map | 追加した.mapのパス | `{`の直後に、ソースマップのキー（`"version"`、`"mappings"`、`"sources"`など） | E-13 | ①（中） |
+| source-map | 追加した.mapのパス | 先頭64バイトに`"version":3`か、ソースマップに特有のキー（`"mappings"`、`"sources"`など）。`"version"`・`"file"`だけでは一致としない（どのパスにも`{"version":"2.1.0"}`を返すAPIで誤検知になるため） | E-13 | ①（中） |
 
 - robots.txtとsecurity.txtはE-03の対象外です。
 - E-03の対象パスで200が返ったのに、どのパターンにも一致しない場合は、E-03②（判定保留）とします。
@@ -710,10 +710,10 @@ t mypage "$H/mypage"     1  -v -o /dev/null -b jar.txt >> out.txt
 | Google CSP Evaluator | ライブラリとWeb UI | CSP解析・評価の中核 | Apache-2.0（npm `csp_evaluator`）。配布物にLICENSEを同梱する（パッケージにNOTICEファイルはない）。`THIRD_PARTY_LICENSES.txt`に自動で含まれる |
 | securityheaders.com | URLスキャン（SaaS） | Recommended/Optionalの分け方 | ソース非公開。基準の参考のみ |
 | OWASP Secure Headers Project | 文書とデータ | Active/Deprecatedの分類、推奨値 | 出典を明記して参照 |
-| 0xelitesystem/http-header-analyzer、techshield-tech/http-headers、meduuv/security-headers-analyzer | 貼り付け型（ブラウザ内で完結） | ヘッダ解説、設定例の生成、「送信しない」設計 | ライセンス未確認。流用前に各リポジトリのLICENSEを確認 |
-| rfc-st/humble | CLI（Python）。URLを取得するほか、保存した生の応答ファイルも解析できる | 指紋になるヘッダの検出、非推奨・不正な値の検査、testssl.shとの連携 | ライセンス要確認。考え方の参考にとどめる |
-| offseckit/headers | CLI（Python）。curl -sIの出力をパイプで受ける | CI向けのJSON出力 | MITと表示されている（要確認） |
-| headerpulse | CLI（Python）。対象に自らアクセスする | ヘッダ・Cookie・CORSのOrigin反射を1回で確認する構成 | ライセンス要確認 |
+| 0xelitesystem/http-header-analyzer、meduuv/security-headers-analyzer | 貼り付け型（ブラウザ内で完結） | ヘッダ解説、設定例の生成、「送信しない」設計 | どちらもMIT（2026-11-18に確認）。当初挙げたtechshield-tech/http-headersは存在しない |
+| rfc-st/humble | CLI（Python）。URLを取得するほか、保存した生の応答ファイルも解析できる | 指紋になるヘッダの検出、非推奨・不正な値の検査、testssl.shとの連携 | MIT（2026-11-18に確認）。考え方の参考にとどめる |
+| offseckit/headers | CLI（Python）。curl -sIの出力をパイプで受ける | CI向けのJSON出力 | MIT（2026-11-18に確認） |
+| headerpulse | CLI（Python）。対象に自らアクセスする | ヘッダ・Cookie・CORSのOrigin反射を1回で確認する構成 | PyPIの版にはライセンスの記載がない。同じ説明のリポジトリ（HeaderPulse-CLI）はMIT |
 | 貼り付け型のWebツール（jmrp.io、hidekazu-konishi.com、elysiatoolsなど） | ブラウザ内で完結（一部はURL取得の機能もある） | 1応答のヘッダの採点と解説。hidekazu-konishi.comは日本語 | ソースとライセンスは各サイトで確認 |
 
 差別化のポイントは、複数ターゲット・`-v`・`-L`・openssl・プローブをまとめた1つの貼り付けを解析できること、API Top 10 2023に対応したルール、送信OriginとACAOの照合、日本語の解説とIPA・ISOG-Jへの対応付け、ログイン前後やログアウト後を比べるターゲット横断の判定、何を確認していないかを示す診断カバレッジ、ブラウザのHARの取り込み（v0.3）です。既存の貼り付け型ツールは、1つの応答のヘッダを採点するものがほとんどです。
@@ -863,7 +863,7 @@ MVPでは、複数ターゲットの入力モデル、マスキング、例外�
 
 ## 判断の根拠・要確認事項・出典
 
-主な設計判断は下記14点で、数値や版のうち未確認のものは「要確認事項」にまとめています。
+主な設計判断は下記15点で、数値や版のうち未確認のものは「要確認事項」にまとめています。
 
 ### 判断の根拠
 
@@ -881,31 +881,32 @@ MVPでは、複数ターゲットの入力モデル、マスキング、例外�
 12. **A-10（エラー形式）は`error-*`ラベルのAPIのエラー応答だけを比べる**：ブラウザ向けのHTMLのエラーページや、`unauth-*`の401などまで比べると、正しい設計でも「統一されていない」と出るため。HTMLのエラーページの情報露出はE-01で判定する。
 13. **専用の組織アカウントで管理・公開する**：他のGitHub Pagesとオリジンを分けるため（無料）。一時は「実績として個人のプロフィールに並べる」ために個人アカウントを検討したが、組織の公開リポジトリでも、①自分がコミットしたリポジトリは個人のプロフィールにピン留めでき、②コミットは個人のコントリビューションのグラフに反映され、③組織のメンバーシップを公開にすればプロフィールに組織のアイコンが出るため、オリジンを分けられる組織アカウントに戻した。
 14. **CLI版は作らない**：ブラウザだけで使う運用のため。判定の部分（`src/parser`・`src/rules`・`src/engine`・`src/export`）は画面の部品に依存しないまま保ち（単体テストはNode.jsで実行している）、CIでの自動検査が必要になったときにCLIの入口を足せるようにしておく。
+15. **T-10はDHE＋AEADの暗号を合格のままにする**：Mozilla Server Side TLSは5.8でIntermediateからDHEを外した（6.0は前方秘匿性のあるECDHE＋AEADだけ）。一方、根拠にしているIPA「TLS暗号設定ガイドライン」はDHEのAEADの暗号を推奨の範囲に含める。DHEを指摘にすると多くのサーバで新しく指摘が出るため、IPAに合わせて合格とし、Mozillaとの差をここに書く（2026-11-18）。
 
 ### 要確認事項
 
 - [x] ASVS 5.0の章構成と項番（CookieがV3、セッション管理がV7か）をOWASP/ASVSリポジトリで確認し、第2章の項番を対応付ける（v1.0：`v5.0.0`タグで確認。CookieはV3.3、セッション管理はV7。全項目を対応付けた）
 - [x] ASVS 5.0との基準の差をどう扱うか決める：HSTSのmax-age（ASVS 3.4.1は1年以上、H-01②は6か月未満で中）と、セッションIDのエントロピー（ASVS 7.2.3は128bit以上、C-07①は64bit未満で高）（既定値をASVSに合わせて上げた。ツール設計2「ASVS 5.0・IPAとの対応」）
-- [ ] Mozilla Server Side TLSの最新版（v5.7より新しい版があるか）を確認する
-- [ ] MDN HTTP Observatoryの現行の配点と最高点（MDNの「Tests & Scoring」は145、旧版scoring.mdは135）をソースで確認する（互換スコアを再検討するときだけ必要）
-- [ ] Trusted Types（`require-trusted-types-for`）の各ブラウザの対応状況を確認する
+- [x] Mozilla Server Side TLSの最新版（v5.7より新しい版があるか）を確認する（2026-11-18：`ssl-config.mozilla.org/guidelines/latest.json`は6.0。5.8でIntermediateからDHEを外し、X25519MLKEM768を足した。6.0でOldを廃止。設定ジェネレータのリポジトリは2026-05にアーカイブされ、wikiは移転の案内だけになった。T-10は判断の根拠15）
+- [x] MDN HTTP Observatoryの現行の配点と最高点（MDNの「Tests & Scoring」は145、旧版scoring.mdは135）をソースで確認する（互換スコアを再検討するときだけ必要）（2026-11-18：mdn/mdn-http-observatoryの`src/grader/charts.js`（ALGORITHM\_VERSION 6）で、2026-08にCOOP・COEPの各+10が加わり、加点の合計は165。加点は減点後の点が90以上のときだけ。MDNの文書は145のまま）
+- [x] Trusted Types（`require-trusted-types-for`）の各ブラウザの対応状況を確認する（2026-11-18：Chrome・Edge 83、Safari 26、Firefox 148。MDNはBaseline 2026。ツールは既知のディレクティブとして扱っている）
 - [x] GitHub Actionsの各アクションの最新メジャーバージョンとコミットSHAを確認する（2026-11-16：各タグのSHAを`git ls-remote`で確認して固定した。以後の更新はDependabot）
-- [ ] 貼り付け型OSS（3件）のライセンスを確認する（コードを流用する場合）
-- [ ] curlが`-v`や`-i`でHTTP/2・3のヘッダ名を小文字で表示するかは公式文書で明言されていない。パーサは大文字小文字の両方を受け付ける前提を維持する
-- [ ] `openssl s_client`がハンドシェイク失敗時に0以外を返すか、成功時に`Protocol  : TLSv1.x`行を出すか（OpenSSL 1.1系・3系）を確認する。C12の判定はこの前提に依存している
-- [ ] ChromeのプリフライトMax-Ageの上限（7200秒、R-05②の根拠）を確認する
-- [ ] curlの`-v`出力の行形式（`* Host ... was resolved`、`* Connected to`、`* SSL connection using`など）が利用するcurlのバージョンで変わらないか確認する（パーサの`VERBOSE_HINT`の前提）
-- [ ] 出典のURL（OWASP Cheat Sheet、WSTG、RFC 9116・9457、PortSwigger、IPA公式）を開いて、リンク切れと内容を確認する
+- [x] 貼り付け型OSS（3件）のライセンスを確認する（コードを流用する場合）（2026-11-18：「既存ツール・OSS」の表に反映）
+- [x] curlが`-v`や`-i`でHTTP/2・3のヘッダ名を小文字で表示するかは公式文書で明言されていない。パーサは大文字小文字の両方を受け付ける前提を維持する（2026-11-18：curlは受け取った名前をそのまま出し、nghttp2は大文字を含む名前をエラーにするので、HTTP/2では常に小文字。公式の明言はないので、両方を受け付けるまま）
+- [x] `openssl s_client`がハンドシェイク失敗時に0以外を返すか、成功時に`Protocol  : TLSv1.x`行を出すか（OpenSSL 1.1系・3系）を確認する。C12の判定はこの前提に依存している（2026-11-18：OpenSSL 3.5.9の`s_server`を相手にC12・C23をそのまま実行し、すべて正しく判定した。3系は失敗で1。1.1.1は警告なしで切断されると0を返しうるが、C12は終了コードと`New, …, Cipher is`の行の両方で見るので正しい。`New, <版>,`の版は暗号の最小の版で、合意した版ではない（TLS 1.2で`New, SSLv3, Cipher is AES128-SHA`）。1.1.1・3.0はTLS 1.3でProtocolの行を出さない。パーサは版をProtocolの行で読み、`New`の行はTLS 1.3のときだけ使う）
+- [x] ChromeのプリフライトMax-Ageの上限（7200秒、R-05②の根拠）を確認する（2026-11-18：Chromiumの`preflight_result.cc`は2時間。Safari（WebKit）は600秒、Firefoxは86400秒。R-05②の推奨対応にSafariを足した）
+- [x] curlの`-v`出力の行形式（`* Host ... was resolved`、`* Connected to`、`* SSL connection using`など）が利用するcurlのバージョンで変わらないか確認する（パーサの`VERBOSE_HINT`の前提）（2026-11-18：`Trying`は全版、`Connected to`は8.15まで、`Established connection to`は8.16から、`Host … was resolved.`は8.5から、`ALPN:`は7.83から（以前は`ALPN, server accepted to use`）。`VERBOSE_HINT`はどの版でも検出できる。`SSL connection using`はOpenSSL系のバックエンドだけで、Windowsの標準のcurl（Schannel）・rustls・mbedTLSは出さない。そのためT-09②（TLS 1.3非対応）とT-10の合意した暗号は判定できず、T-09①・T-10はC12・C23（openssl）で判定する。古い形の`ALPN,`もHTTPSの手がかりとして読む）
+- [x] 出典のURL（OWASP Cheat Sheet、WSTG、RFC 9116・9457、PortSwigger、IPA公式）を開いて、リンク切れと内容を確認する（2026-11-18：OWASP Secure Headers Projectは移転したので直した。Mozilla Server Side TLSのwikiは移転の案内だけなので、指針のJSONに替えた。ほかは開けて、引用した内容も変わっていない。npmのページは自動の取得を拒むが、ブラウザでは開ける）
 - [x] IPAの項番（1-(iii)、4-(i)〜(vi)、5-(viii)・(ix)、6-(i)、7-(i)、9-(i)）とASVS 4.0.3の項番（V3.2.1、V3.2.2、V3.3.1、V3.3.2、V3.4.4、V3.4.5）を原典で確認する（v1.0：IPAは改訂第7版のPDFで確認し、4-(iv)・6-(i)・7-(i)・9-(i)は枝番（-a・-b）まで付けた。ASVS 4.0.3の項番は5.0.0に置き換えた）
-- [ ] C23で使う暗号名（OpenSSLの表記）と、`openssl s_client`の`Cipher :`行の形式を確認する
-- [ ] プローブの判定パターン（.DS\_Store、web.xml、phpinfo、server-status、ソースマップなど）が先頭64バイトで判別できるかを、実際の応答で確認する。任意のパスにJSONを返すAPIでは、package.jsonなどのパターンが誤検知しないかも確認する
-- [ ] 各ブラウザ（Chrome、Edge、Firefox、Safari）のHARの書き出しで、Cookie・Set-Cookie・Authorizationや応答本文が既定で含まれるか、含めるにはどう操作するかを確認する。HAR 1.2の仕様（`redirectURL`、`content.encoding`など）との差も確認する
+- [x] C23で使う暗号名（OpenSSLの表記）と、`openssl s_client`の`Cipher :`行の形式を確認する（2026-11-18：5つともOpenSSLの名前で、`Cipher is <名前>`もその名前のまま。RC4-SHA・DES-CBC3-SHAは1.1.0以降の標準のビルドでok=err。DES-CBC-SHA・EXPORTの暗号は1.1.0で削除され、足してもほぼ常にok=errになるので足さない）
+- [ ] プローブの判定パターン（.DS\_Store、web.xml、phpinfo、server-status、ソースマップなど）が先頭64バイトで判別できるかを、実際の応答で確認する。任意のパスにJSONを返すAPIでは、package.jsonなどのパターンが誤検知しないかも確認する（2026-11-18：形式の仕様と典型的な例で確認し、「プローブの判定パターン」の表に反映した（package.json・composer.json・ソースマップの誤検知、detached HEAD・`export`の.env・Contact以外で始まるsecurity.txtの見逃し）。phpinfoとserver-statusは先頭64バイトに目印が現れない。実際の応答での確認はまだ）
+- [x] 各ブラウザ（Chrome、Edge、Firefox、Safari）のHARの書き出しで、Cookie・Set-Cookie・Authorizationや応答本文が既定で含まれるか、含めるにはどう操作するかを確認する。HAR 1.2の仕様（`redirectURL`、`content.encoding`など）との差も確認する（2026-11-18：Chrome・Edge 130以降の既定は「Export HAR (sanitized)」で、Cookie・Authorization・Set-Cookieを除き、本文は含む。含めるには設定のNetworkで「Allow to generate HAR with sensitive data」を有効にし、「with sensitive data」で書き出す。Firefox・Safariは伏せずに書き出す（Firefoxは1MBを超える本文を切る。Safariは転送のホップを本文なしの別のエントリにする）。テキストでない本文はbase64と`encoding`。`har.ts`はどの形にも対応している）
 
 レビューの指摘と対応の経緯は`docs/history.md`にまとめています。
 
 ### 出典
 
-- [OWASP Secure Headers Project：Response Headers](https://owasp.github.io/www-project-secure-headers/response-headers/)
+- [OWASP Secure Headers Project：Response Headers](https://secure-headers-project.owasp.org/response-headers/)（2026-11に移転）
 - [OWASP HTTP Security Response Headers Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html)
 - [OWASP Content Security Policy Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html)
 - [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
@@ -918,7 +919,7 @@ MVPでは、複数ターゲットの入力モデル、マスキング、例外�
 - [csp\_evaluator（npm）](https://www.npmjs.com/package/csp_evaluator)、[web.dev：Strict CSP](https://web.dev/articles/strict-csp)、[W3C CSP Level 3](https://www.w3.org/TR/CSP3/)
 - [hstspreload.org](https://hstspreload.org/)
 - [PortSwigger Web Security Academy：CORS](https://portswigger.net/web-security/cors)、[HTTP Host header attacks](https://portswigger.net/web-security/host-header)、[Cross-site WebSocket hijacking](https://portswigger.net/web-security/websockets/cross-site-websocket-hijacking)
-- [Mozilla Server Side TLS](https://wiki.mozilla.org/index.php?title=Security/Server_Side_TLS)
+- [Mozilla Server Side TLS の指針（JSON。v6.0）](https://ssl-config.mozilla.org/guidelines/latest.json)、[SSL Configuration Generator](https://ssl-config.mozilla.org/)（wikiの[Security/Server\_Side\_TLS](https://wiki.mozilla.org/Security/Server_Side_TLS)は移転の案内だけになった）
 - [IETF draft：RateLimit header fields](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-ratelimit-headers)、[RFC 9114（HTTP/3）](https://datatracker.ietf.org/doc/html/rfc9114)、[RFC 9116（security.txt）](https://www.rfc-editor.org/rfc/rfc9116)、[RFC 9457（Problem Details）](https://www.rfc-editor.org/rfc/rfc9457)
 - [curl man page](https://curl.se/docs/manpage.html)、[everything curl：Verbose](https://everything.curl.dev/usingcurl/verbose/index.html)
 - [GitHub Community Discussion #54257（PagesのHTTPヘッダ）](https://github.com/orgs/community/discussions/54257)

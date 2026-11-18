@@ -124,7 +124,9 @@ export function ownChain(t: Target): HttpResponse[] {
 export function isHttps(t: Target): boolean | undefined {
   const u = t.url ?? t.meta.url_effective;
   if (u) return /^https:\/\//i.test(u) || upgradedToHttps(t);   // スキームは大文字小文字を区別しない（HTTPS://…）
-  if (t.info.some(l => /SSL connection using|ALPN:/.test(l))) return true;
+  // ALPN の行は、curl 7.83 より前は「ALPN, server accepted to use h2」、以降は「ALPN: server accepted h2」。Windows の Schannel 版の curl は
+  // 「SSL connection using」の行を出さないので、ALPN の行が HTTPS の手がかりになる
+  if (t.info.some(l => /SSL connection using|ALPN[:,]/.test(l))) return true;
   if (t.info.some(l => /^(?:Connected to|Established connection to) .* port 80\b/.test(l))) return false;   // 今の curl は Established connection to とも出す
   return undefined;
 }

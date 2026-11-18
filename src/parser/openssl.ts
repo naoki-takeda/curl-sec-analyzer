@@ -61,7 +61,10 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
     if (sanNext) { for (const m of l.matchAll(/(?:DNS|IP Address):([^,\s]+)/g)) info.sans.push(m[1].toLowerCase()); sanNext = false; continue; }   // push(...) に広げない（長い行でスタックがあふれる）
     let m: RegExpMatchArray | null;
     if ((m = l.match(/^Protocol\s*:\s*(\S+)/))) info.protocol ??= m[1];
-    else if ((m = l.match(/^New, (TLSv[\d.]+|SSLv3), Cipher is (\S+)/))) { info.protocol ??= m[1]; info.cipher ??= m[2]; }
+    // 「New, <版>, Cipher is <暗号>」の版は、その暗号を使える最小の版で、合意した版ではない（TLS 1.2 の接続で New, SSLv3, Cipher is AES128-SHA、
+    // New, TLSv1.0, Cipher is ECDHE-RSA-AES128-SHA と出る）。版として使うのは TLS 1.3 の暗号（TLS 1.3 でしか使えない）のときだけで、
+    // それ以外は Protocol の行で読む（OpenSSL 1.1.1・3.0 は TLS 1.3 の接続で Protocol の行を出さない）
+    else if ((m = l.match(/^New, (TLSv[\d.]+|SSLv3), Cipher is (\S+)/))) { if (m[1] === 'TLSv1.3') info.protocol ??= m[1]; info.cipher ??= m[2]; }
     // 失敗したハンドシェイクの「Cipher : 0000」「Cipher : (NONE)」は暗号ではない（0000 を合意した暗号として T-10 の証跡に出した）
     else if ((m = l.match(/^Cipher\s*:\s*(\S+)/))) { if (/^(?:0+|\(NONE\))$/i.test(m[1])) noCipher = true; else info.cipher ??= m[1]; }
     else if (/^New, \(NONE\), Cipher is \(NONE\)/.test(l)) noCipher = true;

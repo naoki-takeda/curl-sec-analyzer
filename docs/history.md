@@ -961,3 +961,19 @@
 | 本文のない HTML（A2-1） | E-02・E-07〜E-10・E-12 は、本文を採取していない HTML で`[]`（適用外）を返し、「判定できなければ na」の取り決めに反していた。本文を採取した HTML が1つでもあると項目は「判定済み」になり、本文のない機密のページを調べていないことが見えなかった | 2xx の HTML 応答で本文がなければ na（理由「本文を採取していない」）。HTML でない応答と 3xx・4xx は適用外のまま。E-12 の`sensitive=0`と、本文にパスワード欄がないときの E-10 も適用外のまま。画面では、同じターゲットの判定不能のうち証跡と推奨対応が同じものを1行にまとめる（本文のないページで6行並ぶのを防ぐ） | `src/rules/html.ts`、`src/rules/exposure.ts`、`src/engine/summarize.ts`、`src/ui/results.ts`、設計書 |
 | カバレッジの注記（A2-2） | 「一部の条件は入力不足」の注記は、ターゲット横断・ホスト単位の na にだけ付き、ターゲットごとの na があっても注記なしの「判定済み」になった | 判定済みの項目に、ターゲットごとの na があれば「一部のターゲット（n件）は入力不足」と na の理由を添える。区分とカバレッジ率は変えない。ほかの項目に任せた na（「（H-03で判定）」など）と二重計上の防止の na は数えない（初めは数えていて、ゴールデンの差分で H-02・H-05・H-07 に「入力不足」と出たので除いた） | `src/engine/coverage.ts`、`src/recommendationsEn.ts`、設計書 |
 | 未対応 | E-01（エラーの詳細）と A-07（過剰なデータ露出）も、本文のない応答で`[]`を返す。どちらも HTML の本文の項目ではないので今回の範囲に入れなかった。`tests/fixtures/generated_local.txt`は以前の生成スクリプトの出力（`login`を`-v`で採取）のまま | 次回以降 | — |
+
+### 要確認事項の確認（第44回）
+
+設計書の「要確認事項」の未確認の12件を調べた（2026-11-18）。仕様・ソース・公式文書と、手元の OpenSSL 3.5.9・curl 8.22.0（Schannel）を localhost の `s_server`・HTTP サーバに向けた実験で確かめた。11件を確認済みにし、前提の違いを直した。版を 0.4.57 にする。
+
+| 対象 | 分かったこと | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| プローブ：package.json・composer.json | `name`・`version`・`type` のような一般的なキー1つで一致し、どのパスにも`{"name":"api","version":"1.0"}`を返す API で E-03①（高）の誤検知になる | そのファイルに特有のキーか、名前の形（`@scope/名前`・`vendor/名前`）が先頭64バイトにあるときだけ一致とする。特有のキーが後ろにある本物のファイルは②（情報・判定保留）になる | `src/mask.ts`、設計書、`tests/review3.test.ts` |
+| プローブ：ソースマップ | `"version"`・`"file"`だけで一致し、E-13①（中）の誤検知になる | `"version":3`か、ソースマップに特有のキーを必須にする | `src/mask.ts`、設計書 |
+| プローブの見逃し | detached HEAD（コミットのIDだけ）の`.git/HEAD`、`export KEY=`・`KEY = value`の`.env`、`Canonical:`・`Policy:`などで始まる security.txt を見逃した。phpinfo・server-status の目印は、Web の出力では先頭64バイトに現れない | 一致させる。phpinfo・server-status は設計書の「多い」を「ほぼ常に②」に直す | `src/mask.ts`、設計書 |
+| openssl の`New, <版>,`の行 | 版は暗号の最小の版で、合意した版ではない（TLS 1.2 で`New, SSLv3, Cipher is AES128-SHA`）。パーサは版として読んでいた（使うルールはなく、実害はない） | 版は`Protocol`の行で読み、`New`の行は TLS 1.3 の暗号のときだけ使う（1.1.1・3.0 は TLS 1.3 で`Protocol`の行を出さない） | `src/parser/openssl.ts` |
+| curl の`-v`の行 | 7.83 より前の`ALPN, server accepted to use`を HTTPS の手がかりにしていなかった。Windows の標準の curl（Schannel）は`SSL connection using`の行を出さない | 古い形の ALPN も読む。Schannel では T-09②・T-10 の合意した暗号を判定できず、C12・C23 で判定することを設計書に書く | `src/parser/target.ts`、設計書 |
+| R-05②（Max-Age） | Chrome は 7200秒のまま。Safari は600秒、Firefox は86400秒 | 推奨対応に Safari を足す | `src/rules/cors.ts`、`src/recommendationsEn.ts`、設計書 |
+| Mozilla Server Side TLS | 最新は6.0（5.8 で Intermediate から DHE を外し、6.0 で Old を廃止）。wiki は移転の案内だけ | 出典を指針の JSON に替える。T-10 は DHE＋AEAD を合格のままにする（IPA の TLS 暗号設定ガイドラインに合わせる。判断の根拠15） | 設計書 |
+| 出典・ライセンス・そのほか | OWASP Secure Headers Project は移転（旧URLは404）。貼り付け型 OSS などは MIT（techshield-tech/http-headers は存在しない）。Observatory の現行の加点の合計は165。Trusted Types は Baseline 2026。HTTP/2 のヘッダ名は常に小文字。C12・C23 は OpenSSL 3.5.9 で正しく判定した。C23 の暗号名は正しい。Chrome・Edge の HAR の既定は sanitized | 設計書の要確認事項・出典・既存ツールの表に反映する | 設計書 |
+| 未対応 | プローブの判定パターンは、形式の仕様と典型的な例で確かめただけで、実際の応答では確かめていない（要確認事項に残す） | 次回以降 | — |
