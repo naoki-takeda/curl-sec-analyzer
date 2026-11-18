@@ -155,3 +155,34 @@ describe('第49回：ログイン・ログアウトとセッション Cookie', (
     expect(got).not.toContain('C-02.1');
   });
 });
+
+describe('第50回：暗号化した Cookie と解析用の Cookie', () => {
+  const lv = (iv: string, value = 'U2Vzc2lvbklEZml4ZWRWYWx1ZUFBQUFBQUFBQUFBQUFBQUFB') => Buffer.from(JSON.stringify({ iv, value, mac: 'a'.repeat(64), tag: '' })).toString('base64');
+  const c09 = (input: string) => evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId);
+  it('C-09：Laravel の暗号化したセッションCookie は、値が変わっても再発行したとはみなさない（na）', () => {
+    const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, 'HTTP/2 200', `set-cookie: laravel_session=${lv('MTIzNDU2Nzg5MDEyMzQ1Ng==')}; path=/; secure; httponly; samesite=lax`, '', '',
+      '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /home', `set-cookie: laravel_session=${lv('OTg3NjU0MzIxMDk4NzY1NA==')}; path=/; secure; httponly; samesite=lax`, '', ''].join('\n');
+    expect(c09(input)).toEqual(['C-09.na']);
+  });
+  it('C-09：暗号化していない Cookie を新しくしたログインは、これまでどおり合格', () => {
+    const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, 'HTTP/2 200', 'set-cookie: sessionid=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
+      '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /home', 'set-cookie: sessionid=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly', '', ''].join('\n');
+    expect(c09(input)).toEqual(['C-09.ok']);
+  });
+  it('C-09：送っただけの解析用の Cookie（_hjSession・ai_session）では na にしない', () => {
+    const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, '* Connected to www.example.com (192.0.2.1) port 443', '> GET /login HTTP/2',
+      '> Cookie: _hjSessionUser_123=eyJpZCI6IjEifQ; _hjSession_123=eyJpZCI6IjIifQ; ai_session=abc|1|2; JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', '>', '< HTTP/2 200', '<', '',
+      '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /home', 'set-cookie: JSESSIONID=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly', '', ''].join('\n');
+    expect(c09(input)).toEqual(['C-09.ok']);
+  });
+  it('C-07②：暗号化した Cookie は、値から推測可能性を判定しない（na）', () => {
+    const s = (i: number) => `#TARGET url=https://www.example.com/login label=session-sample-${i}\n${AT}\nHTTP/2 302\nlocation: /\nset-cookie: laravel_session=${lv(`aXY${i}aXY${i}aXY${i}aXY${i}`)}; path=/; secure; httponly\n\n`;
+    expect(evaluate(s(1) + s(2)).findings.filter(f => f.item === 'C-07' && f.target === 'session-sample-*').map(f => f.ruleId)).toEqual(['C-07.na']);
+  });
+  it('C-09：送っただけの classic ASP の ASPSESSIONID… を再発行せず、別の Cookie だけを発行したログインは na', () => {
+    const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, '* Connected to www.example.com (192.0.2.1) port 443', '> GET /login HTTP/2',
+      '> Cookie: ASPSESSIONIDQASDRTBC=AAAAAAAAAAAAAAAAAAAAAAAA', '>', '< HTTP/2 200', '< set-cookie: auth_token=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '<', '',
+      '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /home', 'set-cookie: auth_token=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly', '', ''].join('\n');
+    expect(c09(input)).toEqual(['C-09.na']);
+  });
+});

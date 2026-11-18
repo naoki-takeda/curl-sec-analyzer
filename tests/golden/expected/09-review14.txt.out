@@ -79,7 +79,7 @@ mypage | R-04.ok | info | pass | (ACAOなし)
 mypage | T-12.ok | info | pass | HTTP/2
 open-redirect | T-06.na | info | na | HTTP 200（転送しなかった。転送先を検証しているかは分からない）
 pre-login/login | C-09.na | info | na | 
-session-sample-* | C-07.ok | info | pass | .AspNetCore.CookiesC1：2件に共通部分・連番なし
+session-sample-* | C-07.na | info | na | .AspNetCore.CookiesC1：暗号化した Cookie なので、セッションIDの推測可能性は値から分からない
 session-sample-1 | C-01.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-02.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-03.ok | info | pass | .AspNetCore.CookiesC1
@@ -154,7 +154,7 @@ C-03 | evaluated | fails=0
 C-04 | evaluated | fails=0
 C-05 | evaluated | fails=0
 C-06 | evaluated | fails=2
-C-07 | evaluated | fails=0
+C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / サーバ側のセッションIDの作り方（フレームワークの既定の乱数か）を確認する
 C-08 | evaluated | fails=0
 C-09 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: pre-login, login
 C-10 | evaluated | fails=1

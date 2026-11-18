@@ -1,7 +1,7 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
-import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
+import { isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, notSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
 import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
@@ -175,6 +175,9 @@ function loginRejected(login: Target, pre: Target): string | undefined {
   return undefined;
 }
 
+/** 暗号化した Cookie の値：Laravel（base64 の {"iv":…,"value":…,"mac":…}。URL エンコードしたものを含む）と ASP.NET Core の Data Protection（CfDJ8） */
+const encryptedCookie = (v: string) => /^(?:eyJpdiI6|CfDJ8)/.test(v);
+const ENCRYPTED_REC = 'ログイン前の Cookie だけを送って、ログイン後のページを取得できないか手動で確認する';
 export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定化', appliesTo: 'any', scope: 'cross',
   basis: ['OWASP Session Mgmt CS'],
   runCross(x) {
@@ -222,9 +225,17 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // ASP.NET Core の .AspNetCore.Identity.Application）だけを発行した。認証を新しい Cookie で持つなら固定化はないが、ログイン前の ID の
     // セッションに認証を結び付けるなら固定化になる。どちらかは応答からは分からないので、合格にしない（新しい Cookie があるだけで合格にした）
     const renewed = new Set(afterC.filter(c => !before.includes(`${c.name}=${c.value}`)).map(c => c.name));
+    // 値を変えたセッションCookie が、すべて暗号化した Cookie（Laravel の EncryptCookies・ASP.NET Core の Data Protection）で、ログイン前にも
+    // 同じ名前があった：暗号化した値は応答ごとに変わるので、セッションIDを再発行したかは値から分からない（regenerate() を忘れた固定化のある
+    // Laravel のアプリを合格にした。第50回）
+    const changed = afterC.filter(c => !before.includes(`${c.name}=${c.value}`));
+    if (changed.length && changed.every(c => encryptedCookie(c.value) && (beforeC.some(b => b.name === c.name && encryptedCookie(b.value)) || (pre.sentCookieNames ?? []).includes(c.name))))
+      return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'セッションCookie が暗号化した値（応答ごとに値が変わる）なので、セッションIDを再発行したかは値から分からない', ENCRYPTED_REC)];
     // pre-login で送っただけの主のセッションID（-v・HAR の > Cookie: JSESSIONID=…。ブラウザの普通の流れ）も数える（発行した場合だけを数え、
     // 送っただけの JSESSIONID を再発行せず auth_token だけを発行したログインを合格にした。第49回）
-    const kept = [...new Set([...beforeC.map(c => c.name), ...(pre.sentCookieNames ?? [])].filter(n => /sess|^sid$/i.test(n) && !renewed.has(n)))];
+    // 送っただけの名前は、解析用・負荷分散などのセッションCookie でない名前を除く（Hotjar の _hjSession_123・ai_session を数え、C-09 を na に
+    // した。第50回）。looksLikeSessionName で絞ると、classic ASP の ASPSESSIONIDxxxx も外して合格にした（束のレビュー）
+    const kept = [...new Set([...beforeC.map(c => c.name), ...(pre.sentCookieNames ?? []).filter(n => !notSessionName(n))].filter(n => /sess|^sid$/i.test(n) && !renewed.has(n)))];
     if (kept.length)
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答で ${kept.join(', ')} を再発行せず、ほかの Cookie（${[...renewed].join(', ')}）を発行した。どちらで認証しているかは分からない`,
         `ログイン後に、ログイン前の ${kept.join('・')} だけを送って認証後のページを取得できないか、手動で確認する`)];
@@ -279,6 +290,11 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
       const far = times.every(v => !Number.isNaN(v)) && Math.max(...times) - Math.min(...times) > 60e3;
       if (new Set(vals).size === 1 && !far && /^(?:(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.[\w-]+|\.?[\w-]+:[\w-]+:[\w-]{20,})$/.test(vals[0])) {
         out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：署名付きのトークンが同じ値（同じ秒に同じ内容で署名した可能性）`, '秒をまたいで session-sample を採取し直す'));
+        continue;
+      }
+      // 暗号化した Cookie（Laravel・ASP.NET Core）は、値が暗号文なので、中のセッションIDの推測可能性は値から分からない（暗号文を比べて合格にした。第50回）
+      if (vals.every(encryptedCookie)) {
+        out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：暗号化した Cookie なので、セッションIDの推測可能性は値から分からない`, 'サーバ側のセッションIDの作り方（フレームワークの既定の乱数か）を確認する'));
         continue;
       }
       const why = predictable(vals);
