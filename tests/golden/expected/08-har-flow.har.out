@@ -91,6 +91,7 @@ har-5 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 har-5 | R-04.ok | info | pass | (ACAOなし)
 har-5 | T-12.ok | info | pass | HTTP/2
 har-7 | A-02.ok | info | pass | URL・Location・本文にトークンなし
+har-7 | C-10.ok | info | pass | HTTP応答でCookieを発行していない
 har-7 | E-01.ok | info | pass | エラーの詳細らしき記述なし
 har-7 | E-02.ok | info | pass | 一覧表示なし
 har-7 | E-07.ok | info | pass | http:// の資源なし
@@ -198,7 +199,7 @@ C-06 | evaluated | fails=2
 C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | evaluated | fails=0
 C-09 | evaluated | fails=0
-C-10 | missing-input | fails=0 | 必要なラベル: http
+C-10 | evaluated | fails=0
 C-11 | evaluated | fails=0
 C-12 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: logout, after-logout
 C-13 | evaluated | fails=0

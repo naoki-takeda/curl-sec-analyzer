@@ -14,6 +14,7 @@ tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応してい�
 
 ## findings
 chain | A-02.ok | info | pass | URL・Location・本文にトークンなし
+chain | C-10.ok | info | pass | HTTP応答でCookieを発行していない
 chain | H-01.1 | high | fail | (ヘッダなし)
 chain | H-02.na | info | na | HSTSがない（H-01で判定）
 chain | H-08.na | info | na | HTTP 302（本文のない応答）

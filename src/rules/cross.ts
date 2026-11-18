@@ -51,6 +51,49 @@ const STATE_DATA = /["']?\b(?:user(?:name|_?id)?|current_?user|email|account|pro
  * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64KB で、閉じタグまで）：type="application/json" のスクリプト、
  * オブジェクト・配列の代入、JSON.parse のうち、中身が STATE_DATA に当てはまるもの。ld+json（構造化データ）と設定だけのものはデータとしない
  */
+/**
+ * STATE_DATA に当たった名前のうち、値が null・false・空でないものがあるか（window.Laravel = {"csrfToken":…,"user":null} は、サーバが利用者を
+ * 持っていないことを示すので、データとしない。データとみなして C-12①（高）にした。第49回）
+ */
+/** STATE_DATA の1つ目の選択肢（"user": のような名前） */
+const STATE_KEY = /["']?\b(?:user(?:name|_?id)?|current_?user|email|account|profile|customer|member|viewer|me|session|auth(?:enticated|_?user)?)\b["']?\s*:/;
+/** 値が null・false・空 */
+const EMPTY_VALUE = /^(?:null|false|undefined|""|''|\[\s*\]|\{\s*\})(?![\w$])/;
+function stateData(body: string): boolean {
+  const re = new RegExp(STATE_DATA.source, 'gi');
+  for (let m = re.exec(body), n = 0; m && n < 200; m = re.exec(body), n++) {
+    const rest = body.slice(m.index + m[0].length, m.index + m[0].length + 20).trimStart();
+    const opened = m[0].trimEnd().slice(-1);
+    if (opened === '{' || opened === '[') {
+      // 代入の { [ の中（2000文字まで）に利用者のデータらしい名前があれば、その値で見る（Redux・Vuex の SSR の __INITIAL_STATE__ = {"user":null}。
+      // { のあとが空でないだけでデータとすると、利用者のいない殻を C-12①（高）にした。束のレビュー）。名前がなければ、空でないものをデータとする
+      const inner = body.slice(m.index + m[0].length, m.index + m[0].length + 2000);
+      const keys = [...inner.matchAll(new RegExp(STATE_KEY.source, 'gi'))].slice(0, 50);
+      if (keys.length ? keys.some(k => !EMPTY_VALUE.test(inner.slice(k.index! + k[0].length, k.index! + k[0].length + 20).trimStart())) : !/^[}\]]/.test(rest)) return true;
+      continue;
+    }
+    if (/^JSON\.parse/i.test(m[0].slice(-10)) || !EMPTY_VALUE.test(rest)) return true;
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  return false;
+}
+/** パスワード欄のあるフォームの送信先が、ログインらしいパス（LOGIN_PATH）か、送信先がない（同じ URL に送る）か（タグは indexOf で線形に読む） */
+function loginFormAction(b: string): boolean {
+  const low = b.slice(0, 65536).toLowerCase();
+  for (let i = low.indexOf('<form'), n = 0; i >= 0 && n < 50; i = low.indexOf('<form', i + 5), n++) {
+    const end = low.indexOf('>', i); if (end < 0 || end - i > 2000) continue;
+    const close = low.indexOf('</form', end);
+    if (!/type\s*=\s*["']?password/.test(low.slice(end, close < 0 ? end + 8000 : Math.min(close, end + 8000)))) continue;
+    const action = low.slice(i, end).match(/(?<![\w-])action\s*=\s*["']?([^"'\s>]*)/)?.[1];   // data-action には当てない
+    if (!action) return true;
+    try {
+      const path = new URL(action, 'https://x.invalid/').pathname.replace(/\/+$/, '');
+      // ログインの語を途中に含むパス（/login/password・/users/sign_in・/session）も含める
+      if (LOGIN_PATH.test(path) || /(?:^|\/)(?:log-?in|sign-?in|sign_in|sessions?|authenticate|auth|j_(?:spring_)?security_check)(?:[/.]|$)/i.test(path) || path === '') return true;
+    } catch { /* 読めない送信先 */ }
+  }
+  return false;
+}
 function inlineData(b: string): boolean {
   const s = b.slice(0, 65536), low = s.toLowerCase();
   for (let i = low.indexOf('<script'); i >= 0; i = low.indexOf('<script', i + 7)) {
@@ -58,7 +101,7 @@ function inlineData(b: string): boolean {
     const tag = low.slice(i, tagEnd);
     if (/\bsrc\s*=/.test(tag)) continue;
     const end = low.indexOf('</script', tagEnd); const body = s.slice(tagEnd + 1, end < 0 ? s.length : end);
-    if ((/type\s*=\s*["']?application\/json/.test(tag) || /=\s*[{[]|JSON\.parse\s*\(/.test(body)) && STATE_DATA.test(body)) return true;
+    if ((/type\s*=\s*["']?application\/json/.test(tag) || /=\s*[{[]|JSON\.parse\s*\(/.test(body)) && stateData(body)) return true;
     if (end < 0) return false;
   }
   return false;
@@ -142,9 +185,13 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // 新しい値のセッションCookie を1つでも発行し、同じ値で送り直したのが期限付きの Cookie（device_token・remember の類）だけなら、再発行している
     // （名前の推定でセッションCookie とみなした長期の Cookie を同じ値で送り直しただけで、①（高）にした）
     const fresh = afterC.some(c => !before.includes(`${c.name}=${c.value}`));
+    // 名前がセッションらしい Cookie を新しい値にしたか（visitor_ref だけが新しく、主のセッションCookie（APPCTX）を同じ値で送り直したログインを、
+    // 期限のない名前のない Cookie を除いて合格にした。束のレビュー）
+    const freshSession = afterC.some(c => looksLikeSessionName(c.name) && !before.includes(`${c.name}=${c.value}`));
+    // 期限のない Cookie でも、名前がセッションらしくないもの（visitor_ref）は除く（同じ値で送り直しただけで①（高）にした。第49回）。
     // 除くのは、名前がセッションIDらしくないもの（sessionid・JSESSIONID・laravel_session・sid は、期限付きでも主のセッションIDなので比べる。
     // 除くと、期限付きの sessionid を再発行せずに auth_token を足しただけのログインを合格にした）
-    const after = afterC.filter(c => !(fresh && !/sess|^sid$/i.test(c.name) && before.includes(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age')))).map(c => `${c.name}=${c.value}`);
+    const after = afterC.filter(c => !(fresh && !/sess|^sid$/i.test(c.name) && before.includes(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age') || (freshSession && !looksLikeSessionName(c.name))))).map(c => `${c.name}=${c.value}`);
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
@@ -160,6 +207,8 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // SSO のコールバック（Location に ?code=・?ticket=）へ転送しただけで、その先を採取していない（-L なし）なら、セッションはコールバックで発行される
     // ので、再発行したかは分からない
     const lc = ownChain(login);
+    // login の応答がない（プロキシの CONNECT のあとで curl が失敗した）なら、ログインしたかが分からない（応答がないまま①（高）にした。束のレビュー）
+    if (!lc.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'login の応答がない', LOGIN_FAILED_REC)];
     if (!after.length && lc.length === 1 && /[?&](?:code|ticket|SAMLart)=/i.test(lc[0].headers.get('location')?.[0] ?? ''))
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
     const reused = !after.length || after.some(a => before.includes(a));
@@ -173,7 +222,9 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // ASP.NET Core の .AspNetCore.Identity.Application）だけを発行した。認証を新しい Cookie で持つなら固定化はないが、ログイン前の ID の
     // セッションに認証を結び付けるなら固定化になる。どちらかは応答からは分からないので、合格にしない（新しい Cookie があるだけで合格にした）
     const renewed = new Set(afterC.filter(c => !before.includes(`${c.name}=${c.value}`)).map(c => c.name));
-    const kept = [...new Set(beforeC.filter(c => /sess|^sid$/i.test(c.name) && !renewed.has(c.name)).map(c => c.name))];
+    // pre-login で送っただけの主のセッションID（-v・HAR の > Cookie: JSESSIONID=…。ブラウザの普通の流れ）も数える（発行した場合だけを数え、
+    // 送っただけの JSESSIONID を再発行せず auth_token だけを発行したログインを合格にした。第49回）
+    const kept = [...new Set([...beforeC.map(c => c.name), ...(pre.sentCookieNames ?? [])].filter(n => /sess|^sid$/i.test(n) && !renewed.has(n)))];
     if (kept.length)
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答で ${kept.join(', ')} を再発行せず、ほかの Cookie（${[...renewed].join(', ')}）を発行した。どちらで認証しているかは分からない`,
         `ログイン後に、ログイン前の ${kept.join('・')} だけを送って認証後のページを取得できないか、手動で確認する`)];
@@ -267,6 +318,9 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
       // ログインのフォームは、パスワード欄が1つで、ユーザー名・メールの欄があり、パスワード変更の欄（new_password など）がないもの。
       // ログイン後のページ（mypage）自身にパスワード欄があるときは、見分けられないので使わない
       const mpBody = mp ? finalResponse(mp)?.body ?? '' : '';
+      // ログイン後のページ（mypage）がないときは、パスワード欄のフォームの送信先がログインらしいパス（または送信先なし）のときだけログイン画面とする
+      // （メールアドレスの変更などで再入力を求めるアカウント画面（action="/account/email"）を「ログイン画面」として合格にした。第49回）
+      if (loginForm(r.body ?? '') && !mp && !loginFormAction(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（パスワード欄のある画面。送信先がログインらしいパスでなく、ログイン後のページ（mypage）もないので、ログイン画面かは分からない）`, 'ログイン後のデータを返すページを label=mypage として採取する')];
       if (loginForm(r.body ?? '') && !PASSWORD_FIELD.test(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
       // SPA の画面（<div id="root"> とスクリプトだけで、文字のない HTML）は、どのセッションでも同じものを返すので、旧Cookie が使えたかは分からない
       // （A-01・A-11・E-05 の HTML の画面と同じ考え方）

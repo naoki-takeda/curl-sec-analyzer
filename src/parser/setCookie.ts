@@ -92,7 +92,7 @@ const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_u
 // Kubernetes の ingress-nginx のスティッキーセッション（INGRESSCOOKIE）と、Google Cloud の負荷分散（GCLB）も同じ
 // AWSELB で始まっても、ALB の認証（OIDC・Cognito）のセッションCookie（AWSELBAuthSessionCookie-0）は利用者ごとのセッションなので除かない。
 // Azure Front Door（ASLBSA・ASLBSACORS）、Application Gateway（ApplicationGatewayAffinity）、Citrix ADC（NSC_…）、Traefik の既定の名前も負荷分散の印
-const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB(?!Auth)|TS01[0-9a-f]{6}|SERVERID$|ROUTEID$|INGRESSCOOKIE$|GCLB$|ASLBSA|ApplicationGatewayAffinity|NSC_|_TRAEFIK_BACKEND$)/i;
+const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB(?!Auth)|TS01[0-9a-f]{6}|SERVERID$|ROUTEID$|INGRESSCOOKIE$|GCLB$|ASLBSA|ApplicationGatewayAffinity|NSC_|_TRAEFIK_BACKEND$|route$)/i;   // route は nginx-sticky-module-ng の既定の名前（第49回）
 const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*)$/i;
 // WAF・CDN・ボット対策の Cookie（Cloudflare、Imperva、Akamai）。CDN が発行し、属性（Domain・SameSite・Secure）は運営者が変えられない。
 // 期限がなく値が長いものは、推定ではセッションCookieに見える（Imperva の incap_ses_* で C-01①・C-02①（高）の誤検知になる）

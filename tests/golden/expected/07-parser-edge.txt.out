@@ -89,6 +89,7 @@ page | C-03.ok | info | pass | tmp
 page | C-04.ok | info | pass | tmp
 page | C-06.ok | info | pass | tmp
 page | C-08.ok | info | pass | tmp
+page | C-10.2 | medium | fail | tmp=…(6 chars); Path=/
 page | C-11.ok | info | pass | tmp
 page | C-13.ok | info | pass | 共有キャッシュの指定なし
 page | E-02.na | info | na | 本文を採取していない
@@ -219,7 +220,7 @@ C-06 | evaluated | fails=0
 C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | evaluated | fails=0
 C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
-C-10 | missing-input | fails=0 | 必要なラベル: http
+C-10 | evaluated | fails=1
 C-11 | evaluated | fails=0
 C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
 C-13 | evaluated | fails=0

@@ -35,7 +35,9 @@ export const cookieEvidence = (c: SetCookie) => {
 
 /** Cookie ごとの判定を集める。指摘が1件もなければ .ok を1件返す。Set-Cookie がなければ適用外（空配列） */
 function perCookie(rule: Rule, ctx: RuleContext, judge: (c: SetCookie) => Finding | undefined, subset = (_: SetCookie) => true): Finding[] {
-  if (ctx.isHttps === false) return [];                // HTTP応答のCookieは C-10 で扱う（MVP）
+  // http のターゲットで見ないのは、Secure（C-01）と __Host-・__Secure- のプレフィックス（C-06）だけ（Secure の有無は C-10 で見る）。HttpOnly・
+  // SameSite・期限・推測可能性は通信路によらない（ASVS 3.3.4）。すべてを適用外にすると、http だけのサイトでセッションCookie の判定が何も出なかった（第49回）
+  if (ctx.isHttps === false && (rule.id === 'C-01' || rule.id === 'C-06')) return [];
   // 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ応答に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない）
   const all = cookiesOf(ctx); const names = new Set(all.map(c => c.name));
   const cs = all.filter(c => !(isChunkMarker(c) && names.has(`${c.name}C1`))).filter(subset);
@@ -145,6 +147,10 @@ export function estimateBits(raw: string): number {
   // 64種で数え、20桁の16進数（80bit）を約132bitとして合格にした）
   let v = raw.replace(/^"(.*)"$/s, '$1');
   try { v = decodeURIComponent(v); } catch { /* 壊れた %XX はそのまま */ }
+  // 区切りの記号（0a1b-2c3d-…、1234.5678.…）は乱数の量に数えない（数えると記号を含むとみなして64種で数え、20桁の16進数（80bit）を合格にした。第49回）
+  // base64url（secrets.token_urlsafe）の - _ は区切りではなく文字そのものなので、16進数のかたまりを区切った形のときだけ外す（外すと、128bit の
+  // base64url を約125bit として C-07①（高）にした。束のレビュー）
+  if (/^[0-9a-f]+(?:[-._:][0-9a-f]+)+$/i.test(v)) v = v.replace(/[-._:]/g, '');
   // 小文字と数字だけ（ASP.NET_SessionId の base32 など）・大文字と数字だけは36種で数える（62種で数えると、24文字の約120bitを約142bitとして見逃した）
   const size = /^[0-9]+$/.test(v) ? 10 : /^[0-9a-f]+$/i.test(v) ? 16 : /^[0-9a-z]+$/.test(v) || /^[0-9A-Z]+$/.test(v) ? 36 : /^[0-9A-Za-z]+$/.test(v) ? 62 : 64;
   return Math.floor(v.length * Math.log2(size));
@@ -192,7 +198,11 @@ export const cookieOverHttp: Rule = { id: 'C-10', title: 'HTTP応答でのCookie
   run(ctx) {
     // http のホップすべて（http://…/app → http://…/app/ → https の2つ目のホップで発行した Cookie も平文で送られる）。
     // 各ホップの URL はパーサ・HAR の取り込みが付ける（parser/target.ts の assignHopUrls）。URL の分からないホップは最初のものだけ
-    const httpResponses = /^http:\/\//i.test(ctx.target.url ?? '') ? ctx.chain.filter((r, i) => i === 0 || /^http:\/\//i.test(r.url ?? '')) : [];
+    // ホップの URL で見る（HAR のターゲットの URL は転送先の https なので、ターゲットの URL で見ると、http のホップで発行した Cookie を見逃し、
+    // curl と HAR で結果が違った。第49回）。URL の分からない最初のホップは、ターゲットの URL で見る
+    // 対象のサイトのホップだけ（-L で別サイトへ転送した先の http のホップの Cookie を、C-10①（高）にした。束のレビュー）
+    const site = new Set(siteResponses(ctx.target));
+    const httpResponses = ctx.chain.filter((r, i) => site.has(r) && /^http:\/\//i.test(r.url ?? (i === 0 ? ctx.target.url ?? '' : '')));
     if (!httpResponses.length) return [];
     const cs = httpResponses.flatMap(r => r!.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
     if (!cs.length) return [mk(cookieOverHttp, ctx, 'ok', 'info', 'pass', 'HTTP応答でCookieを発行していない', '')];

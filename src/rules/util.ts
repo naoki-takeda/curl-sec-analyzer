@@ -146,9 +146,11 @@ const ENVELOPE_KEYS = /^(?:message|msg|status|status_?code|statuscode|code|succe
 const errorEnvelope = (j: Record<string, unknown>, blank: (v: unknown, k?: string) => boolean): boolean => {
   const entries = Object.entries(j);
   // 状態の番号だけのエラー（{"status":401,"message":"Unauthorized"}・{"code":401,"msg":"not logged in"}・{"status":"fail"}）も含める
-  const failed = entries.some(([k, v]) => (ERROR_KEYS.test(k) && !blank(v)) || (/^(?:success|ok)$/i.test(k) && v === false)
+  // ログインの状態を表す名前（authenticated・loggedIn）が false のものも失敗の印（{"authenticated":false,"message":"Not logged in"} を
+  // データとみなし、C-12①・A-01①（高）にした。第49回）
+  const failed = entries.some(([k, v]) => (ERROR_KEYS.test(k) && !blank(v)) || ((/^(?:success|ok)$/i.test(k) || AUTH_FLAG.test(k)) && v === false)
     || (/^(?:status|status_?code|statuscode|code)$/i.test(k) && ((typeof v === 'number' && v >= 400 && v < 600) || (typeof v === 'string' && /^(?:[45]\d\d|fail(?:ed|ure)?|error|unauthori[sz]ed|forbidden|denied)$/i.test(v)))));
-  return failed && entries.every(([k, v]) => ERROR_KEYS.test(k)
+  return failed && entries.every(([k, v]) => ERROR_KEYS.test(k) || (AUTH_FLAG.test(k) && v === false)
     || (/^(?:data|result)$/i.test(k) && blank(v))
     || (ENVELOPE_KEYS.test(k) && (v === null || ['string', 'number', 'boolean'].includes(typeof v))));
 };

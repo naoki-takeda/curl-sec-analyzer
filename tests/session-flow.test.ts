@@ -100,3 +100,58 @@ describe('第48回（束3〜5のレビュー）', () => {
     const t0 = performance.now(); evaluate(LOGOUT('HTTP/2 200\ncontent-type: text/html', body) + AFTER('<h1>x</h1>')); expect(performance.now() - t0).toBeLessThan(3000);
   });
 });
+
+describe('第49回：ログイン・ログアウトとセッション Cookie', () => {
+  const AFTER49 = (ct: string, body: string) => ['#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1', AT, 'HTTP/2 200', `content-type: ${ct}`, '', body, ''].join('\n');
+  it('C-12①・A-01①：{"authenticated":false,"message":…} はデータを返していない', () => {
+    expect(ids(LOGOUT(DELETED) + AFTER49('application/json', '{"authenticated":false,"message":"Not logged in"}'), 'C-12')).not.toContain('C-12.1');
+    const unauth = evaluate(`#TARGET url=https://www.example.com/api/me label=unauth-me\n${AT}\nHTTP/2 200\ncontent-type: application/json\n\n{"authenticated":false,"message":"Not logged in"}\n`);
+    expect(unauth.findings.filter(f => f.item === 'A-01').map(f => f.ruleId)).not.toContain('A-01.1');
+  });
+  it('C-12①：利用者が null の SPA の殻はデータを持たない（利用者のデータを埋め込んだ殻は今までどおり①）', () => {
+    const shell = (user: string) => `<head><script>window.Laravel = {"csrfToken":"AbCdEfGh","user":${user}};</script></head><body><div id="app"></div><script src="/js/app.js"></script></body>`;
+    expect(ids(LOGOUT(DELETED) + AFTER49('text/html', shell('null')), 'C-12')).not.toContain('C-12.1');
+    expect(ids(LOGOUT(DELETED) + AFTER49('text/html', shell('{"id":1,"email":"a@example.com"}')), 'C-12')).toContain('C-12.1');
+  });
+  it('C-12：mypage がなく、送信先がログインらしくないパスワード欄の画面（アカウント画面）は合格にしない', () => {
+    const acct = '<h1>Account: taro@example.com</h1><form method="post" action="/account/email"><input type="email" name="email" value="taro@example.com"><input type="password" name="password"></form>';
+    expect(evaluate(LOGOUT(DELETED) + AFTER49('text/html', acct)).findings.filter(f => f.item === 'C-12' && f.target === 'after-logout').map(f => f.ruleId)).toEqual(['C-12.na']);
+  });
+  it('C-07①：区切りのある値の乱数の量を、区切りを除いて数える', () => {
+    const r = evaluate(`#TARGET url=https://www.example.com/login label=login\n${AT}\nHTTP/2 302\nlocation: /\nset-cookie: SESSIONID=0a1b-2c3d-4e5f-6071-8293; Path=/; Secure; HttpOnly; SameSite=Lax\n\n`);
+    expect(r.findings.filter(f => f.item === 'C-07').map(f => f.ruleId)).toContain('C-07.1');
+  });
+  it('http だけのサイトでも、セッション Cookie の HttpOnly（C-02）と HTTP での発行（C-10）を判定する', () => {
+    const r = evaluate(`#TARGET url=http://intranet.example.com/ label=t\n${AT}\nHTTP/1.1 200 OK\ncontent-type: text/html\nset-cookie: SESSIONID=abcdefghijklmnopqrstuvwxyz0123456789ABCD; Path=/\n\n<p>x</p>\n`);
+    const got = r.findings.map(f => f.ruleId);
+    expect(got).toContain('C-02.1');
+    expect(got).toContain('C-10.1');
+    expect(got.filter(x => x.startsWith('C-01'))).toEqual([]);   // Secure は http では見ない（C-10 で見る）
+  });
+  it('C-09①：セッションIDを新しくしていれば、セッションらしくない名前の Cookie の送り直しでは①にしない', () => {
+    const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, 'HTTP/2 200', 'content-type: text/html',
+      'set-cookie: JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; HttpOnly', 'set-cookie: visitor_ref=abcdefghijklmnopqrstuvwxyz012345; Path=/', '', '',
+      '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /mypage',
+      'set-cookie: JSESSIONID=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; HttpOnly', 'set-cookie: visitor_ref=abcdefghijklmnopqrstuvwxyz012345; Path=/', '', ''].join('\n');
+    expect(evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.ok']);
+  });
+  it('C-09：送っただけの JSESSIONID を再発行せず、別の Cookie だけを発行したログインは na', () => {
+    const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, '* Connected to www.example.com (192.0.2.1) port 443', '> GET /login HTTP/2',
+      '> Cookie: JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', '>', '< HTTP/2 200', '< content-type: text/html', '<', '',
+      '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /mypage', 'set-cookie: auth_token=ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ; Path=/; Secure; HttpOnly', '', ''].join('\n');
+    expect(evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.na']);
+  });
+  it('C-09：login の応答がプロキシの CONNECT の応答だけ（curl が失敗した）なら na', () => {
+    const R = '0123456789abcdef', at = `#META at=2026-11-01T10:00:00 run=${R}`;
+    const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${R}`, at, 'HTTP/1.1 200 Connection established', '', 'HTTP/2 200',
+      'set-cookie: sessionid=Q2x8AAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
+      `#TARGET url=https://www.example.com/login label=login run=${R}`, at, 'HTTP/1.1 200 Connection established', '', `#BODY run=${R}`, '', ''].join('\n');
+    expect(evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.na']);
+  });
+  it('nginx の負荷分散の Cookie（route）をセッション Cookie とみなさない', () => {
+    const s = (i: number) => `#TARGET url=https://www.example.com/login label=session-sample-${i}\n${AT}\nHTTP/2 302\nlocation: /\nset-cookie: route=8f14e45fceea167a5a36dedd4bea2543; Path=/\n\n`;
+    const got = evaluate(s(1) + s(2)).findings.map(f => f.ruleId);
+    expect(got).not.toContain('C-07.2');
+    expect(got).not.toContain('C-02.1');
+  });
+});
