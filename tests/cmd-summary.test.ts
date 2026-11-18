@@ -130,7 +130,7 @@ describe('実施コマンドの要約の性質', () => {
     for (const s of ['C4', 'C11・C12・C23', 'HAR', '-', 'C1・C2']) expect(summarizeCommand(s)).toBe(s);
   });
 
-  it('長い入力でも時間が入力の長さの2乗にならない', () => {
+  it('長い入力でも時間が入力の長さの2乗にならない', { tags: ['perf'] }, () => {
     const t = performance.now();
     for (const unit of ['_-daaaaa', '_-HAuthorization:', '_-Hz:a', 'Cookie:a…(1 chars)_', '"', "'", 'https://a.example/_', '_-sSu', 'a_b=', 'A_', 'a_', '_a', 'A1_'])
       summarizeCommand(`curl${unit.repeat(20000)}`);
@@ -139,7 +139,7 @@ describe('実施コマンドの要約の性質', () => {
     expect(performance.now() - t).toBeLessThan(2000);
   });
 
-  it('URL・引用符・・の多い入力でも、長さを4倍にして時間が4倍程度（2乗なら16倍）', () => {
+  it('URL・引用符・・の多い入力でも、長さを4倍にして時間が4倍程度（2乗なら16倍）', { tags: ['perf'] }, () => {
     // 閉じない引用符と \"、空のコマンド、ポートのある URL、次のコマンドがあるときの URL の繰り返し（第33回）。URL は1つずつキーの形にするので
     // 1つの時間が長い。合計の時間ではなく、長さを4倍にしたときの増え方を見る（並べて動かしたときの遅さで失敗しないように）
     const time = (s: string) => { const t = performance.now(); summarizeCommand(s); return performance.now() - t; };

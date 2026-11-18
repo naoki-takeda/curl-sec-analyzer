@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run --tagsFilter=!perf && vitest run --tagsFilter=perf --no-file-parallelism",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "lint": "tsc --noEmit && eslint .",

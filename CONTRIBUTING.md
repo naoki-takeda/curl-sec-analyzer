@@ -15,7 +15,7 @@ Node.js は `.nvmrc` の版を使います（`engines` の下限は 22.12）。
 ```sh
 npm ci
 npm run lint         # 型チェックと ESLint
-npm test             # 単体テスト（変更を監視するときは npm run test:watch）
+npm test             # 単体テスト（時間を測るテストは最後に別に流す。変更を監視するときは npm run test:watch）
 npm run audit        # 依存の署名の検証と、公開物に含まれる依存の既知の脆弱性の検査
 npm run build
 npx playwright install chromium firefox webkit
@@ -42,6 +42,7 @@ npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build �
 
 - 新しいテストは、`tests/` の直下の領域ごとのファイル（`tests/masking.test.ts`、`tests/body-missing.test.ts` など）に書きます。合うファイルがなければ、領域の名前でファイルを作ります。レビューの回の名前のファイルは作りません。
 - `tests/regression/` は、第2回〜第26回のレビューと積み残しへの対応、MVP〜v0.4 の段階ごとに書いた回帰テストです。中身はそのまま残し、新しいテストは足しません（経緯の記録は `docs/history.md`）。
+- 時間の上限を確かめるテストには `{ tags: ['perf'] }` を付けます（describe に付けると、その中がすべて対象になります）。`npm test` は、ほかのテストが終わってから、perf のテストをファイルを並べずに流します。並べて流すと CPU を取り合い、上限を超えることがあるためです。
 
 ## 回帰テスト（ゴールデン・同値性）
 

@@ -23,7 +23,7 @@ const PATTERNS = ['<!--', '<!-- x', '<script ', '<a href="', '<form ', '<input t
   // 第40回の束6：全角・ゼロ幅の名前、番号の形、パスワードの名前の値
   '?ａ', '&ｐａｓｓ\u200b', '\u200b', '1234 ', '1234-', '1234.', '123-45-', '4111 1111 1111 1111 ', 'password: secure ', '"cvv":1'];
 
-describe('2乗の時間にならない', () => {
+describe('2乗の時間にならない', { tags: ['perf'] }, () => {
   it.each(PATTERNS)('本文・ヘッダに「%s」の繰り返し', p => {
     const v = fill(p).replace(/[\r\n]/g, ' ');
     const input = [

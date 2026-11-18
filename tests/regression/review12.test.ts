@@ -199,7 +199,7 @@ describe('20・21 長い行', () => {
     const line = Array.from({ length: 200_000 }, (_, i) => `c${i}=v; Path=/`).join(', ');
     expect(() => parseInput(`#TARGET url=https://a.example/ label=t\nHTTP/2 200\nset-cookie: ${line}\n\n`)).not.toThrow();
   });
-  it('} で終わる %{header_json} らしい行が続いても、上限を超えたら解析し直さない', () => {
+  it('} で終わる %{header_json} らしい行が続いても、上限を超えたら解析し直さない', { tags: ['perf'] }, () => {
     const big = 'x'.repeat(10_000);
     const input = `{"date":[{"b":"${big}"}\n` + `,{"b":"${big}"}\n`.repeat(499);
     const s = performance.now(); parseInput(input);

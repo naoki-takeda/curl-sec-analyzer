@@ -22,7 +22,7 @@ const c09 = (login: string, p = pre) => ids(p + login, 'C-09', 'pre-login/login'
 
 describe('1・2・9 例外の照合', () => {
   const f = (key: string, url: string, target = 'har-2') => ({ item: 'H-01', ruleId: 'H-01.1', status: 'fail', target, targetKey: key, url, keyUrl: urlKey(url) } as Finding);
-  it('1 指摘5000件 × 例外300件でも速い', () => {
+  it('1 指摘5000件 × 例外300件でも速い', { tags: ['perf'] }, () => {
     const fs = Array.from({ length: 5000 }, (_, i) => f(`HAR GET https://a.example/p${i}`, `https://a.example/p${i}`));
     const list = Array.from({ length: 300 }, (_, i) => ({ ruleId: 'H-02', target: `HAR GET https://b.example/x${i}`, reason: 'x' })) as never[];
     expect(ms(() => applySuppressions(fs, list))).toBeLessThan(2000);

@@ -203,7 +203,7 @@ describe('P2 重要度「高」の誤判定と見逃し', () => {
 });
 
 describe('レビューの指摘（同じ PR の中で見つかったもの）', () => {
-  it('jdbc: を繰り返した本文で2乗の時間にならない', () => {
+  it('jdbc: を繰り返した本文で2乗の時間にならない', { tags: ['perf'] }, () => {
     const body = 'jdbc:x:'.repeat(64 * 1024 / 7);
     const t0 = performance.now();
     evaluate(t('err', 'https://a.example/x', 'HTTP/2 500\ncontent-type: text/plain', body));
@@ -240,7 +240,7 @@ describe('レビューの指摘（同じ PR の中で見つかったもの）', 
     expect(maskText('https://a.example/posts/nonce-reuse-attacks-explained')).toContain('nonce-reuse-attacks-explained');
     expect(maskText('<div class="nonce-container">')).toContain('nonce-container');
   });
-  it('前の語が _ を含む JWT（x_Bearer_eyJ…、access_token_eyJ…）も伏せる', () => {
+  it('前の語が _ を含む JWT（x_Bearer_eyJ…、access_token_eyJ…）も伏せる', { tags: ['perf'] }, () => {
     const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXZhbHVl';
     expect(maskText(`x_Bearer_${jwt}`)).not.toContain('c2lnbmF0dXJlLXZhbHVl');
     expect(maskText(`access_token_${jwt}`)).not.toContain('c2lnbmF0dXJlLXZhbHVl');

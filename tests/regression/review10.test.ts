@@ -194,19 +194,19 @@ describe('16 E-05：GraphQL', () => {
 
 describe('17 性能', () => {
   const ms = (f: () => void) => { const s = performance.now(); f(); return performance.now() - s; };
-  it('-i の本文の中にステータス行らしい行が多くても、入力の長さに比例する時間で読む', () => {
+  it('-i の本文の中にステータス行らしい行が多くても、入力の長さに比例する時間で読む', { tags: ['perf'] }, () => {
     const body = 'abc\n'.repeat(20_000) + 'HTTP/1.1 200 OK\n'.repeat(50_000);
     expect(ms(() => parseInput(`#TARGET url=https://a.example/ label=t\nHTTP/1.1 200 OK\ncontent-type: text/html\n\n${body}`))).toBeLessThan(1500);
   });
-  it('%{header_json} らしい行が続いても、行ごとに全体を解析し直さない', () => {
+  it('%{header_json} らしい行が続いても、行ごとに全体を解析し直さない', { tags: ['perf'] }, () => {
     expect(ms(() => parseInput('{"date":["x",\n'.repeat(150_000)))).toBeLessThan(1500);
   });
-  it('> のない <script の繰り返しでも、タグの読み取りが本文の長さに比例する', () => {
+  it('> のない <script の繰り返しでも、タグの読み取りが本文の長さに比例する', { tags: ['perf'] }, () => {
     const block = `"${'<script '.repeat(249)}"`;                   // 引用符で囲んだ <script の並び（> がない。64KB）
     const body = block.repeat(Math.floor(64 * 1024 / block.length));
     expect(ms(() => { for (let i = 0; i < 10; i++) tags(body, ['script', 'iframe', 'link', 'img', 'form']); })).toBeLessThan(300);
   });
-  it('ターゲットが多くても、CSV は指摘の数 × ターゲットの数の時間にならない', () => {
+  it('ターゲットが多くても、CSV は指摘の数 × ターゲットの数の時間にならない', { tags: ['perf'] }, () => {
     const input = Array.from({ length: 3000 }, (_, i) => t(`t${i}`, `https://a.example/p${i}`, HTML, '<p>x</p>')).join('');
     const { targets } = parseInput(input);
     // 判定は1つのターゲットだけで行い、その指摘をほかのターゲットに写す（準備の時間を測らないため）

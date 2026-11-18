@@ -13,14 +13,14 @@ const ms = (f: () => unknown) => { const t = performance.now(); f(); return perf
 const f = (evidence: unknown) => ({ ruleId: 'E-08.1', item: 'E-08', condition: 1, title: 'SRI', severity: 'low', status: 'fail', target: 'page', targetKey: 'page', evidence, recommendation: '', references: [], score: 0 } as Finding);
 
 describe('束2 2乗の時間と、壊れた前回の結果', () => {
-  it('閉じのない <!-- の繰り返しでも、タグの読み取りは本文の長さに比例する', () => {
+  it('閉じのない <!-- の繰り返しでも、タグの読み取りは本文の長さに比例する', { tags: ['perf'] }, () => {
     expect(ms(() => tags('<!--'.repeat(16384), ['script', 'iframe', 'link', 'img', 'form']))).toBeLessThan(200);
     expect(ms(() => tags('<!-- x'.repeat(11000), ['script']))).toBeLessThan(200);
   });
   it('閉じた <!-- --> の中のタグはこれまでどおり読まない（確認用）', () => {
     expect(tags('<!-- <script src="https://x.example/a.js"></script> --><script src="https://y.example/b.js"></script>', ['script']).map(t => t.attrs.get('src'))).toEqual(['https://y.example/b.js']);
   });
-  it('差分のキー：長い英数字とドットの並びの証跡でも速い', () => {
+  it('差分のキー：長い英数字とドットの並びの証跡でも速い', { tags: ['perf'] }, () => {
     const ev = 'ab.'.repeat(30000);
     expect(ms(() => diff([f(ev)], [f(ev)]))).toBeLessThan(500);
   });

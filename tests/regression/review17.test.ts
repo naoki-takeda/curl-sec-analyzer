@@ -41,7 +41,7 @@ describe('1・6・7・10・28・29 #META cmd=', () => {
       expect(summarizeCommand(c)).not.toContain('hunter2pw');
     expect(summarizeCommand('LANG=C_curl_-sS_https://a.example/')).toBe('LANG=**** curl -sS https://a.example/');
   });
-  it('6・10 「_-daaaaa」「Cookie:-H」の繰り返しでも線形の時間。結果はもう一度かけても変わらない', () => {
+  it('6・10 「_-daaaaa」「Cookie:-H」の繰り返しでも線形の時間。結果はもう一度かけても変わらない', { tags: ['perf'] }, () => {
     expect(ms(() => summarizeCommand(`curl${'_-daaaaa'.repeat(20000)}`))).toBeLessThan(1500);
     expect(ms(() => summarizeCommand(`curl_${'Cookie:-H'.repeat(8000)}`))).toBeLessThan(1500);
     for (const c of ['C3:curl_-u_alice:Hunter2pw_https://a.example/', 'curl_-x_alice:hunter2pw@proxy.example:3128_https://a.example/', 'http_POST_https://example.com/login_password=hunter2pw']) {
@@ -51,7 +51,7 @@ describe('1・6・7・10・28・29 #META cmd=', () => {
 });
 
 describe('27・33 マスク', () => {
-  it('27 名前が一覧にないパラメータのトークン（?t=・&invite=）を伏せる。普通の値は残す', () => {
+  it('27 名前が一覧にないパラメータのトークン（?t=・&invite=）を伏せる。普通の値は残す', { tags: ['perf'] }, () => {
     expect(maskText('https://www.example.com/magic?t=kyFBQuRU5fxaThYvjaxZry')).not.toContain('kyFBQuRU5fxaThYvjaxZry');
     expect(maskText('https://a.example/x?invite=kyFBQuRU5fxaThYvjaxZry&page=2')).toContain('&page=2');
     expect(maskText('https://a.example/?q=hello_world&sort=asc')).toBe('https://a.example/?q=hello_world&sort=asc');
@@ -198,7 +198,7 @@ describe('11・31・32・34 入力', () => {
   type H = { name: string; value: string };
   const entry = (url: string, status: number, headers: H[]) => ({ startedDateTime: '2026-11-01T00:00:00Z', request: { method: 'GET', url, headers: [] },
     response: { status, httpVersion: 'HTTP/2', headers, content: { mimeType: 'text/html', text: '<p>x</p>' } } });
-  it('11 同じ URL へ転送する 3xx が多い HAR でも線形の時間', () => {
+  it('11 同じ URL へ転送する 3xx が多い HAR でも線形の時間', { tags: ['perf'] }, () => {
     const entries = [...Array.from({ length: 20000 }, (_, i) => entry(`https://a.example/r${i}`, 302, [{ name: 'location', value: '/same' }])),
       ...Array.from({ length: 20000 }, () => entry('https://a.example/same', 200, []))];
     let imp: ReturnType<typeof importHar> | undefined;
@@ -217,7 +217,7 @@ describe('11・31・32・34 入力', () => {
     expect(r.targets[0].label).toBe('top page');
     expect(parseInput('#TARGET label=x url=a.example/r\nHTTP/2 200\n\n').warnings.map(w => w.kind)).toContain('unknown-url');
   });
-  it('34 %{header_json} の閉じない括弧が続く入力でも、行ごとに解析し直さない', () => {
+  it('34 %{header_json} の閉じない括弧が続く入力でも、行ごとに解析し直さない', { tags: ['perf'] }, () => {
     const block = `{"a":[ }\n${'}\n'.repeat(499)}`;
     expect(ms(() => parseInput(`#TARGET url=https://a.example/ label=x\n${block.repeat(2000)}`))).toBeLessThan(2000);
     const ok = parseInput('#TARGET url=https://a.example/ label=x\n{"content-type":["text/html"],\n"x-a":["}"]}\n#META response_code=200\n');

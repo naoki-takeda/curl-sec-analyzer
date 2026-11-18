@@ -35,12 +35,12 @@ describe('1・2 TLS の採取は、診断対象のサーバがハンドシェイ
 });
 
 describe('3・4 入力の長さの2乗の時間にならない', () => {
-  it('ホスト名らしい長い並びのあとの @（Location・CSP の値）', () => {
+  it('ホスト名らしい長い並びのあとの @（Location・CSP の値）', { tags: ['perf'] }, () => {
     expect(ms(() => allowText(`https://${'a'.repeat(64000)}@x`))).toBeLessThan(500);
     expect(ms(() => showText(`Location: https://${'a.'.repeat(32000)}:@evil/`))).toBeLessThan(1000);
     expect(ms(() => allowText(`https://${'a@'.repeat(32000)}`))).toBeLessThan(500);
   });
-  it('印のある入力の本文の1行に「#META 」が続く', () => {
+  it('印のある入力の本文の1行に「#META 」が続く', { tags: ['perf'] }, () => {
     const s = `#TARGET url=https://a.example/ label=p run=0123456789abcdef\nHTTP/2 200\n\n${'#META '.repeat(40000)}\n`;
     expect(ms(() => parseInput(s))).toBeLessThan(1000);
   });

@@ -132,7 +132,7 @@ describe('11〜18 判定', () => {
 });
 
 describe('19・20 解析の速さとマスクの漏れ', () => {
-  it('#META response_code の行が多くても、入力の長さに比例する時間で読む', () => {
+  it('#META response_code の行が多くても、入力の長さに比例する時間で読む', { tags: ['perf'] }, () => {
     const s = performance.now(); parseInput(`#TARGET url=https://a.example/ label=t\n${'HTTP/1.1 200 OK\n#META response_code=200\n'.repeat(40_000)}`);
     expect(performance.now() - s).toBeLessThan(1000);
   });

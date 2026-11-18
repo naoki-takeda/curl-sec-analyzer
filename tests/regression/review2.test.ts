@@ -10,7 +10,7 @@ const t = (label: string, url: string, head: string, extra = '') => `#TARGET url
 const HTML = 'HTTP/2 200\ncontent-type: text/html; charset=utf-8';
 
 describe('高', () => {
-  it('E-09②：閉じのない <!-- が続く本文でも線形時間で終わる（以前は64KBで数分）', () => {
+  it('E-09②：閉じのない <!-- が続く本文でも線形時間で終わる（以前は64KBで数分）', { tags: ['perf'] }, () => {
     const hostile = '<!--TODO '.repeat(Math.ceil(65536 / 9)).slice(0, 65536);
     const start = Date.now();
     expect(devCommentWord(hostile)).toBeUndefined();          // 閉じたコメントがない

@@ -56,11 +56,9 @@ export default defineConfig({
   build: { target: 'es2022', sourcemap: false },
   // タイムゾーンを固定する。#META at= はタイムゾーンを持たず手元の時刻として読むので、CI（UTC）と手元（JST）で期限の時間が変わり、
   // ゴールデンテストが CI でだけ失敗した。期待結果は JST で作ってある
-  // 2乗の時間の見張り（tests/adversarial-perf.test.ts）は重いので、ほかのテストが終わってから別に流す（同時に流すと、時間を測るほかのテストが
-  // CPU を取り合って上限を超えた）
-  test: { environment: 'node', env: { TZ: 'Asia/Tokyo' },
-    projects: [
-      { extends: true, test: { name: 'unit', include: ['tests/**/*.test.ts'], exclude: ['tests/adversarial-perf.test.ts'], sequence: { groupOrder: 0 } } },
-      { extends: true, test: { name: 'perf', include: ['tests/adversarial-perf.test.ts'], sequence: { groupOrder: 1 } } },
-    ] },
+  // 時間の上限を確かめるテストには perf のタグ（{ tags: ['perf'] }）を付け、npm test では、ほかのテストが終わってから、ファイルを並べずに
+  // 別に流す（package.json の test）。同時に流すと CPU を取り合い、tests/regression/review10.test.ts の CSV の性能テストなどが、単独では
+  // 通るのに上限を超えることがあった（T8）。describe に付けると、その中のテストがすべて対象になる
+  test: { environment: 'node', env: { TZ: 'Asia/Tokyo' }, include: ['tests/**/*.test.ts'],
+    tags: [{ name: 'perf', description: '時間の上限を確かめるテスト（npm test では、ほかのテストのあとに、ファイルを並べずに流す）' }] },
 });

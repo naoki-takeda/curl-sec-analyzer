@@ -54,7 +54,7 @@ describe('プロキシを使った -v', () => {
 });
 
 describe('CR が長く続く入力', () => {
-  it('LF のない CR の並びを、入力の長さに比例した時間で読む', () => {
+  it('LF のない CR の並びを、入力の長さに比例した時間で読む', { tags: ['perf'] }, () => {
     const input = `#TARGET url=https://www.example.com/ label=top\nHTTP/1.1 200 OK\ncontent-type: text/html\n\n${'\r'.repeat(200_000)}x\n`;
     const start = performance.now();
     parseInput(input);

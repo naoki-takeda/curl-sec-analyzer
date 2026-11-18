@@ -60,7 +60,7 @@ describe('マスク', () => {
     const ids = evaluate('#TARGET url=https://a.example/cb?accessToken=opaque1234567890abcdef label=t\nHTTP/2 200\ncontent-type: text/html\n').ids('t');
     expect(ids).toContain('A-02.1');
   });
-  it('長い英数字の並びでも時間がかからない（URLの user:pass@）', () => {
+  it('長い英数字の並びでも時間がかからない（URLの user:pass@）', { tags: ['perf'] }, () => {
     const start = performance.now();
     maskText('a'.repeat(200_000));
     maskText('x://'.repeat(50_000));
@@ -72,7 +72,7 @@ describe('マスク', () => {
 });
 
 describe('E-01：本文が長くても時間がかからない', () => {
-  it('絶対パスや System. が多数並ぶ本文', () => {
+  it('絶対パスや System. が多数並ぶ本文', { tags: ['perf'] }, () => {
     for (const unit of ['/srv/', 'System.']) {
       const body = unit.repeat(Math.floor(60_000 / unit.length));
       const start = performance.now();

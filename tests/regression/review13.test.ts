@@ -128,7 +128,7 @@ describe('12・14 T-10 と本文のない応答', () => {
 
 describe('15・16 性能とパスのトークン', () => {
   const ms = (f: () => void) => { const s = performance.now(); f(); return performance.now() - s; };
-  it('継続行（obs-fold）と -v の Cookie の行が多くても、2乗の時間にならない', () => {
+  it('継続行（obs-fold）と -v の Cookie の行が多くても、2乗の時間にならない', { tags: ['perf'] }, () => {
     expect(ms(() => parseInput(`#TARGET url=https://a.example/ label=t\nHTTP/1.1 200 OK\nX-A: b\n${' a\n'.repeat(200_000)}\n`))).toBeLessThan(1000);
     const cookies = Array.from({ length: 4000 }, (_, i) => `> Cookie: c${i}=1`).join('\n');
     expect(ms(() => parseInput(`#TARGET url=https://a.example/ label=t\n* Connected to a.example (192.0.2.1) port 443\n> GET / HTTP/1.1\n${cookies}\n>\n< HTTP/1.1 200 OK\n<\n`))).toBeLessThan(1000);

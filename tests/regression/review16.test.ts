@@ -66,7 +66,7 @@ describe('2・6・9 C-12①', () => {
     expect(c12(t('after-logout', 'https://a.example/mypage', 'HTTP/2 302\nlocation: /sso/start\n\nHTTP/2 302\nlocation: https://idp.example/realms/x/protocol/openid-connect/auth?client_id=a'))).toEqual(['C-12.ok']);
     expect(c12(t('after-logout', 'https://a.example/mypage', 'HTTP/2 302\nlocation: /home'))).toEqual(['C-12.na']);
   });
-  it('閉じない <input が並ぶ本文でも、ログインのフォームの判定は線形の時間', () => {
+  it('閉じない <input が並ぶ本文でも、ログインのフォームの判定は線形の時間', { tags: ['perf'] }, () => {
     const body = `<form><input type="password" name="p">${'<input '.repeat(12000)}`;
     expect(ms(() => c12(t('after-logout', 'https://a.example/mypage', HTML, body)))).toBeLessThan(500);
   });
@@ -210,7 +210,7 @@ describe('12〜24 判定', () => {
 });
 
 describe('29〜32 入力', () => {
-  it('29 splitSetCookie は「a=b,」の繰り返しでも線形の時間', () => {
+  it('29 splitSetCookie は「a=b,」の繰り返しでも線形の時間', { tags: ['perf'] }, () => {
     const big = 'a=b,'.repeat(100000);
     expect(ms(() => splitSetCookie(big))).toBeLessThan(500);
     expect(splitSetCookie('a=1; Path=/, b=2; Path=/')).toEqual(['a=1; Path=/', 'b=2; Path=/']);
@@ -220,7 +220,7 @@ describe('29〜32 入力', () => {
   const entry = (url: string, status: number, headers: H[], reqHeaders: H[] = []) => ({
     startedDateTime: '2026-11-01T00:00:00Z', request: { method: 'GET', url, headers: reqHeaders },
     response: { status, httpVersion: 'HTTP/2', headers, content: { mimeType: 'text/html', text: '<p>x</p>' } } });
-  it('30 転送先のない 302 が多い HAR でも線形の時間', () => {
+  it('30 転送先のない 302 が多い HAR でも線形の時間', { tags: ['perf'] }, () => {
     const entries = Array.from({ length: 8000 }, (_, i) => entry(`https://a.example/r${i}`, 302, [{ name: 'location', value: `/missing${i}` }]));
     expect(ms(() => importHar(JSON.stringify({ log: { entries } })))).toBeLessThan(1000);
   });
@@ -276,7 +276,7 @@ describe('コミット前のレビュー', () => {
     expect(ids(t('top', 'https://a.example/uploads/minutes.20241231.html', HTML, '<p>x</p>'), 'E-11')).toContain('E-11.1');
     expect(ids(t('top', 'https://a.example/uploads/avatar.5f3a9c2e.svg', 'HTTP/2 200\ncontent-type: image/svg+xml', '<svg/>'), 'E-11')).toContain('E-11.1');
   });
-  it('P7 summarizeCommand は「_-Habcde」の繰り返しでも線形の時間', () => {
+  it('P7 summarizeCommand は「_-Habcde」の繰り返しでも線形の時間', { tags: ['perf'] }, () => {
     expect(ms(() => summarizeCommand(`curl${'_-Habcde'.repeat(25000)}`))).toBeLessThan(1000);
   });
   it('P8 summarizeCommand：curl 以外のコマンド（openssl・grep）のオプションは伏せない', () => {

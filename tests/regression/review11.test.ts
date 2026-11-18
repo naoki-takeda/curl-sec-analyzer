@@ -189,7 +189,7 @@ describe('15 WAF・CDN の Cookie', () => {
 });
 
 describe('16・17 多数のターゲットと、ルールの例外', () => {
-  it('同じラベルのターゲットが多くても、付け直しが件数の2乗の時間にならない', () => {
+  it('同じラベルのターゲットが多くても、付け直しが件数の2乗の時間にならない', { tags: ['perf'] }, () => {
     const input = '#TARGET url=https://a.example/ label=x\nHTTP/2 200\n\n'.repeat(20_000);
     const s = performance.now(); parseInput(input);
     expect(performance.now() - s).toBeLessThan(2000);

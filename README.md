@@ -59,7 +59,7 @@ Node.js は `.nvmrc` の版（24）を使います（22.12 以降なら動きま
 ```sh
 npm ci
 npm run dev          # 開発サーバ（メタCSPは本番ビルドだけに入る）
-npm test             # 単体テスト（Vitest。変更を監視するときは npm run test:watch）
+npm test             # 単体テスト（Vitest。時間を測るテストは最後に別に流す。変更を監視するときは npm run test:watch）
 npm run lint         # 型チェック（tsc）と ESLint（innerHTML・eval の禁止を含む）
 npm run audit        # 依存の署名の検証と、公開物に含まれる依存の既知の脆弱性（high 以上）の検査（CI と同じ）
 npm run build        # 型チェック＋本番ビルド（dist/）
