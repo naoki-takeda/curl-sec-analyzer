@@ -74,6 +74,7 @@ export interface Finding {
   evidence: string; recommendation: string; references: string[];
   suppressedBy?: Suppression;       // 例外に該当したとき
   originalSeverity?: Severity;      // 組織プロファイルで重要度を変えたときの元の重要度
+  apiInfo?: boolean;                // API の応答なので、HTML 向けの項目の指摘を情報に下げた（組織プロファイルの重要度で上げ直さない）
   dedupedBy?: string;               // 二重計上を防ぐため、別のルールID（例：A-09.2）で数えたとき。status は na になる
 }
 /** 組織プロファイル（profile.json）：組織ごとの重要度、対象外の項目、セッションCookieの指定 */

@@ -181,8 +181,9 @@ describe('P2 重要度「高」の誤判定と見逃し', () => {
       expect(ids(input, 'E-05')).toEqual(['E-05.na']);
       const bearer = v('t', 'https://a.example/v3/api-docs/swagger.json', ['Authorization: Bearer x'], ['HTTP/1.1 200 OK', 'content-type: application/json']);
       expect(ids(bearer, 'E-05')).toEqual(['E-05.na']);
-      // 何も送らなければ今までどおり①
-      expect(ids(v('t', 'https://a.example/actuator', [], ['HTTP/1.1 200 OK', 'content-type: application/json']), 'E-05')).toEqual(['E-05.1']);
+      // 何も送らなければ今までどおり①（本文のない /actuator の一覧は、既定のリンクだけかが分からないので na（第48回）。/actuator/env は取得できれば①）
+      expect(ids(v('t', 'https://a.example/actuator/env', [], ['HTTP/1.1 200 OK', 'content-type: application/json']), 'E-05')).toEqual(['E-05.1']);
+      expect(ids(v('t', 'https://a.example/actuator', [], ['HTTP/1.1 200 OK', 'content-type: application/json']), 'E-05')).toEqual(['E-05.na']);
     });
     it('ステータスが分からない応答（%{header_json} だけ）を合格にしない', () => {
       const input = '#TARGET url=https://a.example/swagger.json label=t\n{"content-type":["application/json"],"date":["Mon, 16 Nov 2026 00:00:00 GMT"]}\n';

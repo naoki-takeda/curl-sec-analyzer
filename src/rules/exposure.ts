@@ -222,6 +222,10 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     // 死活監視の応答なので対象外（Kubernetes・負荷分散装置が使う。ほぼすべての Spring Boot の製品で高を出していた）
     if (docSegment(p) === 'actuator' && actuatorDefault(p, b))
       return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `${p}（HTTP ${f.status}、既定で公開される死活監視の応答・一覧）`, '')];
+    // 既定で公開される /actuator/health・info・一覧で本文を採取していない（-D - -o /dev/null・-I・HAR の本文なし）と、状態だけの応答かが分からない
+    // （①（高）にした。第48回）。/actuator/env などは、取得できたこと自体が①
+    if (docSegment(p) === 'actuator' && !b.trim() && /\/actuator(?:\/(?:health(?:\/[\w-]+)?|info))?\/?$/i.test(p))
+      return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。本文を採取していないので、既定で公開される状態だけの応答かは分からない）`, NO_BODY_REC)];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
     return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}）`, 'API仕様は本番で無効にするか、認証の内側に置く')];
   } };

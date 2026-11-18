@@ -57,11 +57,12 @@ export function attrs(s: string): Record<string, string> {
 }
 
 /**
- * ラベルとして受け付ける形（英数字・日本語などの文字と _ . - *、64文字まで）。それ以外（引用符・空白・記号を含むもの）は invalid-label にする。
+ * ラベルとして受け付ける形（英数字・日本語などの文字と _ . -、64文字まで）。* は使えない（例外の照合で任意の文字列の意味になり、label=* で登録した例外が
+ * すべてのターゲットに当たった。第48回）。それ以外（引用符・空白・記号を含むもの）は invalid-label にする。
  * ラベルは画面・エクスポート・例外ファイルにそのまま出るので、本文に入れた「#TARGET label=…」の残り（"password":"…"）を出さない
  */
 // 引用符で囲んだラベルの中の空白（label="top page"）は認める（第29回）
-const LABEL_OK = /^[\p{L}\p{N}_.*-](?:[\p{L}\p{N}_.* -]{0,62}[\p{L}\p{N}_.*-])?$/u;
+const LABEL_OK = /^[\p{L}\p{N}_.-](?:[\p{L}\p{N}_. -]{0,62}[\p{L}\p{N}_.-])?$/u;
 const SENS_TRUE = /^(?:1|true|yes)$/i, SENS_FALSE = /^(?:0|false|no)$/i;
 /** #TARGET で読む名前（run= は採取の印） */
 const TARGET_KEYS = new Set(['url', 'label', 'kind', 'sensitive', 'run']);
@@ -147,7 +148,7 @@ export function parseInput(input: string): ParseResult {
         // 動かない理由が分からなかった。sensitive= と同じく知らせる（値は出さない。ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
         const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
         if (unknown.length) badTargetAttrs.push(`${t.label}：${unknown.slice(0, 3).map(k => (/^[A-Za-z_][\w-]{0,30}$/.test(k) ? k : '…')).join('・')}=（使える名前は url・label・kind・sensitive）`);
-        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push('invalid-label：label= に使えるのは英数字・日本語などの文字と _ . * - と空白（64文字まで）');
+        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push('invalid-label：label= に使えるのは英数字・日本語などの文字と _ . - と空白（64文字まで）');
         if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push(`${t.label}：kind= は html・api・auto のいずれか`);
       }
       else if (tag === 'META') {

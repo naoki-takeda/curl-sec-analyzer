@@ -22,10 +22,12 @@ export function openSuppressDialog(f: Finding) {
     refs.dialog.close(); actions.renderSettings(); actions.analyze();
   });
   refs.dialog.replaceChildren(el('div', 'p-5',
-    el('h2', 'text-lg font-bold', T.title),
+    Object.assign(el('h2', 'text-lg font-bold', T.title), { id: 'sup-title' }),
     el('p', 'mt-1 text-sm text-muted', T.note(`${f.item}${circled(f.condition)} ${itemTitle(f.item, f.title)}`, f.target)),
     el('div', 'mt-3', labelFor('sup-scope', T.scope), scope),
     field('sup-reason', T.reason, reason), field('sup-approver', T.approver, approver), field('sup-until', T.until, until), err,
     el('div', 'mt-4 flex justify-end gap-2', button(T.cancel, BTN, () => refs.dialog.close()), save)));
+  // 見出しをダイアログの名前にする（読み上げで、何のダイアログかが分かるように。第48回）
+  refs.dialog.setAttribute('aria-labelledby', 'sup-title');
   refs.dialog.showModal(); reason.focus();
 }

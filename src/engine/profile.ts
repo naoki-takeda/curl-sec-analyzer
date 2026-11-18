@@ -62,6 +62,8 @@ export function overrideSeverity(fs: Finding[], p?: Profile): Finding[] {
   if (!p) return fs;
   return fs.map(f => {
     if (f.status !== 'fail' && f.status !== 'suppressed') return f;
+    // API の応答で情報に下げた HTML 向けの指摘（H-10 など）は、上書きで上げない（ひな形の "H-10": "low" で、API の情報の指摘を低に上げた。第48回）
+    if (f.apiInfo) return f;
     const s = (f.condition !== undefined ? p.severity[`${f.item}.${f.condition}`] : undefined) ?? p.severity[f.item];
     return s && s !== f.severity ? { ...f, severity: s, originalSeverity: f.severity } : f;
   });

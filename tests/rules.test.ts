@@ -93,3 +93,32 @@ describe('R-01 Origin反射・T-04 HTTP→HTTPS', () => {
     expect(withLabel('http', 'http://a.example/', 'HTTP/1.1 301 Moved\nLocation: https://a.example/')).toContain('T-04.ok');
   });
 });
+
+// 第48回のレビュー（判定ルール）で見つかった誤検知・取り決め違反
+describe('第48回：ルールの誤検知', () => {
+  const page = (body: string) => `#TARGET url=https://www.example.com/ label=page\n#META at=2026-11-01T10:00:00\n${HTML}\n${body}\n`;
+  it('E-09①：入力の検証の規則・autocomplete の値・正規表現を秘密の値とみなさない（本物のキーは今までどおり）', () => {
+    for (const s of ['<script>const schema={email:"required|email",password:"required|min:8|max:64"};</script>',
+      '<script>window.cfg={"username":"username","password":"current-password"};</script>', '<script>var rules={password:"^(?=.*[A-Z])(?=.*\\d).{8,}$"};</script>']) {
+      expect(evaluate(page(s)).ids('page'), s).not.toContain('E-09.1');
+    }
+    expect(evaluate(page('<script>var cfg={client_secret:"9f8e7d6c5b4a3f2e1d0c9b8a"};</script>')).ids('page')).toContain('E-09.1');
+  });
+  it('E-05①：本文のない /actuator/health の 200 は na（状態だけの応答かが分からない）', () => {
+    const r = evaluate('#TARGET url=https://www.example.com/actuator/health label=page\n#META at=2026-11-01T10:00:00\nHTTP/2 200\ncontent-type: application/vnd.spring-boot.actuator.v3+json\n\n');
+    expect(r.ids('page').filter(x => x.startsWith('E-05'))).toEqual(['E-05.na']);
+  });
+  it('H-03③：有効な CSP のヘッダがあれば、空の CSP のヘッダがあっても③にしない', () => {
+    const r = withLabel('page', 'https://www.example.com/', `${HTML}content-security-policy: default-src 'self'; object-src 'none'; base-uri 'none'\ncontent-security-policy: \n`);
+    expect(r).not.toContain('H-03.3');
+    expect(r).toContain('H-03.ok');
+  });
+  it('R-05：cors-preflight で許可外の Origin のプリフライトを拒否したら合格（適用外にしない）', () => {
+    const r = evaluate('#TARGET url=https://www.example.com/api label=cors-preflight\n* Connected to www.example.com (192.0.2.1) port 443\n> OPTIONS /api HTTP/2\n> Origin: https://evil.example\n> Access-Control-Request-Method: PUT\n>\n< HTTP/2 403\n<\n');
+    expect(r.ids('cors-preflight')).toContain('R-05.ok');
+  });
+  it('T-05：一般ラベルで、許可していない条件（①）の指摘だけのときは、許可した条件（②）を判定済みとして残す', () => {
+    const r = evaluate('#TARGET url=https://www.example.com/a label=page\n#META at=2026-11-01T10:00:00\nHTTP/2 302\nlocation: http://www.example.com/b\n\nHTTP/1.1 200 OK\ncontent-type: text/html\n\n<p>b</p>\n');
+    expect(r.ids('page').filter(x => x.startsWith('T-05'))).toEqual(['T-05.ok']);
+  });
+});

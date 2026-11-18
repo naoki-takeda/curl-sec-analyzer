@@ -111,6 +111,8 @@ function safeRun(rule: Rule, run: () => Finding[] | undefined, target: string): 
   }
 }
 
+/** ラベルで許可していない条件の指摘だけが出たとき、合格を残してよいルール（すべての条件を一度に判定するもの） */
+const SYNTH_OK = new Set(['T-05', 'A-01', 'E-04']);
 function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   const { rules = TARGET_RULES, hostRules = HOST_RULES, crossRules = ALL_CROSS_RULES } = opt;
   const findings: Finding[] = [];
@@ -129,11 +131,18 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
       // H-03①（高）・H-06①・H-14① など）を判定しない。本文の秘密（E-09）は利用者に届くので判定する（H-08・H-13 も転送を除いている）
       if (rule.appliesTo === 'html' && rule.id !== 'E-09' && isRedirectWithLocation(ctx.final)) continue;
       if (rule.appliesTo === 'api' && ctx.responseKind !== 'api') continue;
-      for (const f of safeRun(rule, () => rule.run?.(ctx), t.label).filter(x => allow.allowsFinding(x))) {   // ②⑤
+      const raw = safeRun(rule, () => rule.run?.(ctx), t.label);
+      const kept = raw.filter(x => allow.allowsFinding(x));
+      // ラベルで許可していない条件の指摘（一般ラベルの T-05①）だけが出た：許可した条件（T-05②）は判定して指摘がなかったので、合格として残す
+      // （何も残さないと、すでにあるラベルを「必要なラベル」と案内した。第48回）
+      // 合成するのは、すべての条件を一度に判定するルールだけ（条件ごとに途中で返すルール（E-13）では、判定していない条件まで合格にした）
+      if (!kept.length && SYNTH_OK.has(rule.id) && raw.some(x => x.status === 'fail'))
+        kept.push({ ...raw[0], ruleId: `${rule.id}.ok`, condition: undefined, severity: 'info', status: 'pass', evidence: 'このラベルで判定する条件には指摘なし', recommendation: '' });
+      for (const f of kept) {   // ②⑤
         // 推奨対応も許可リストを通す（C-09 の推奨対応に、入力の Cookie の名前がそのまま入り、証跡では伏せた名前が画面・エクスポートに出た）。
         // 決まった文言は変わらないことを tests/regression/review26.test.ts で確かめる
         const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: showText(f.evidence), recommendation: showText(f.recommendation) };
-        if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') g.severity = 'info';   // ⑥
+        if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') { g.severity = 'info'; g.apiInfo = true; }   // ⑥
         findings.push(g);
       }
     }

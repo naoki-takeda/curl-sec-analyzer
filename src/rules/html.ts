@@ -260,7 +260,15 @@ const ASSIGNED = /(?<![\w-])["']?(api[_-]?key|client[_-]?secret|secret[_-]?key|a
  * 英語の画面の文言（A-07 と同じ isLabelText）
  */
 const notSecretValue = (key: string, v: string): boolean =>
-  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v);
+  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v)
+  || VALIDATION_RULE.test(v) || /^\^.*\$$/.test(v) || AUTOCOMPLETE.test(v);
+/**
+ * 入力の検証の規則（Laravel・VeeValidate の required|min:8|max:64）。| でつないだ、英字の規則名（引数は数字・英字）だけのもの。
+ * ログイン・登録の画面の password:"required|min:8" を、秘密の値の代入（E-09①（高））とした（第48回）
+ */
+const VALIDATION_RULE = /^[a-z_]+(?::[\w,.-]{1,20})?(?:\|[a-z_]+(?::[\w,.-]{1,20})?)+$/i;
+/** HTML の autocomplete の値（current-password・new-password・one-time-code など）。正規表現（^…$）も秘密の値ではない */
+const AUTOCOMPLETE = /^(?:current-password|new-password|one-time-code|username|email|off|on)$/i;
 // Google の API キー（AIza…）は、Maps・Firebase などブラウザから使う前提のキー（HTTP リファラーや API の制限で守る）なので、HTML にあっても①にしない。
 // Stripe の公開キー（pk_live_…）、PaymentIntent の client_secret も同じ（A-07 と同じ isPublicClientValue）
 /** 公開を前提にした JWT（ペイロードの role が anon。Supabase の anon key） */

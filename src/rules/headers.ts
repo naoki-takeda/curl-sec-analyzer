@@ -51,7 +51,9 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
     if (!rawEnforce.length) return [mk(cspPresence, ctx, 2, 'medium', 'fail', `Report-Onlyのみ: ${ro[0]}`, '確認できたら強制モードの Content-Security-Policy に切り替える')];
     // ③は、ヘッダ値のどのポリシーにもディレクティブがないとき。カンマのあとのかけら（report-uri の URL の中のカンマなど）だけが
     // 読めなくても、前のポリシーは効いているので③にしない（構文の誤りは H-07④）
-    if (rawEnforce.some(v => !splitPolicies([v]).some(p => parseCsp(p).size > 0))) return [mk(cspPresence, ctx, 3, 'high', 'fail', rawEnforce.join(' / '), rec)];
+    // 空のヘッダが1つあっても、ほかのヘッダのポリシーが効いていれば③にしない（ブラウザは空のポリシーを無視し、すべての強制ポリシーを適用する（CSP3）。
+    // 1つでも空なら③にすると、有効な CSP があるのに③（高）にした。第48回）
+    if (!headerEffective) return [mk(cspPresence, ctx, 3, 'high', 'fail', rawEnforce.join(' / '), rec)];
     return [mk(cspPresence, ctx, 'ok', 'info', 'pass', enforce.join(' / '), '')];
   } };
 

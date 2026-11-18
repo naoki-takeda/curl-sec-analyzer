@@ -132,7 +132,10 @@ export const corsPreflight: Rule = { id: 'R-05', title: 'プリフライト応�
   run(ctx) {
     const methods = ctx.final?.headers.get('access-control-allow-methods')?.join(',');
     const maxAge = ctx.final?.headers.get('access-control-max-age')?.[0];
-    if (!ctx.final || (!methods && !maxAge)) return [];      // プリフライト応答だけ
+    // プリフライト応答だけ。cors-preflight のラベル（C8 で許可外の Origin のプリフライトを送ったもの）で Allow-Methods も Max-Age もないなら、
+    // プリフライトを許可しなかったので合格（[] にすると、判定できたのに適用外になり、カバレッジで判定済みに数えなかった。第48回）
+    if (!ctx.final || (!methods && !maxAge)) return ctx.final && baseLabel(ctx.target.label) === 'cors-preflight'
+      ? [mk(corsPreflight, ctx, 'ok', 'info', 'pass', `HTTP ${ctx.final.status}（プリフライトを許可していない）`, '')] : [];
     const out = [];
     const acao = acaoOf(ctx); const sent = ctx.target.sentOrigin;
     // 許可外の Origin を許可したか：R-01 と同じく、送った Origin（自サイト以外）を反射したか。送った Origin が分からない -i では、テスト値の ACAO

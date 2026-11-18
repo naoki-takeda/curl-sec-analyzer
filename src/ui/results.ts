@@ -124,7 +124,7 @@ export function targetSummary(targets: Target[], byTarget: Map<string, Finding[]
     const fails = (byTarget.get(t.label) ?? []).filter(x => x.status === 'fail');
     return el('tr', '',
       td('whitespace-nowrap font-bold', t.label), td('break-all text-muted', t.url ? showText(t.url) : T.urlUnknown),
-      td('whitespace-nowrap', `${T.kinds[responseKind(t, f)]}（${getLang() === 'en' ? labelRow(t.label).nameEn : labelRow(t.label).name}）`),
+      td('whitespace-nowrap', getLang() === 'en' ? `${T.kinds[responseKind(t, f)]} (${labelRow(t.label).nameEn})` : `${T.kinds[responseKind(t, f)]}（${labelRow(t.label).name}）`),
       td('whitespace-nowrap', s === undefined ? T.unknown : s ? T.yes : T.no),
       ...SEVERITIES.map(sv => { const n = fails.filter(x => x.severity === sv).length; return td(`num ${n ? SEV_TEXT[sv] + ' font-bold' : 'text-muted'}`, String(n)); }));
   }));
@@ -183,7 +183,7 @@ export function diffBlock(rows: DiffRow[]) {
     state.baseline?.rulesetVersion && state.baseline.rulesetVersion !== RULESET_VERSION ? el('p', 'mb-2 text-sm text-sev-medium', T.diffRulesetWarning(state.baseline.rulesetVersion, RULESET_VERSION)) : null,
     shown.length ? table(T.tables.diff, [T.cols.change, T.cols.severity, T.cols.item, T.cols.title, T.cols.target], shown.map(r =>
       el('tr', '', td(`whitespace-nowrap font-bold ${r.kind === 'new' ? 'text-sev-high' : r.kind === 'resolved' ? 'text-ok' : 'text-muted'}`, diffLabel(r.kind)),
-        td(`whitespace-nowrap ${SEV_TEXT[r.severity]}`, sevLabel(r.severity), r.before ? `（← ${sevLabel(r.before)}）` : ''),
+        td(`whitespace-nowrap ${SEV_TEXT[r.severity]}`, sevLabel(r.severity), r.before ? (getLang() === 'en' ? ` (was ${sevLabel(r.before)})` : `（← ${sevLabel(r.before)}）`) : ''),
         td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title), td('', r.target)))) : null,
     el('p', 'mt-2 text-sm text-muted', T.diffNote));
 }
@@ -201,7 +201,7 @@ export function coverageBlock(cov: Coverage[]) {
       el('tr', '', td('whitespace-nowrap num', c.item), titleCell(c.item, c.title),
         td(`whitespace-nowrap ${c.status === 'evaluated' ? (c.fails ? 'text-sev-medium' : 'text-ok') : 'text-muted'}`, covLabel(c.status), c.status === 'evaluated' && c.fails ? ` (${c.fails})` : ''),
         td('text-muted', c.status === 'manual' ? T.manualNote
-          : c.status === 'missing-input' && commandsFor(c.item) ? `${c.reasons.map(rec).join(getLang() === 'en' ? '; ' : '、')}（${T.command}：${commandsFor(c.item)}）`
+          : c.status === 'missing-input' && commandsFor(c.item) ? (getLang() === 'en' ? `${c.reasons.map(rec).join('; ')} (${T.command}: ${commandsFor(c.item)})` : `${c.reasons.map(rec).join('、')}（${T.command}：${commandsFor(c.item)}）`)
           : c.reasons.map(rec).join(getLang() === 'en' ? '; ' : '、'))))),
     el('p', 'mt-3 text-sm text-muted', T.outOfScope));
 }
