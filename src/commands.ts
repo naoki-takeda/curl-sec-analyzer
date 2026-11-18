@@ -47,6 +47,8 @@ export function generateScript(o: CommandOptions): string {
     'set -u', 'umask 077', 'rm -f out.txt old.txt jar.txt s1.txt s2.txt s3.txt', `H=${q(H)}`,
     '# 実行ごとの印（応答の本文に書かれたマーカーと見分けるため）',
     "RUN=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
+    '# キャッシュよけの乱数（診断対象のサーバに送る。採取の印 RUN はサーバに送らない）',
+    "CB=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')",
     '# 本文を取るコマンドのヘッダと本文の一時ファイル（ヘッダと本文を分けて出す。#BODY の印のあとが本文）', 'hdr=$(mktemp); body=$(mktemp)',
     // 一時ファイルには認証後の応答（Set-Cookie・本文）が入る。Ctrl-C や kill で止めたときも消す（dash は INT で EXIT の trap を実行しないので、
     // INT・TERM・HUP では exit して EXIT の trap を通す）。まだ作っていない一時ファイルは rm に渡さない（空の引数を渡さない）
@@ -69,7 +71,8 @@ export function generateScript(o: CommandOptions): string {
   }
 
   L.push('', '# ---- 第2章：ログインの流れ（C18）。login.txt にログインのPOST本文を書いておく ----');
-  t('pre-login', `${H}${o.loginPath}`); L.push(`curl -sS -v -o /dev/null -c jar.txt -b jar.txt "$H"${q(o.loginPath)} 2>&1`);
+  // pre-login は -b を付けない（スクリプトの初めに jar.txt を消すので、-b jar.txt は -v の1行目に「* WARNING: failed to open cookie file」を出した）
+  t('pre-login', `${H}${o.loginPath}`); L.push(`curl -sS -v -o /dev/null -c jar.txt "$H"${q(o.loginPath)} 2>&1`);
   // login は本文も取る（#BODY の形。下の置き換え）。本文を捨てる（-v -o /dev/null）と、パスワード欄のある画面を 200 で返し直す失敗（Django・
   // ASP.NET Identity・WordPress）を成功と見分けられず、新しいセッションIDがないので C-09①（高）にした
   t('login', `${H}${o.loginPath}`, ' sensitive=1'); L.push(`curl -sS -i -c jar.txt -b jar.txt -X POST --data @login.txt "$H"${q(o.loginPath)}`);
@@ -96,7 +99,11 @@ export function generateScript(o: CommandOptions): string {
   L.push('', '# ---- 第4章：メソッド・転送・ヘッダ（C9・C14・C19・C22） ----');
   t('options', `${H}/`); L.push('curl -sS -i -X OPTIONS "$H/"');
   t('trace', `${H}/`); L.push('curl -sS -i -X TRACE "$H/"');
-  t('host-inj', `${H}/`); L.push(`curl -sS -i -H 'X-Forwarded-Host: evil.example' "$H/"`);
+  // X-Forwarded-Host を変えた応答が共有キャッシュ（CDN・リバースプロキシ）に入ると、ほかの利用者に evil.example へのリンクを返しうる（第49回）。
+  // 実行ごとの印をクエリに付けて、キャッシュのキーをほかの利用者のリクエストと分ける
+  // キャッシュよけの乱数（CB）は、採取の印（RUN）と別にする。RUN をサーバに送ると、印を知ったサーバが本文に正しい印の偽のマーカーを書き、
+  // C-12① などを偽装できた（束のレビュー）。#TARGET の url は単一引用符の中で展開されないので、パスだけを書く
+  t('host-inj', `${H}/`); L.push(`curl -sS -i -H 'X-Forwarded-Host: evil.example' "$H/?csa=$CB"`);
   // T-06 は、転送した応答だけで判定する（ログイン画面が 200 を返すと na）。next= で実際に転送する URL があれば、そちらに置き換えるよう書いておく
   L.push('# T-06：ログイン画面が 200 を返すと判定できない（na）。next= などで実際に転送する URL（ログアウト、ログイン後の転送先）に置き換える');
   t('open-redirect', `${H}${o.loginPath}`); L.push(`curl -sS -D - -o /dev/null "$H"${q(`${o.loginPath}?next=https://evil.example&returnTo=https://evil.example&url=https://evil.example`)}`);

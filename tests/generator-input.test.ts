@@ -102,3 +102,92 @@ describe('第48回（束2の第2回のレビュー）：-v は、ターゲット
     expect(v.targets[0].verbose).toBe(true);
   });
 });
+
+describe('第49回：生成スクリプトの出力の読み取り', () => {
+  it('pre-login の -v の1行目が curl の WARNING の行でも -v として読み、C-09① を判定する', () => {
+    for (const first of ['* WARNING: failed to open cookie file "jar.txt"', '* !!! WARNING !!!']) {
+      const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${RUN}`, AT, first,
+        '* Connected to www.example.com (192.0.2.1) port 443', '> GET /login HTTP/2', '>', '< HTTP/2 200', '< set-cookie: sessionid=Q2x8AAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/', '<', '',
+        `#TARGET url=https://www.example.com/login label=login run=${RUN}`, AT, 'HTTP/1.1 302 Found', 'Location: /mypage', '', ''].join('\n');
+      const r = evaluate(input);
+      expect(r.targets.map(t => t.label), first).toEqual(['pre-login', 'login']);
+      expect(r.findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId), first).toEqual(['C-09.1']);
+    }
+  });
+  it('ヘッダの途中のステータス行の形の行で、応答を作り直さない（A-01①・C-12① を合格にさせない）', () => {
+    const unauth = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 OK', 'Content-Type: application/json',
+      'HTTP/1.1 401 Unauthorized: x', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n');
+    expect(ids(unauth, 'A-01')).toContain('A-01.1');
+    const reason = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 Connection established', 'Content-Type: application/json', '',
+      `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n');
+    expect(ids(reason, 'A-01')).toContain('A-01.1');
+  });
+  it('-L の次のホップ（空行のあとのステータス行）と、プロキシの CONNECT の応答はこれまでどおり読む', () => {
+    const hops = parseInput([`#TARGET url=http://www.example.com/ label=http run=${RUN}`, AT, 'HTTP/1.1 301 Moved', 'Location: https://www.example.com/', '', 'HTTP/2 200', '', ''].join('\n'));
+    expect(hops.targets[0].responses.map(r => r.status)).toEqual([301, 200]);
+    const proxy = parseInput([`#TARGET url=https://www.example.com/ label=top run=${RUN}`, AT, 'HTTP/1.1 200 Connection established', '', 'HTTP/2 200', '', ''].join('\n'));
+    expect(proxy.targets[0].responses.map(r => r.kind)).toEqual(['connect', 'final']);
+  });
+  it('OpenSSL 3.5 の「Connecting to」のすぐあとの depth= の行でも、解析警告を出さない', () => {
+    const r = parseInput([`#TARGET url=https://www.example.com/ label=tls run=${RUN}`, AT, 'Connecting to 192.0.2.1', 'depth=0 CN=www.example.com', 'CONNECTED(00000003)', ''].join('\n'));
+    expect(r.warnings.map(w => w.kind)).not.toContain('unparsed-lines');
+  });
+  it('C10 の最初のヘッダの名前に . があっても、応答として読む', () => {
+    const r = parseInput(['#TARGET url=https://www.example.com/ label=header-json', '{"x.trace":["1"],', '"content-type":["text/html"]}', '#META response_code=200', ''].join('\n'));
+    expect(r.targets[0].responses).toHaveLength(1);
+  });
+  it('C14 は実行ごとの乱数をクエリに付けて、共有キャッシュのキーを分ける（採取の印 RUN とは別の乱数）', () => {
+    const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous: false });
+    expect(s).toMatch(/X-Forwarded-Host: evil\.example' "\$H\/\?csa=\$CB"/);
+    expect(s).toMatch(/^CB=\$\(od /m);
+    expect(s).toContain('label=host-inj');
+  });
+  it('採取の印 RUN を、診断対象のサーバに送らない（URL・ヘッダ・送る本文に入れない）', () => {
+    for (const dangerous of [false, true]) {
+      const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous });
+      expect(s).not.toMatch(/"\$H[^"\s]*\$RUN/);
+      expect(s).not.toMatch(/-H '[^']*\$RUN/);
+      expect(s).not.toMatch(/--data[^;\n]*\$RUN/);
+    }
+  });
+  it('プロキシの CONNECT の応答のあとで curl が失敗しても、CONNECT の応答をサイトの応答にしない', () => {
+    const r = parseInput([`#TARGET url=https://www.example.com/ label=top run=${RUN}`, AT, 'HTTP/1.1 200 Connection established', 'Proxy-Agent: Squid', '',
+      'curl: (35) schannel: next InitializeSecurityContext failed', ''].join('\n'));
+    expect(r.targets[0].responses.map(x => x.kind)).toEqual(['connect']);
+    const findings = evaluate([`#TARGET url=https://www.example.com/ label=top run=${RUN}`, AT, 'HTTP/1.1 200 Connection established', 'Via: 1.1 proxy', 'Content-Length: 0', '', ''].join('\n')).findings;
+    expect(findings.filter(f => f.item === 'H-01' && f.status === 'fail')).toEqual([]);
+  });
+});
+
+describe('第49回：HAR の転送のつなぎ方', () => {
+  it('302 の転送先として、同じ URL の POST のエントリをつながない（ログインの候補を残す）', async () => {
+    const { importHar } = await import('../src/parser/har');
+    const e = (method: string, url: string, status: number, headers: { name: string; value: string }[] = []) => ({ startedDateTime: '2026-11-01T00:00:00Z',
+      request: { method, url, headers: [] }, response: { status, httpVersion: 'HTTP/2', headers, content: { mimeType: 'text/html', text: '<p>x</p>' } } });
+    const imp = importHar(JSON.stringify({ log: { entries: [
+      e('GET', 'https://www.example.com/mypage', 302, [{ name: 'location', value: '/login' }]),
+      e('POST', 'https://www.example.com/login', 302, [{ name: 'location', value: '/mypage' }, { name: 'set-cookie', value: 'SESSIONID=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly' }]),
+      e('GET', 'https://www.example.com/mypage', 200)] } }));
+    expect(imp.chains.map(c => `${c.method} ${c.hops}`)).toEqual(['GET 1', 'POST 2']);
+  });
+  it('転送先のメソッド：303 は GET（HEAD は HEAD）、301・302 は POST だけ GET、307・308 は同じメソッド', async () => {
+    const { importHar } = await import('../src/parser/har');
+    const e = (method: string, url: string, status: number, loc?: string) => ({ startedDateTime: '2026-11-01T00:00:00Z',
+      request: { method, url, headers: [] }, response: { status, httpVersion: 'HTTP/2', headers: loc ? [{ name: 'location', value: loc }] : [], content: { mimeType: 'text/html', text: '<p>x</p>' } } });
+    const hops = (m0: string, st: number, m1: string) => importHar(JSON.stringify({ log: { entries: [
+      e(m0, 'https://www.example.com/a', st, '/b'), e(m1, 'https://www.example.com/b', 200)] } })).chains[0].hops;
+    expect(hops('POST', 303, 'GET')).toBe(2);
+    expect(hops('PUT', 303, 'GET')).toBe(2);
+    expect(hops('HEAD', 303, 'HEAD')).toBe(2);
+    expect(hops('HEAD', 303, 'GET')).toBe(1);
+    expect(hops('POST', 302, 'GET')).toBe(2);
+    expect(hops('PUT', 302, 'PUT')).toBe(2);
+    expect(hops('PUT', 302, 'GET')).toBe(1);
+    expect(hops('HEAD', 301, 'HEAD')).toBe(2);
+    expect(hops('POST', 307, 'POST')).toBe(2);
+    expect(hops('POST', 308, 'GET')).toBe(1);
+    // ブラウザが転送しない 3xx（304・300）の Location はつながない
+    expect(hops('GET', 304, 'GET')).toBe(1);
+    expect(hops('GET', 300, 'GET')).toBe(1);
+  });
+});

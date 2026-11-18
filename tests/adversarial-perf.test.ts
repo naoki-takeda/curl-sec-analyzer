@@ -47,3 +47,31 @@ describe('2乗の時間にならない', { tags: ['perf'] }, () => {
       expect(ms(() => f(v)), `${name} ${p}`).toBeLessThan(1500);
   });
 });
+
+describe('第49回：HAR の転送のつなぎ方が2乗の時間にならない', { tags: ['perf'] }, () => {
+  it('同じ URL へ転送する 302 と、メソッドの違う同じ URL のエントリが多い HAR', async () => {
+    const { importHar } = await import('../src/parser/har');
+    const e = (method: string, url: string, status: number, loc?: string) => ({ startedDateTime: '2026-11-01T00:00:00Z',
+      request: { method, url, headers: [] }, response: { status, httpVersion: 'HTTP/2', headers: loc ? [{ name: 'location', value: loc }] : [], content: { mimeType: 'text/html', text: '' } } });
+    const N = 20000;
+    const entries = [
+      ...Array.from({ length: N }, (_, i) => e('GET', `https://a.example/p${i}`, 302, '/login')),
+      ...Array.from({ length: N }, () => e('POST', 'https://a.example/login', 200)),
+    ];
+    const har = JSON.stringify({ log: { entries } });
+    expect(ms(() => importHar(har)), 'importHar').toBeLessThan(4000);
+  });
+  it('転送先の URL の使っていないエントリが、転送元より前に多くある HAR', async () => {
+    const { importHar } = await import('../src/parser/har');
+    const e = (url: string, status: number, loc?: string) => ({ startedDateTime: '2026-11-01T00:00:00Z',
+      request: { method: 'GET', url, headers: [] }, response: { status, httpVersion: 'HTTP/2', headers: loc ? [{ name: 'location', value: loc }] : [], content: { mimeType: 'text/html', text: '' } } });
+    const N = 15000;
+    const entries = [
+      ...Array.from({ length: N }, (_, i) => e(`https://a.example/a${i}`, 302, `/b${i}`)),
+      ...Array.from({ length: N }, () => e('https://a.example/x', 200)),
+      ...Array.from({ length: N }, (_, i) => e(`https://a.example/b${i}`, 302, '/x')),
+    ];
+    const har = JSON.stringify({ log: { entries } });
+    expect(ms(() => importHar(har)), 'importHar').toBeLessThan(4000);
+  });
+});

@@ -78,6 +78,10 @@ const hasData = (t: Target) =>
 const nextHopAfter = (status: number) => status < 200 || (status >= 300 && status < 400) || status === 401 || status === 407;
 const probeResult = (ok?: string): 'accepted' | 'rejected' | 'error' => (ok === '1' ? 'accepted' : ok === 'err' ? 'error' : 'rejected');
 
+/** プロキシの CONNECT の応答の形：本文がなく、ヘッダがプロキシの決まったものだけ */
+const PROXY_HEADERS = new Set(['proxy-agent', 'via', 'date', 'connection', 'keep-alive', 'content-length', 'proxy-connection']);
+// 本文は、curl の失敗の行（curl: (35) …。-sS の標準エラー出力が混ざる）だけなら、ないものとみなす
+const proxyShape = (r: HttpResponse) => !(r.body ?? '').replace(/^curl: \(\d+\).*$/gm, '').trim() && [...r.headers.keys()].every(k => PROXY_HEADERS.has(k)) && (r.headers.get('content-length') ?? ['0']).every(v => v.trim() === '0');
 export function parseInput(input: string): ParseResult {
   const targets: Target[] = [];
   let t = newTarget({});
@@ -177,7 +181,10 @@ export function parseInput(input: string): ParseResult {
     // openssl の出力とみなし、T-10・T-11 を「ハンドシェイクに失敗した可能性」にした）
     // 同じターゲットで HTTP の応答に続けた openssl の出力（CONNECTED( の行、Connecting to と CONNECTED( の2行）は、応答の本文の中でも
     // openssl の出力の始まりとして応答を閉じる（本文に入れると t.openssl が空になり、T-10・T-11 で使えなかった）。ほかの始まりの行（depth= など）は本文の外だけ
-    const opensslHead = /^CONNECTED\(\d+\)\s*$/.test(line) || (CONNECTING.test(line) && /^CONNECTED\(/.test(lines[li + 1] ?? ''));
+    // OpenSSL 3.5 は「Connecting to」のすぐあとに depth= の行を出す（2>&1）ので、tls のラベルでは次の行が openssl の出力の始まりのときも含める
+    // （含めないと、生成スクリプトの tls で毎回1行の解析警告が出た。第49回）
+    const opensslHead = /^CONNECTED\(\d+\)\s*$/.test(line) || (CONNECTING.test(line) && (/^CONNECTED\(/.test(lines[li + 1] ?? '')
+      || (baseLabel(t.label) === 'tls' && OPENSSL_START.test(lines[li + 1] ?? ''))));
     // 生成スクリプトの出力（印のある入力）では、本文の中の「CONNECTED(n)」を openssl の出力の始まりとするのは tls のラベルだけ（生成スクリプトは
     // tls 以外で openssl を実行しない。診断対象のサーバが本文に書くと、そのあとの本文がすべて openssl の出力になり、E-07〜E-09・E-12 が消えた）。
     // 手書きの入力は、HTTP の応答に続けた openssl の出力をどのラベルでも読む（これまでどおり）
@@ -192,9 +199,13 @@ export function parseInput(input: string): ParseResult {
     // 応答のヘッダの中で決めると、診断対象のサーバがヘッダに「* Connected to …」「> Cookie: …」の行を書いて、Cookie を送ったことにでき、
     // 認証なしの A-01①（高）を na に隠せた
     // 印のある入力では、ターゲットの最初の行（空行と、デバッグ版の curl の「WARNING:」「Note:」の行を除く）が curl -v の「*」の行のときだけ
-    // -v として読む（curl -v 2>&1 の出力は必ず「*」の行で始まる）。応答のヘッダに「* Connected to」「> Cookie:」を書いて Cookie を送ったことにし、
+    // -v として読む（curl -v 2>&1 の出力は必ず「*」の行で始まる。「* WARNING: failed to open cookie file」「* !!! WARNING !!!」も curl 自身の行で、
+    // 診断対象のサーバは curl の行より前に行を書けない。VERBOSE_HINT の行だけにすると、生成スクリプトの pre-login を読み捨てた。第49回）。応答のヘッダに「* Connected to」「> Cookie:」を書いて Cookie を送ったことにし、
     // A-01①（高）を隠せた。読めないステータス行（小文字の http/1.1 200、2桁のコード）で応答を始めずに書く形もあった（第48回）
-    if (runId && firstLine === 'pending' && line.trim() && !/^(?:WARNING|Note):/.test(line)) firstLine = VERBOSE_HINT.test(line) ? 'hint' : 'other';
+    if (runId && firstLine === 'pending' && line.trim() && !/^(?:WARNING|Note):/.test(line)) {
+      firstLine = /^\* /.test(line) || VERBOSE_HINT.test(line) ? 'hint' : 'other';
+      if (firstLine === 'hint') t.verbose = true;   // デバッグ版の curl の「* !!! WARNING !!!」などを、-v の情報行として読む（解析警告にした。束のレビュー）
+    }
     if (!inBody() && (!runId || firstLine === 'hint') && VERBOSE_HINT.test(line)) t.verbose = true;
     if (t.verbose && !inBody()) {                      // -v の解釈は verbose ターゲットのヘッダ部だけ
       // 受信ヘッダ（< の行）の途中の空行は無視する。終端は「<」の行で、空行ではない。
@@ -237,7 +248,10 @@ export function parseInput(input: string): ParseResult {
       else if (/^[{}] \[/.test(line)) continue;
     }
     const sm = line.match(STATUS_RE);
-    if (sm && !inBody()) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; vHeaders = fromV; continue; }
+    // 印のある入力では、ヘッダの途中（cur があり、まだヘッダを読んでいる）のステータス行の形の行は、新しい応答にしない（curl はコロンのある
+    // 「HTTP/1.1 401 Unauthorized: x」をヘッダとして受け付けて出す。診断対象のサーバがこの行で応答を作り直し、本物の 200 をプロキシの応答に
+    // して A-01①・C-12①（高）を合格にできた。第49回）。-D・-v のどちらも、次の応答の前には空行（-v は「<」の行）がある
+    if (sm && !inBody() && !(runId && cur && inHeaders)) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; vHeaders = fromV; continue; }
     // 本文の直前の行が空行かは、本文の末尾だけを見る（本文全体を split すると、本文の中のステータス行らしい行ごとに64KBを分けることになり、入力の長さの2乗の時間がかかる）
     // -i の出力では、本文と次の応答を見分けられない（本文が「HTTP/1.1 200 OK」と偽のヘッダで始まると、次の応答として読む）。ヘッダの形で
     // プロキシの応答を見分ける作りは、本物のプロキシの応答（ヘッダを足すもの）を壊し、3xx・401 の本文からの偽装も止められなかったのでやめた。
@@ -246,7 +260,7 @@ export function parseInput(input: string): ParseResult {
       close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue;
     }
     // C10：ヘッダ名が小文字のJSON。-v の本文や、応答のあとの本文（{"items":[...]} など）は対象にしない
-    if (!cur && !t.verbose && (json || (!t.responses.length && /^\s*\{\s*"[\w-]+"\s*:\s*\[/.test(line)))) {
+    if (!cur && !t.verbose && (json || (!t.responses.length && /^\s*\{\s*"[!#$%&'*+.^_`|~0-9A-Za-z-]+"\s*:\s*\[/.test(line)))) {
       if (!json) { json = []; jsonBytes = 0; js.depth = 0; js.inStr = false; js.esc = false; }
       json.push(line); jsonBytes += line.length;
       for (const ch of line) {
@@ -290,7 +304,12 @@ export function parseInput(input: string): ParseResult {
     if (r.status > 0 && r.status < 200) r.kind = 'informational';
     // 407 はプロキシだけが返すので、あとに応答が続かなくても（プロキシの認証に失敗して諦めた）サイトの応答にしない
     // （最終応答にすると、プロキシの 407 で H-01①（高）などを判定した）
-    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '')) || proxyReply || r.status === 407) r.kind = 'connect';
+    // 理由句「Connection established」でプロキシの応答とみなすのは、あとに応答が続くときだけ（最後の応答の理由句を変えるだけで、サイトの応答を
+    // 消せた。第49回）
+    // あとに応答が続かない（CONNECT のあとで curl が失敗した。社内のプロキシ越しの Schannel の失効確認の失敗など）ときも、本文がなく、ヘッダが
+    // プロキシの応答の形（Proxy-Agent・Via・Date・Connection・Keep-Alive・Content-Length: 0 だけ）なら connect（サイトの応答にすると、H-01① など
+    // の誤検知が大量に出た。束のレビュー）。この形をサーバが返しても、空の応答と同じで判定には使えない
+    else if ((r.status === 200 && /connection established/i.test(r.reason ?? '') && (retried || proxyShape(r))) || proxyReply || r.status === 407) r.kind = 'connect';
     else if (r.status === 401 && retried) r.kind = 'challenge';
     else if (r.status >= 300 && r.status < 400 && r.headers.has('location')) r.kind = 'redirect';
     if (r.body !== undefined && !r.body.trim()) r.body = undefined;
