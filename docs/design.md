@@ -784,7 +784,7 @@ curl-sec-analyzer/
 │  ├─ ui/      state.ts dom.ts results.ts har.ts generator.ts dialog.ts
 │  ├─ parser/  input.ts har.ts target.ts openssl.ts setCookie.ts
 │  ├─ rules/   ruleset.ts util.ts headers.ts csp.ts cookies.ts cors.ts transport.ts hostRules.ts
-│  │           exposure.ts html.ts api.ts cross.ts
+│  │           exposure.ts html.ts api.ts cross.ts probes.ts（C13 のプローブの判定パターン）
 │  ├─ engine/  run.ts labels.ts labels.json items.json coverage.ts suppress.ts profile.ts diff.ts summarize.ts
 │  └─ export/  markdown.ts json.ts csv.ts
 ├─ scripts/screenshot.mjs     # README の画像を撮り直す（npm run screenshot）

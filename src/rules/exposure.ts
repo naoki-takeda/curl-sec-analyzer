@@ -1,6 +1,7 @@
 // rules/exposure.ts：第5章 エラー・情報露出（E-01、E-02、E-04〜E-06、E-11、E-13）
 import type { HttpResponse, Rule, RuleContext } from '../model';
-import { clip, probePattern } from '../mask';
+import { clip } from '../mask';
+import { probePattern } from './probes';
 import { NO_BODY_REC, PROBE_UNREACHED_REC, bodyTruncated, header, isStaticResource, mk } from './util';
 import { ownChain } from '../parser/target';
 import { allowedItems } from '../engine/labels';

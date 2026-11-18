@@ -1,6 +1,6 @@
 // rules/hostRules.ts：ホスト単位のルール（T-09〜T-11、E-03）。同じホストの全ターゲットをまとめて判定する
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { probePattern } from '../mask';
+import { probePattern } from './probes';
 import { hasCertificate, nameMatches, parseOpenssl, type TlsInfo } from '../parser/openssl';
 import { capturedAt } from '../parser/target';
 import { PROBE_UNREACHED_REC } from './util';

@@ -1,6 +1,6 @@
 // 要確認事項の確認（2026-11-18）で分かった、プローブのパターン・openssl の出力・curl の -v の前提の違い
 import { describe, expect, it } from 'vitest';
-import { probePattern } from '../src/mask';
+import { probePattern } from '../src/rules/probes';
 import { parseOpenssl } from '../src/parser/openssl';
 import { isHttps } from '../src/parser/target';
 import { recommendationEn } from '../src/recommendationsEn';
