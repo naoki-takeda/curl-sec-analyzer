@@ -2,7 +2,7 @@
 import type { Rule, RuleContext } from '../model';
 import { LOGOUT_FAILED_REC, NO_BODY_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, parseHsts, sensitiveUnlessStatic, splitPolicies } from './util';
 import { clip, maskValue } from '../mask';
-import { baseLabel, firstStatus, logoutFailed, ownChain, siteResponses } from '../parser/target';
+import { baseLabel, chainOf, firstStatus, logoutFailed, siteResponses } from '../parser/target';
 import { htmlBody, metaCspPolicies, mixedContent, tags } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
@@ -10,13 +10,25 @@ import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './cs
  * 判定に使う HSTS ヘッダ。apex は、apex 自身の応答（転送の最初のホップ）で見る。
  * -L や HAR で www への転送をたどった最後の応答は www のもの（H-02「apex自身もHSTSを返す」）
  */
-const hstsOf = (ctx: RuleContext) => (baseLabel(ctx.target.label) === 'apex' ? ownChain(ctx.target)[0] : ctx.final)?.headers.get('strict-transport-security')?.[0];
+const hstsOf = (ctx: RuleContext) => (baseLabel(ctx.target.label) === 'apex' ? apexHop(ctx) : ctx.final)?.headers.get('strict-transport-security')?.[0];
+/**
+ * apex 自身の https の応答（ホストが apex のホップ）。http で採取して -L で www へ転送したとき、ownChain の最初は www の応答なので、www の HSTS で
+ * apex の H-01・H-02 を合格にした（横断の H-02③ は na で、結果が食い違った。第49回）
+ */
+const apexHop = (ctx: RuleContext) => {
+  let host: string | undefined; try { host = new URL(ctx.target.url ?? '').hostname; } catch { return undefined; }
+  return chainOf(ctx.target).find(r => { try { return /^https:/i.test(r.url ?? '') && new URL(r.url!).hostname === host; } catch { return false; } });
+};
+/** apex で、apex 自身の https の応答がないときの na（H-01・H-02） */
+const noApexHttps = (rule: Rule, ctx: RuleContext) => (baseLabel(ctx.target.label) === 'apex' && !apexHop(ctx)
+  ? [mk(rule, ctx, 'na', 'info', 'na', 'apex 自身の https の応答がない（転送先の www の HSTS は apex のものではない）', 'https://apex/ を label=apex で採取する')] : undefined);
 
 export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS', 'MDN HTTP Observatory'],
   run(ctx) {
     if (ctx.isHttps === false) return [];               // http のターゲットは適用外（T-04 で評価）
     if (ctx.isHttps === undefined || !ctx.final) return [mk(hsts, ctx, 'na', 'info', 'na', 'HTTPSかどうか判定できない', '#TARGET に url= を付ける')];
+    const apexNa = noApexHttps(hsts, ctx); if (apexNa) return apexNa;
     const v = hstsOf(ctx);
     const rec = 'Strict-Transport-Security: max-age=63072000; includeSubDomains';
     if (!v) return [mk(hsts, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
@@ -145,15 +157,18 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
 // ヘッダの CSP と、HTML の <meta> の CSP（ブラウザは両方を強制する）。H-06 の frame-ancestors はヘッダだけ（cspPolicies）で見る
 const enforcedPolicies = (ctx: RuleContext) => [...cspPolicies(ctx), ...metaCspPolicies(ctx)].map(parseCsp).filter(p => p.size > 0);
 
+/** 英語の画面のカバレッジの理由が日本語の証跡にならないよう、推奨対応を付ける（第49回） */
+const HSTS_SYNTAX_REC = 'HSTS の構文を直す（H-01③）';
 export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'any', scope: 'target',
   basis: ['hstspreload.org', 'MDN'],
   run(ctx) {
     if (ctx.isHttps === false) return [];
+    const apexNa = noApexHttps(hstsPreload, ctx); if (apexNa) return apexNa;
     const v = hstsOf(ctx);
     if (!ctx.final || !v) return [mk(hstsPreload, ctx, 'na', 'info', 'na', 'HSTSがない（H-01で判定）', '')];
     // 構文の誤ったヘッダ（カンマ区切りの max-age=…, includeSubDomains, preload など）はブラウザが無視する。H-01③ で指摘するので、
     // ここで「preload なし」とは言わない（preload と書いてあるのに「なし」の証跡になった）
-    if (!parseHsts(v).valid) return [mk(hstsPreload, ctx, 'na', 'info', 'na', `${v}（HSTSの構文の誤り。H-01③で判定）`, '')];
+    if (!parseHsts(v).valid) return [mk(hstsPreload, ctx, 'na', 'info', 'na', `${v}（HSTSの構文の誤り。H-01③で判定）`, HSTS_SYNTAX_REC)];
     const age = parseHsts(v).maxAge;
     if (!hstsDirective(v, 'preload')) return [mk(hstsPreload, ctx, 2, 'info', 'fail', v, 'preload リストへの登録を検討する（max-age 31536000 以上＋includeSubDomains＋preload）')];
     if (age < 31536000 || !hstsDirective(v, 'includesubdomains')) return [mk(hstsPreload, ctx, 1, 'low', 'fail', v, 'preload には max-age 31536000 以上と includeSubDomains が必要')];

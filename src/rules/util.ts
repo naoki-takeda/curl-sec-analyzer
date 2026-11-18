@@ -189,3 +189,14 @@ export const isPublicClientValue = (v: string): boolean =>
  */
 export const isPlaceholderValue = (v: string): boolean =>
   /^(?:([*•●xX#.\-_])\1{2,}|[[(<{]?\s*(?:redacted|filtered|hidden|masked|protected|removed|omitted)\s*[\])>}]?)$/i.test(v.trim());
+
+/**
+ * 入力の検証の規則（Laravel・VeeValidate の required|min:8|max:64）。| でつないだ、英字の規則名（引数は数字・英字）だけのもの。
+ * ログイン・登録の画面の password:"required|min:8" を、秘密の値の代入（E-09①（高））とした（第48回）
+ */
+export const VALIDATION_RULE = /^[a-z_]+(?::[\w,.-]{1,20})?(?:\|[a-z_]+(?::[\w,.-]{1,20})?)+$/i;
+/** HTML の autocomplete の値（current-password・new-password・one-time-code など）。正規表現（^…$）も秘密の値ではない */
+export const AUTOCOMPLETE = /^(?:current-password|new-password|one-time-code|username|email|off|on)$/i;
+/** 秘密の値ではない形（入力の検証の規則・正規表現 ^…$・autocomplete の値）。E-09 と A-07 で共有する（A-07 だけ除いておらず、API の検証の規則を
+ * パスワードの露出（高）とした。第49回） */
+export const notSecretFormat = (v: string): boolean => VALIDATION_RULE.test(v) || /^\^.*\$$/.test(v) || AUTOCOMPLETE.test(v);

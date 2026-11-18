@@ -217,7 +217,7 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     // <redoc>、<rapi-doc>、@scalar/api-reference）。本文の「Swagger UI」の語だけで見ると、どのパスにも同じ画面を返す SPA の文中の語で②にした
     const ui = /<title>[^<]{0,100}(?:swagger[- ]ui|redoc|rapidoc|scalar)|\bid\s*=\s*["']?(?:swagger-ui|api-reference)\b|swagger-ui(?:-bundle|-standalone-preset)?(?:\.min)?\.(?:js|css)\b|SwaggerUIBundle|<redoc\b|redoc\.standalone|<rapi-doc\b|@scalar\/api-reference/i.test(b);
     if (isHtml && !(docSegment(p) !== 'actuator' && ui))
-      return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? '' : NO_BODY_REC)];
+      return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? `${p} がその機能の画面かを、ブラウザで開いて確かめる` : NO_BODY_REC)];
     // /actuator/health・/actuator/info で、本文が状態だけ（components・details のない {"status":"UP"}、空の {}）のものは、Spring Boot が既定で公開する
     // 死活監視の応答なので対象外（Kubernetes・負荷分散装置が使う。ほぼすべての Spring Boot の製品で高を出していた）
     if (docSegment(p) === 'actuator' && actuatorDefault(p, b))

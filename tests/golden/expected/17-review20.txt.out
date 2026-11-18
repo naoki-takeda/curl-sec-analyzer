@@ -143,7 +143,7 @@ www.example.com | T-10.3 | medium | fail | TLS 1.2で接続できたCBC・静的
 
 ## coverage
 H-01 | evaluated | fails=4
-H-02 | missing-input | fails=0 | HSTSがない（H-01で判定） / max-age=63072000, includeSubDomains, preload（HSTSの構文の誤り。H-01③で判定）
+H-02 | missing-input | fails=0 | HSTSがない（H-01で判定） / HSTS の構文を直す（H-01③）
 H-03 | evaluated | fails=2 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
