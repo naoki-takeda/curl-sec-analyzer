@@ -14,7 +14,7 @@ export interface HttpResponse {
   url?: string;                     // そのホップのリクエストのURL（HAR は記録から、curl はターゲットの URL から Location をたどって付ける）
 }
 export interface ParseWarning {
-  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'proxy-only' | 'invalid-attr';
+  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'mixed-run' | 'proxy-only' | 'invalid-attr';
   detail: string;
   label?: string;                   // unknown-url：URLが分からないターゲットのラベル（画面のURL欄で補ったものだけ警告を消すため）
 }

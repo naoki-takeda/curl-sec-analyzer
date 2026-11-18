@@ -147,7 +147,7 @@ describe('生成スクリプト：-i の出力のあとに改行を出す', () =
     expect(s).not.toMatch(/curl -sS -i /);
     const lines = s.split('\n').filter(l => /-D "\$hdr" -o "\$body"/.test(l));
     expect(lines.length).toBeGreaterThan(10);
-    for (const l of lines) expect(l).toMatch(/cat "\$hdr"; echo "#BODY run=\$RUN"; cat "\$body"; echo/);
+    for (const l of lines) expect(l).toMatch(/cat "\$hdr"; echo "#BODY run=\$RUN"; head -c 196608 "\$body"; echo/);
   });
   it('改行で終わらない本文でも、次の #TARGET が別のターゲットになる', () => {
     // 生成スクリプトが出す形：本文（改行なし）のあとに -w の改行、次の #TARGET

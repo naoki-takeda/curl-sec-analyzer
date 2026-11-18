@@ -40,6 +40,8 @@ const METER_PREFIX = new RegExp(String.raw`${METER}(?=(?:< )?HTTP\/[\d.]+ \d{3}|
 export function attrs(s: string): Record<string, string> {
   const out: Record<string, string> = {};
   const line = s;
+  // 行の最後の @ の位置は一度だけ求める（cmd= のたびに行の残りを調べると、cmd= を並べた本文の1行で入力の長さの2乗の時間がかかった）
+  const lastAt = line.lastIndexOf('@');
   const ct = s.match(/(?:^|\s)ct=(.*)$/);
   if (ct) { out.ct = ct[1].trim(); s = s.slice(0, ct.index); }
   // 値は引用符で囲んでもよい（url="https://…"、label="top page"）。引用符をそのまま値にすると、url が URL として読めず、警告なしで
@@ -49,7 +51,7 @@ export function attrs(s: string): Record<string, string> {
     // cmd= の値が引用符・空白で切れ、行のあとに @ が残ったもの（cmd="curl 'https://first.last:'"$PASS"'@host/'"）は、値の終わりに「 @」を付ける。
     // CSV の実施コマンドの要約は、URL のあとの @ で URL を伏せる（export/cmdSummary.ts）。付けないと、ユーザー情報の終わりの @ が値から外れ、
     // 切れる前のユーザー名と数字のパスワードがホストとポートとして出た（第33回）
-    if (m[1] === 'cmd' && line.slice(m.index + m[0].length).includes('@')) out.cmd += ' @';
+    if (m[1] === 'cmd' && lastAt >= m.index + m[0].length) out.cmd += ' @';
   }
   return out;
 }
@@ -113,6 +115,7 @@ export function parseInput(input: string): ParseResult {
     : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
   const badSensitive: Target[] = [];                   // sensitive= の値を読めなかったターゲット（ラベルは付け直したあとのものを出す）
   const badTargetAttrs: string[] = [];                 // #TARGET の読めなかった指定（書き間違えた名前、受け付けないラベル・kind）
+  let firstLine: 'pending' | 'hint' | 'other' = 'pending';   // 印のある入力で、ターゲットの最初の行が curl -v の「*」の行だったか
   let ignoredMarkers = 0;                              // 印のない（違う）#TARGET の行の数。本文として読んだことを知らせる
   let inRaw = false;                                   // #BODY のあと：次のマーカーまでを本文としてそのまま読む（ステータス行・openssl の行・-v の行として読まない）
   let rawBody: HttpResponse | undefined;              // 本文を足す応答。#BODY の前に応答がない（curl が失敗した、curl は受け付けるがここでは読めないステータス行
@@ -139,7 +142,7 @@ export function parseInput(input: string): ParseResult {
       const [, tag] = mk;
       if (tag === 'BODY') { inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
       if (tag === 'TARGET') {
-        flush(); t = newTarget(a); pendingJson.length = 0; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
+        flush(); t = newTarget(a); pendingJson.length = 0; firstLine = 'pending'; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
         // 書き間違い（lable=）や受け付けない値（label=login/x、kind=API）は、黙って既定にすると、予約したラベルの横断の判定（C-09 など）が
         // 動かない理由が分からなかった。sensitive= と同じく知らせる（値は出さない。ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
         const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
@@ -177,10 +180,21 @@ export function parseInput(input: string): ParseResult {
     // 生成スクリプトの出力（印のある入力）では、本文の中の「CONNECTED(n)」を openssl の出力の始まりとするのは tls のラベルだけ（生成スクリプトは
     // tls 以外で openssl を実行しない。診断対象のサーバが本文に書くと、そのあとの本文がすべて openssl の出力になり、E-07〜E-09・E-12 が消えた）。
     // 手書きの入力は、HTTP の応答に続けた openssl の出力をどのラベルでも読む（これまでどおり）
-    if ((!inBody() && (OPENSSL_START.test(line) || opensslHead)) || (inBody() && opensslHead && (!runId || baseLabel(t.label) === 'tls'))) { close(); inOpenssl = true; }
+    // 印のある入力では、ヘッダの中の行（notAfter=… など）も openssl の出力の始まりにしない。始まりは、tls のラベルで、応答の外（cur がない）の行だけ
+    // （診断対象のサーバが応答ヘッダに notAfter=2099… と「Verify return code: 0 (ok)」の行を書くと、本物の証明書の T-11①② を合格にできた）
+    const opensslAllowed = !runId ? (!inBody() ? (OPENSSL_START.test(line) || opensslHead) : opensslHead)
+      : baseLabel(t.label) === 'tls' && (!cur || inBody()) && (cur ? opensslHead : (OPENSSL_START.test(line) || opensslHead));
+    if (opensslAllowed) { close(); inOpenssl = true; }
     if (inOpenssl && !STATUS_RE.test(line) && !/^[*<>] /.test(line)) { t.openssl.push(line); continue; }
     inOpenssl = false;
-    if (!inBody() && VERBOSE_HINT.test(line)) t.verbose = true;
+    // 印のある入力では、-v の出力かどうかを応答の外の行（cur がない）だけで決める。curl -v の「* Connected to」などは応答より前に出る。
+    // 応答のヘッダの中で決めると、診断対象のサーバがヘッダに「* Connected to …」「> Cookie: …」の行を書いて、Cookie を送ったことにでき、
+    // 認証なしの A-01①（高）を na に隠せた
+    // 印のある入力では、ターゲットの最初の行（空行と、デバッグ版の curl の「WARNING:」「Note:」の行を除く）が curl -v の「*」の行のときだけ
+    // -v として読む（curl -v 2>&1 の出力は必ず「*」の行で始まる）。応答のヘッダに「* Connected to」「> Cookie:」を書いて Cookie を送ったことにし、
+    // A-01①（高）を隠せた。読めないステータス行（小文字の http/1.1 200、2桁のコード）で応答を始めずに書く形もあった（第48回）
+    if (runId && firstLine === 'pending' && line.trim() && !/^(?:WARNING|Note):/.test(line)) firstLine = VERBOSE_HINT.test(line) ? 'hint' : 'other';
+    if (!inBody() && (!runId || firstLine === 'hint') && VERBOSE_HINT.test(line)) t.verbose = true;
     if (t.verbose && !inBody()) {                      // -v の解釈は verbose ターゲットのヘッダ部だけ
       // 受信ヘッダ（< の行）の途中の空行は無視する。終端は「<」の行で、空行ではない。
       // Windows の curl は受信ヘッダの行を CR CR LF で終え、画面の入力欄（textarea）はそれを改行2つ（空行）に変えるため、
@@ -285,8 +299,12 @@ export function parseInput(input: string): ParseResult {
   const ignored: ParseWarning[] = ignoredMarkers ? [{ kind: 'ignored-marker',
     detail: `採取の印（run=）が最初の #TARGET と違う #TARGET の行が${ignoredMarkers}行あり、応答の本文として読みました（診断対象が本文に書いたもの、または別の採取の出力を付け足したもの。付け足した出力は別に判定してください）` }] : [];
   const badAttr: ParseWarning[] = badSensitive.length ? [{ kind: 'invalid-attr', detail: `sensitive= の値を読めませんでした（${badSensitive.slice(0, 5).map(x => x.label).join(', ')}${badSensitive.length > 5 ? ' など' : ''}）。1（機密）か 0（機密でない）を指定してください` }] : [];
+  // 最初の #TARGET に印がなく、あとに印のある #TARGET（生成スクリプトの出力）が続く：印は最初の #TARGET からだけ取るので、生成スクリプトの出力も
+  // 印のない入力として読み、応答の本文に書かれたマーカーを読む（README のとおり手書きのターゲットを前に足すと、印による保護が黙って外れた）
+  const mixedRun: ParseWarning[] = !runId && /(?:^|\n)#TARGET[ \t](?:[^\n]*[ \t])?run=[0-9a-f]{16,64}(?=[ \t\n]|$)/.test(normalized) ? [{ kind: 'mixed-run',
+    detail: '生成スクリプトの出力（run= の印のある #TARGET）の前に、印のない #TARGET があります。この場合は印を使わずに読むので、応答の本文に書かれた #TARGET などのマーカーもターゲットとして読みます。生成スクリプトの出力だけを先頭から貼り付け、手書きの出力は別に貼り付けて判定してください' }] : [];
   if (badTargetAttrs.length) badAttr.push({ kind: 'invalid-attr', detail: `#TARGET の指定を読めませんでした（${badTargetAttrs.slice(0, 5).join('、')}${badTargetAttrs.length > 5 ? ' など' : ''}）` });
-  return { targets, warnings: [...dup, ...ignored, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets)] };
+  return { targets, warnings: [...dup, ...ignored, ...mixedRun, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets)] };
 }
 
 // %{header_json} にほぼ必ずある応答ヘッダ。どれもない JSON（{"tags":["a"]} など）はヘッダとみなさない

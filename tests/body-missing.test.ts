@@ -59,7 +59,7 @@ describe('A1 生成スクリプト：login は本文も採取する', () => {
   const loginLine = s.split('\n').find(l => l.includes('--data @login.txt') && !l.includes('s$i.txt'))!;
   it('ヘッダと本文を分けて取り、#BODY の印のあとに本文を出す', () => {
     expect(loginLine).toContain('-D "$hdr" -o "$body"');
-    expect(loginLine).toContain('echo "#BODY run=$RUN"; cat "$body"');
+    expect(loginLine).toContain('echo "#BODY run=$RUN"; head -c 196608 "$body"');
     expect(loginLine).toContain('-c jar.txt -b jar.txt -X POST');
     expect(loginLine).not.toContain('/dev/null');
   });

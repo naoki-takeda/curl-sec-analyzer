@@ -30,7 +30,7 @@ describe('生成スクリプト', () => {
   });
   it('証明書の SAN は見出しと値の2行だけを取り、期限は SAN の前に出す（SAN の改行で notAfter を偽装させない）', () => {
     const line = s.split('\n').find(l => l.startsWith('if [ -n "$cert" ]'))!;
-    expect(line).toBe(`if [ -n "$cert" ]; then printf '%s\\n' "$cert" | openssl x509 -noout -subject -issuer -dates; printf '%s\\n' "$cert" | openssl x509 -noout -ext subjectAltName | head -n 2; fi`);
+    expect(line).toBe(`if [ -n "$cert" ]; then printf '%s\\n' "$cert" | openssl x509 -noout -subject -issuer -dates; printf '%s\\n' "$cert" | openssl x509 -noout -ext subjectAltName | tr -d '\\r' | head -n 2; fi`);
   });
   it('run.sh：sh（dash）でも止まらない、~/.curlrc を読まない、http はポートを除く', () => {
     const r = readFileSync(new URL('../../run.sh', import.meta.url), 'utf8');

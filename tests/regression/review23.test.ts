@@ -136,7 +136,7 @@ describe('束3b 生成スクリプトはヘッダと本文を分けて取る（�
     expect(s).toMatch(/^rm -f "\$hdr" "\$body"$/m);
     for (const l of s.split('\n').filter(x => x.includes('-D "$hdr"'))) expect(l).toMatch(/^\s*: > "\$hdr"; : > "\$body"; curl /);
     // 行末のコメント（# A-08）が、cat のあとに移っている
-    expect(s).toMatch(/cat "\$body"; echo\s+# A-08/);
+    expect(s).toMatch(/head -c 196608 "\$body"; echo\s+# A-08/);
   });
 });
 

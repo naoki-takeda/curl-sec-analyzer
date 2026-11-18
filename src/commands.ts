@@ -127,20 +127,26 @@ export function generateScript(o: CommandOptions): string {
     // SAN は x509 が名前をそのまま（改行を含めて）出すので、見出しと値の2行だけを取る。証明書の SAN に改行と「notAfter=2099…」を入れて、
     // 期限や SAN を偽装できた（パーサは後ろの notAfter・SAN を使う）。証明書を受け取れなかったときは x509 を実行しない
     `cert=$(openssl s_client -connect ${q(hp)} -servername ${q(sni)} </dev/null 2>/dev/null | openssl x509)`,
-    `if [ -n "$cert" ]; then printf '%s\\n' "$cert" | openssl x509 -noout -subject -issuer -dates; printf '%s\\n' "$cert" | openssl x509 -noout -ext subjectAltName | head -n 2; fi`,
+    `if [ -n "$cert" ]; then printf '%s\\n' "$cert" | openssl x509 -noout -subject -issuer -dates; printf '%s\\n' "$cert" | openssl x509 -noout -ext subjectAltName | tr -d '\\r' | head -n 2; fi`,
+    // ↑ SAN の値の CR も除く（CR は head -n 2 を通り抜け、パーサが改行にそろえると「notAfter=…」の行ができた）
+    // 手元の openssl がない（終了コード 127）・実行できない（126）・その指定を受け付けない（no cipher match。LibreSSL は @SECLEVEL を読まない）
+    // ときは err（試していない）。拒否（ok=0）とすると、openssl のない環境で C12・C23 がすべて「拒否」になり、T-09・T-10 を合格にした。
+    // 照合の前に、証明書の検証の行（depth=・verify error/return）を除く（サーバの証明書の subject に「O=unknown option」と書くと、受け入れた
+    // プローブを err にして T-09①・T-10① を隠せた）
+    "OSSL_ERR='unknown option|no protocols available|no cipher match|invalid command|error with command|ssl_conf_cmd|command not found'",
     'tout=$(mktemp); terr=$(mktemp)',
     'for v in tls1 tls1_1 tls1_2 tls1_3; do',
     `  openssl s_client -connect ${q(hp)} -servername ${q(sni)} -$v -cipher 'DEFAULT@SECLEVEL=0' </dev/null >"$tout" 2>"$terr"; rc=$?`,
     // 手元の openssl がそのプロトコルに対応していない（no protocols available・unknown option）ときだけ err。「unsupported protocol」は、
     // サーバが別のバージョンを選んだ（このバージョンを拒否した）ときにも出るので、拒否として扱う
-    `  if grep -qiE 'unknown option|no protocols available' "$terr"; then r=err`,
+    `  if [ $rc -ge 126 ] || grep -vE '^(depth=|verify (error|return))' "$terr" | grep -qiE "$OSSL_ERR"; then r=err`,
     // 「New, <版>, Cipher is <暗号>」の版は、OpenSSL 1.1 以降は暗号の最低の版（AES128-SHA は SSLv3）を出す。版は問わず、失敗したとき
     // の「New, (NONE), Cipher is (NONE)」だけを除く（TLS で始まるものだけにすると、TLS 1.0 の AES128-SHA を「拒否」とした）
     `  elif [ $rc -eq 0 ] && ${cut} "$tout" | grep -qE '^New, [^(,][^,]*, Cipher is [^(]'; then r=1`, '  else r=0; fi',
     `  printf '#TLSPROBE run=%s v=%s ok=%s\\n' "$RUN" "$v" "$r"`, 'done',
     'for c in RC4-SHA DES-CBC3-SHA NULL-SHA256 AES128-SHA ECDHE-RSA-AES128-SHA; do',
     `  openssl s_client -connect ${q(hp)} -servername ${q(sni)} -tls1_2 -cipher "$c:@SECLEVEL=0" </dev/null >"$tout" 2>"$terr"; rc=$?`,
-    `  if grep -qiE 'no cipher match|unknown option' "$terr"; then r=err`,
+    `  if [ $rc -ge 126 ] || grep -vE '^(depth=|verify (error|return))' "$terr" | grep -qiE "$OSSL_ERR"; then r=err`,
     `  elif [ $rc -eq 0 ] && ${cut} "$tout" | grep -qE "^New, [^(,][^,]*, Cipher is $c\\$"; then r=1`, '  else r=0; fi',
     `  printf '#CIPHERPROBE run=%s c=%s ok=%s\\n' "$RUN" "$c" "$r"`, 'done', 'rm -f "$tout" "$terr"');
 
@@ -161,9 +167,12 @@ export function generateScript(o: CommandOptions): string {
   // 本文を取るコマンド（ここでは curl -sS -i と書く）は、ヘッダ（-D）と本文（-o）を別のファイルに取り、「ヘッダ・#BODY の印・本文」の順に出す。
   // -i の出力では本文と次の応答を見分けられず、診断対象のサーバが本文を「HTTP/1.1 200 OK」と偽のヘッダで始めると、本物の応答を置き換えられた。
   // 印は実行ごとの乱数を持つので、サーバは本文の終わりを作れない。取る前に2つのファイルを空にする（接続に失敗したとき、前のコマンドの
-  // ヘッダ・本文を出さない）。最後に改行を出す（本文が改行で終わらないと、次の #TARGET が本文の続きになる）
+  // ヘッダ・本文を出さない）。最後に改行を出す（本文が改行で終わらないと、次の #TARGET が本文の続きになる）。
+  // 本文は先頭の192KBだけを出す（パーサが使うのは先頭の64K文字。head -c はバイト数なので、日本語などの多バイトの本文でも64K文字に届く
+  // 3倍の大きさにする。全部を出すと、大きな JS のバンドルで out.txt が読み込みの上限5MBを超えて判定できず、
+  // 認証後の本文の使わない部分までファイルに残った）
   return L.map(l => l.replace(/^(\s*)curl -sS -i (.*?)(\s+#.*)?$/, (_, ind: string, args: string, comment = '') =>
-    `${ind}: > "$hdr"; : > "$body"; curl -sS -D "$hdr" -o "$body" ${args}; cat "$hdr"; echo "#BODY run=$RUN"; cat "$body"; echo${comment}`)
+    `${ind}: > "$hdr"; : > "$body"; curl -sS -D "$hdr" -o "$body" ${args}; cat "$hdr"; echo "#BODY run=$RUN"; head -c 196608 "$body"; echo${comment}`)
     .replace(/\bcurl -sS /g, `curl ${CURL_COMMON} `)).join('\n') + '\n';
 }
 

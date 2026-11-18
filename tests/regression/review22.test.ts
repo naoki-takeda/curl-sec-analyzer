@@ -16,7 +16,8 @@ const script = generateScript({ host: 'www.example.com', apiPath: '/api/me', log
 describe('1・2 TLS の採取は、診断対象のサーバがハンドシェイクのあとに送るデータで結果を変えられない', () => {
   it('プローブのエラーは標準エラーだけで見て、結果はハンドシェイクの要約（最初の Verify return code: まで）だけで見る', () => {
     expect(script).toMatch(/>"\$tout" 2>"\$terr"; rc=\$\?/);
-    expect(script).toMatch(/grep -qiE 'unknown option\|no protocols available' "\$terr"/);
+    expect(script).toMatch(/if \[ \$rc -ge 126 \] \|\| grep -vE '\^\(depth=\|verify \(error\|return\)\)' "\$terr" \| grep -qiE "\$OSSL_ERR"; then r=err/);
+    expect(script).toMatch(/OSSL_ERR='unknown option\|no protocols available\|no cipher match/);
     expect(script).not.toMatch(/printf '%s' "\$out" \| grep/);
     // 版は問わない（OpenSSL 1.1 以降は、AES128-SHA の TLS 1.0 の接続も「New, SSLv3, Cipher is AES128-SHA」と出す）。失敗の (NONE) だけを除く
     expect(script).toContain(`sed '/^ *Verify return code:/q' "$tout" | grep -qE '^New, [^(,][^,]*, Cipher is [^(]'`);
