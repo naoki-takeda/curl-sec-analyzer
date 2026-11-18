@@ -7,7 +7,7 @@ const SEV: Severity[] = ['high', 'medium', 'low', 'info'];
 const ID = /^[HCRTEA]-\d\d(\.\d+)?$/;
 /** チェックリストにある項目か（H-99 のような存在しない項目を、黙って受け付けない） */
 const ITEM_IDS = new Set((ITEMS as { id: string }[]).map(i => i.id));
-const knownItem = (id: string) => ID.test(id) && ITEM_IDS.has(id.replace(/\.\d+$/, ''));
+export const knownItem = (id: string) => ID.test(id) && ITEM_IDS.has(id.replace(/\.\d+$/, ''));
 const PROFILE_KEYS = ['name', 'severity', 'exclude', 'sessionCookieNames', 'sessionMaxAgeHours', 'trustedScriptOrigins'];
 // 配列にする項目が配列でない（"exclude": "T-12"）なら、黙って空にせずエラーにする（既定の設定のまま判定したことに気づけなかった）
 const notArray = (v: unknown) => v !== undefined && !Array.isArray(v);
@@ -37,7 +37,7 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   if (notArray(d.sessionCookieNames) || (Array.isArray(d.sessionCookieNames) && names.length !== d.sessionCookieNames.length)) errors.push('sessionCookieNames：Cookie名（英数字と記号）の配列にしてください');
   // 数値だけを受け付ける（Number() で変換すると true が1時間、"12"・[12] が12時間になり、書き誤りに気づけなかった）
   const hours = d.sessionMaxAgeHours === undefined ? 24 : typeof d.sessionMaxAgeHours === 'number' ? d.sessionMaxAgeHours : NaN;
-  const hoursOk = hours > 0 && hours <= 24 * 400;
+  const hoursOk = hours >= 1 && hours <= 24 * 400;   // 文言のとおり1以上（0.5 を受け付け、C-05 の基準を30分にした。第50回）
   if (!hoursOk) errors.push('sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）');
   // エラーにした値は使わない（既定値に戻す）
   return { profile: { name: typeof d.name === 'string' ? d.name.slice(0, 100) : '', severity, exclude, sessionCookieNames: names, sessionMaxAgeHours: hoursOk ? hours : 24, trustedScriptOrigins: origins }, errors };

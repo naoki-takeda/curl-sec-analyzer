@@ -39,6 +39,9 @@ export function render() {
   const rows = overall(findings);
   const byTarget = groupByTarget(findings);   // ターゲットごとに全指摘を絞り込み直すと、ターゲット数×指摘数になる（数千件で数秒）
   const hints = missingLabelHints(targets);
+  // 絞り込み・表示の切り替えの部品は描き直すので、操作した部品にフォーカスを戻す（data-focus で同じ部品を探す。select を矢印で変えると、
+  // 1回でフォーカスが body に落ちた。第50回）
+  const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
   const parts: Child[] = [
     ledger(countBySeverity(rows)),
     // 例外を当てた指摘の件数（重要度別の件数には含めない。ワイルドカードの例外で高が消えても、画面から気づけなかった。第49回）
@@ -48,14 +51,17 @@ export function render() {
     state.last.diff ? diffBlock(state.last.diff) : null,
     heading(T.findings, findingsCount(rows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(rows.filter(r => r.severity === 'info').length), chapterFilter())),
     rows.length ? overallTable(rows.filter(r => (!state.view.chapter || chapterOf(r.item) === state.view.chapter) && (state.view.showInfo || r.severity !== 'info'))) : el('p', 'text-muted', T.noFindings),
-    heading(T.perTarget, T.count(targets.length), button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); })),
+    heading(T.perTarget, T.count(targets.length), focusable(button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); }), 'show-all')),
     targetSummary(targets, byTarget),
     ...targets.map(t => targetBlock(t, byTarget.get(t.label) ?? [])),
     crossBlock(findings),
     coverageBlock(cov),
   ];
   refs.results.replaceChildren(...parts.filter((p): p is Node => p instanceof Node));
+  if (focusKey) refs.results.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.focus();
 }
+/** 描き直したあとにフォーカスを戻す部品の印 */
+const focusable = <T extends HTMLElement>(n: T, key: string): T => { n.dataset.focus = key; return n; };
 /** 指摘の件数。「情報」を隠しているときは、表の行数と合うように内訳を添える */
 function findingsCount(rows: ReturnType<typeof overall>) {
   const info = rows.filter(r => r.severity === 'info').length;
@@ -64,7 +70,7 @@ function findingsCount(rows: ReturnType<typeof overall>) {
 
 export function infoToggle(n: number) {
   if (!n) return null;
-  return button(state.view.showInfo ? tr().hideInfo : tr().showInfo(n), LINK, () => { state.view.showInfo = !state.view.showInfo; render(); });
+  return focusable(button(state.view.showInfo ? tr().hideInfo : tr().showInfo(n), LINK, () => { state.view.showInfo = !state.view.showInfo; render(); }), 'show-info');
 }
 export function heading(text: string, aside?: string, right?: Node) {
   return el('div', 'mt-8 mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1',
@@ -105,6 +111,7 @@ export function chapterFilter() {
   const sel = options(el('select', 'rounded-md border border-line bg-surface px-2 py-1 text-sm'),
     [['0', T.allChapters], ...T.chapters.map((c, i): [string, string] => [String(i + 1), T.chapter(i + 1, c)])], String(state.view.chapter));
   sel.setAttribute('aria-label', T.filterChapter);
+  focusable(sel, 'chapter');
   sel.addEventListener('change', () => { state.view.chapter = Number(sel.value); render(); });
   return sel;
 }
@@ -195,6 +202,7 @@ export function coverageBlock(cov: Coverage[]) {
   const sel = options(el('select', 'rounded-md border border-line bg-surface px-2 py-1 text-sm'),
     [['all', T.allCategories], ...(['evaluated', 'missing-input', 'manual', 'not-implemented', 'excluded'] as const).map((k): [string, string] => [k, covLabel(k)])], state.view.covFilter);
   sel.setAttribute('aria-label', T.filterCategory);
+  focusable(sel, 'cov-filter');
   sel.addEventListener('change', () => { state.view.covFilter = sel.value; render(); });
   const rows = cov.filter(c => state.view.covFilter === 'all' || c.status === state.view.covFilter);
   return el('section', '',

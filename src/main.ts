@@ -63,7 +63,8 @@ function buildShell() {
   const supIn = hidden('.json,application/json', async f => {
     if (f.size > MAX_BYTES) { say(() => tr().settingsTooLarge(MAX_BYTES / 1024 / 1024)); return; }
     const { list, errors } = parseSuppressions(await f.text());
-    state.suppressions = list;
+    // 1件も読めなかった（形式の違うファイル）ときは、登録済みの例外を残す（画面で登録しただけで書き出していない例外が消えた。第50回）
+    if (list.length || !errors.length) state.suppressions = list;
     const legacy = list.filter(s => legacyHarKey(s.target)).length;
     refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors, getLang())) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
@@ -189,7 +190,13 @@ function analyzeUnsafe() {
   // URL 欄で補ったターゲットにも、各ホップの URL を付け直す（-L で http から https に転送されたかを判定するため。parseInput の中では URL が分からない）
   if (u) for (const t of targets) if (!t.url && t.label === 'default') { t.url = u; assignHopUrls(t); }
   if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return; }
+  // URL 欄の値がスキームのある URL でなければ（www.example.com）、#TARGET の url= と同じく警告する（http として扱い、H-01①・C-01①（高）が
+  // 警告なしに消えた。第50回）
+  const urlOk = /^[a-z][\w+.-]*:\/\/[^/?#\s]/i.test(u);
+  // パーサの「url= を付けてください」は、URL 欄で補ったターゲットには出さない（URL 欄の誤りは、URL 欄の警告として1つだけ出す。束のレビュー）。
+  // 文言はほかの解析の警告と同じく日本語（判定した時点の言語で残ると、言語を切り替えたあとに古い言語のまま出た）
   const warnings = [...parsed.warnings, ...fromHar.warnings, ...merged].filter(w => !(u && w.kind === 'unknown-url' && w.label === 'default'));   // URL欄で補ったのは default だけ
+  if (u && !urlOk && targets.some(t => t.url === u)) warnings.push({ kind: 'unknown-url', label: 'default', detail: 'URL 欄の値を URL として読めません。HTTPSかどうかを使う項目は判定できません（https:// から書いてください）' });
   const findings = runAll(targets, { suppressions: state.suppressions, profile: state.profile });
   state.last = { targets, warnings, findings, cov: coverage(findings, IMPLEMENTED, ITEMS, state.profile?.exclude), diff: state.baseline ? diff(state.baseline.findings, findings) : undefined };
   if (text.trim()) state.view.inputHidden = true;            // 判定できたら、生の出力を隠す

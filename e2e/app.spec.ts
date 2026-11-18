@@ -253,3 +253,44 @@ test('件数以外の状態のメッセージも、言語を切り替えると�
   await page.getByRole('button', { name: '日本語' }).click();
   await expect(page.getByRole('status')).toHaveText('curlの出力を貼り付けてから「判定する」を押してください。');
 });
+
+test('第50回：URL 欄にスキームのない URL を入れると警告する', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill('HTTP/2 200\ncontent-type: text/html\nset-cookie: SESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/\n\n<html></html>\n');
+  await page.getByLabel('#TARGET がない入力のURL（任意）').fill('www.example.com');
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(page.getByText(/URL 欄の値を URL として読めません/)).toBeVisible();
+});
+
+test('第50回：言語を切り替えても、コマンド生成器の入力と生成したスクリプトを残す', async ({ page }) => {
+  await page.goto('/');
+  await page.getByText('コマンドを作る（推奨コマンド C1〜C26）').click();
+  await page.getByLabel('ホスト名').fill('www.example.com');
+  await page.getByRole('button', { name: 'コマンドを作る', exact: true }).click();
+  await page.getByRole('button', { name: 'English' }).click();
+  await expect(page.locator('#gen-host')).toHaveValue('www.example.com');
+  await expect(page.locator('textarea[readonly]').first()).toHaveValue(/label=pre-login/);
+});
+
+test('第50回：章の絞り込みを変えてもフォーカスを失わず、例外の理由のエラーを読み上げる', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  const sel = page.locator('select[data-focus="chapter"]');
+  await sel.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('select[data-focus="chapter"]')).toBeFocused();
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByRole('button', { name: '登録する' }).click();
+  await expect(page.getByRole('alert')).toHaveText(/理由/);
+});
+
+test('第50回：形式の違うファイルを例外ファイルとして読んでも、登録済みの例外を消さない', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByLabel('理由（必須）').fill('検証環境のため');
+  await page.getByRole('button', { name: '登録する' }).click();
+  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await page.getByText('設定ファイル').click();
+  await expect(page.getByText(/例外 1件（有効 1件/)).toBeVisible();
+});

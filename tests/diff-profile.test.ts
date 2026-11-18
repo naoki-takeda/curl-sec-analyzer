@@ -73,3 +73,45 @@ describe('第49回：差分と Markdown', () => {
     expect(md).toContain('> 前回と今回で組織プロファイルが違います。');
   });
 });
+
+describe('第50回：プロファイルの比べ方・例外ファイル・時間の下限・英語の Markdown', () => {
+  it('重要度のキーの順番だけが違うプロファイルは、違うとしない', async () => {
+    const { profileDiffers } = await import('../src/engine/diff');
+    const a = parseProfile('{"severity":{"H-10":"low","H-14.1":"info"}}').profile!, b = parseProfile('{"severity":{"H-14.1":"info","H-10":"low"}}').profile!;
+    expect(profileDiffers(a, b)).toBe(false);
+    expect(profileDiffers(a, parseProfile('{"severity":{"H-10":"medium"}}').profile!)).toBe(true);
+  });
+  it('例外ファイルの存在しない項目ID（H-99・Z-99）はエラーにする', async () => {
+    const { parseSuppressions } = await import('../src/engine/suppress');
+    const r = parseSuppressions(JSON.stringify([{ ruleId: 'H-99', target: 'top', reason: 'x' }, { ruleId: 'Z-99.1', target: 'top', reason: 'x' }, { ruleId: 'H-01.1', target: 'top', reason: 'x' }]));
+    expect(r.list.map(s => s.ruleId)).toEqual(['H-01.1']);
+    expect(r.errors).toHaveLength(2);
+  });
+  it('sessionMaxAgeHours は1以上（0.5 はエラーにして既定の24時間）', () => {
+    const r = parseProfile('{"sessionMaxAgeHours":0.5}');
+    expect(r.errors).toHaveLength(1);
+    expect(r.profile?.sessionMaxAgeHours).toBe(24);
+  });
+  it('英語の Markdown に全角の区切り文字を残さない', async () => {
+    const { setLang } = await import('../src/i18n');
+    const { toMarkdown } = await import('../src/export/markdown');
+    const { coverage } = await import('../src/engine/coverage');
+    const { IMPLEMENTED } = await import('../src/rules/ruleset');
+    const before = evaluate('#TARGET url=https://www.example.com/ label=top\nHTTP/2 200\ncontent-type: text/html\n\n<p>x</p>\n').findings;
+    const r = evaluate('#TARGET url=https://www.example.com/ label=top\nHTTP/2 200\ncontent-type: text/html\nstrict-transport-security: max-age=1\n\n<p>x</p>\n');
+    // 言語の切り替えは <html lang> も書き換えるので、テストでは document の代わりを置く
+    const g = globalThis as { document?: unknown }; const had = 'document' in g;
+    if (!had) g.document = { documentElement: {} };
+    setLang('en');
+    try {
+      const md = toMarkdown(r.findings, coverage(r.findings, IMPLEMENTED), [], new Date('2026-11-01T00:00:00Z'), { diff: { rows: diff(before, r.findings), baselineAt: '2026-10-01' } });
+      const head = md.split('## Findings')[0];
+      expect(head).not.toMatch(/[：、（）]/);
+      expect(md).toMatch(/^- Generated: 2026/m);
+    } finally { setLang('ja'); if (!had) delete g.document; }
+  });
+  it('例外ファイルの存在しない項目IDのエラーも英訳する（束のレビュー）', async () => {
+    const { messageEn } = await import('../src/messagesEn');
+    expect(messageEn('1件目：ruleId「H-99」は項目IDではありません')).toBe('Entry 1: ruleId "H-99" is not a check ID');
+  });
+});

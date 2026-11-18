@@ -136,6 +136,7 @@ export function diffSummary(rows: DiffRow[]): Record<DiffKind, number> {
 
 /** 前回と今回でプロファイル（重要度・対象外の項目）が違うか。違えば「重要度の変化」に設定の違いが混ざる */
 export function profileDiffers(before?: Profile, now?: Profile): boolean {
-  const norm = (p?: Profile) => JSON.stringify({ severity: p?.severity ?? {}, exclude: [...(p?.exclude ?? [])].sort(), names: [...(p?.sessionCookieNames ?? [])].sort(), hours: p?.sessionMaxAgeHours ?? 24, origins: [...(p?.trustedScriptOrigins ?? [])].sort() });
+  // 重要度はキーの順番をそろえる（同じ設定でキーの順番だけが違うと「プロファイルが違う」と警告した。第50回）
+  const norm = (p?: Profile) => JSON.stringify({ severity: Object.entries(p?.severity ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)), exclude: [...(p?.exclude ?? [])].sort(), names: [...(p?.sessionCookieNames ?? [])].sort(), hours: p?.sessionMaxAgeHours ?? 24, origins: [...(p?.trustedScriptOrigins ?? [])].sort() });
   return norm(before) !== norm(now);
 }

@@ -16,10 +16,13 @@ export function openSuppressDialog(f: Finding) {
     [[f.ruleId, T.onlyCond(`${f.item}${circled(f.condition)}`)], [f.item, T.wholeItem(f.item)]], f.ruleId);
   scope.id = 'sup-scope';
   const err = el('p', 'mt-2 min-h-5 text-sm text-sev-high');
+  err.setAttribute('role', 'alert');   // 入力の誤りを読み上げる（WCAG 4.1.3。role も aria-live もなく、読み上げなかった。第50回）
   const save = button(T.save, 'rounded-md bg-primary px-4 py-2 font-bold text-primary-ink', () => {
-    if (!reason.value.trim()) { err.textContent = T.needReason; return; }
+    if (!reason.value.trim()) { err.textContent = T.needReason; reason.focus(); return; }
     state.suppressions = [...state.suppressions, { ruleId: scope.value, target: f.targetKey ?? f.target, reason: reason.value.trim(), approver: approver.value.trim(), until: until.value }];
     refs.dialog.close(); actions.renderSettings(); actions.analyze();
+    // 例外に登録したボタンは描き直しで消えるので、結果の最初の見出しにフォーカスを移す（body に落ちて、キーボードで続けられなかった。第50回）
+    const h = refs.results.querySelector<HTMLElement>('h2'); if (h) { h.tabIndex = -1; h.focus(); }
   });
   refs.dialog.replaceChildren(el('div', 'p-5',
     Object.assign(el('h2', 'text-lg font-bold', T.title), { id: 'sup-title' }),
