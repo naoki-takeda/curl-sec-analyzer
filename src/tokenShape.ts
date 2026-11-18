@@ -28,7 +28,9 @@ export function rareBigrams(x: string): number {
 /** 語として残す、英語の読み方の規則に当たらない名前（製品・プロトコル） */
 // 第49回：H-16 の製品名・ヘッダの語（Proxy-Authorization・CherryPy・WebSEAL）。まれな2文字の並びの規則で伏せていた。一般の規則を緩めると、
 // 3文字のかけらでできた乱数のトークンを表示したので、一覧で持つ
-const KNOWN_WORDS = new Set(['proxy', 'web', 'cherrypy', 'webseal', 'zyxel', 'jexus', 'kohana', 'nancy', 'proxmox', 'xmlrpc', 'nginx', 'lighttpd', 'nodejs', 'nextjs', 'nuxtjs', 'webpack', 'fastly', 'varnish', 'wsgi', 'cgi', 'fcgi', 'grpc', 'hsts', 'csrf', 'xsrf', 'jwks', 'jsdelivr', 'cloudflare', 'akamai', 'csrftoken', 'xsrftoken', 'aspnetmvc', 'aspnet', 'azure']);
+const KNOWN_WORDS = new Set(['proxy', 'web', 'cherrypy', 'webseal', 'zyxel', 'jexus', 'kohana', 'nancy', 'proxmox', 'xmlrpc', 'nginx', 'lighttpd', 'nodejs', 'nextjs', 'nuxtjs', 'webpack', 'fastly', 'varnish', 'wsgi', 'cgi', 'fcgi', 'grpc', 'hsts', 'csrf', 'xsrf', 'jwks', 'jsdelivr', 'cloudflare', 'akamai', 'csrftoken', 'xsrftoken', 'aspnetmvc', 'aspnet', 'azure',
+  // よくあるセッション Cookie の名前（大文字だけの13文字以上・6文字以上の略語を含むキャメルケース）。伏せると、どの Cookie の指摘か分からなかった（第50回）
+  'awselbauthsessioncookie', 'obssocookie', 'jsessionidsso', 'aspxformsauth', 'aspxauth', 'authsessionid', 'cfauthorization', 'awselb', 'awsalb', 'awsalbcors', 'awsalbtg', 'awsalbtgcors']);
 /** キャメルケースの2文字の部分として残してよい語（By・Id・Of・My。乱数の Dg・Ng・Xk を残さない）。大文字だけの略語（JS・IO・DB）は別に認める */
 const SHORT_WORDS = new Set('of by id to in on at is my no or up if as be do go it me us we ok py'.split(' '));   // Py（CherryPy）
 /**

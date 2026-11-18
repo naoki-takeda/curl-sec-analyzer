@@ -26,7 +26,10 @@ const PATTERNS = ['<!--', '<!-- x', '<script ', '<a href="', '<form ', '<input t
   '%2F%2Fa%3A', '%3A//a:', '%253A%252F%252F', '1234%20', '123%2D45%2D', '?u=a&p=', 'QWER-', 'a1b2-',
   '.%2F%2F%40', '=%2F%2F%40', 'a.%2F%2F%2540', 'https:%2F%2Fa:', '?u=a&p=…(1 chars) ',
   // 第49回：// の数が標準でない URL、引用符と @、フラグメントの p=、日本語の名前
-  'https:\\a:', 'http:/a:', "a'@", '#u=a&p=', '?パ='];
+  'https:\\a:', 'http:/a:', "a'@", '#u=a&p=', '?パ=',
+  // 第50回：値の中の生の ;、長いパラメータの名前、pass で終わる名前、配列の値
+  '?password=a;', ';a', '&aaaaaaaaaa', 'xpass=', 'password":["',
+  '"password":[[', 'password: [a, ', ';a a ', '%22password%22%3A%5B', 'password":[{"v":"'];
 
 describe('2乗の時間にならない', { tags: ['perf'] }, () => {
   it.each(PATTERNS)('本文・ヘッダに「%s」の繰り返し', p => {

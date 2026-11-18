@@ -275,3 +275,57 @@ describe('第49回：Markdown の自動リンク', () => {
     expect(md).not.toMatch(/_https:\/\//);
   });
 });
+
+describe('第50回：pass で終わる名前・長い名前・値の中の ;・配列の値・Cookie の名前', () => {
+  it('pass で終わる名前の値を伏せる（bypass・compass は伏せない）', () => {
+    expect(showText('https://a.example/login?username=bob&userpass=Winter2024')).not.toContain('Winter2024');
+    expect(showText('{"newpass":"Winter2024","oldpass":"Autumn2023"}')).not.toMatch(/Winter2024|Autumn2023/);
+    expect(showText('dbpass=Winter2024')).not.toContain('Winter2024');
+    expect(showText('?pword=Winter2024&pswrd=Spring2025')).not.toMatch(/Winter2024|Spring2025/);
+    expect(showText('?bypass=1&compass=north')).toBe('?bypass=1&compass=north');
+  });
+  it('100文字を超える名前（Rails の入れ子のフォームをエンコードしたもの）の値も伏せる', () => {
+    expect(showText('?registration%5Buser_attributes%5D%5Baccount_attributes%5D%5Bsecurity_settings%5D%5Bcredentials%5D%5Bpassword%5D=Winter2024')).not.toContain('Winter2024');
+  });
+  it('値の中の生の ; も値として伏せる（; のあとが名前= のときは区切り）', () => {
+    expect(showText('?username=bob&password=Summer;2024')).not.toContain('2024');
+    expect(showText('a=1;jsessionid=ABCDEF0123456789ABCD;b=2')).toMatch(/;b=2$/);
+    expect(showText('token=abc; Path=/')).toMatch(/; Path=\/$/);
+  });
+  it('配列の値（"password":["…"]）の中身を伏せる', () => {
+    expect(showText('?q={"password":["Winter2024"]}')).not.toContain('Winter2024');
+  });
+  it('よくあるセッション Cookie の名前は伏せない', () => {
+    for (const n of ['AWSELBAuthSessionCookie-0', 'ObSSOCookie', 'JSESSIONIDSSO', '.ASPXFORMSAUTH', 'AUTHSESSIONID', 'CFAUTHORIZATION'])
+      expect(showText(`${n}=x; Secure`), n).toContain(n);
+  });
+});
+
+describe('第50回（束のレビュー）：括弧で始まる値・pass で終わる語・配列・; の続き', () => {
+  it('括弧で始まる引用符のない値も伏せる', () => {
+    for (const x of ['password: [Winter2024]', 'password={Winter2024}', 'api_key=[Spring2025]', 'secret: {Spring2025}'])
+      expect(showText(x), x).not.toMatch(/Winter2024|Spring2025/);
+  });
+  it('pass で終わる語は、数字・区切り・入れ子の名前でも伏せる', () => {
+    for (const x of ['?newpass1=Winter2024', '?newpass_confirm=Winter2024', '?user[newpass]=Winter2024', '?user%5Bnewpass%5D=Winter2024', '?dbpass.value=Winter2024', '{"newpass1":"Winter2024"}'])
+      expect(showText(x), x).not.toContain('Winter2024');
+  });
+  it('配列のすべての要素・入れ子・JSON の名前・エスケープ・URL エンコードの形を伏せ、ほかのキーの配列は残す', () => {
+    for (const x of ['{"password":["Winter2024","Spring2025"]}', '{"password":[["Winter2024"]]}', '{"userPassword":["Winter2024"]}', '{\\"password\\":[\\"Winter2024\\"]}',
+      '?q=%7B%22password%22%3A%5B%22Winter2024%22%5D%7D', "password: ['Winter2024', 'Spring2025']"])
+      expect(showText(x), x).not.toMatch(/Winter2024|Spring2025/);
+    expect(showText('{"password":["Winter2024"],"x":["keepme"]}')).toContain('keepme');
+  });
+  it('自由文の ; の続きも伏せ、Cookie の属性・接続文字列の設定の前では切る', () => {
+    expect(showText('password=Summer;2024')).not.toContain('2024');
+    expect(showText('x=1;session=abc;Secure;HttpOnly')).toMatch(/;Secure;HttpOnly$/);
+    expect(showText('Server=db;Password=Winter2024;Max Pool Size=100')).toMatch(/;Max Pool Size=100$/);
+  });
+  it('（2回目の束のレビュー）改行を含む配列・括弧のあとの空白・引用符のない要素・=>・数字の付く名前・配列の中のキー', () => {
+    for (const x of ['{"password":[\n  "Winter2024",\n  "Summer2025"\n]}', 'password: [ Winter2024 ]', 'password = { Winter2024 }', 'password: [[Winter2024]]',
+      'password: [Winter2024, Summer2025]', "'password' => ['Winter2024','Summer2025']", 'newpass1=Winter2024', 'password1: Winter2024', 'db_pass1: Winter2024'])
+      expect(showText(x), x).not.toMatch(/Winter2024|Summer2025/);
+    expect(showText('{"password":[{"v":"Winter2024"}]}')).toBe('{"password":[{"v":"Wi…(10 chars)"}]}');
+    expect(showText('a;jsessionid=ABCDEF0123456789;foo/bar.jsp')).toMatch(/;foo\/bar\.jsp$/);
+  });
+});
