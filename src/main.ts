@@ -12,7 +12,7 @@ import { RULESET_VERSION, TOOL_VERSION } from './version';
 import { type Lang, getLang, setLang, tr } from './i18n';
 import sample from './sample.txt?raw';   // 「サンプルを入れる」の入力例（値はすべてダミー。192.0.2.0/24 は文書用のアドレス）
 import { BTN, LINK, PRIMARY, button, download, el, fileInput as hidden, labelFor, link, reducedMotion } from './ui/dom';
-import { type Message, actions, refs, state } from './ui/state';
+import { type AnalyzeSource, type AnalyzedInput, type Message, actions, refs, state } from './ui/state';
 import { render, renderEmpty } from './ui/results';
 import { cancelHarLoad, loadHar, renderHar } from './ui/har';
 import { commandGenerator } from './ui/generator';
@@ -105,7 +105,7 @@ function buildShell() {
           refs.inputNote, refs.input,
           labelFor('url', T.urlLabel, 'mt-3 mb-1 block text-sm text-muted'), refs.urlInput,
           el('div', 'mt-3 flex flex-wrap items-center gap-2',
-            button(T.analyze, PRIMARY, analyze),
+            button(T.analyze, PRIMARY, () => analyze()),
             Object.assign(button(T.openFile, BTN, () => fileIn.click()), { id: 'open-file' }),
             button(T.sample, BTN, loadSample),
             button(T.clear, 'rounded-md px-3 py-2 text-muted underline-offset-4 hover:underline', clearAll),
@@ -150,10 +150,12 @@ async function refresh(msg: Message = () => '') {
   renderSettings();
   // 判定する前の HAR は判定しない（ホストとラベルを確かめてから「判定する」を押す）。読み込みのエラーがなければ HAR の案内を残す
   if (!(state.last || analyzing)) { if (msg() || !state.har) say(msg); return; }
-  const shown = await analyze();
+  const shown = await analyze('result');
   if (!msg()) return;
   const prev = current;
-  say(shown || !prev ? msg : () => `${prev()} ${msg()}`);
+  // 表示できたら読み込みのメッセージに置き換える。書き換えた入力欄をまだ判定していないことは残す
+  const note = shown && formNotAnalyzed;
+  say(shown || !prev ? (note ? () => msg() + tr().formNotAnalyzed : msg) : () => `${prev()} ${msg()}`);
 }
 function renderSettings() {
   const T = tr();
@@ -189,7 +191,9 @@ async function openFile(f: File) {
 }
 // 判定の世代と、判定中の Worker・その Promise の解決。判定し直したり、消去・HAR を外すを押したりしたら、前の Worker を止め、前の結果は
 // 使わない（古い結果で新しい入力の表示を上書きしない）。止めた判定の Promise も解決する（待っている呼び出し側を止めたままにしない）
-let analyzeGen = 0; let analyzing: { worker: Worker; settle: (shown: boolean) => void; text: string; url: string } | undefined;
+// 最後に表示した結果が、表示中の結果の入力で判定し直したもので、入力欄がその入力と違ったか（入力欄の変更をまだ判定していない）
+let formNotAnalyzed = false;
+let analyzeGen = 0; let analyzing: { worker: Worker; settle: (shown: boolean) => void; text: string; url: string; source: AnalyzeSource } | undefined;
 /** 判定中の Worker を止める（結果は使わない） */
 function cancelAnalysis() {
   analyzeGen++;
@@ -202,24 +206,33 @@ function setBusy(b: boolean) {
   refs.results.setAttribute('aria-busy', String(b));
   for (const x of refs.results.querySelectorAll<HTMLButtonElement>('[data-export]')) x.disabled = b;
 }
-/** 判定中に入力・URL 欄を直したら、その判定を止める（結果が届いたときに、直す前の入力の結果を出して入力欄を隠さない） */
+/**
+ * 判定中に入力・URL 欄を直したら、その判定を止める（結果が届いたときに、直す前の入力の結果を出して入力欄を隠さない）。
+ * 表示中の結果の入力で判定し直しているときは止めない（入力欄を判定しているのではなく、入力欄も隠さない）
+ */
 function inputChanged() {
-  if (!analyzing || (refs.input.value === analyzing.text && refs.urlInput.value === analyzing.url)) return;
+  if (!analyzing || analyzing.source === 'result' || (refs.input.value === analyzing.text && refs.urlInput.value === analyzing.url)) return;
   cancelAnalysis(); say(() => tr().analysisCancelled);
 }
 /**
  * 入力を判定して表示する。判定は Web Worker で行う（数万件のターゲットの HAR などで画面を止めない。blob: URL で作る理由は csp.config.ts）。
  * 表示まで終わったら解決する（判定のあとに出すメッセージのため）。解決する値は、この判定の結果を表示したか（止められた・置き換わった・
- * 判定できなかった・応答がなかったときは false。描き直した結果にフォーカスを移すため）
+ * 判定できなかった・応答がなかったときは false。描き直した結果にフォーカスを移すため）。
+ * source が result なら、表示中の結果（判定中ならその判定）の入力を判定し直す（ui/state.ts の AnalyzeSource）。結果も判定中のものもなければ入力欄
  */
-function analyze(): Promise<boolean> {
+function analyze(source: AnalyzeSource = 'form'): Promise<boolean> {
   say();
-  const text = refs.input.value;
+  const base: AnalyzedInput | undefined = source === 'result' ? (analyzing ?? state.last?.input) : undefined;
+  const input: AnalyzedInput = base ? { text: base.text, url: base.url } : { text: refs.input.value, url: refs.urlInput.value };
+  // 判定中の判定を引き継ぐときは、その判定の種類も引き継ぐ（「判定する」の判定中に設定を読み込んでも、入力欄の判定として生の出力を隠し、
+  // 判定中に入力欄を直したら止める）
+  const fromResult = source === 'result' && (analyzing ? analyzing.source === 'result' : !!state.last);
+  const { text } = input;
   const fail = (m: () => string) => { cancelAnalysis(); say(m); state.last = null; renderEmpty(); };
   if (!text.trim() && !state.har) { fail(() => tr().emptyInput); return Promise.resolve(false); }
   // 判定できなかったときは前の結果を消す（残すと、言語の切り替えなどで別の入力の結果が表示・出力される）
   if (new Blob([text]).size > MAX_BYTES) { fail(() => tr().tooLarge(MAX_MB)); return Promise.resolve(false); }
-  const req: AnalyzeRequest = { text, url: refs.urlInput.value, har: state.har ? { imp: state.har.imp, hosts: state.har.hosts } : undefined,
+  const req: AnalyzeRequest = { text, url: input.url, har: state.har ? { imp: state.har.imp, hosts: state.har.hosts } : undefined,
     suppressions: state.suppressions, profile: state.profile };
   const settings = { suppressions: state.suppressions, profile: state.profile, baseline: state.baseline };
   cancelAnalysis();
@@ -230,7 +243,7 @@ function analyze(): Promise<boolean> {
   const gen = analyzeGen;
   say(() => tr().analyzing); setBusy(true);
   return new Promise<boolean>(resolve => {
-    analyzing = { worker: w, settle: resolve, text, url: req.url };
+    analyzing = { worker: w, settle: resolve, text, url: input.url, source: fromResult ? 'result' : 'form' };
     const done = () => { w.terminate(); if (analyzing?.worker === w) { analyzing = undefined; setBusy(false); } };
     const broken = () => { done(); if (gen === analyzeGen) fail(() => tr().workerFailed); resolve(false); };
     w.onmessage = (e: MessageEvent<{ ok: boolean; result?: AnalyzeResult }>) => {
@@ -239,23 +252,29 @@ function analyze(): Promise<boolean> {
       // 判定の途中の例外（想定外の入力）で、前の入力の結果を表示・出力したままにしない
       let shown = false;
       if (!e.data.ok || !e.data.result) fail(() => tr().analysisFailed);
-      else { try { shown = show(e.data.result, text, settings); } catch { fail(() => tr().analysisFailed); } }
+      else { try { shown = show(e.data.result, input, settings, fromResult); } catch { fail(() => tr().analysisFailed); } }
       resolve(shown);                                   // 表示まで終わってから解決する
     };
     w.onerror = w.onmessageerror = broken;
     try { w.postMessage(req); } catch { broken(); }
   });
 }
-/** 判定の結果を表示する。応答が1つもなければ結果を消して false を返す */
-function show({ targets, warnings, findings, cov }: AnalyzeResult, text: string, settings: NonNullable<typeof state.last>['settings']): boolean {
+/**
+ * 判定の結果を表示する。応答が1つもなければ結果を消して false を返す。fromResult は、表示中の結果の入力で判定し直したか
+ */
+function show({ targets, warnings, findings, cov }: AnalyzeResult, input: AnalyzedInput, settings: NonNullable<typeof state.last>['settings'], fromResult: boolean): boolean {
   if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return false; }
-  state.last = { targets, warnings, findings, cov, settings, diff: settings.baseline ? diff(settings.baseline.findings, findings) : undefined };
-  if (text.trim()) state.view.inputHidden = true;            // 判定できたら、生の出力を隠す
+  state.last = { targets, warnings, findings, cov, settings, input, diff: settings.baseline ? diff(settings.baseline.findings, findings) : undefined };
+  // 表示中の結果の入力で判定し直したとき、判定のあとに書き換えた入力欄は、まだ判定していない
+  formNotAnalyzed = fromResult && (refs.input.value !== input.text || refs.urlInput.value !== input.url);
+  // 判定できたら、生の出力を隠す。書き換えた入力欄は隠さない（書き換えている途中の入力欄を隠さない）
+  if (input.text.trim() && !formNotAnalyzed) state.view.inputHidden = true;
   applyInputVisibility();
   render();
   // 件数は画面の集計（項目×条件で一意に数える。ui/results.ts と同じ）に合わせる。ターゲットごとの指摘を数えると、画面と違う数を読み上げる
   const rows = overall(findings); const high = countBySeverity(rows).high;
-  say(() => tr().analyzed(targets.length, rows.length, high));
+  const note = formNotAnalyzed;
+  say(() => tr().analyzed(targets.length, rows.length, high) + (note ? tr().formNotAnalyzed : ''));
   if (matchMedia('(max-width: 1023px)').matches)
     refs.results.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth' });
   return true;

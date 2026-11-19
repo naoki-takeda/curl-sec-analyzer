@@ -8,6 +8,7 @@ export async function analyzed(page: Page) {
 
 /**
  * Worker を差し替える。window.workerMode が 'real' なら本物、'throw' ならコンストラクタの例外、'error' ならあとから error を出す。
+ * 'hang' は結果を返さない（判定中の状態を確かめるため）。
  * Vite の ?worker&inline の包みは、blob: で作れないと data: URL で作り直すので、'throw' はどちらの試みでも例外にする
  */
 export async function fakeWorker(page: Page) {
@@ -19,11 +20,12 @@ export async function fakeWorker(page: Page) {
       constructor(url: string | URL, o?: WorkerOptions) {
         if (w.workerMode === 'real') return new Real(url, o) as never;
         if (w.workerMode === 'throw') throw new Error('blocked');
+        if (w.workerMode === 'hang') return;
         setTimeout(() => this.onerror?.(new Event('error')), 50);
       }
       postMessage() {} terminate() {} addEventListener() {} removeEventListener() {}
     };
   });
 }
-export const setWorkerMode = (page: Page, mode: 'real' | 'throw' | 'error') =>
+export const setWorkerMode = (page: Page, mode: 'real' | 'throw' | 'error' | 'hang') =>
   page.evaluate(m => { (window as unknown as { workerMode: string }).workerMode = m; }, mode);

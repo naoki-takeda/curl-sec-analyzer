@@ -23,7 +23,7 @@ export function openSuppressDialog(f: Finding) {
     refs.dialog.close(); actions.renderSettings();
     // 例外に登録したボタンは描き直しで消えるので、結果の最初の見出しにフォーカスを移す（body に落とさず、キーボードで続けられるように。WCAG 2.4.3）。
     // 判定は Web Worker で行うので、描き直したあとに移す（その判定が別の判定に置き換わったら、古い結果の見出しには移さない）
-    actions.analyze().then(shown => { if (!shown) return; const h = refs.results.querySelector<HTMLElement>('h2'); if (h) { h.tabIndex = -1; h.focus(); } });
+    actions.analyze('result').then(shown => { if (!shown) return; const h = refs.results.querySelector<HTMLElement>('h2'); if (h) { h.tabIndex = -1; h.focus(); } });
   });
   refs.dialog.replaceChildren(el('div', 'p-5',
     Object.assign(el('h2', 'text-lg font-bold', T.title), { id: 'sup-title' }),

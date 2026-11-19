@@ -423,3 +423,59 @@ test('判定する前の HAR は、設定ファイルを読み込んでも判定
   await expect(status).toHaveText(/件のリクエストを読み込みました/);
   await expect(page.getByRole('heading', { name: /指摘/ })).toHaveCount(0);
 });
+
+test('例外の登録・設定ファイルの読み込みで判定し直すときは、表示中の結果の入力を使い、入力欄の変更は「判定する」まで判定しない', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  const status = page.getByRole('status');
+  await expect(status).toHaveText(/^11件のターゲット/);
+  // 判定のあとに入力欄を書き換える（まだ「判定する」は押さない）
+  await page.getByRole('button', { name: '入力を表示する' }).click();
+  const other = '#TARGET url=https://other.example/ label=top\nHTTP/2 200\ncontent-type: text/html\n\n<html></html>';
+  await page.locator('#input').fill(other);
+  // 例外を登録すると、表示中の結果（サンプル）の入力で判定し直し、書き換えたことを知らせる。入力欄は隠さない
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByLabel('理由（必須）').fill('検証環境のため');
+  await page.getByRole('button', { name: '登録する' }).click();
+  await analyzed(page);
+  await expect(status).toHaveText(/^11件のターゲット.*入力欄の変更/);
+  await expect(page.locator('#input')).toBeVisible();
+  await expect(page.locator('#input')).toHaveValue(other);
+  // 入力欄を空にしてから例外のない例外ファイルを読み込んでも、表示中の結果を消さずに判定し直す（登録した例外が外れるまで待つ）
+  const suppressed = page.getByText(/例外を当てた指摘/);
+  await expect(suppressed).toHaveCount(1);
+  await page.locator('#input').fill('');
+  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
+  await expect(suppressed).toHaveCount(0);
+  await analyzed(page);
+  await expect(status).toHaveText(/^11件のターゲット.*入力欄の変更/);
+  await expect(page.locator('#input')).toBeVisible();
+  // 読み込みのエラーを出すときも、入力欄の変更をまだ判定していないことを残す
+  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await expect(status).toHaveText(/JSONとして読めません.*入力欄の変更/);
+  // 「判定する」で、入力欄の内容を判定する
+  await page.locator('#input').fill(other);
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(status).toHaveText(/^1件のターゲット/);
+  await expect(status).not.toHaveText(/入力欄の変更/);
+});
+
+test('「判定する」の判定中に設定ファイルを読み込むと、その判定を入力欄の判定として引き継ぎ、入力欄を直したら止める', async ({ page }) => {
+  await fakeWorker(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.getByRole('button', { name: '入力を表示する' }).click();
+  // 結果を返さない Worker で「判定する」を押し、その判定中に例外ファイルを読み込む（判定中の判定の入力で判定し直す）
+  await setWorkerMode(page, 'hang');
+  await page.getByRole('button', { name: '判定する' }).click();
+  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
+  await page.getByText('設定ファイル').click();
+  await expect(page.getByText('例外の登録はありません')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('判定しています…');
+  // 引き継いだ判定も入力欄の判定なので、入力欄を直したら止める（直す前の入力の結果を出して入力欄を隠さない）
+  await page.locator('#input').press('End');
+  await page.locator('#input').pressSequentially('x');
+  await expect(page.getByRole('status')).toHaveText(/判定を止めました/);
+});
