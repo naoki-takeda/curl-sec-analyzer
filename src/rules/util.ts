@@ -1,6 +1,6 @@
 import type { Finding, Rule, RuleContext, Severity, Status } from '../model';
 import { wordLike } from '../tokenShape';
-import { BODY_LIMIT, isRedirectWithLocation } from '../parser/target';
+import { BODY_LIMIT, TCHAR, isRedirectWithLocation } from '../parser/target';
 
 /** 送ったテスト値のホスト（既知のテスト値。ツール設計1。生成するコマンド（src/commands.ts）と同じ値） */
 export const TEST_HOST = 'evil.example';
@@ -75,6 +75,9 @@ export function parseCsp(v: string): Map<string, string[]> {
   return m;
 }
 
+/** HSTS の1つのディレクティブ：名前、または名前=値（値はトークンか引用符の文字列） */
+const HSTS_DIRECTIVE = new RegExp(String.raw`^(${TCHAR}+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|(${TCHAR}+)))?$`);
+
 /**
  * HSTS のヘッダを RFC 6797 6.1 のとおりに読む。「;」で分けた各ディレクティブが「名前」か「名前=値」（値はトークンか引用符の文字列）で、
  * 同じディレクティブが2回なく、max-age が数字であるときだけ有効（ブラウザは無効なヘッダを無視する（8.1））。
@@ -85,7 +88,7 @@ export function parseHsts(v: string | undefined): { valid: boolean; maxAge: numb
   const seen = new Set<string>(); let maxAge: number | undefined;
   for (const raw of hstsParts(v)) {
     const d = raw.trim(); if (!d) continue;
-    const m = d.match(/^([!#$%&'*+.^_`|~0-9A-Za-z-]+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([!#$%&'*+.^_`|~0-9A-Za-z-]+)))?$/);
+    const m = d.match(HSTS_DIRECTIVE);
     if (!m) return { valid: false, maxAge: 0 };
     const name = m[1].toLowerCase();
     if (seen.has(name)) return { valid: false, maxAge: 0 };

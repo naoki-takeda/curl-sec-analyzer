@@ -12,10 +12,10 @@ import { suppressionsJson, toJson } from '../export/json';
 import { toCsv } from '../export/csv';
 import { ITEM_COMMANDS, ITEM_COMMANDS_EN } from '../commands';
 import { hstsDirective } from '../rules/util';
-import { covLabel, diffLabel, getLang, sevLabel, statusLabel, tr } from '../i18n';
+import { covLabel, diffLabel, getLang, listSep, sevLabel, statusLabel, tr } from '../i18n';
 import { showText } from '../shownText';
 import { recommendationEn } from '../recommendationsEn';
-import { BTN, type Child, LINK, PRIMARY, SEV_BORDER, SEV_TEXT, button, chapterOf, disclosure, download, el, options, sevCell, table, td, titleCell } from './dom';
+import { BTN, type Child, LINK, PRIMARY, SEV_BORDER, SEV_TEXT, button, chapterOf, disclosure, download, el, focusable, focusedKey, options, restoreFocus, sevCell, table, td, titleCell } from './dom';
 import { actions, refs, state } from './state';
 import { openSuppressDialog } from './dialog';
 
@@ -39,9 +39,8 @@ export function render() {
   const rows = overall(findings);
   const byTarget = groupByTarget(findings);   // ターゲットごとに全指摘を絞り込み直すと、ターゲット数×指摘数になる（数千件で数秒）
   const hints = missingLabelHints(targets);
-  // 絞り込み・表示の切り替えの部品は描き直すので、操作した部品にフォーカスを戻す（data-focus で同じ部品を探す。select を矢印で変えても
-  // フォーカスを body に落とさない。WCAG 2.4.3）
-  const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
+  // 絞り込み・表示の切り替えの部品は描き直すので、操作した部品にフォーカスを戻す
+  const focusKey = focusedKey();
   // 章で絞り込んだ行（見出しの件数と「情報」の件数を、表の行数と合わせる）
   const chapterRows = rows.filter(r => !state.view.chapter || chapterOf(r.item) === state.view.chapter);
   const parts: Child[] = [
@@ -61,10 +60,8 @@ export function render() {
     coverageBlock(cov),
   ];
   refs.results.replaceChildren(...parts.filter((p): p is Node => p instanceof Node));
-  if (focusKey) refs.results.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focusKey)}"]`)?.focus();
+  restoreFocus(refs.results, focusKey);
 }
-/** 描き直したあとにフォーカスを戻す部品の印 */
-const focusable = <T extends HTMLElement>(n: T, key: string): T => { n.dataset.focus = key; return n; };
 /** 指摘の件数。「情報」を隠しているときは、表の行数と合うように内訳を添える */
 function findingsCount(rows: ReturnType<typeof overall>) {
   const info = rows.filter(r => r.severity === 'info').length;
@@ -231,7 +228,7 @@ function coverageBlock(cov: Coverage[]) {
       el('tr', '', td('whitespace-nowrap num', c.item), titleCell(c.item, c.title),
         td(`whitespace-nowrap ${c.status === 'evaluated' ? (c.fails ? 'text-sev-medium' : 'text-ok') : 'text-muted'}`, covLabel(c.status), c.status === 'evaluated' && c.fails ? ` (${c.fails})` : ''),
         td('text-muted', c.status === 'manual' ? T.manualNote
-          : c.status === 'missing-input' && commandsFor(c.item) ? (getLang() === 'en' ? `${c.reasons.map(rec).join('; ')} (${T.command}: ${commandsFor(c.item)})` : `${c.reasons.map(rec).join('、')}（${T.command}：${commandsFor(c.item)}）`)
-          : c.reasons.map(rec).join(getLang() === 'en' ? '; ' : '、'))))),
+          : c.status === 'missing-input' && commandsFor(c.item) ? (getLang() === 'en' ? `${c.reasons.map(rec).join(listSep())} (${T.command}: ${commandsFor(c.item)})` : `${c.reasons.map(rec).join(listSep())}（${T.command}：${commandsFor(c.item)}）`)
+          : c.reasons.map(rec).join(listSep()))))),
     el('p', 'mt-3 text-sm text-muted', T.outOfScope));
 }

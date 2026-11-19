@@ -253,6 +253,3 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
   if (imp.sanitized) warnings.push({ kind: 'har-sanitized', detail: 'HAR：Cookie・Set-Cookie が含まれていません。機密情報を除いた形式で書き出された可能性があります。第2章（Cookie）の項目は判定できません' });
   return { targets, warnings };
 }
-
-/** HARで付けられるラベル（画面の選択肢） */
-export const HAR_LABEL_CHOICES = ['pre-login', 'login', 'logout', 'http', 'apex', 'csp-sample-1', 'csp-sample-2'];

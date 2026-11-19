@@ -2,7 +2,7 @@
 import type { Rule, RuleContext, Target } from '../model';
 import { INTERNAL_HOST_IN_TEXT, LOGOUT_FAILED_REC, NO_BODY_REC, NO_CONTENT_REC, SENSITIVE_REC, cacheDirectives, cspPolicies, directiveNames, header, hstsDirective, isNosniff, isStaticResource, mk, noContent, noResponse, nothingToSniff, parseCsp, parseHsts, sensitiveUnlessStatic, zeroLength } from './util';
 import { clip, maskValue } from '../mask';
-import { baseLabel, chainOf, firstStatus, hostnameOf, isRedirectWithLocation, siteResponses } from '../parser/target';
+import { baseLabel, chainOf, firstStatus, hostnameOf, isRedirectWithLocation, isToken, siteResponses } from '../parser/target';
 import { htmlBody, logoutFailed, metaCspPolicies, mixedContent, tags } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
@@ -428,7 +428,7 @@ const appTimings = (v: string): string[] => {
     if (c === '"' && v[i - 1] !== '\\') quoted = !quoted;
     else if ((c === ',' && !quoted) || i === v.length) { names.push(v.slice(start, i).split(';')[0].trim()); start = i + 1; }
   }
-  return names.filter(n => /^[!#$%&'*+.^_`|~\w-]+$/.test(n) && !CDN_TIMING.test(n));
+  return names.filter(n => isToken(n) && !CDN_TIMING.test(n));
 };
 export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン・デバッグ情報の露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG-INFO-02', 'IPA'],

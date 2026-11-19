@@ -1,7 +1,7 @@
 // i18n.ts：画面の文言（日本語と英語）。推奨対応の英訳は recommendationsEn.ts。判定の証跡・解析警告・CSV は日本語のみ
 import type { CoverageStatus, Severity, Status } from './model';
 import type { DiffKind } from './engine/diff';
-import type { CommandOptions } from './commands';
+import { type CommandOptions, PATH_FIELDS } from './commands';
 import { ITEMS } from './engine/coverage';
 
 export type Lang = 'ja' | 'en';
@@ -14,6 +14,13 @@ export function setLang(l: Lang) {
   lang = l; document.documentElement.lang = l;
   document.title = l === 'en' ? 'curl-sec-analyzer: check web security settings from curl output' : 'curl-sec-analyzer：curlの出力でWebセキュリティ設定を判定';
 }
+
+/** コマンド生成器のパスの欄の名前（入力の誤りの文言と同じ名前にする） */
+const pathFields = (l: Lang) =>
+  Object.fromEntries(Object.entries(PATH_FIELDS).map(([k, f]) => [k, f[l]])) as Record<keyof typeof PATH_FIELDS, string>;
+
+/** 理由・エラーの一覧の区切り（日本語は読点、英語は「; 」） */
+export const listSep = (l: Lang = lang) => (l === 'en' ? '; ' : '、');
 
 const ja = {
   tagline: 'curl と openssl の出力、またはブラウザの HAR を読み込むと、HTTPヘッダ・Cookie・CORS・リダイレクト・TLS・APIの設定を判定します。',
@@ -76,7 +83,7 @@ const ja = {
   framed: { title: 'このツールは、他のサイトに埋め込んだ状態では使えません。', note: '貼り付ける内容を守るため、単独のタブで開いてください。', open: 'このツールを直接開く' },
   dlg: { title: '例外に登録', scope: '範囲', onlyCond: (x: string) => `この条件だけ（${x}）`, wholeItem: (x: string) => `この項目すべて（${x}）`, reason: '理由（必須）', approver: '承認者', until: '期限', needReason: '理由を入力してください。', save: '登録する', cancel: 'やめる', note: (t: string, target: string) => `${t}（対象：${target}）。登録した例外は「例外ファイル」で保存し、次回は読み込んで使います。` },
   gen: { title: 'コマンドを作る（推奨コマンド C1〜C26）', note: 'ホスト名とパスを入れると、#TARGET 付きのコマンドを作ります。実行は自分の端末で行い、出力（out.txt）をここに貼り付けます。ログインには login.txt（POST本文）を用意してください。',
-    fields: { host: 'ホスト名', apex: 'apexドメイン（任意）', apiPath: '機密のAPI', loginPath: 'ログイン', mypagePath: '認証後のページ', logoutPath: 'ログアウト', staticPath: '静的リソース（JS）', wsPath: 'WebSocket（任意）' } satisfies Record<Exclude<keyof CommandOptions, 'dangerous'>, string>,
+    fields: { host: 'ホスト名', apex: 'apexドメイン（任意）', ...pathFields('ja'), wsPath: `${PATH_FIELDS.wsPath.ja}（任意）` } satisfies Record<Exclude<keyof CommandOptions, 'dangerous'>, string>,
     danger: '検証環境でだけ行う試験（CRLF、メソッド上書き、送信元の偽装、Content-Type）も含める。DELETE など、データを消しうる試験は生成しません', make: 'コマンドを作る', copy: 'コピー', saveSh: 'csa-collect.sh として保存',
     copied: 'コピーしました。', copyFailed: 'コピーできませんでした。選択した状態にしたので、手動でコピーしてください。', output: '生成したコマンド' },
   har: { loading: 'HARを読み込んでいます…', tooLarge: (mb: number) => `HARが大きすぎます（上限${mb}MB）。対象の操作だけを記録して書き出してください。`, failed: (k: HarFailure) => `HARを読み込めませんでした。${{ json: 'JSONの形式が正しくありません。', format: 'HARの形式として読めません。', read: 'ファイルを読めません。', worker: 'ブラウザが Web Worker を使えない、メモリが足りない、またはツールの不具合の可能性があります。' }[k]}`,
@@ -151,7 +158,7 @@ const en: Dict = {
   framed: { title: 'This tool cannot be used inside another site.', note: 'To protect what you paste, open it in its own tab.', open: 'Open this tool directly' },
   dlg: { title: 'Add exception', scope: 'Scope', onlyCond: x => `This condition only (${x})`, wholeItem: x => `Whole check (${x})`, reason: 'Reason (required)', approver: 'Approver', until: 'Expires', needReason: 'Enter a reason.', save: 'Add exception', cancel: 'Cancel', note: (t, target) => `${t} (target: ${target}). Save exceptions with “Exceptions file” and load them next time.` },
   gen: { title: 'Build commands (recommended commands C1–C26)', note: 'Enter a host name and paths to build commands with #TARGET lines. Run them on your own machine and paste the output (out.txt) here. Prepare login.txt (the login POST body) first.',
-    fields: { host: 'Host name', apex: 'Apex domain (optional)', apiPath: 'Sensitive API', loginPath: 'Login', mypagePath: 'Page behind login', logoutPath: 'Logout', staticPath: 'Static resource (JS)', wsPath: 'WebSocket path (optional)' },
+    fields: { host: 'Host name', apex: 'Apex domain (optional)', ...pathFields('en'), wsPath: `${PATH_FIELDS.wsPath.en} path (optional)` },
     danger: 'Include tests for test environments only (CRLF, method override, IP spoofing, Content-Type). Tests that may delete data, such as DELETE, are never generated', make: 'Build commands', copy: 'Copy', saveSh: 'Save as csa-collect.sh',
     copied: 'Copied.', copyFailed: 'Could not copy. The text is selected so you can copy it manually.', output: 'Generated commands' },
   har: { loading: 'Loading HAR…', tooLarge: mb => `The HAR file is too large (${mb} MB limit). Record only the steps you need.`, failed: k => `Could not load the HAR file. ${{ json: 'It is not valid JSON.', format: 'It is not in the HAR format.', read: 'The file could not be read.', worker: 'The browser may not allow Web Workers, memory may be low, or this may be a bug in the tool.' }[k]}`,

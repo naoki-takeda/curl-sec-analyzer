@@ -1,9 +1,10 @@
 // ui/har.ts：HARの読み込み（Web Worker）と、エントリ一覧の画面
-import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarChain, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
+import { HAR_MAX_BYTES, type HarChain, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
+import { HAR_LABEL_CHOICES } from '../engine/labels';
 import { withProfile } from '../engine/profile';
 import { type HarFailure, tr } from '../i18n';
 import { showText } from '../shownText';
-import { BTN, button, el, labelFor, options, table, td } from './dom';
+import { BTN, button, el, focusable, focusedKey, labelFor, options, restoreFocus, table, td } from './dom';
 import HarWorker from '../harWorker.ts?worker&inline';
 import { type Message, actions, refs, state } from './state';
 import { renderEmpty } from './results';
@@ -69,13 +70,13 @@ export function renderHar() {
   if (!state.har) { refs.harBox.replaceChildren(); return; }
   // 一覧は描き直すので、操作した部品のフォーカス・表のスクロール位置・開閉を戻す（チェックボックス・ラベルの選択を変えても、フォーカスを
   // body に落とさず、表を先頭に戻さない。WCAG 2.4.3）
-  const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
+  const focusKey = focusedKey();
   const T = tr().har; const { imp, hosts } = state.har;
   const same = shownImp === imp; shownImp = imp; if (!same) moved.clear();
   const prevScroll = same ? refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? 0 : 0;
   const prevOpen = same ? refs.harBox.querySelector('details')?.open : undefined;
   const hostBoxes = imp.hosts.map(h => {
-    const cb = el('input'); cb.type = 'checkbox'; cb.checked = hosts.has(h); cb.id = `har-host-${h}`; cb.dataset.focus = `har-host-${h}`;
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = hosts.has(h); cb.id = `har-host-${h}`; focusable(cb, `har-host-${h}`);
     cb.addEventListener('change', () => { if (cb.checked) hosts.add(h); else hosts.delete(h); renderHar(); });
     return el('span', 'mr-4 inline-flex items-center gap-1', cb, labelFor(cb.id, `${h} (${imp.chains.filter(c => c.host === h).length})`, 'text-sm'));
   });
@@ -85,7 +86,7 @@ export function renderHar() {
       // har-N は、予約ラベルをほかのエントリに移したときの戻り先なので、いつも選択肢に入れる（候補が error-N のエントリでも空欄にしない）
       [...new Set([base, `har-${c.id + 1}`, `error-${c.id + 1}`, ...HAR_LABEL_CHOICES, c.label])].map((v): [string, string] => [v, v]).concat([['__exclude', T.exclude]]),
       c.excluded ? '__exclude' : c.label);
-    sel.setAttribute('aria-label', T.labelFor(c.method, shownUrl(c))); sel.dataset.focus = `har-label-${c.id}`;   // 読み上げ用の名前も、画面の表示と同じくマスクする
+    sel.setAttribute('aria-label', T.labelFor(c.method, shownUrl(c))); focusable(sel, `har-label-${c.id}`);   // 読み上げ用の名前も、画面の表示と同じくマスクする
     sel.addEventListener('change', () => {
       // このエントリが前に予約ラベルを移していたら、そのエントリのラベルを戻す（ほかのラベルに変えていなければ）
       for (const [o, v] of moved) if (v.by === c) { if (o.label === `har-${o.id + 1}` && !imp.chains.some(x => x !== o && x !== c && x.label === v.label)) o.label = v.label; moved.delete(o); }
@@ -96,7 +97,7 @@ export function renderHar() {
     });
     const sens = options(el('select', 'rounded-md border border-line bg-paper px-2 py-1 text-sm'),
       [['auto', T.auto(c.sentAuth)], ['1', tr().yes], ['0', tr().no]], c.sensitive === undefined ? 'auto' : c.sensitive ? '1' : '0');
-    sens.setAttribute('aria-label', T.sensFor(shownUrl(c))); sens.dataset.focus = `har-sens-${c.id}`;
+    sens.setAttribute('aria-label', T.sensFor(shownUrl(c))); focusable(sens, `har-sens-${c.id}`);
     sens.addEventListener('change', () => { c.sensitive = sens.value === 'auto' ? undefined : sens.value === '1'; });
     return el('tr', '', td('whitespace-nowrap', c.method), td('break-all font-mono text-[12px]', shownUrl(c)),
       td('num whitespace-nowrap', `${c.status}${c.hops > 1 ? T.hops(c.hops) : ''}`), td('', sel), td('', sens));
@@ -113,5 +114,5 @@ export function renderHar() {
   box.open = prevOpen ?? true;
   refs.harBox.replaceChildren(box);
   scroller.scrollTop = prevScroll;
-  if (focusKey) box.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focusKey)}"]`)?.focus();
+  restoreFocus(box, focusKey);
 }

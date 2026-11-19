@@ -1,8 +1,9 @@
 // parser/openssl.ts：openssl s_client（-showcerts）と openssl x509 -noout の出力から、T-10②・T-11 に使う値を取り出す
 export interface TlsInfo {
-  protocol?: string; cipher?: string;
+  protocol?: string;                       // 合意した版。ルールは使わず（版は #TLSPROBE で T-09 が見る）、出力の読み方をテストで確かめる
+  cipher?: string;
   verifyCode?: number; verifyText?: string;
-  notAfter?: Date; notBefore?: Date;
+  notAfter?: Date;
   subjectCN?: string; sans: string[];
   keyType?: string; keyBits?: number;      // リーフ証明書の公開鍵
   sigalgs: string[];                       // チェーンの署名アルゴリズム（リーフから順に）
@@ -72,14 +73,13 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
     // notAfter・SAN は、後ろのもの（s_client のあとに実行する x509 の出力）を使う。s_client のあとにサーバが送ったデータ（手で採取した、切っていない
     // 出力）は x509 の出力より前に出るので、後ろのものが本物になる
     else if ((m = l.match(/^notAfter=(.+)$/))) info.notAfter = date(m[1]);
-    else if ((m = l.match(/^notBefore=(.+)$/))) info.notBefore = date(m[1]);
     else if ((m = l.match(/^subject=.*?CN\s*=\s*([^,/]+)/))) info.subjectCN ??= m[1].trim().toLowerCase();
     // SAN は最後の X509v3 Subject Alternative Name: の行のものだけ（前のものに足すと、サーバが送った「DNS:victim.example」でホスト名の不一致を隠せる）
     else if (/^X509v3 Subject Alternative Name:/.test(l)) { sanNext = true; sanLine = true; info.sans = []; }
     else if (afterSummary) continue;
     // ここから下（証明書のチェーン・鍵）は、s_client のハンドシェイクの要約（最初の Verify return code: まで）の中にだけ出る。それより後ろの同じ形の行は、
     // サーバがハンドシェイクのあとに送ったデータなので読まない（a:PKEY: で鍵の長さと署名を上書きさせない）
-    else if ((m = l.match(/^v:NotBefore: (.+?); NotAfter: (.+)$/)) && info.chainDepth === 1) { info.notBefore ??= date(m[1]); info.notAfter ??= date(m[2]); }
+    else if ((m = l.match(/^v:NotBefore: .+?; NotAfter: (.+)$/)) && info.chainDepth === 1) info.notAfter ??= date(m[1]);
     else if ((m = l.match(/^(\d+) s:(.*)$/))) { cur = Number(m[1]); info.chainDepth = Math.max(info.chainDepth, cur + 1); info.certs[cur] = { subject: m[2].trim() }; }
     else if ((m = l.match(/^i:(.*)$/)) && cur >= 0) info.certs[cur].issuer = m[1].trim();
     else if (/no peer certificate available/i.test(l)) info.noPeerCert = true;

@@ -1,4 +1,6 @@
 // parser/setCookie.ts：Set-Cookie の解析とセッションCookieの推定
+import { TCHAR } from './target';
+
 export interface SetCookie { name: string; value: string; attrs: Map<string, string | true>; raw: string; }
 
 /**
@@ -31,6 +33,9 @@ export function parseSetCookie(raw: string): SetCookie {
   return { name, value, attrs, raw };
 }
 
+/** 次の Set-Cookie の始まり（「, 名前=」のカンマ） */
+const NEXT_COOKIE = new RegExp(String.raw`,(?=\s*${TCHAR}+=)`);
+
 /**
  * 1つのヘッダ値にカンマでつないだ複数の Set-Cookie を1件ずつに分ける（プロキシやフレームワークがまとめる場合がある）。
  * 分けるのは「, 名前=」の前だけで、Expires の日付（Expires=Wed, 21 Oct 2026 …）のカンマでは分けない。
@@ -42,7 +47,7 @@ export function splitSetCookie(v: string): string[] {
   const out: string[] = [];
   // 前のかけらが属性（;）を持つかは真偽値で持つ（伸びていくかけらに毎回 includes をかけると、'a=b,' の繰り返しで2乗の時間がかかる）
   let lastHasAttr = false;
-  for (const part of v.split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/)) {
+  for (const part of v.split(NEXT_COOKIE)) {
     if (out.length && !lastHasAttr) out[out.length - 1] += `,${part}`; else out.push(part);
     lastHasAttr = part.includes(';');
   }

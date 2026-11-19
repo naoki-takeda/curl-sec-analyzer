@@ -63,7 +63,7 @@ function buildShell() {
     if (list.length || !errors.length) state.suppressions = list;
     // * を含むものは、以前の形式のキーでもパターンとして照合する（engine/suppress.ts の matches）ので、登録し直しを促さない
     const legacy = list.filter(s => !s.target.includes('*') && legacyHarKey(s.target)).length;
-    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors, getLang())) : legacy ? t.legacyHarKeys(legacy) : ''; });
+    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors)) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
   const profIn = hidden('.json,application/json', async f => {
     const text = await readSettings(f, MAX_BYTES); if (text === undefined) return;
@@ -75,7 +75,7 @@ function buildShell() {
     // （判定に使うプロファイルと食い違わないため）
     if (p && !kept && state.har) { const chains = state.har.imp.chains; withProfile(p, () => suggestLabels(chains, true)); renderHar(); }
     // 残したときは、そのことを知らせる（「既定の24時間を使います」などのエラーの文言だけでは、古いプロファイルを使い続けることが分からない）
-    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.loadProfile, joinMessages(errors, getLang())) + (kept ? t.profileKept : '') : ''; });
+    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.loadProfile, joinMessages(errors)) + (kept ? t.profileKept : '') : ''; });
   });
   const baseIn = hidden('.json,application/json', async f => {
     // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超えるので、貼り付けと同じ上限では自分のエクスポートを読めない）
@@ -83,7 +83,7 @@ function buildShell() {
     const { baseline: b, error, skipped } = parseBaseline(text);
     if (b) state.baseline = b;
     const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
-    refresh(() => { const t = tr(); return error ? joinMessages([error], getLang()) : skipped ? t.baselineSkipped(skipped) : legacy ? t.legacyHarKeys(legacy) : ''; });
+    refresh(() => { const t = tr(); return error ? joinMessages([error]) : skipped ? t.baselineSkipped(skipped) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
 
   app.replaceChildren(

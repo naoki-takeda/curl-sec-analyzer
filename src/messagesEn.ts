@@ -1,6 +1,9 @@
 // messagesEn.ts：画面に出すエラーメッセージ（設定ファイルの読み込み、コマンド生成器の入力）の英訳
 // キーは engine/suppress.ts・engine/profile.ts・engine/diff.ts・commands.ts が返す日本語の文言。新しい文言を足したら、ここにも足す
 // （tests/regression/review4.test.ts が、不正な入力で出るメッセージに日本語が残らないことを確かめる）
+import { PATH_FIELDS } from './commands';
+import { type Lang, getLang, listSep } from './i18n';
+
 const EXACT: Record<string, string> = {
   'JSONとして読めません': 'The file is not valid JSON',
   '配列、または suppressions を持つオブジェクトが必要です': 'Expected an array, or an object with a suppressions array',
@@ -15,7 +18,7 @@ const EXACT: Record<string, string> = {
   'apexドメインの書き方が正しくありません': 'The apex domain is not valid',
   'name は文字列にしてください': 'name must be a string',
 };
-const FIELD: Record<string, string> = { 機密のAPI: 'Sensitive API', ログイン: 'Login', 認証後のページ: 'Page behind login', ログアウト: 'Logout', '静的リソース（JS）': 'Static resource (JS)', WebSocket: 'WebSocket' };
+const FIELD: Record<string, string> = Object.fromEntries(Object.values(PATH_FIELDS).map(f => [f.ja, f.en]));
 const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：ruleId が不正です$/, m => `Entry ${m[1]}: invalid ruleId`],
   [/^(\d+)件目：ruleId「(.*)」は項目IDではありません$/s, m => `Entry ${m[1]}: ruleId "${m[2]}" is not a check ID`],
@@ -40,4 +43,4 @@ export function messageEn(ja: string): string {
 }
 
 /** エラーの一覧を画面の言語でつなぐ */
-export const joinMessages = (list: string[], lang: string) => (lang === 'en' ? list.map(messageEn).join('; ') : list.join('、'));
+export const joinMessages = (list: string[], l: Lang = getLang()) => (l === 'en' ? list.map(messageEn) : list).join(listSep(l));

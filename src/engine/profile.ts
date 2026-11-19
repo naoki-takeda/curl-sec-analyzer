@@ -1,6 +1,7 @@
 // engine/profile.ts：組織プロファイル
 import type { Finding, Profile, Severity } from '../model';
 import { sessionConfig } from '../parser/setCookie';
+import { isToken } from '../parser/target';
 import { SEVERITIES } from './summarize';
 import { ITEMS } from './coverage';
 
@@ -46,7 +47,7 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   }
   const exclude = Array.isArray(d.exclude) ? (d.exclude as unknown[]).filter((x): x is string => typeof x === 'string' && /^[HCRTEA]-\d\d$/.test(x) && knownItem(x)) : [];
   if (notArray(d.exclude) || (Array.isArray(d.exclude) && exclude.length !== d.exclude.length)) errors.push('exclude：項目ID（例：H-17）の配列にしてください');
-  const names = Array.isArray(d.sessionCookieNames) ? (d.sessionCookieNames as unknown[]).filter((x): x is string => typeof x === 'string' && /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(x)) : [];
+  const names = Array.isArray(d.sessionCookieNames) ? (d.sessionCookieNames as unknown[]).filter((x): x is string => typeof x === 'string' && isToken(x)) : [];
   const ORIGIN = /^(?:https?:\/\/)?(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d+)?$/i;
   const rawOrigins = Array.isArray(d.trustedScriptOrigins) ? d.trustedScriptOrigins as unknown[] : [];
   const origins = rawOrigins.filter((x): x is string => typeof x === 'string' && ORIGIN.test(x));

@@ -33,6 +33,13 @@ export function allowedItems(label: string): Allow {
 /** HARのエントリに付けられるラベルか（parser/har.ts が使う） */
 export const allowedForHar = (label: string) => labelRow(label).har;
 
+/**
+ * HARで付けられる予約ラベル（画面の選択肢）。labels.json の har の行から作る。接頭辞の行は、2つを比べる csp-sample- を
+ * csp-sample-1・csp-sample-2 にする（error- はエントリごとの番号を付けるので、画面がエントリごとに error-N として出す）
+ */
+export const HAR_LABEL_CHOICES: string[] = ROWS.filter(r => r.har && r.label && r.label !== 'error-')
+  .flatMap(r => (r.match === 'prefix' ? [`${r.label}1`, `${r.label}2`] : [r.label!]));
+
 /** 横断ルールが必要とするラベル（labels.json の対応表では表せないもの） */
 const CROSS_REQUIRES: Record<string, string[]> = {
   'C-07': ['session-sample-*（2つ以上）'], 'C-09': ['pre-login', 'login'], 'C-12': ['logout', 'after-logout'],

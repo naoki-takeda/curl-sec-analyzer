@@ -62,5 +62,13 @@ export function download(name: string, type: string, body: string) {
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+/**
+ * 描き直す部品のフォーカスを戻す（WCAG 2.4.3）。描き直す前に focusedKey で操作している部品の印（data-focus）を取り、描き直したあとに
+ * restoreFocus で同じ印の部品にフォーカスを戻す（select を矢印で変えても、チェックボックスを切り替えても、フォーカスを body に落とさない）
+ */
+export const focusable = <T extends HTMLElement>(n: T, key: string): T => { n.dataset.focus = key; return n; };
+export const focusedKey = () => (document.activeElement as HTMLElement | null)?.dataset?.focus;
+export const restoreFocus = (box: ParentNode, key: string | undefined) => { if (key) box.querySelector<HTMLElement>(`[data-focus="${CSS.escape(key)}"]`)?.focus(); };
+
 /** 折りたたみ（details）の見出しの先頭に付ける開閉の目印。summary を flex にするとブラウザの三角が消えるため自前で付ける */
 export const disclosure = () => { const s = el('span', 'disclosure inline-block w-4 shrink-0 text-muted'); s.setAttribute('aria-hidden', 'true'); return s; };

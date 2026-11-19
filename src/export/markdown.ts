@@ -5,7 +5,7 @@ import { SEVERITIES, circled, countBySeverity, overall } from '../engine/summari
 import { type DiffRow, diffSummary } from '../engine/diff';
 import { RULESET_VERSION, TOOL_VERSION } from '../version';
 import { API_TOP10, ASVS_VERSION, IPA_EDITION, IPA_EDITION_EN, asvsLevel, standardsOf, standardsShort } from '../engine/standards';
-import { covLabel, diffLabel, getLang, itemTitle, sevLabel } from '../i18n';
+import { covLabel, diffLabel, getLang, itemTitle, listSep, sevLabel } from '../i18n';
 import { recommendationEn } from '../recommendationsEn';
 
 // 証跡には診断対象の HTML（<img src=…> など）がそのまま入るので、表示側でタグとして描画されないよう < > を実体参照にする。
@@ -58,7 +58,7 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
     `| ${en ? 'Check' : '項目'} | ${en ? 'Description' : '内容'} | ${en ? 'Status' : '区分'} | ${en ? 'Reason / input needed' : '理由・必要な入力'} | ASVS ${ASVS_VERSION} | IPA |`, '| --- | --- | --- | --- | --- | --- |');
   for (const x of cov) {
     const s = standardsOf(x.item);
-    L.push(`| ${x.item} | ${cell(itemTitle(x.item, x.title))} | ${covLabel(x.status)} | ${cell((en ? x.reasons.map(recommendationEn) : x.reasons).join(en ? '; ' : '、'))} | ${s.asvs.map(a => `${a} (L${asvsLevel(a)})`).join(', ') || '—'} | ${cell(s.ipa.join(', ')) || '—'} |`);
+    L.push(`| ${x.item} | ${cell(itemTitle(x.item, x.title))} | ${covLabel(x.status)} | ${cell((en ? x.reasons.map(recommendationEn) : x.reasons).join(listSep()))} | ${s.asvs.map(a => `${a} (L${asvsLevel(a)})`).join(', ') || '—'} | ${cell(s.ipa.join(', ')) || '—'} |`);
   }
   if (suppressions.length) L.push('', `${en ? 'Registered exceptions' : '登録済みの例外'}${COL}${suppressions.length}`);
   L.push('', en ? '> A pass covers only what could be checked. It does not mean the system is secure.' : '> 合格は、判定できた範囲での結果です。安全であることの保証にはなりません。');

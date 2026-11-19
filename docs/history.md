@@ -1308,3 +1308,18 @@ v1.0 の範囲を実装し、要確認事項（第44回）を確かめたので�
 | 文書の重複 | 設計書：openssl の採り方（推奨コマンドの例と2か所）、プローブの採る長さ（4か所）、Observatory の点数（3か所）、版の上げ方、開発サーバに CSP を付けない理由、要確認事項の [x] のうちほかの節の決定の言い直し（7件）、ロードマップの「フェーズ0」。README のルールの返り値の取り決め・ASVS の持ち方・「設計書」の節。CHANGELOG の経緯への参照の重複と回の範囲。CONTRIBUTING の Node.js の版（README と同じ） | 1か所にして、ほかは参照にした・外した | 設計書、README、CHANGELOG、CONTRIBUTING |
 | 判断したこと | README の組織プロファイルの JSON の例（設計書とひな形と同じ）は、利用者の入口なので残した。`.gitignore` の `run.sh.local`（run.sh を書き換えた写しを置く場合）は残した。`commands.ts` の `evil.example` はシェルの文字列のまま（`TEST_HOST` と同じ値であることはコメントのとおり）。回帰テスト（`tests/regression/`）の中の同じ確かめの重複は、中身を変えない決まりなので残した | — | — |
 | 未対応（低） | 例外の登録・設定の読み込みで判定し直すとき、結果の元の入力ではなく今の入力欄を使う。生成器の欄の名前が `commands.ts`・`i18n.ts`・`messagesEn.ts` の3か所にある（`validate` が構造で返すと回帰テストの文字列の形が変わる）。E2E の `getByRole('status')`・`nth()` の探し方。フォーカスを戻す処理（`results.ts`・`har.ts`）と言語ごとの区切りの文字の共有。組織プロファイルで変えた重要度の「*」の凡例。`messagesEn` の漏れの確かめを構文木から集めること。`ParseWarning.label` を使わない警告に付けていること。`showText` がスキームのない `//ホスト` のホスト名を伏せること。第62回の未対応（低） | 次回以降 | — |
+
+### 積み残しへの対応（第64回、1.0.0 の公開の前：第62・63回の未対応（低）の重複の共有）
+
+第62・63回で「低」として残したもののうち、同じ規則・名前を複数の場所に書いているもの（G5）を、1か所にまとめた（利用者が選んだ範囲）。判定・画面の文言・エクスポートの結果は変えていない（ゴールデンの期待結果は変わらない）。
+
+| 対象 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| HTTP のトークンの文字 | RFC 9110 の token の文字の集まりを、組織プロファイルの Cookie の名前、`%{header_json}` の始まりとヘッダ名、Set-Cookie の分割、Server-Timing の項目の名前（H-16）、HSTS のディレクティブの6か所に書いていた | `parser/target.ts` の `TCHAR`・`isToken` を使う | `src/parser/`、`src/rules/util.ts`・`headers.ts`、`src/engine/profile.ts` |
+| 実行の印の形 | `run=` の値の形（16〜64桁の16進数）を2か所に書いていた | `parser/input.ts` の1つの定数にする | `src/parser/input.ts` |
+| 生成器の欄の名前 | パスの欄の名前を、入力の誤りの文言（`validate`）、画面の欄、文言の英訳の3か所に書いていた | `commands.ts` の `PATH_FIELDS`（日本語と英語）から3つとも作る。`validate` の文言と順は変えない（回帰テストが文字列で確かめる） | `src/commands.ts`、`src/i18n.ts`、`src/messagesEn.ts` |
+| フォーカスを戻す処理・区切りの文字 | 描き直したあとにフォーカスを戻す処理を結果と HAR の一覧に、理由・エラーの一覧の区切り（`、`・`; `）を画面・Markdown・エラーの英訳に別々に書いていた | `ui/dom.ts` の `focusable`・`focusedKey`・`restoreFocus` と、`i18n.ts` の `listSep` を使う | `src/ui/`、`src/i18n.ts`、`src/export/markdown.ts`、`src/messagesEn.ts` |
+| HAR のラベルの選択肢 | 画面の選択肢を `labels.json` の「HAR で使えるか」と別に手で並べていた | `labels.json` の HAR で使える行から作る（`csp-sample-*` は比べる2つ、`error-*` はエントリごとの番号なので画面が出す）。選択肢の順は設計書の許可リストと同じ（http・apex が pre-login の前）になった。順を単体テストで固定した | `src/engine/labels.ts`、`src/ui/har.ts`、`tests/labels.test.ts` |
+| 使っていない値 | `TlsInfo.notBefore` を読んでいたが、どのルールも使わない。`ParseWarning.label` を、使う unknown-url のほかに proxy-only・too-many-cookies にも付けていた | 外した。`TlsInfo.protocol` もルールは使わないが、openssl の出力の読み方を回帰テストが確かめるので残し、理由をコメントに書いた | `src/parser/openssl.ts`・`target.ts`・`input.ts` |
+| 束のレビュー | 新しい関数の JSDoc の前に置いたので、`disclosure` の説明がほかの宣言の上に離れた（低）。HAR のラベルの選択肢の順が変わったことを、テストで固定していなかった（中） | 説明を `disclosure` の真上に戻した。順を確かめるテストを足した | `src/ui/dom.ts`、`tests/labels.test.ts` |
+| 未対応 | 第62回の未対応（低）のうち、回帰テストの中の組み立ての重複（`tests/regression/` は変えない決まり）と設計書の「マスキングの対象」の短縮。第63回の未対応（低）のうち、上で直したもののほか（判定し直すときの入力、E2E の探し方、「*」の凡例、`messagesEn` の漏れの確かめ、`showText` の `//ホスト`） | 次回以降 | — |

@@ -1,6 +1,6 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、%{header_json}、#META、#BODY、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
-import { HAS_SCHEME, assignHopUrls, baseLabel, BODY_LIMIT, cookieCapWarnings, isRedirectWithLocation, pushCookies, uniqueLabels } from './target';
+import { HAS_SCHEME, TCHAR, assignHopUrls, baseLabel, BODY_LIMIT, cookieCapWarnings, isRedirectWithLocation, isToken, pushCookies, uniqueLabels } from './target';
 import { autoAuthScheme, cookieNames, JWT_IN_TEXT, sentAuthOf, splitSetCookie } from './setCookie';
 
 // curl と同じ緩さで読む：HTTP/ の大文字小文字を区別しない、理由句の前の空白がなくてもよい（HTTP/1.1 200OK）、コードは先頭の3桁（curl は
@@ -35,6 +35,13 @@ const METER_LINE = new RegExp(String.raw`^\s*(?:% Total\s+% Received|Dload\s+Upl
 // 数字の欄のあいだにある行も進捗表示とする。ただし応答の本文の外だけ（本文の桁をそろえた数値の表を消さない）
 const METER_LINE_NO_TIME = new RegExp(String.raw`^(?=.*\d {10,}\d)${METER}$`);
 const METER_PREFIX = new RegExp(String.raw`^${METER}(?=(?:< )?HTTP\/[\d.]+ \d{3}|[<>*] )`);
+// %{header_json}（C10）の始まり：ヘッダ名をキーにした配列の JSON（{"server":[…]）
+const HEADER_JSON_START = new RegExp(String.raw`^\s*\{\s*"${TCHAR}+"\s*:\s*\[`);
+// 採取の印（run=）の値の形。コマンド生成器のスクリプトは、8バイトの乱数を16進数で付ける（commands.ts）
+const RUN_ID = '[0-9a-f]{16,64}';
+const RUN_ID_ONLY = new RegExp(`^${RUN_ID}$`);
+// 印のある #TARGET の行（最初の #TARGET に印がないとき、あとの行に印があれば警告する）
+const RUN_TARGET = new RegExp(String.raw`(?:^|\n)#TARGET[ \t](?:[^\n]*[ \t])?run=${RUN_ID}(?=[ \t\n]|$)`);
 
 // key=value を解析。ct= 以降は行末まで1つの値（空白を含むContent-Type対策）
 export function attrs(s: string): Record<string, string> {
@@ -114,7 +121,7 @@ export function parseInput(input: string): ParseResult {
   // 印は、入力の最初の #TARGET の行からだけ取る（設計書のとおり）。印のある行ならどれでも取ると、手書きの入力で、診断対象のサーバが本文に書いた
   // 「#TARGET … run=<乱数>」で印を有効にし、利用者の本物のマーカーをすべて本文として読ませられる
   const firstTarget = normalized.match(/(?:^|\n)#TARGET\b([^\n]*)/)?.[1];   // 属性のない #TARGET も、MARKER_RE と同じくマーカー
-  const runId = firstTarget !== undefined ? attrs(firstTarget).run?.match(/^[0-9a-f]{16,64}$/)?.[0] : undefined;
+  const runId = firstTarget !== undefined ? attrs(firstTarget).run?.match(RUN_ID_ONLY)?.[0] : undefined;
   const lines = runId
     // 印のある入力では、くっついたマーカーも印のあるものだけを分ける（行の中のマーカーの位置で分け、印のある部分だけを新しい行にする。
     // 先読みの正規表現で分けると、本文の1行に「#META 」が続く入力で、入力の長さの2乗の時間がかかる）
@@ -283,7 +290,7 @@ export function parseInput(input: string): ParseResult {
       close(); cur = newResponse(sm); inHeaders = true; continue;
     }
     // C10：ヘッダ名が小文字のJSON。-v の本文や、応答のあとの本文（{"items":[...]} など）は対象にしない
-    if (!cur && !t.verbose && (json || (!t.responses.length && /^\s*\{\s*"[!#$%&'*+.^_`|~0-9A-Za-z-]+"\s*:\s*\[/.test(line)))) {
+    if (!cur && !t.verbose && (json || (!t.responses.length && HEADER_JSON_START.test(line)))) {
       if (!json) { json = []; jsonBytes = 0; js.depth = 0; js.inStr = false; js.esc = false; }
       json.push(line); jsonBytes += line.length;
       for (const ch of line) {
@@ -346,7 +353,7 @@ export function parseInput(input: string): ParseResult {
   const badAttr: ParseWarning[] = badSensitive.length ? [{ kind: 'invalid-attr', detail: `sensitive= の値を読めませんでした（${badSensitive.slice(0, 5).map(x => x.label).join(', ')}${badSensitive.length > 5 ? ' など' : ''}）。1（機密）か 0（機密でない）を指定してください` }] : [];
   // 最初の #TARGET に印がなく、あとに印のある #TARGET（生成スクリプトの出力）が続く：印は最初の #TARGET からだけ取るので、生成スクリプトの出力も
   // 印のない入力として読み、応答の本文に書かれたマーカーを読む（手書きのターゲットを前に足すと印による保護が外れるので、知らせる）
-  const mixedRun: ParseWarning[] = !runId && /(?:^|\n)#TARGET[ \t](?:[^\n]*[ \t])?run=[0-9a-f]{16,64}(?=[ \t\n]|$)/.test(normalized) ? [{ kind: 'mixed-run',
+  const mixedRun: ParseWarning[] = !runId && RUN_TARGET.test(normalized) ? [{ kind: 'mixed-run',
     detail: '生成スクリプトの出力（run= の印のある #TARGET）の前に、印のない #TARGET があります。この場合は印を使わずに読むので、応答の本文に書かれた #TARGET などのマーカーもターゲットとして読みます。生成スクリプトの出力だけを先頭から貼り付け、手書きの出力は別に貼り付けて判定してください' }] : [];
   if (badTargetAttrs.length) badAttr.push({ kind: 'invalid-attr', detail: `#TARGET の指定を読めませんでした（${badTargetAttrs.slice(0, 5).join('、')}${badTargetAttrs.length > 5 ? ' など' : ''}）` });
   return { targets, warnings: [...dup, ...ignored, ...mixedRun, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets), ...cookieCapWarnings(targets)] };
@@ -365,7 +372,7 @@ function headerJson(text: string, code?: string): HttpResponse | null | undefine
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const entries = Object.entries(obj as Record<string, unknown>);
   const isHeaders = entries.some(([k]) => TYPICAL_HEADER.test(k.toLowerCase()))
-    && entries.every(([k, v]) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(k) && Array.isArray(v) && v.every(x => typeof x === 'string'));
+    && entries.every(([k, v]) => isToken(k) && Array.isArray(v) && v.every(x => typeof x === 'string'));
   if (!isHeaders) return null;
   const headers = new Map<string, string[]>(); let dropped = 0;
   for (const [k, v] of entries)
@@ -418,6 +425,6 @@ function collectWarnings(targets: Target[], unparsed: number, emptyTargets: stri
   // 応答がプロキシのもの（407・CONNECT）だけのターゲットは、サイトの応答を判定できない。黙って判定から消えないよう知らせる
   // WebSocket の 101（1xx）だけの応答は、プロキシの応答ではない
   for (const t of targets) if (t.responses.some(r => r.kind === 'connect') && t.responses.every(r => r.kind === 'connect' || r.kind === 'informational'))
-    w.push({ kind: 'proxy-only', label: t.label, detail: `ターゲット「${t.label}」：プロキシの応答（HTTP ${t.responses.map(r => r.status).join('・')}）しかなく、サイトの応答を判定できません（プロキシの認証を確かめて採取し直してください）` });
+    w.push({ kind: 'proxy-only', detail: `ターゲット「${t.label}」：プロキシの応答（HTTP ${t.responses.map(r => r.status).join('・')}）しかなく、サイトの応答を判定できません（プロキシの認証を確かめて採取し直してください）` });
   return w;
 }

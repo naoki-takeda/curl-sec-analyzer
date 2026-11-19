@@ -4,6 +4,12 @@ import type { HttpResponse, ParseWarning, ResponseKind, Target } from '../model'
 /** 読む本文の上限（curl の貼り付け・HAR とも先頭 64KB まで） */
 export const BODY_LIMIT = 64 * 1024;
 
+/** HTTP のトークン（RFC 9110 5.6.2 の token）の1文字。ヘッダ名・Cookie の名前・ディレクティブの名前の形 */
+export const TCHAR = "[!#$%&'*+.^_`|~0-9A-Za-z-]";
+const TOKEN = new RegExp(`^${TCHAR}+$`);
+/** 全体が HTTP のトークンか */
+export const isToken = (s: string) => TOKEN.test(s);
+
 /** 付け直したラベル（http#2 など）の元のラベル。ラベル対応表やラベルで判定を変えるルールは、この元のラベルで判定する */
 export const baseLabel = (label: string) => label.replace(/#\d+$/, '');
 
@@ -84,7 +90,7 @@ export const pushCookies = (list: string[], vals: string[]): number => {
 /** 上限を超えた Set-Cookie のあるターゲットの警告 */
 export const cookieCapWarnings = (targets: Target[]): ParseWarning[] => targets.flatMap(t => {
   const n = t.responses.reduce((a, r) => a + (r.droppedCookies ?? 0), 0);
-  return n ? [{ kind: 'too-many-cookies' as const, label: t.label, detail: `ターゲット「${t.label}」：1つの応答の Set-Cookie が${MAX_SET_COOKIES}個を超えたので、先の${n}個を判定に使いませんでした（ブラウザも1つのドメインに約180個までしか保存せず、古いものから捨てます）` }] : [];
+  return n ? [{ kind: 'too-many-cookies' as const, detail: `ターゲット「${t.label}」：1つの応答の Set-Cookie が${MAX_SET_COOKIES}個を超えたので、先の${n}個を判定に使いませんでした（ブラウザも1つのドメインに約180個までしか保存せず、古いものから捨てます）` }] : [];
 });
 /**
  * ホスト名の「サイト」（登録したドメイン）の目安。公開接尾辞の一覧は持たないので、最後の2つのラベル（example.com）とし、
