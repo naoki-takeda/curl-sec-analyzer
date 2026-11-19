@@ -6,7 +6,7 @@ const COMMON_BIGRAMS = new Set(('th he in er an re on at en nd ti es or te of ed
 
 /**
  * 英小文字だけの16文字以上の乱数のトークン（/invite/qwrtzxkpmnbvcdfgh）か。次のどちらか：
- * - 母音（y を含む）が4分の1未満（例外のキーを変えないため、この規則も残す）
+ * - 母音（y を含む）が4分の1未満（登録済みの例外のキーを変えないため）
  * - よく現れる2文字の並びにないものが35%以上（乱数の16〜24文字の約98%。英語の語をつないだもの（healthcheckstatus・nightschoolprograms・
  *   internationalization）は24%以下なので残る）
  */
@@ -60,8 +60,7 @@ export function wordLike(w: string): boolean {
   const parts = w.match(/[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+/g) ?? [];
   if (parts.join('') !== w) return false;
   const singles = parts.filter(p => p.length === 1).length;
-  const allWords = parts.every(p => p.length >= 3 || SHORT_WORDS.has(p.toLowerCase()) || /^[A-Z]{2}$/.test(p) || p.length === 1);
-  return parts.length <= (allWords && singles === 0 ? 7 : 4) && singles <= 1
+  return parts.length <= (singles === 0 ? 7 : 4) && singles <= 1
     && parts.every((p, i) => (i === 0 || /^[A-Z]/.test(p)) && !/^[A-Z]{6,}$/.test(p)
       && (p.length !== 2 || SHORT_WORDS.has(p.toLowerCase()) || /^[A-Z]{2}$/.test(p)))
     && partRare(parts) < 0.45;

@@ -118,3 +118,24 @@ describe('二重減点の除去', () => {
     expect(fs.filter(f => f.status === 'fail').map(f => f.ruleId)).toContain('H-08.1');
   });
 });
+
+describe('深い入れ子のパラメータと数値の秘密', () => {
+  it('深さ10を超えて入れ子にしたパラメータの秘密も伏せる（エンコードした ?・二重エンコード・生の ?）', () => {
+    for (const unit of ['/a%3Fr%3D', '/a%253Fr%253D', '/a?r=']) {
+      const tail = unit.replace(/a(.*)r(.*)$/, 'b$1password$2');
+      const s = `https://a.example/x?r=${unit.repeat(11)}${tail}hunter2`;
+      expect(maskText(s), unit).not.toContain('hunter2');
+      expect(maskText(maskText(s))).toBe(maskText(s));
+    }
+  });
+  it('数値の OTP・PIN・パスワードを、JSON（エスケープ・エンコード）と名前を付けた値で伏せる', () => {
+    for (const s of ['{\\"password\\":12345678}', '{\\"otp\\":482913}', '%22pin%22%3A123456', "{'otp': 482913}", 'otp: 482913', "passcode = '482913'", 'pin: 4821']) {
+      const m = maskText(s);
+      expect(m, s).not.toMatch(/12345678|482913|123456|4821/);
+      expect(maskText(m)).toBe(m);
+    }
+  });
+  it('pin・otp に似た別の名前と、真偽値は伏せない', () => {
+    for (const s of ['pin: true', 'opt: 482913', 'spinner: 3', 'pinned: 12', 'pin_lat: 35123', 'map_pin: 7', 'https://a.example/x?pin2=7', '{"code":404}']) expect(maskText(s), s).toBe(s);
+  });
+});

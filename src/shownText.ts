@@ -9,7 +9,7 @@
 //   日時・単位（01T10・30s・64KB）だけ
 // - URL のホスト名、決まった最上位ドメインのドメイン名、CSP のハッシュ（'sha256-…'）、伏せた印「…(N chars)」は、そのまま残す
 // 名前の付いた短い秘密（password=hunter2 の hunter2）は形では見分けられないので、maskText の名前による伏せ方と組み合わせて使う（showText）
-import { maskText } from './mask';
+import { HASH_SOURCE, maskText } from './mask';
 import { rareBigrams, wordLike } from './tokenShape';
 
 /** 英字に数字を付けた語のうち、残してよい英字の部分（暗号・プロトコル・文字コード・版の名前）。小文字で照合する */
@@ -30,7 +30,7 @@ function joinedWords(w: string): boolean {
   const digits = chunks.filter(c => /^\d/.test(c)).join('').length;
   // 単位（KB・ms・k）は数字の直後だけ（K7MDENG の K を単位と読まない）。大文字だけのかたまりは5文字まで（AKIAIOSFODNN7EXAMPLE を残さない）。
   // 英字のかたまりは、短くてもまれな2文字の並びが半分未満のもの（GitLab のトークンのかけら rbdO66tkD の rbd・tkD を語とみなさない）
-  return chunks.length <= 3 && digits <= 4 && chunks.every((c, i) => /^\d/.test(c) || (UNITS.test(c) && i > 0 && /^\d/.test(chunks[i - 1]))
+  return chunks.length <= 3 && digits <= 4 && chunks.every((c, i) => /^\d/.test(c) || (UNITS.test(c) && i > 0)
     || CRYPTO_CHUNKS.has(c.toLowerCase())   // 暗号の名前（CAMELLIA256・ARIA128）は大文字6文字以上でも残す（T-10③ の証跡を読めるように）
     || (c.length >= 3 && wordLike(c) && !/^[A-Z]{6,}$/.test(c) && rareBigrams(stem(c).toLowerCase()) < 0.5));
 }
@@ -40,7 +40,7 @@ const stem = (c: string) => (/[a-z][A-Z]$/.test(c) ? c.slice(0, -1) : c);
 const UNITS = /^(?:bit|bits|byte|bytes|ms|s|m|h|d|w|y|kb|mb|gb|tb|px|em|rem|vh|vw|x|xx|st|nd|rd|th|k)$/i;
 
 /** 残してよい語か */
-export function allowedWord(w: string): boolean {
+function allowedWord(w: string): boolean {
   if (w.length <= 4) return true;
   if (/^\d+$/.test(w)) return w.length <= 10;
   if (/^[A-Za-z]+$/.test(w)) return wordLike(w);
@@ -50,7 +50,7 @@ export function allowedWord(w: string): boolean {
   return !!m && MIXED_STEMS.has(m[1].toLowerCase()) && (m[1].length > 1 || m[2].length <= 3);
 }
 
-// KEEP：語として見ずにそのまま残す部分。伏せた印、CSP・SRI のハッシュ（長さちょうどのもの。mask.ts の HASH_SOURCE と同じ）、URL のホスト名、
+// KEEP：語として見ずにそのまま残す部分。伏せた印、CSP・SRI のハッシュ（長さちょうどのもの。mask.ts の HASH_SOURCE）、URL のホスト名、
 // 決まった最上位ドメインのドメイン名
 // - URL のホスト名は、ユーザー情報（user:****@）のあとか、ユーザー情報のない URL の「//」の直後だけ（ユーザー名に置いたトークン
 //   https://<トークン>:x-oauth-basic@api… をホスト名として残さない）
@@ -61,7 +61,7 @@ const USERINFO = String.raw`(?:[^/\s?#@<>"']|["'](?=[\w@-])|…\(\d+ chars\)){0,
 // 英小文字のドメイン名（スキームのない CSP のホスト ajax.aspnetcdn.com、Via の app01.prod.example.com）。決まった最上位ドメインのものだけ
 // （/reset/<トークン>.pdf のようなファイル名を残さない）
 const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost)(?![\w-])`;
-const KEEP = String.raw`…\(\d+ chars\)|(?<![\w-])(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)(?![\w+/=-])|(?<=:\/\/${USERINFO})[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|${DOMAIN}`;
+const KEEP = String.raw`…\(\d+ chars\)|${HASH_SOURCE}|(?<=:\/\/${USERINFO})[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|${DOMAIN}`;
 // ↑ ユーザー情報のない URL のホスト名は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない。区切り直すと、
 // ホスト名らしい並びのあとに @ がある入力（https://a.a.a…@evil/）で1文字ずつ短くするたびに @ まで読み直し、2乗の時間になる）
 // JOIN：- _ + でつないだ語の並び（glpat-<トークン>・sk_live_<トークン>・Strict-Transport-Security）は、まとめて見る。パーセントエンコードした
@@ -93,11 +93,13 @@ const WORDS = new RegExp(`(${ESCAPES})|(${KEEP})|[A-Za-z0-9]+(?:${JOIN}[A-Za-z0-
 const JOIN_SPLIT = new RegExp(`(${JOIN})`);
 // 暗号の略語（CBC・GCM・DHE・ADH・SRP）。まれな2文字の並びが多いが、番号のかけらとみなさない（ECDHE-RSA-RC4-SHA を伏せない）
 const CRYPTO_WORDS = new Set('aes des ede rc2 rc4 md5 sha cbc gcm ccm rsa dss dhe edh ecdh ecdhe adh aecdh srp psk idea exp null anon seed aria camellia chacha poly ecdsa tls ssl sm2 sm3 sm4 gost'.split(' '));
+/** 残してよい英字に数字を付けた語（rc4・md5・sha1） */
+const stemmedWord = (p: string) => { const m = p.match(STEM_DIGITS); return !!m && MIXED_STEMS.has(m[1].toLowerCase()); };
 /**
  * 番号のかけらとして、語として読めないもの：英字と数字が混ざる（K7QX・a1b2。rc4・md5・sha1 のような残してよい語は除く）か、英字4文字以上で
  * まれな2文字の並びが半分以上（ZXCV・ASDF）
  */
-const randomPiece =(p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !STEM_DIGITS.test(p) || !MIXED_STEMS.has((p.match(STEM_DIGITS)?.[1] ?? '').toLowerCase())
+const randomPiece = (p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !stemmedWord(p)
   : /^[A-Za-z]{4,}$/.test(p) && rareBigrams(p.toLowerCase()) >= 0.5);   // 英字3文字（pdf・img・MIT）は略語として乱数とみなさない
 /** 6桁までの数字だけのかけらが3つ以上続き、合わせて12桁以上になる部分があるか（日付の 20261118 のような8桁を含む並び（db-backup-20261118-0300-01）は番号としない） */
 const digitRun = (nums: string[]): boolean => { let n = 0, len = 0; for (const p of nums) { if (/^\d{1,6}$/.test(p)) { n++; len += p.length; if (n >= 3 && len >= 12) return true; } else { n = 0; len = 0; } } return false; };

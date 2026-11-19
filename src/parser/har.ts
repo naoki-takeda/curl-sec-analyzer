@@ -2,16 +2,16 @@
 // - request.postData（ログインのパスワードなど）は読まない。本文は HTML・JSON・JS の先頭64KBだけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
-import { autoAuthScheme, cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
+import { autoAuthScheme, cookieNames, JWT_IN_TEXT, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
-import { baseLabel, cookieCapWarnings, pushCookies } from './target';
+import { baseLabel, BODY_LIMIT, cookieCapWarnings, isRedirectWithLocation, pushCookies } from './target';
 
-const BODY_LIMIT = 64 * 1024;
 export const HAR_MAX_BYTES = 50 * 1024 * 1024;
 
 interface HarHeader { name: string; value: string; }
 interface HarEntry {
   startedDateTime?: string;
+  serverIPAddress?: unknown;
   request: { method: string; url: string; httpVersion?: string; headers?: HarHeader[] };
   response: { status: number; statusText?: string; httpVersion?: string; headers?: HarHeader[]; redirectURL?: string;
               content?: { mimeType?: string; text?: string; encoding?: string } };
@@ -63,18 +63,17 @@ function toResponse(e: HarEntry): HttpResponse {
     try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 2)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
     body = body?.slice(0, BODY_LIMIT);
   }
-  const status = e.response.status;
-  return { httpVersion: normalizeVersion(e.response.httpVersion), status, reason: e.response.statusText, headers, rawNames, body,
-           kind: status >= 300 && status < 400 && headers.has('location') ? 'redirect' : 'final', ...(dropped ? { droppedCookies: dropped } : {}) };
+  const r: HttpResponse = { httpVersion: normalizeVersion(e.response.httpVersion), status: e.response.status, reason: e.response.statusText, headers, rawNames, body,
+    kind: 'final', ...(dropped ? { droppedCookies: dropped } : {}) };
+  if (isRedirectWithLocation(r)) r.kind = 'redirect';
+  return r;
 }
 
 const withoutHash = (u: string) => { const i = u.indexOf('#'); return i >= 0 ? u.slice(0, i) : u; };
-// 始まりは直前が英数字・ハイフンでないところだけ（\b は「-eyJ」の繰り返しで2乗の時間になる）
-const JWT_IN_HEADER = /(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 /** 名前のあるヘッダだけ（配列でない headers、名前のない要素・null を含む HAR でも TypeError にしない） */
 const named = (hs: (HarHeader | null | undefined)[] | undefined): HarHeader[] => (Array.isArray(hs) ? hs : []).filter((h): h is HarHeader => typeof h?.name === 'string');
 /** Authorization・Cookie のリクエストヘッダにある JWT（A-03 が curl の -v と同じく送った JWT もデコードできるように） */
-const jwtsIn = (hs: HarHeader[]) => [...new Set(hs.filter(h => /^(?:authorization|cookie)$/i.test(h.name)).flatMap(h => String(h.value ?? '').match(JWT_IN_HEADER) ?? []))];
+const jwtsIn = (hs: HarHeader[]) => [...new Set(hs.filter(h => /^(?:authorization|cookie)$/i.test(h.name)).flatMap(h => String(h.value ?? '').match(JWT_IN_TEXT) ?? []))];
 const hostOfUrl = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
 /** 突き合わせ用の URL（フラグメントを除き、URL として読み直した形） */
 const normalizedUrl = (u: string) => { try { const x = new URL(u); x.hash = ''; return x.href; } catch { return withoutHash(u); } };
@@ -95,13 +94,17 @@ export function importHar(text: string): HarImport {
   // ないので除く（http で接続していないのに T-04・C-10 を判定しない）。
   // 印（理由句・ヘッダ）はサーバも返せるので、307 で、ネットワークに出ていない（serverIPAddress がない）ものだけを内部の転送とする
   // （印だけで除くと、診断対象のサーバがログインの POST や http から https への転送を判定から外せる）
-  const internal = (e: HarEntry) => e.response.status === 307 && !String((e as { serverIPAddress?: unknown }).serverIPAddress ?? '').trim()
+  const internal = (e: HarEntry) => e.response.status === 307 && !String(e.serverIPAddress ?? '').trim()
     && (/internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name)));
   // 状態コードは数値にそろえる（文字列の "304" を書き出すツールがある。304 の除外や === 401 などの比べ方を効かせるため）
   // 応答がオブジェクトでないエントリ（"response": 1）は、書き換えずに除く（書き換えると例外になる）
-  for (const e of all) if (typeof e.response === 'object') { const st = Number(e.response.status); e.response.status = Number.isInteger(st) ? st : 0; }
-  const internalCount = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && internal(e)).length;
-  const entries = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && !internal(e));
+  const entries: HarEntry[] = []; let internalCount = 0;
+  for (const e of all) {
+    if (typeof e.response !== 'object') continue;
+    const st = Number(e.response.status); e.response.status = Number.isInteger(st) ? st : 0;
+    if (e.response.status <= 0) continue;
+    if (internal(e)) internalCount++; else entries.push(e);
+  }
   const used = new Set<number>(); const chains: HarChain[] = [];
   // 転送先のエントリを「メソッド URL」から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかる）。
   // URL は、引くときと同じく URL として読み直した形（new URL().href）にする（https://a.example:443/、エンコードしていない /日本 でも連なりを切らない）。
@@ -151,8 +154,7 @@ export function importHar(text: string): HarImport {
       // 別のホスト（IdP、apex から www など）への転送先はつながない。つなぐと、対象外のホストの応答を、選んだホストのURLの結果として判定してしまう。
       // 同じホストの http から https への転送はつなぐ
       if (next.hostname !== new URL(cur.request.url).hostname) break;
-      const from = ci;
-      const j = nextEntry(next.href, from, cur.response.status, methodOf(cur));
+      const j = nextEntry(next.href, ci, cur.response.status, methodOf(cur));
       if (j < 0) break;
       used.add(j); cur = entries[j]; ci = j; hops.push(cur);
     }
@@ -163,7 +165,7 @@ export function importHar(text: string): HarImport {
     const sentCookieNames = [...new Set(reqHeaders.filter(h => h.name.toLowerCase() === 'cookie').flatMap(h => cookieNames(String(h.value ?? ''))))];
     const sentAuth = sentAuthOf(sentAuthorization, sentCookieNames);
     if (sentAuthorization || sentCookieNames.length || hops.some(h => named(h.response.headers).some(x => x.name.toLowerCase() === 'set-cookie'))) anyCookie = true;
-    chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: e.request.method, host: hostOfUrl(e.request.url),
+    chains.push({ id: chains.length, url: e.request.url, finalUrl: cur.request.url, method: methodOf(e), host: hostOfUrl(e.request.url),
       status: cur.response.status, hops: hops.length, responses: hops.map(h => ({ ...toResponse(h), url: h.request.url })),
       sentAuth, sentAuthorization, sentAutoAuth, sentCookieNames, sentTokens: jwtsIn(reqHeaders), at: e.startedDateTime,
       sentOrigin: named(cur.request.headers).find(h => h.name.toLowerCase() === 'origin')?.value?.toString().trim() || undefined,

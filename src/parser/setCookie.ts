@@ -2,6 +2,12 @@
 export interface SetCookie { name: string; value: string; attrs: Map<string, string | true>; raw: string; }
 
 /**
+ * 本文・ヘッダの中の JWT（A-03 のデコード用に送った JWT を集める）。直前が英数字・ハイフンでないところから（ は「-eyJ」の繰り返しで
+ * 2乗の時間になる）。g フラグなので String.prototype.match だけで使う（exec・test は lastIndex が残る）
+ */
+export const JWT_IN_TEXT = /(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
+
+/**
  * 「=」のない Set-Cookie（set-cookie: <値>; Path=/）は、名前が空で値だけを持つ Cookie（RFC 6265bis 5.6、Chrome・Firefox もこう扱う）。
  * 名前として読むと値が空になり、削除用とみなして C-01・C-02 の判定から外れ、C-12 の証跡に生の値が出る
  */
@@ -37,8 +43,8 @@ export function splitSetCookie(v: string): string[] {
   // 前のかけらが属性（;）を持つかは真偽値で持つ（伸びていくかけらに毎回 includes をかけると、'a=b,' の繰り返しで2乗の時間がかかる）
   let lastHasAttr = false;
   for (const part of v.split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+=)/)) {
-    if (out.length && !lastHasAttr) { out[out.length - 1] += `,${part}`; lastHasAttr = part.includes(';'); }
-    else { out.push(part); lastHasAttr = part.includes(';'); }
+    if (out.length && !lastHasAttr) out[out.length - 1] += `,${part}`; else out.push(part);
+    lastHasAttr = part.includes(';');
   }
   return out.map(s => s.trim()).filter(Boolean);
 }
@@ -47,9 +53,8 @@ export function splitSetCookie(v: string): string[] {
 export function isDeletion(c: SetCookie, now = Date.now()): boolean {
   if (c.value === '' || c.value === '""') return true;
   const ma = c.attrs.get('max-age');
-  // 空や数字でない Max-Age は無視する（RFC 6265 5.2.2）。正しい Max-Age があれば Expires より優先する（RFC 6265 5.3 の手順3。C-05 と同じ）。
-  // 例：Max-Age=3600 と過去の Expires の Cookie は生きている
-  if (typeof ma === 'string' && /^-?\d+$/.test(ma.trim())) return Number(ma) <= 0;
+  // Max-Age は Expires より優先する（RFC 6265 5.3 の手順3。Max-Age=3600 と過去の Expires の Cookie は生きている）。読めない Max-Age は parseSetCookie が捨てる
+  if (typeof ma === 'string') return Number(ma) <= 0;
   const ex = c.attrs.get('expires');
   return typeof ex === 'string' && cookieDate(ex) < now;
 }
@@ -87,7 +92,9 @@ const SESSION_WORD = /^(?:(?:j|php|s)?sess\w*|sid|token|auth|jwt|login|aspxauth)
 // WordPress のログインの Cookie（wordpress_sec_<hash>・wordpress_logged_in_<hash>）と Shibboleth のセッション（_shibsession_<id>）も、
 // 名前の語にセッションらしい語がないので、ここで挙げる
 const AUTH_COOKIE = /^(?:\.(?:AspNetCore\.(?:Identity\.Application|Cookies|Session)(?:C\d+)?|ASPXAUTH|AspNet\.ApplicationCookie)|wordpress_(?:sec|logged_in)_\w+|_shibsession_\w+|_oauth2_proxy(?:_\d+)?)$/i;   // _oauth2_proxy は oauth2-proxy（大きいものは _oauth2_proxy_0・_1 に分ける）
-const SESSION_NAME = { test: (name: string) => AUTH_COOKIE.test(name) || name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).some(w => SESSION_WORD.test(w)) };
+/** 名前の語（- _ . とキャメルケースの境目で分ける。sessionExpiry → session・expiry） */
+const wordsOfName = (name: string) => name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).filter(Boolean);
+const sessionName = (name: string) => AUTH_COOKIE.test(name) || wordsOfName(name).some(w => SESSION_WORD.test(w));
 /** 組織プロファイルで変えられる設定（engine/profile.ts の withProfile が実行中だけ差し替える） */
 export const sessionConfig = { names: [] as string[], maxAgeHours: 24 };
 
@@ -114,8 +121,6 @@ const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*|expiry|e
 // 期限がなく値が長いものは、推定ではセッションCookieに見える（Imperva の incap_ses_* で C-01①・C-02①（高）の誤検知になる）
 // Cloudflare は __cf で始まる名前（__cf_bm、__cflb、__cfruid、__cfwaitingroom）と cf_clearance・cf_ob_info・cf_use_ob・cf_chl_…・_cfuvid
 const WAF_CDN = /^(?:__cf|cf_(?:clearance|ob_info|use_ob|chl_)|_cfuvid$|incap_ses_|nlbi_|visid_incap_|ak_bmsc$|bm_sv$|bm_sz$|bm_mi$|_abck$)/i;
-/** 名前の語（- _ . とキャメルケースの境目で分ける。sessionExpiry → session・expiry） */
-const wordsOfName = (name: string) => name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).filter(Boolean);
 const TIME_WORD = /^(?:last|at|time|ts|date|since|until|updated|created|when)$/i;
 /**
  * 主のセッションIDらしい名前：sess を含むもの（JSESSIONID・PHPSESSID・laravel_session）と、語として sid で終わるもの（sid・__Host-sid・
@@ -134,7 +139,7 @@ export const isInfraCookie = (name: string) => LOAD_BALANCER.test(name) || WAF_C
  * 組織プロファイルで名前の指定があれば、それだけを使う
  */
 export const looksLikeSessionName = (name: string): boolean =>
-  sessionConfig.names.length ? sessionConfig.names.some(n => n.toLowerCase() === name.toLowerCase()) : !notSessionName(name) && SESSION_NAME.test(name);
+  sessionConfig.names.length ? sessionConfig.names.some(n => n.toLowerCase() === name.toLowerCase()) : !notSessionName(name) && sessionName(name);
 
 /**
  * Cookie・Authorization を送ったか（機密応答の推定、第0章 0.3②）。ブラウザや curl の Cookie ジャーは解析用・同意用の Cookie（_ga、theme）も送るので、
@@ -178,6 +183,6 @@ export function looksLikeSession(c: SetCookie, now = Date.now()): boolean {
   // セッションIDとして C-07 で判定する）。
   // 値が Unix 時刻（1で始まる10桁の秒か13桁のミリ秒。2001〜2033年）で、名前に sess・sid がなく時刻の語（last・at・time など）があるもの
   // （last_login=1731900000）も、時刻でセッションIDではない。時刻の語のない auth=1000000001 は、連番のトークンとして C-07 で判定する
-  if (SESSION_NAME.test(c.name)) return !/^(?:true|false|yes|no|on|off|[01])$/i.test(c.value) && !(/^1\d{9}(?:\d{3})?$/.test(c.value) && !MAIN_SESSION.test(c.name) && wordsOfName(c.name).some(w => TIME_WORD.test(w)));
+  if (sessionName(c.name)) return !/^(?:true|false|yes|no|on|off|[01])$/i.test(c.value) && !(/^1\d{9}(?:\d{3})?$/.test(c.value) && !MAIN_SESSION.test(c.name) && wordsOfName(c.name).some(w => TIME_WORD.test(w)));
   return !persistent && c.value.length >= 20;
 }

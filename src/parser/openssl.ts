@@ -46,7 +46,7 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
   // -showcerts の最初の証明書（リーフ）の PEM。見るのは最初の PEM だけで、途中に空行などが入って切れたら使わない
   // （次の PEM は中間 CA の証明書で、それを「リーフ」として SAN がないと判定してしまうため）
   let pem: string[] | undefined, firstPem: string | undefined, pemSeen = false;
-  let cur = -1;                            // 直前の「N s:」の証明書の番号（a: の行をその証明書に対応させる）
+  let cur = -1;                            // 直前の「N s:」の証明書の番号（i:・a: の行をその証明書に対応させる）
   let afterSummary = false;                // s_client のハンドシェイクの要約（最初の Verify return code:）のあと
   let noCipher = false;                    // ハンドシェイクに失敗したセッション（Cipher : 0000・Cipher is (NONE)）
   for (const raw of lines) {
@@ -81,7 +81,7 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
     // サーバがハンドシェイクのあとに送ったデータなので読まない（a:PKEY: で鍵の長さと署名を上書きさせない）
     else if ((m = l.match(/^v:NotBefore: (.+?); NotAfter: (.+)$/)) && info.chainDepth === 1) { info.notBefore ??= date(m[1]); info.notAfter ??= date(m[2]); }
     else if ((m = l.match(/^(\d+) s:(.*)$/))) { cur = Number(m[1]); info.chainDepth = Math.max(info.chainDepth, cur + 1); info.certs[cur] = { subject: m[2].trim() }; }
-    else if ((m = l.match(/^i:(.*)$/)) && info.certs.length) info.certs[info.certs.length - 1].issuer = m[1].trim();
+    else if ((m = l.match(/^i:(.*)$/)) && cur >= 0) info.certs[cur].issuer = m[1].trim();
     else if (/no peer certificate available/i.test(l)) info.noPeerCert = true;
     // OpenSSL 3 の -showcerts。鍵の種類には id-ecPublicKey・RSASSA-PSS のようにハイフンを含むものがある。
     // OpenSSL 3.5 は EC 鍵の長さを出さず、曲線の名前を出す（a:PKEY: EC, (prime256v1); sigalg: …）。
@@ -96,7 +96,7 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
   // 暗号を合意しなかったセッションの「Protocol : TLSv1.2」は、試みた版で、合意した版ではない
   if (noCipher && !info.cipher) info.protocol = undefined;
   // x509 -ext subjectAltName の出力に SAN の行があれば、PEM によらず SAN はある
-  info.sanExtension = sanLine || info.sans.length ? true : firstPem ? pemHasSan(firstPem) : undefined;
+  info.sanExtension = sanLine ? true : firstPem ? pemHasSan(firstPem) : undefined;
   return info;
 }
 

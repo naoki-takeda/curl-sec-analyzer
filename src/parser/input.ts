@@ -1,7 +1,7 @@
-// parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、#META、#PROBE、#TLSPROBE、#CIPHERPROBE）
+// parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、%{header_json}、#META、#BODY、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
-import { assignHopUrls, baseLabel, cookieCapWarnings, pushCookies, uniqueLabels } from './target';
-import { autoAuthScheme, cookieNames, sentAuthOf, splitSetCookie } from './setCookie';
+import { assignHopUrls, baseLabel, BODY_LIMIT, cookieCapWarnings, isRedirectWithLocation, pushCookies, uniqueLabels } from './target';
+import { autoAuthScheme, cookieNames, JWT_IN_TEXT, sentAuthOf, splitSetCookie } from './setCookie';
 
 // curl と同じ緩さで読む：HTTP/ の大文字小文字を区別しない、理由句の前の空白がなくてもよい（HTTP/1.1 200OK）、コードは先頭の3桁（curl は
 // 「HTTP/1.1 2000 OK」も 200 として受け付ける）。curl が受け付ける行を読めないと、次のヘッダ行「HTTP/1.1 302 Found: x」を応答にする偽装ができる
@@ -14,9 +14,9 @@ const CONNECTING = /^Connecting to \S+\s*$/;
 // -v の出力の手がかり。今の curl は「*   Trying」（空白が3つ）や「* Established connection to」とも出すので、空白の数を問わない。
 // プロキシを使うと、最初の行が「* Uses proxy env variable https_proxy == …」になる
 const VERBOSE_HINT = /^\*\s+(Connected to|Established connection to|Trying|SSL connection|ALPN|Host |Uses proxy env variable )/;
-const BODY_LIMIT = 64 * 1024;
-// 改行のない本文（手で書いた curl -i の JSON・HTML）の直後にくっついたマーカー（{"id":1}#TARGET url=…）。分けないと、次のターゲットが
-// 前の本文に吸い込まれて黙って消える。本文がたまたま「}#TARGET url=」を含むことはまずないので、JSON・HTML の閉じの直後だけを分ける
+// 改行のない本文（手で書いた curl -i の JSON・HTML）の直後にくっついたマーカー（{"id":1}#META at=…）。分けないと、マーカーが
+// 前の本文に吸い込まれて黙って消える。#META（と #TARGET の at=・cmd= など）は、本文がたまたま含むことのまずない JSON・HTML の閉じ（} ] >）の
+// 直後だけを分ける（#TARGET の url=・label= は下の STUCK_TARGET が分ける）
 const STUCK_MARKER = /([}\]>])(#(?:TARGET|META)[ \t]+(?:url|label|at|cmd|response_code)=)/g;
 // #TARGET は、どの文字の直後でも分ける（Express の res.sendStatus(401) の「Unauthorized」、text/plain の 404 の本文のように、改行のない本文は
 // } ] > 以外でも終わる）。ただし、直前が空白・引用符のもの（本文の文中の「… #TARGET url=」、set -x の「+ echo '#TARGET …'」）は分けない
@@ -27,21 +27,20 @@ const STUCK_TARGET = /([^\n\s'"`])(#TARGET[ \t]+(?:url|label)=)/g;
 // 時刻の欄は curl の版で違う（--:--:--、0:00:02、curl 8.22 の 00:02、空欄）ので、あってもなくてもよい。
 // 8個の数字の欄を続けて求めるので、本文の日時の行（2026-11-01 12:00:00）は当たらない
 const PCT = String.raw`(?:100|\d{1,2})`, NUM = String.raw`[\d.]+[kMGTP]?`;
-const METER = String.raw`^\s*${PCT}\s+${NUM}\s+${PCT}\s+${NUM}\s+${PCT}\s+${NUM}\s+${NUM}\s+${NUM}(?:\s+(?:--:--:--|\d+:\d\d(?::\d\d)?))*\s+${NUM}\s*`;
+const METER = String.raw`\s*${PCT}\s+${NUM}\s+${PCT}\s+${NUM}\s+${PCT}\s+${NUM}\s+${NUM}\s+${NUM}(?:\s+(?:--:--:--|\d+:\d\d(?::\d\d)?))*\s+${NUM}\s*`;
 // 進捗表示だけの行は、時刻の欄が1つ以上あるものだけ（本文の「1 2 3 4 5 6 7 8 9」のような数字の行を読み飛ばさない）。
 // 応答の行の前にくっついたもの（METER_PREFIX）は、直後がステータス行・送受信の行なので、時刻の欄がなくてもよい
-const METER_LINE = new RegExp(String.raw`^\s*(?:% Total\s+% Received|Dload\s+Upload\s+Total)|^(?=.*\d:\d\d)${METER.slice(1)}$`);
+const METER_LINE = new RegExp(String.raw`^\s*(?:% Total\s+% Received|Dload\s+Upload\s+Total)|^(?=.*\d:\d\d)${METER}$`);
 // curl 8.22 は時刻の欄を空欄にした行（「0      0   0 … 0                              0」）も出すので、時刻の欄の代わりに長い空白（10個以上）が
 // 数字の欄のあいだにある行も進捗表示とする。ただし応答の本文の外だけ（本文の桁をそろえた数値の表を消さない）
-const METER_LINE_NO_TIME = new RegExp(String.raw`^(?=.*\d {10,}\d)${METER.slice(1)}$`);
-const METER_PREFIX = new RegExp(String.raw`${METER}(?=(?:< )?HTTP\/[\d.]+ \d{3}|[<>*] )`);
+const METER_LINE_NO_TIME = new RegExp(String.raw`^(?=.*\d {10,}\d)${METER}$`);
+const METER_PREFIX = new RegExp(String.raw`^${METER}(?=(?:< )?HTTP\/[\d.]+ \d{3}|[<>*] )`);
 
 // key=value を解析。ct= 以降は行末まで1つの値（空白を含むContent-Type対策）
 export function attrs(s: string): Record<string, string> {
   const out: Record<string, string> = {};
-  const line = s;
   // 行の最後の @ の位置は一度だけ求める（cmd= のたびに行の残りを調べると、cmd= を並べた本文の1行で入力の長さの2乗の時間がかかる）
-  const lastAt = line.lastIndexOf('@');
+  const lastAt = s.lastIndexOf('@');
   const ct = s.match(/(?:^|\s)ct=(.*)$/);
   if (ct) { out.ct = ct[1].trim(); s = s.slice(0, ct.index); }
   // 値は引用符で囲んでもよい（url="https://…"、label="top page"）。引用符は値に含めない
@@ -74,6 +73,12 @@ const hasData = (t: Target) =>
   t.responses.length + t.probes.length + t.tlsProbes.length + t.cipherProbes.length + t.openssl.length > 0;
 /** この応答のあとに次の応答が続きうるか（転送・1xx・認証のやり直し）。200 の本文の中のステータス行らしき行では分けない */
 const nextHopAfter = (status: number) => status < 200 || (status >= 300 && status < 400) || status === 401 || status === 407;
+const newResponse = (sm: RegExpMatchArray): HttpResponse => ({ httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' });
+/** 本文に1行を足す。本文は先頭64KBまで（1行が長い本文（圧縮したHTMLなど）も途中で切る） */
+const appendBody = (r: HttpResponse, line: string) => {
+  const room = BODY_LIMIT - (r.body?.length ?? 0);
+  if (room > 0) r.body = (r.body ?? '') + (line.length < room ? `${line}\n` : line.slice(0, room));
+};
 const probeResult = (ok?: string): 'accepted' | 'rejected' | 'error' => (ok === '1' ? 'accepted' : ok === 'err' ? 'error' : 'rejected');
 
 /** プロキシの CONNECT の応答の形：本文がなく、ヘッダがプロキシの決まったものだけ */
@@ -126,23 +131,23 @@ export function parseInput(input: string): ParseResult {
   let inRaw = false;                                   // #BODY のあと：次のマーカーまでを本文としてそのまま読む（ステータス行・openssl の行・-v の行として読まない）
   let rawBody: HttpResponse | undefined;              // 本文を足す応答。#BODY の前に応答がない（curl が失敗した、ステータス行を読めなかった）ときは、
                                                        // 本文を捨てる（ふつうに読むと、本文の偽のステータス行が応答になる）
-  const isMarker = (l: string) => { const m = l.match(MARKER_RE); const x = m ? attrs(m[2]) : undefined; return !!m && !!x && (!runId || x.run === runId); };
   for (let li = 0; li < lines.length; li++) {
     let line = lines[li]; let fromV = false;   // fromV：-v の「< 」の行（受信ヘッダ）
+    // マーカー行（印のある入力では、印の同じものだけ）。マーカー行は進捗表示の行・接頭辞に当たらないので、ここで一度だけ見る
+    const mk = line.match(MARKER_RE);
+    const a = mk ? attrs(mk[2]) : undefined;
+    const own = !!a && (!runId || a.run === runId);
     // #BODY のあとの本文は、次のマーカーまでそのまま本文に足す（本文の「HTTP/1.1 200 OK」・偽のヘッダ・CONNECTED(n) を読まない）
-    if (inRaw && !isMarker(line)) {
+    if (inRaw && !own) {
       if (runId && /^#TARGET\b/.test(line)) ignoredMarkers++;   // 印の違う #TARGET は、本文の中でも知らせる
       if (!rawBody) { if (line.trim()) unparsed++; continue; }
-      const room = BODY_LIMIT - (rawBody.body?.length ?? 0);
-      if (room > 0) rawBody.body = (rawBody.body ?? '') + (line.length < room ? `${line}\n` : line.slice(0, room));
+      appendBody(rawBody, line);
       continue;
     }
     if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;
     line = line.replace(METER_PREFIX, '');
-    const mk = line.match(MARKER_RE);
-    const a = mk ? attrs(mk[2]) : undefined;
-    if (mk && runId && a?.run !== runId && mk[1] === 'TARGET') ignoredMarkers++;
-    if (mk && a && (!runId || a.run === runId)) {      // マーカー行は必ず応答を閉じる
+    if (mk && !own && mk[1] === 'TARGET') ignoredMarkers++;
+    if (mk && a && own) {                              // マーカー行は必ず応答を閉じる
       // 前のターゲットの状態（CONNECT を送った、など）を持ち越さない（次のターゲットの本物の 200 をプロキシの応答とみなさない）
       close(); inOpenssl = false; vBody = false; connectReq = false; inRaw = false; rawBody = undefined; if (json) { unparsed += json.length; json = null; }
       const [, tag] = mk;
@@ -225,7 +230,7 @@ export function parseInput(input: string): ParseResult {
           for (const n of cookieNames(ck[1])) if (!seen.has(n)) { seen.add(n); names.push(n); added.push(n); }
         }
         if (auv) { t.sentAuthorization = true; if (autoAuthScheme(auv[1])) t.sentAutoAuth = true; }
-        if (ck || au) { t.sentAuth = t.sentAuth || sentAuthOf(au, added); for (const tok of h.match(/(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) t.sentTokens.push(tok); }
+        if (ck || au) { t.sentAuth = t.sentAuth || sentAuthOf(au, added); for (const tok of h.match(JWT_IN_TEXT) ?? []) t.sentTokens.push(tok); }
         continue;
       }
       if (/^>\s*$/.test(line)) continue;               // 送信ヘッダの終端
@@ -262,7 +267,7 @@ export function parseInput(input: string): ParseResult {
     if (runId && cur && !inHeaders && /^1/.test(cur.httpVersion) && (cur.headers.get('transfer-encoding') ?? []).some(v => /chunked/i.test(v))) {
       if (sm && !trailer && nextHopAfter(cur.status)) {
         const redirect = cur.status >= 300 && cur.status < 400;
-        close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; vHeaders = fromV;
+        close(); cur = newResponse(sm); inHeaders = true; vHeaders = fromV;
         if (redirect) trailerHops.add(cur);   // -L でなければ、3xx のあとにホップは来ない（あとで #META の num_redirects= で確かめる）
         continue;
       }
@@ -271,12 +276,12 @@ export function parseInput(input: string): ParseResult {
     // 印のある入力では、ヘッダの途中（cur があり、まだヘッダを読んでいる）のステータス行の形の行は、新しい応答にしない（curl はコロンのある
     // 「HTTP/1.1 401 Unauthorized: x」をヘッダとして受け付けて出すので、診断対象のサーバがこの行で応答を作り直せる）。
     // -D・-v のどちらも、次の応答の前には空行（-v は「<」の行）がある
-    if (sm && !inBody() && !(runId && cur && inHeaders)) { close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; vHeaders = fromV; continue; }
+    if (sm && !inBody() && !(runId && cur && inHeaders)) { close(); cur = newResponse(sm); inHeaders = true; vHeaders = fromV; continue; }
     // 本文の直前の行が空行かは、本文の末尾だけを見る（本文全体を split すると、入力の長さの2乗の時間がかかる）。
     // -i の出力では、本文と次の応答を見分けられない（本文が「HTTP/1.1 200 OK」と偽のヘッダで始まると、次の応答として読む）。
     // 生成スクリプトは、ヘッダ（-D）と本文（-o）を分けて採取し、#BODY の印のあとを本文として読む（この分かれ目はサーバが作れない）
     if (sm && !trailer && inBody() && (cur!.body === undefined || nextHopAfter(cur!.status)) && /^\s*$/.test(lastLine(cur!.body ?? ''))) {   // -L で次のホップが続く場合
-      close(); cur = { httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' }; inHeaders = true; continue;
+      close(); cur = newResponse(sm); inHeaders = true; continue;
     }
     // C10：ヘッダ名が小文字のJSON。-v の本文や、応答のあとの本文（{"items":[...]} など）は対象にしない
     if (!cur && !t.verbose && (json || (!t.responses.length && /^\s*\{\s*"[!#$%&'*+.^_`|~0-9A-Za-z-]+"\s*:\s*\[/.test(line)))) {
@@ -294,11 +299,7 @@ export function parseInput(input: string): ParseResult {
     }
     // curl の失敗の行（curl: (28) Operation timed out。WebSocket の 101 のあとの --max-time の時間切れなど）は、解析できない行に数えない
     if (!cur) { if (line.trim() && !/^curl: \(\d+\) /.test(line)) { unparsed++; sawUnreadable = true; } continue; }
-    if (!inHeaders) {                                  // 本文は先頭64KBまで。1行が長い本文（圧縮したHTMLなど）も途中で切る
-      const room = BODY_LIMIT - (cur.body?.length ?? 0);
-      if (room > 0) cur.body = (cur.body ?? '') + (line.length < room ? `${line}\n` : line.slice(0, room));
-      continue;
-    }
+    if (!inHeaders) { appendBody(cur, line); continue; }
     if (line.trim() === '') { inHeaders = false; continue; }
     // obs-fold：前の値に足すだけにする（毎回全体を trim し直すと、継続行の多い入力で2乗の時間がかかる。前の値はすでに trim 済み）
     if (/^[ \t]/.test(line) && last) {
@@ -336,7 +337,7 @@ export function parseInput(input: string): ParseResult {
     // この形をサーバが返しても、空の応答と同じで判定には使えない
     else if ((r.status === 200 && /connection established/i.test(r.reason ?? '') && (retried || proxyShape(r))) || proxyReply || r.status === 407) r.kind = 'connect';
     else if (r.status === 401 && retried) r.kind = 'challenge';
-    else if (r.status >= 300 && r.status < 400 && r.headers.has('location')) r.kind = 'redirect';
+    else if (isRedirectWithLocation(r)) r.kind = 'redirect';
     if (r.body !== undefined && !r.body.trim()) r.body = undefined;
   });
   for (const tg of targets) assignHopUrls(tg);

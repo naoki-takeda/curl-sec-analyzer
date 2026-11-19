@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { attrs, parseInput } from '../src/parser/input';
-import { finalResponse, isHttps } from '../src/parser/target';
+import { finalResponse, isHttps, logoutFailed, siteOf } from '../src/parser/target';
+import { importHar } from '../src/parser/har';
 import { fixture, sampleText } from './helpers';
 
 describe('parseInput', () => {
@@ -52,5 +53,30 @@ describe('parseInput', () => {
   it('CRLF の改行も読める', () => {
     const { targets } = parseInput('#TARGET url=https://a.example/\r\nHTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\n\r\n');
     expect(finalResponse(targets[0])?.headers.get('x-content-type-options')).toEqual(['nosniff']);
+  });
+});
+
+describe('ターゲットの共通の処理', () => {
+  it('ログアウトの確認画面は、小文字にすると長さの変わる文字（İ）が前にあっても見つける', () => {
+    const body = `<p>${'İ'.repeat(5000)}</p><form method="post" action="/logout"><button>Log out</button></form>`;
+    const { targets } = parseInput(`#TARGET url=https://a.example/logout label=logout
+HTTP/1.1 200 OK
+content-type: text/html
+
+${body}
+`);
+    expect(logoutFailed(targets[0])).toBe(true);
+  });
+  it('siteOf はポート・角かっこを外し、国別の第2レベルは3つのラベルにする', () => {
+    expect(siteOf('www.Example.com:8443')).toBe('example.com');
+    expect(siteOf('a.b.example.co.jp')).toBe('example.co.jp');
+    expect(siteOf('[::1]')).toBe('::1');
+    expect(siteOf('192.0.2.1')).toBe('192.0.2.1');
+  });
+  it('HAR の小文字のメソッド（post）も、ログインの候補にする', () => {
+    const har = JSON.stringify({ log: { entries: [{ request: { method: 'post', url: 'https://a.example/login', headers: [] }, response: { status: 200, headers: [] } }] } });
+    const c = importHar(har).chains[0];
+    expect(c.method).toBe('POST');
+    expect(c.suggested).toBe('login');
   });
 });

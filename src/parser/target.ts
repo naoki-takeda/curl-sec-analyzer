@@ -1,6 +1,9 @@
 // parser/target.ts：ターゲットの共通の処理（ラベル・判定に使う応答のホップ・HTTPS か・機密か・採取時刻・Set-Cookie の上限）
 import type { HttpResponse, ParseWarning, ResponseKind, Target } from '../model';
-import { looksLikeSessionName } from './setCookie';
+import { looksLikeSessionName, parseSetCookie } from './setCookie';
+
+/** 読む本文の上限（curl の貼り付け・HAR とも先頭 64KB まで） */
+export const BODY_LIMIT = 64 * 1024;
 
 /** 付け直したラベル（http#2 など）の元のラベル。ラベル対応表やラベルで判定を変えるルールは、この元のラベルで判定する */
 export const baseLabel = (label: string) => label.replace(/#\d+$/, '');
@@ -30,6 +33,7 @@ export const isRedirectWithLocation = (r?: HttpResponse): boolean => !!r && r.st
 
 /** その URL の応答のホップか（1xx、プロキシの応答（CONNECT・407）、curl が認証し直した 401 を除く） */
 export const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
+export const chainOf = (t: Target): HttpResponse[] => t.responses.filter(isHop);
 
 /**
  * 判定に使う応答：-L なら、ターゲットの URL と同じサイトの最後のホップ。別のサイト（IdP、legacy.example.net）へ転送した先の応答は、
@@ -37,7 +41,7 @@ export const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !
  * 同じサイトのホップがない（URL が分からない）ときは最後のホップ
  */
 export const finalResponse = (t: Target): HttpResponse | undefined => {
-  const c = t.responses.filter(isHop);
+  const c = chainOf(t);
   const host = hostnameOf(t.url);
   if (!host) return c.at(-1);
   // 同じサイト（登録ドメイン。apex と www、example.co.jp の下のホスト）への転送はたどる（curl -L で apex から www へ転送する普通の形を、
@@ -45,7 +49,8 @@ export const finalResponse = (t: Target): HttpResponse | undefined => {
   const site = siteOf(host); const https = /^https:/i.test(t.url ?? '');
   return c.filter(r => { const h = hostnameOf(r.url); return !r.url || (!!h && siteOf(h) === site && (!https || /^https:/i.test(r.url))); }).at(-1) ?? c.at(-1);
 };
-const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowerCase() : undefined; } catch { return undefined; } };
+/** URL のホスト名（小文字）。読めなければ undefined */
+export const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowerCase() : undefined; } catch { return undefined; } };
 /**
  * ターゲットの URL と同じサイトの応答（URL の分からない応答を含む）。-L で別のサイト（IdP の login.microsoftonline.com）へ転送した先の Set-Cookie・
  * Clear-Site-Data を、対象の Cookie として判定しない（C-01〜C-07・C-11・C-12②・H-15。IdP の Cookie の属性を対象の指摘にせず、IdP の Cookie を
@@ -64,7 +69,7 @@ export const siteResponses = (t: Target): HttpResponse[] => {
  * 1つの応答で読む Set-Cookie の上限。ブラウザも1つのドメインに約180個までしか保存しない。上限がないと、5MB の Set-Cookie の行で
  * Cookie の項目ごとに数万件の指摘を作り、判定に数十秒かかる。超えた分は警告で知らせる
  */
-export const MAX_SET_COOKIES = 300;
+const MAX_SET_COOKIES = 300;
 /**
  * Set-Cookie の値を一覧に足す。上限を超えたら古いもの（先のもの）を捨てて、後のものを残す（ブラウザも古いものから追い出す。
  * 先のものを残すと、後ろに置いた Secure なしのセッションCookie を判定しない）。捨てた数を返す
@@ -80,14 +85,17 @@ export const cookieCapWarnings = (targets: Target[]): ParseWarning[] => targets.
   const n = t.responses.reduce((a, r) => a + (r.droppedCookies ?? 0), 0);
   return n ? [{ kind: 'too-many-cookies' as const, label: t.label, detail: `ターゲット「${t.label}」：1つの応答の Set-Cookie が${MAX_SET_COOKIES}個を超えたので、先の${n}個を判定に使いませんでした（ブラウザも1つのドメインに約180個までしか保存せず、古いものから捨てます）` }] : [];
 });
-/** 登録ドメインの近似（最後の2つのラベル。co.jp・com.au のような2段の国別ドメインは3つ）。IP アドレスはそのまま */
-const siteOf = (h: string): string => {
-  if (/^[\d.]+$|:/.test(h)) return h;
-  const l = h.split('.');
-  return l.slice(l.length >= 3 && /^[a-z]{2}$/.test(l.at(-1)!) && /^(?:co|ne|or|ac|go|ed|lg|gr|ad|com|net|org|gov|edu)$/.test(l.at(-2)!) ? -3 : -2).join('.');
+/**
+ * ホスト名の「サイト」（登録したドメイン）の目安。公開接尾辞の一覧は持たないので、最後の2つのラベル（example.com）とし、
+ * 国別の第2レベル（co.jp、com.au など）なら3つ（example.co.jp）にする。ポートと IPv6 の角かっこは外し、IP アドレスと1つのラベル（localhost）はそのまま
+ */
+export const siteOf = (host: string): string => {
+  const h = host.toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  if (/^[\d.]+$/.test(h) || h.includes(':')) return h;
+  const p = h.split('.');
+  if (p.length >= 3 && p.at(-1)!.length === 2 && /^(?:co|or|ne|ac|go|ed|lg|gr|ad|com|net|org|gov|edu)$/.test(p.at(-2)!)) return p.slice(-3).join('.');
+  return p.slice(-2).join('.');
 };
-
-export const chainOf = (t: Target): HttpResponse[] => t.responses.filter(isHop);
 
 /**
  * curl の出力の各ホップに、そのリクエストの URL を付ける（HAR は取り込みで付ける）。ターゲットの URL から Location をたどる。
@@ -109,12 +117,13 @@ export function assignHopUrls(t: Target): void {
  */
 const upgradedToHttps = (t: Target): boolean => {
   if (baseLabel(t.label) === 'http' || !/^http:/i.test(t.url ?? '')) return false;
-  const last = chainOf(t).at(-1)?.url;
+  const from = hostnameOf(t.url);
   // 同じサイト（apex と www）の https への転送も含める（finalResponse と同じ。http://example.com → https://www.example.com のよくある形）
-  try { return !!last && new URL(last).protocol === 'https:' && siteOf(new URL(last).hostname.toLowerCase()) === siteOf(new URL(t.url!).hostname.toLowerCase()); } catch { return false; }
+  try { const last = new URL(chainOf(t).at(-1)?.url ?? ''); return !!from && last.protocol === 'https:' && siteOf(last.hostname) === siteOf(from); } catch { return false; }
 };
 
-const trimPath = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+/** パスの末尾の / を除く（/ だけのパスはそのまま） */
+export const trimPath = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
 /** 転送先が同じページ（同じホストで、パスが末尾の / の違いだけ）か。Django の APPEND_SLASH、FastAPI の redirect_slashes、Apache の DirectorySlash など */
 export function sameDocument(r: HttpResponse, base?: string): boolean {
   try {
@@ -214,9 +223,10 @@ const LOGOUT_WORD = /log[-_ ]?out|sign[-_ ]?out|log[-_ ]?off|ログアウト|サ
  */
 function logoutConfirmPage(t: Target): boolean {
   const chain = ownChain(t);
-  if (chain.some(r => r.headers.has('clear-site-data') || (r.headers.get('set-cookie') ?? []).some(c => looksLikeSessionName(c.split('=')[0].trim())))) return false;
-  const body = (finalResponse(t)?.body ?? '').slice(0, 65536);
+  if (chain.some(r => r.headers.has('clear-site-data') || (r.headers.get('set-cookie') ?? []).some(c => looksLikeSessionName(parseSetCookie(c).name)))) return false;
+  const body = finalResponse(t)?.body ?? '';
   if (/type\s*=\s*["']?password/i.test(body) || /__VIEWSTATE/i.test(body)) return false;
+  // 位置は low の中のもの（toLowerCase で長さの変わる文字（İ）があるので、body を切り出さない。下の正規表現は大文字小文字を区別しない）
   const low = body.toLowerCase();
   for (let i = low.indexOf('<form'), n = 0; i >= 0 && n < 50; i = low.indexOf('<form', i + 5), n++) {
     const end = low.indexOf('>', i); if (end < 0 || end - i > 2000) continue;
@@ -225,7 +235,7 @@ function logoutConfirmPage(t: Target): boolean {
     const action = tag.match(/\baction\s*=\s*["']?([^"'\s>]*)/)?.[1] ?? '';
     if (method !== 'post' || !LOGOUT_WORD.test(action)) continue;
     const close = low.indexOf('</form', end);
-    const inner = body.slice(end + 1, close < 0 ? end + 4000 : Math.min(close, end + 4000));
+    const inner = low.slice(end + 1, close < 0 ? end + 4000 : Math.min(close, end + 4000));
     if (LOGOUT_WORD.test(inner.replace(/<[^>]{0,500}>/g, ' ')) || /value\s*=\s*["'][^"']{0,40}(?:log\s*out|sign\s*out|ログアウト)/i.test(inner)) return true;
   }
   return false;
