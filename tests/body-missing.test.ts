@@ -140,3 +140,30 @@ describe('E-04：本文を採取していない robots.txt・security.txt の 2x
     expect(e04('https://a.example/.well-known/security.txt', 'HTTP/2 404\n').map(f => f.ruleId)).toEqual(['E-04.2']);
   });
 });
+
+describe('HAR のテキスト・XML の本文', () => {
+  const har = (mime: string, text: string, status = 500) => JSON.stringify({ log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z',
+    request: { method: 'GET', url: 'https://a.example/x', headers: [] },
+    response: { status, httpVersion: 'HTTP/2', headers: [{ name: 'Content-Type', value: mime }], content: { mimeType: mime, text } } }] } });
+  it('text/plain のスタックトレースは本文として読み、E-01② にする（「本文を採取していない」の na にしない）', async () => {
+    const { analyze } = await import('./golden/analyze');
+    const fs = analyze('', har('text/plain; charset=utf-8', 'Traceback (most recent call last):\n  File "/srv/app/main.py", line 41')).findings.filter(f => f.item === 'E-01');
+    expect(fs.map(f => f.ruleId)).toEqual(['E-01.2']);
+  });
+  it('XML のエラー応答も本文として読む', async () => {
+    const { analyze } = await import('./golden/analyze');
+    const fs = analyze('', har('application/xml', '<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>', 404)).findings.filter(f => f.item === 'E-01');
+    expect(fs.map(f => f.ruleId)).not.toContain('E-01.na');
+  });
+});
+
+describe('HAR で残さない本文', () => {
+  it('SVG と Office の文書（XML を含む種類名）の本文は残さない', async () => {
+    const { importHar } = await import('../src/parser/har');
+    for (const mime of ['image/svg+xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']) {
+      const imp = importHar(JSON.stringify({ log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z', request: { method: 'GET', url: 'https://a.example/x', headers: [] },
+        response: { status: 200, httpVersion: 'HTTP/2', headers: [], content: { mimeType: mime, text: '<svg/>' } } }] } }));
+      expect(imp.chains[0].responses.at(-1)?.body, mime).toBeUndefined();
+    }
+  });
+});

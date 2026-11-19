@@ -112,3 +112,19 @@ describe('汎用の語のキー・web.xml の処理命令と名前空間', () =>
     expect(probePattern('/WEB-INF/web.xml', b64('<?xml version="1.0"?>\n<j:web-app xmlns:j="https://jakarta.ee/xml/ns/jakartaee">', 4096), 200)?.name).toBe('web-xml');
   });
 });
+
+describe('処理命令の名前に - のある並びでも、すぐ終わる', { tags: ['perf'] }, () => {
+  it('web.xml の先頭の <?a-a-a-a-a> の繰り返し（名前の - の位置ごとに分け方ができると指数的に増える）', () => {
+    const t = performance.now();
+    for (const s of ['<?a-a-a-a-a>'.repeat(340) + 'x', '<?a-a-a-a-a'.repeat(370), `${'<?x-y '.repeat(600)}>`, `${'<!-- a-b -->'.repeat(340)}x`])
+      probePattern('/WEB-INF/web.xml', b64(s, 4096), 200);
+    expect(performance.now() - t).toBeLessThan(200);
+  });
+  it('どのパスのパターンも、4KB の繰り返しの形ですぐ終わる', () => {
+    const paths = ['/.git/HEAD', '/.env', '/.svn/entries', '/.DS_Store', '/WEB-INF/web.xml', '/package.json', '/composer.json', '/backup.zip', '/phpinfo.php', '/server-status', '/.well-known/security.txt', '/a.js.map'];
+    const shapes = ['<?a-a-', '<!--', '-->', '{"a":', '"\\', '<title>', 'Contact', '\n', ' ', 'a-', '<h1 class="p">', ')]}\'\n{'];
+    const t = performance.now();
+    for (const p of paths) for (const s of shapes) probePattern(p, b64(s.repeat(Math.ceil(4096 / s.length)), 4096), 200);
+    expect(performance.now() - t).toBeLessThan(1000);
+  });
+});

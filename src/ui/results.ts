@@ -92,11 +92,19 @@ function exportBar() {
   const T = tr(); const stamp = localDate();
   return el('div', 'mt-3 flex flex-wrap items-center gap-2 text-sm',
     el('span', 'text-muted', T.save),
-    button('Markdown', BTN, () => state.last && download(`sec-report-${stamp}.md`, 'text/markdown',
-      toMarkdown(state.last.findings, state.last.cov, state.suppressions, new Date(), { profile: state.profile, diff: state.last.diff && state.baseline ? { rows: state.last.diff, baselineAt: state.baseline.generatedAt, ...diffWarnings() } : undefined }))),
-    button('JSON', BTN, () => state.last && download(`sec-report-${stamp}.json`, 'application/json', toJson(state.last.findings, state.last.cov, state.suppressions, new Date(), state.profile))),
-    button(T.csv, BTN, () => state.last && download(`sec-report-${stamp}.csv`, 'text/csv', toCsv(state.last.findings, state.last.targets))),
+    // 結果のファイルは、その結果を判定したときの設定で書く（判定のあとに読み込んだ設定と混ぜない）。判定中は押せない（main.ts の setBusy）
+    exportButton('Markdown', () => { const L = state.last!; const b = L.settings.baseline;
+      return download(`sec-report-${stamp}.md`, 'text/markdown', toMarkdown(L.findings, L.cov, L.settings.suppressions, new Date(),
+        { profile: L.settings.profile, diff: L.diff && b ? { rows: L.diff, baselineAt: b.generatedAt, ...diffWarnings() } : undefined })); }),
+    exportButton('JSON', () => { const L = state.last!; download(`sec-report-${stamp}.json`, 'application/json', toJson(L.findings, L.cov, L.settings.suppressions, new Date(), L.settings.profile)); }),
+    exportButton(T.csv, () => download(`sec-report-${stamp}.csv`, 'text/csv', toCsv(state.last!.findings, state.last!.targets))),
     button(T.suppressionsFile, BTN, () => download('suppressions.json', 'application/json', suppressionsJson(state.suppressions))));
+}
+/** 結果のファイルの保存ボタン。判定中（actions.isAnalyzing）は押せないようにする（data-export で main.ts の setBusy が切り替える） */
+function exportButton(label: string, save: () => void) {
+  const b = button(label, BTN, () => { if (state.last && !actions.isAnalyzing()) save(); });
+  b.dataset.export = '1'; b.disabled = actions.isAnalyzing();
+  return b;
 }
 function missingLabelHints(targets: Target[]): string[] {
   const T = tr(); const has = (l: string) => targets.some(t => t.label === l);
@@ -189,15 +197,15 @@ function crossBlock(findings: Finding[], targets: Target[]) {
 }
 /** 前回との差分の警告（ルールセットの版・組織プロファイルの違い）。画面と Markdown で同じものを出す */
 function diffWarnings(): { rulesetWarning?: string; profileWarning?: string } {
-  const b = state.baseline; const T = tr();
+  const s = state.last?.settings; const b = s?.baseline; const T = tr();
   return { rulesetWarning: b?.rulesetVersion && b.rulesetVersion !== RULESET_VERSION ? T.diffRulesetWarning(b.rulesetVersion, RULESET_VERSION) : undefined,
-           profileWarning: profileDiffers(b?.profile, state.profile) ? T.diffProfileWarning : undefined };
+           profileWarning: profileDiffers(b?.profile, s?.profile) ? T.diffProfileWarning : undefined };
 }
 function diffBlock(rows: DiffRow[]) {
   const T = tr(); const s = diffSummary(rows); const w = diffWarnings();
   const shown = rows.filter(r => r.kind !== 'continuing');
   return el('section', '',
-    heading(T.diff, state.baseline?.generatedAt),
+    heading(T.diff, state.last?.settings.baseline?.generatedAt),
     el('p', 'mb-2 text-sm', T.diffSummary(s.new, s.resolved, s['severity-changed'], s.suppressed, s['not-rechecked'], s.continuing)),
     ...[w.profileWarning, w.rulesetWarning].map(x => (x ? el('p', 'mb-2 text-sm text-sev-medium', x) : null)),
     shown.length ? table(T.tables.diff, [T.cols.change, T.cols.severity, T.cols.item, T.cols.title, T.cols.target], shown.map(r =>

@@ -4,7 +4,7 @@ curl-sec-analyzer の版ごとの変更です。版の付け方は [docs/design.
 
 ## 1.0.0（未公開。公開するときに日付を入れる）
 
-最初の安定版です。設計書のロードマップの v1.0 の範囲（MVP〜v1.0）をすべて実装し、30回の新鮮な目でのレビューと積み残しへの対応（docs/history.md の第1回〜第55回）を経ています。
+最初の安定版です。設計書のロードマップの v1.0 の範囲（MVP〜v1.0）をすべて実装し、31回の新鮮な目でのレビューと積み残しへの対応（docs/history.md の第1回〜第59回）を経ています。
 
 ### 判定
 
@@ -97,14 +97,19 @@ curl-sec-analyzer の版ごとの変更です。版の付け方は [docs/design.
   - E-01 は、エラーの応答（4xx・5xx）と `error-*` のラベルで本文を採取していないとき、A-07 は API の 2xx で本文を採取していないとき、適用外ではなく na にします。
   - E-09①：OpenID Connect の form_post の hidden の欄を除くとき、属性の値の中の `>` でタグを切っていたため、欄の値のトークンを本文の秘密として数えていました。
   - A-09①：HAR の Content-Type の値の前に空白があると、JSON を text/html で返す応答を見逃していました。
-- C13 のプローブを、実物の応答で確かめて直しました（docs/history.md の第58回）：
-  - 目印が後ろにあるテキストの形式（phpinfo・web.xml・package.json・composer.json・security.txt）は先頭の4KB、server-status は1KB を採ります。ほかは64バイトのままです。package.json は、実物189件のうち64バイトで一致したのが33%でした。
-  - どのパスにも HTML の画面を返すサーバ（SPA など）で、.env・.git/HEAD・backup.zip などを E-03②（判定保留）として並べていました。HTML の画面は、そのファイルではないとして合格にします（phpinfo・server-status は除く）。
-  - 長く採った先頭で誤検知しないよう、web.xml は先頭に固定し、package.json・composer.json は最上位のキーだけを見て、phpinfo・server-status は出力の決まった形に絞りました。
 - 構造とテストを整理しました（docs/history.md の第57回）：
   - 判定を Web Worker で行います。数万件のターゲットの HAR でも画面が止まらず、判定中は「判定しています」と表示します。画面の側はルールを読み込まないので、ページの JS は約 437KB です。
   - `tests/fixtures/generated_local.txt` を、今の生成スクリプトの出力で採り直しました（採り方は `scripts/capture-fixture.sh`）。
   - テストの名前とコメントから、レビューの回の番号を外しました。
+- C13 のプローブを、実物の応答で確かめて直しました（docs/history.md の第58回）：
+  - 目印が後ろにあるテキストの形式（phpinfo・web.xml・package.json・composer.json・security.txt）は先頭の4KB、server-status は1KB を採ります。ほかは64バイトのままです。package.json は、実物189件のうち64バイトで一致したのが33%でした。
+  - どのパスにも HTML の画面を返すサーバ（SPA など）で、.env・.git/HEAD・backup.zip など10件を E-03②（判定保留）として並べていました。HTML の形式でないファイルのパスに HTML の画面が返ったら、そのファイルではないとして②にしません。phpinfo・server-status は本物も HTML なので、パターンに一致しなければ②のままです（SPA では②が10件から2件に減ります）。
+  - 長く採った先頭で誤検知しないよう、web.xml は先頭に固定し、package.json・composer.json は最上位のキーだけを見て、phpinfo・server-status は出力の決まった形に絞りました。
+- 公開前の最終確認のレビュー（docs/history.md の第59回）で見つかったものを直しました：
+  - 診断対象のサーバが `/WEB-INF/web.xml` に `<?a-a-a-a-a>` の繰り返しを返すと、判定が終わりませんでした（web.xml のパターンの正規表現が指数的な時間）。
+  - HAR の `text/plain`・XML の本文を捨てていたので、Django・Go などのテキストのスタックトレース（E-01②）を見逃し、「本文を採取していない」の na にしていました。robots.txt・security.txt も本文で判定します。
+  - 判定中も古い結果を保存でき、判定のあとに読み込んだ組織プロファイル・例外・前回の結果と混ぜて出力していました。結果はそれを判定したときの設定で保存し、判定中は保存できません。
+  - 判定中に入力を直すと、結果が届いたときに入力欄を隠し、直す前の入力の結果を出していました。判定中に入力・URL 欄を直したら、その判定を止めます。
 - JSON のエクスポートの指摘（`findings`）から、使っていなかった `score`（ほとんどの指摘で0。HSTS とHTTP→HTTPS の転送だけが Observatory の配点を持っていた）と `obsId` を外しました。MDN HTTP Observatory 互換のスコアは作らないと決めたためです。
 
 ### 既知の限界

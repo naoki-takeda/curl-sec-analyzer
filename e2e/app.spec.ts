@@ -348,3 +348,29 @@ test('例外に登録したあと、判定し直した結果の見出しにフ�
   await expect(page.locator('#app h2:focus')).toHaveCount(1);
   expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('H2');
 });
+
+test('判定中は結果のファイルを保存できず、判定中に入力を直すと判定を止める', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました/);
+  await expect(page.locator('[data-export]').first()).toBeEnabled();
+  // 判定するを押した同じタスクの中で見る（Worker の結果が届く前）
+  const busy = await page.evaluate(() => {
+    [...document.querySelectorAll('button')].find(x => x.textContent === '判定する')!.click();
+    return [...document.querySelectorAll<HTMLButtonElement>('[data-export]')].every(b => b.disabled) && document.querySelector('[aria-label="判定結果"]')?.getAttribute('aria-busy') === 'true';
+  });
+  expect(busy).toBe(true);
+  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました/);
+  await expect(page.locator('[data-export]').first()).toBeEnabled();
+  // 入力を表示して直し、判定するを押した同じタスクの中で入力を変える
+  await page.getByRole('button', { name: '入力を表示' }).click();
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLTextAreaElement>('#input')!;
+    [...document.querySelectorAll('button')].find(x => x.textContent === '判定する')!.click();
+    input.value += '\n'; input.dispatchEvent(new Event('input'));
+  });
+  await expect(page.getByRole('status')).toHaveText(/判定を止めました/);
+  await page.waitForTimeout(2000);
+  await expect(page.locator('#input')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText(/判定を止めました/);
+});

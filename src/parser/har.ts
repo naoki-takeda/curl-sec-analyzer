@@ -1,5 +1,5 @@
 // parser/har.ts：HAR（HTTP Archive）の取り込み（ツール設計1「HAR形式の取り込み」）
-// - request.postData（ログインのパスワードなど）は読まない。本文は HTML・JSON・JS の先頭64KBだけ残す
+// - request.postData（ログインのパスワードなど）は読まない。本文は HTML・JSON・JS・テキスト・XML の先頭64KBだけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
 import { autoAuthScheme, cookieNames, JWT_IN_TEXT, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
@@ -58,8 +58,11 @@ function toResponse(e: HarEntry): HttpResponse {
   if (e.response.redirectURL && !headers.has('location') && e.response.status >= 300 && e.response.status < 400) headers.set('location', [e.response.redirectURL]);
   let body: string | undefined;
   const c = e.response.content;
-  // JS も残す（JSONP の E-06、ソースマップの参照の E-13 が本文で判定する）。本文が文字列でないもの（content.text: 12345）は読まない
-  if (typeof c?.text === 'string' && c.text && /html|json|javascript|ecmascript/i.test(String(c.mimeType ?? ''))) {
+  // JS も残す（JSONP の E-06、ソースマップの参照の E-13 が本文で判定する）。テキストと XML も残す（text/plain のスタックトレース・S3 の XML の
+  // エラーの E-01、robots.txt・security.txt の E-04。捨てると「本文を採取していない」の na になり、採り直しても直らない）。XML は text/xml と
+  // application/…+xml・application/xml だけ（image/svg+xml や Office の文書（application/vnd.openxmlformats-…）のバイナリは残さない）。
+  // 本文が文字列でないもの（content.text: 12345）は読まない
+  if (typeof c?.text === 'string' && c.text && /html|json|javascript|ecmascript|^\s*text\/(?:plain|xml)\b|^\s*application\/(?:[\w.-]+\+)?xml\b/i.test(String(c.mimeType ?? ''))) {
     try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 2)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
     body = body?.slice(0, BODY_LIMIT);
   }

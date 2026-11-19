@@ -8,7 +8,9 @@ export const state = {
   profile: undefined as Profile | undefined,
   baseline: undefined as Baseline | undefined,
   har: null as { imp: HarImport; hosts: Set<string>; name: string } | null,
-  last: null as { targets: Target[]; warnings: ParseWarning[]; findings: Finding[]; cov: Coverage[]; diff?: DiffRow[] } | null,
+  // settings：その結果を判定したときの例外・組織プロファイル・前回の結果（判定のあとに読み込んだ設定と、古い結果を混ぜて出力しない）
+  last: null as { targets: Target[]; warnings: ParseWarning[]; findings: Finding[]; cov: Coverage[]; diff?: DiffRow[];
+    settings: { suppressions: Suppression[]; profile?: Profile; baseline?: Baseline } } | null,
   view: { showAll: false, showInfo: false, inputHidden: false, chapter: 0, covFilter: 'missing-input' },
   draft: { input: '', url: '', message: '' },
 };

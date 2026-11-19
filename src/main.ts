@@ -44,8 +44,10 @@ function buildShell() {
   refs.input.id = 'input'; refs.input.spellcheck = false; refs.input.autocomplete = 'off'; refs.input.wrap = 'off'; refs.input.value = state.draft.input;
   refs.input.placeholder = '#TARGET url=https://www.example.com/ label=top\nHTTP/2 200\ncontent-type: text/html\n…';
   refs.input.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) analyze(); });
+  refs.input.addEventListener('input', inputChanged);
   refs.urlInput = el('input', 'w-full rounded-md border border-line bg-surface px-3 py-2 font-mono text-[13px]');
   refs.urlInput.id = 'url'; refs.urlInput.type = 'url'; refs.urlInput.placeholder = 'https://www.example.com/'; refs.urlInput.value = state.draft.url;
+  refs.urlInput.addEventListener('input', inputChanged);
   refs.message = el('p', 'min-h-6 text-sm text-sev-medium', state.draft.message); refs.message.setAttribute('role', 'status');
   // 結果欄は aria-live にしない（再描画のたびに数百行を読み上げてしまう）。判定の結果は、件数だけを役割 status の欄（refs.message）で知らせる
   refs.results = el('section', 'min-w-0'); refs.results.setAttribute('aria-label', getLang() === 'en' ? 'Results' : '判定結果');
@@ -95,7 +97,7 @@ function buildShell() {
           el('h1', 'text-2xl font-bold tracking-tight', 'curl-sec-analyzer'),
           el('span', 'num text-sm text-muted', T.versions(TOOL_VERSION, RULESET_VERSION)),
           // ボタンの文言（English・日本語）は切り替え先の言語なので lang を付ける（WCAG 3.1.2）。作り直したあとはボタンにフォーカスを戻す（WCAG 2.4.3）
-          Object.assign(button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const m = current; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); if (m) say(m);
+          Object.assign(button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const m = current; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); setBusy(!!analyzing); if (m) say(m);
             document.querySelector<HTMLButtonElement>('#lang-switch')?.focus(); }), { id: 'lang-switch', lang: getLang() === 'ja' ? 'en' : 'ja' })),
         el('p', 'mt-1 text-muted', T.tagline),
         el('ul', 'mt-2 list-disc pl-5 text-sm text-muted', el('li', '', T.notice1), el('li', '', T.notice2), el('li', '', T.notice3),
@@ -176,12 +178,23 @@ async function openFile(f: File) {
 }
 // 判定の世代と、判定中の Worker・その Promise の解決。判定し直したり、消去・HAR を外すを押したりしたら、前の Worker を止め、前の結果は
 // 使わない（古い結果で新しい入力の表示を上書きしない）。止めた判定の Promise も解決する（待っている呼び出し側を止めたままにしない）
-let analyzeGen = 0; let analyzing: { worker: Worker; settle: (shown: boolean) => void } | undefined;
+let analyzeGen = 0; let analyzing: { worker: Worker; settle: (shown: boolean) => void; text: string; url: string } | undefined;
 /** 判定中の Worker を止める（結果は使わない） */
 function cancelAnalysis() {
   analyzeGen++;
   const a = analyzing; analyzing = undefined;
   if (a) { a.worker.terminate(); a.settle(false); }
+  setBusy(false);
+}
+/** 判定中は結果欄を aria-busy にし、結果のファイルの保存を止める（判定のあとに読み込んだ設定と古い結果を混ぜて出力しない） */
+function setBusy(b: boolean) {
+  refs.results.setAttribute('aria-busy', String(b));
+  for (const x of refs.results.querySelectorAll<HTMLButtonElement>('[data-export]')) x.disabled = b;
+}
+/** 判定中に入力・URL 欄を直したら、その判定を止める（結果が届いたときに、直す前の入力の結果を出して入力欄を隠さない） */
+function inputChanged() {
+  if (!analyzing || (refs.input.value === analyzing.text && refs.urlInput.value === analyzing.url)) return;
+  cancelAnalysis(); say(() => tr().analysisCancelled);
 }
 /**
  * 入力を判定して表示する。判定は Web Worker で行う（数万件のターゲットの HAR などで画面を止めない）。Worker は HAR の読み込みと同じく
@@ -197,19 +210,20 @@ function analyze(): Promise<boolean> {
   if (new Blob([text]).size > MAX_BYTES) { fail(() => tr().tooLarge); return Promise.resolve(false); }
   const req: AnalyzeRequest = { text, url: refs.urlInput.value, har: state.har ? { imp: state.har.imp, hosts: state.har.hosts } : undefined,
     suppressions: state.suppressions, profile: state.profile };
+  const settings = { suppressions: state.suppressions, profile: state.profile, baseline: state.baseline };
   cancelAnalysis();
   const w = new AnalyzeWorker(); const gen = analyzeGen;
-  say(() => tr().analyzing);
+  say(() => tr().analyzing); setBusy(true);
   return new Promise<boolean>(resolve => {
-    analyzing = { worker: w, settle: resolve };
-    const done = () => { w.terminate(); if (analyzing?.worker === w) analyzing = undefined; };
+    analyzing = { worker: w, settle: resolve, text, url: req.url };
+    const done = () => { w.terminate(); if (analyzing?.worker === w) { analyzing = undefined; setBusy(false); } };
     w.onmessage = (e: MessageEvent<{ ok: boolean; result?: AnalyzeResult }>) => {
       done();
       if (gen !== analyzeGen) { resolve(false); return; }   // 古い判定の結果
       // 判定の途中の例外（想定外の入力）で、前の入力の結果を表示・出力したままにしない
       let shown = false;
       if (!e.data.ok || !e.data.result) fail(() => tr().analysisFailed);
-      else { try { show(e.data.result, text); shown = true; } catch { fail(() => tr().analysisFailed); } }
+      else { try { show(e.data.result, text, settings); shown = true; } catch { fail(() => tr().analysisFailed); } }
       resolve(shown);                                   // 表示まで終わってから解決する
     };
     w.onerror = () => { done(); if (gen === analyzeGen) fail(() => tr().analysisFailed); resolve(false); };
@@ -217,9 +231,9 @@ function analyze(): Promise<boolean> {
   });
 }
 /** 判定の結果を表示する */
-function show({ targets, warnings, findings, cov }: AnalyzeResult, text: string) {
+function show({ targets, warnings, findings, cov }: AnalyzeResult, text: string, settings: NonNullable<typeof state.last>['settings']) {
   if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return; }
-  state.last = { targets, warnings, findings, cov, diff: state.baseline ? diff(state.baseline.findings, findings) : undefined };
+  state.last = { targets, warnings, findings, cov, settings, diff: settings.baseline ? diff(settings.baseline.findings, findings) : undefined };
   if (text.trim()) state.view.inputHidden = true;            // 判定できたら、生の出力を隠す
   applyInputVisibility();
   render();
