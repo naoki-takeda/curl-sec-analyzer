@@ -1,7 +1,7 @@
 // ui/dom.ts：DOM の組み立て。描画はすべて textContent で行い、innerHTML は使わない（ESLint でも禁止）
 import type { Severity } from '../model';
 import { itemTitle, sevLabel, tr } from '../i18n';
-import { API_TOP10 } from '../rules/api';
+import { API_TOP10 } from '../engine/standards';
 import { asvsRef, standardsOf, standardsShort } from '../engine/standards';
 
 export type Child = Node | string | null | undefined | false;

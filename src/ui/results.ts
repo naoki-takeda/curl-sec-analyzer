@@ -6,7 +6,7 @@ import { localDate } from '../engine/suppress';
 import { labelRow, RESERVED_HINTS } from '../engine/labels';
 import { type DiffRow, diffSummary, profileDiffers } from '../engine/diff';
 import { SEVERITIES, circled, countBySeverity, mergeNa, overall } from '../engine/summarize';
-import { RULESET_VERSION } from '../rules/ruleset';
+import { RULESET_VERSION } from '../version';
 import { toMarkdown } from '../export/markdown';
 import { suppressionsJson, toJson } from '../export/json';
 import { toCsv } from '../export/csv';

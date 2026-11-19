@@ -6,6 +6,12 @@ import type { ItemInfo } from '../model';
 import items from './items.json';
 import levels from './asvs-levels.json';
 
+/** OWASP API Security Top 10 2023 との対応（画面とエクスポートに表示） */
+export const API_TOP10: Record<string, string> = {
+  'A-01': 'API2:2023', 'A-02': 'API2:2023・API8:2023', 'A-03': 'API2:2023', 'A-04': 'API4:2023', 'A-05': 'API4:2023', 'A-06': 'API4:2023',
+  'A-07': 'API3:2023', 'A-08': 'API8:2023', 'A-09': 'API8:2023', 'A-10': 'API8:2023', 'A-11': 'API5:2023・API9:2023',
+};
+
 export const ASVS_VERSION = '5.0.0';
 export const IPA_EDITION = '安全なウェブサイトの作り方 改訂第7版';
 export const IPA_EDITION_EN = 'IPA "How to Secure Your Web Site", 7th edition (Japanese)';

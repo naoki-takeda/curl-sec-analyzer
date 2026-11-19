@@ -36,6 +36,7 @@ npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build �
 
 - 実在のシステムから採取した値は使いません。ホスト名は `example.com` などに、Cookie・トークンはダミーの値に置き換えます。
 - `tests/fixtures/*.txt` は、採取したままの改行（サーバの応答ヘッダは CRLF、curl 自身の行は LF）を保ちます。`.gitattributes` で改行を変換しない設定にしています。エディタで保存し直して改行を変えないでください。
+- `tests/fixtures/generated_local.txt` は、コマンド生成器の出力をローカルの HTTPS サーバ（`openssl s_server -WWW`）に向けて実行したものです。生成スクリプトの形を変えたら、`scripts/capture-fixture.sh` で採り直し（Linux・WSL。手順はスクリプトの先頭）、ゴールデンの期待結果の差分を確かめます。外部には接続しません。
 - テスト用の HAR は `tests/fixtures/` か `tests/golden/cases/` に置きます。ほかの場所の `*.har` は `.gitignore` で除外しています。
 
 ## テストの置き場所

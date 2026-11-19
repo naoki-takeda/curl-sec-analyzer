@@ -28,13 +28,16 @@ test('サンプルを判定でき、外部へのリクエストが発生しな�
 test('例外に登録すると「例外」になり、Markdown を保存できる', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  // 判定は Web Worker で行うので、結果が出てから数える
+  await expect(page.getByRole('button', { name: '例外に登録' }).first()).toBeVisible();
   const before = await page.getByRole('button', { name: '例外に登録' }).count();
   await page.getByRole('button', { name: '例外に登録' }).first().click();
   await page.getByLabel('理由（必須）').fill('検証環境のため');
   await page.getByRole('button', { name: '登録する' }).click();
   await page.getByText('設定ファイル').click();
   await expect(page.getByText(/例外 1件（有効 1件/)).toBeVisible();
-  expect(await page.getByRole('button', { name: '例外に登録' }).count()).toBeLessThan(before);
+  // 登録すると判定し直す（Worker）ので、表示が変わるまで待つ
+  await expect.poll(() => page.getByRole('button', { name: '例外に登録' }).count()).toBeLessThan(before);
 
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Markdown' }).click()]);
   expect(dl.suggestedFilename()).toMatch(/\.md$/);
@@ -122,11 +125,11 @@ test('画面の改善：最初の手順の案内、入力欄を隠す、「情�
   expect(await results.locator('details', { has: page.locator('summary span.font-bold', { hasText: /^probes$/ }) }).getAttribute('open')).toBeNull();
 });
 
-// ---- 2回目のレビューで見つかった不具合の再現 ----
+// ---- 不具合の再現 ----
 test('HAR の Worker も含め、ページから作る Worker は外部へ通信できない（blob: Worker はページの CSP を引き継ぐ）', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute('content', /worker-src blob:/);
-  // no-cors にする（CORS の失敗でも reject されるので、CSP が効いていなくても 'blocked' になり、何も確かめていなかった。第49回）。
+  // no-cors にする（CORS の失敗でも reject されるので、CSP が効いていなくても 'blocked' になり、何も確かめられない）。
   // 送られたリクエストも見る
   const sent: string[] = [];
   page.on('request', r => { if (r.url().startsWith('https://example.com/')) sent.push(r.url()); });
@@ -248,7 +251,7 @@ test('件数以外の状態のメッセージも、言語を切り替えると�
   await expect(page.getByRole('status')).toHaveText('curlの出力を貼り付けてから「判定する」を押してください。');
 });
 
-test('第50回：URL 欄にスキームのない URL を入れると警告する', async ({ page }) => {
+test('URL 欄にスキームのない URL を入れると警告する', async ({ page }) => {
   await page.goto('/');
   await page.locator('#input').fill('HTTP/2 200\ncontent-type: text/html\nset-cookie: SESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/\n\n<html></html>\n');
   await page.getByLabel('#TARGET がない入力のURL（任意）').fill('www.example.com');
@@ -256,7 +259,7 @@ test('第50回：URL 欄にスキームのない URL を入れると警告する
   await expect(page.getByText(/URL 欄の値を URL として読めません/)).toBeVisible();
 });
 
-test('第50回：言語を切り替えても、コマンド生成器の入力と生成したスクリプトを残す', async ({ page }) => {
+test('言語を切り替えても、コマンド生成器の入力と生成したスクリプトを残す', async ({ page }) => {
   await page.goto('/');
   await page.getByText('コマンドを作る（推奨コマンド C1〜C26）').click();
   await page.getByLabel('ホスト名').fill('www.example.com');
@@ -266,7 +269,7 @@ test('第50回：言語を切り替えても、コマンド生成器の入力と
   await expect(page.locator('textarea[readonly]').first()).toHaveValue(/label=pre-login/);
 });
 
-test('第50回：章の絞り込みを変えてもフォーカスを失わず、例外の理由のエラーを読み上げる', async ({ page }) => {
+test('章の絞り込みを変えてもフォーカスを失わず、例外の理由のエラーを読み上げる', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   const sel = page.locator('select[data-focus="chapter"]');
@@ -278,7 +281,7 @@ test('第50回：章の絞り込みを変えてもフォーカスを失わず、
   await expect(page.getByRole('alert')).toHaveText(/理由/);
 });
 
-test('第50回：形式の違うファイルを例外ファイルとして読んでも、登録済みの例外を消さない', async ({ page }) => {
+test('形式の違うファイルを例外ファイルとして読んでも、登録済みの例外を消さない', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await page.getByRole('button', { name: '例外に登録' }).first().click();
@@ -289,7 +292,7 @@ test('第50回：形式の違うファイルを例外ファイルとして読ん
   await expect(page.getByText(/例外 1件（有効 1件/)).toBeVisible();
 });
 
-test('第51回：HAR の一覧で操作してもフォーカスを失わない', async ({ page }) => {
+test('HAR の一覧で操作してもフォーカスを失わない', async ({ page }) => {
   await page.goto('/');
   await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
   const sel = page.locator('select[data-focus^="har-label-"]').first();
@@ -299,7 +302,7 @@ test('第51回：HAR の一覧で操作してもフォーカスを失わない',
   await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeFocused();
 });
 
-test('第51回：ホストが2つあるとき、ホスト単位の表に対象の列を出す', async ({ page }) => {
+test('ホストが2つあるとき、ホスト単位の表に対象の列を出す', async ({ page }) => {
   await page.goto('/');
   await page.locator('#input').fill(['#TARGET url=https://www.example.com/ label=tls', '#TLSPROBE v=tls1 ok=1', '#TARGET url=https://api.example.com/ label=tls2', '#TLSPROBE v=tls1 ok=1', ''].join('\n'));
   await page.getByRole('button', { name: '判定する' }).click();
@@ -308,7 +311,7 @@ test('第51回：ホストが2つあるとき、ホスト単位の表に対象�
   await expect(cross.getByText('www.example.com', { exact: false }).first()).toBeVisible();
 });
 
-test('第51回（束のレビュー）：HAR のラベルを矢印で見て回っても、ほかのエントリの予約ラベルを失わない', async ({ page }) => {
+test('HAR のラベルを矢印で見て回っても、ほかのエントリの予約ラベルを失わない', async ({ page }) => {
   await page.goto('/');
   await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
   const labels = async () => page.locator('select[data-focus^="har-label-"]').evaluateAll(els => els.map(e => (e as HTMLSelectElement).value));
@@ -317,4 +320,31 @@ test('第51回（束のレビュー）：HAR のラベルを矢印で見て回�
   await page.locator('select[data-focus^="har-label-"]').first().focus();
   for (const k of ['ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp']) await page.keyboard.press(k);
   expect(await labels()).toEqual(before);
+});
+
+test('判定は Web Worker で行い、判定中に消去したら前の入力の結果を出さない', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill(readFileSync('src/sample.txt', 'utf8'));
+  // 判定する・消去を同じタスクの中で押す（Worker の結果が届く前に消去する）
+  await page.evaluate(() => {
+    const b = (name: string) => [...document.querySelectorAll('button')].find(x => x.textContent === name)!;
+    b('判定する').click(); b('消去').click();
+  });
+  // 消去しなかった場合に結果が届く時間より長く待つ（遅い環境も見込む）
+  await page.waitForTimeout(3000);
+  const results = page.getByRole('region', { name: '判定結果' });
+  await expect(results.getByText('指摘（項目×条件）')).toHaveCount(0);
+  await expect(page.locator('#input')).toHaveValue('');
+});
+
+test('例外に登録したあと、判定し直した結果の見出しにフォーカスを移す', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByLabel('理由（必須）').fill('検証環境のため');
+  await page.getByRole('button', { name: '登録する' }).click();
+  // 登録すると同期的に「判定しています…」になるので、件数のメッセージを待てば、Worker の結果で描き直したあと
+  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました/);
+  await expect(page.locator('#app h2:focus')).toHaveCount(1);
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('H2');
 });

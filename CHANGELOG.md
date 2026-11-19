@@ -97,6 +97,10 @@ curl-sec-analyzer の版ごとの変更です。版の付け方は [docs/design.
   - E-01 は、エラーの応答（4xx・5xx）と `error-*` のラベルで本文を採取していないとき、A-07 は API の 2xx で本文を採取していないとき、適用外ではなく na にします。
   - E-09①：OpenID Connect の form_post の hidden の欄を除くとき、属性の値の中の `>` でタグを切っていたため、欄の値のトークンを本文の秘密として数えていました。
   - A-09①：HAR の Content-Type の値の前に空白があると、JSON を text/html で返す応答を見逃していました。
+- 構造とテストを整理しました（docs/history.md の第57回）：
+  - 判定を Web Worker で行います。数万件のターゲットの HAR でも画面が止まらず、判定中は「判定しています」と表示します。画面の側はルールを読み込まないので、ページの JS は約 437KB です。
+  - `tests/fixtures/generated_local.txt` を、今の生成スクリプトの出力で採り直しました（採り方は `scripts/capture-fixture.sh`）。
+  - テストの名前とコメントから、レビューの回の番号を外しました。
 - JSON のエクスポートの指摘（`findings`）から、使っていなかった `score`（ほとんどの指摘で0。HSTS とHTTP→HTTPS の転送だけが Observatory の配点を持っていた）と `obsId` を外しました。MDN HTTP Observatory 互換のスコアは作らないと決めたためです。
 
 ### 既知の限界

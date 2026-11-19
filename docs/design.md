@@ -728,7 +728,7 @@ rm -f "$tout" "$terr"
 | ツール自身のCSP（meta） | `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; worker-src blob:; base-uri 'none'; form-action 'none'">`（`object-src`は`default-src 'none'`で禁止される）。あわせて`<meta name="referrer" content="no-referrer">`を入れる。これらは`<head>`の先頭（charsetより前）、どのスクリプトよりも前に置く。開発サーバはHMRのためにインラインスクリプト・WebSocket・style要素を使うため、メタCSPは本番ビルド時だけViteプラグインで挿入する。CSSはTailwind CSS v4を@tailwindcss/viteでビルド時に静的ファイルとして生成し、実行時にstyle要素を注入するものは使わない |
 | メタCSPの制約 | W3C CSP3では`frame-ancestors`、`report-uri`、`sandbox`、Report-Onlyはmetaで無効。GitHub Pagesは独自ヘッダを設定できない。クリックジャッキング対策はJSの`top !== self`による表示抑止で補う。厳密さが必要ならCloudflare Pagesなどヘッダを設定できるホストへ移す |
 | XSS対策 | 入力由来の文字列は`textContent`か`createTextNode`で描画し、`innerHTML`、`insertAdjacentHTML`、`eval`、`new Function`は禁止。ESLint（`no-restricted-properties`で`innerHTML`・`outerHTML`・`insertAdjacentHTML`・`document.write`、`no-eval`・`no-implied-eval`・`no-new-func`）で機械的に止める。メタCSPの`require-trusted-types-for 'script'`は、今は採らない（主なブラウザの対応は確かめた。必要になれば改めて検討する） |
-| Worker | HARの解析はWeb Workerで行う（curlの貼り付けはメインスレッドで解析する）。Viteの`?worker&inline`でblob: URLのWorkerとして作り、メタCSPに`worker-src blob:`を加える。別ファイルのWorkerには、そのファイルのHTTP応答のCSPが使われ、GitHub PagesはCSPヘッダを返さないため、生のHAR（Cookie・パスワード）を持つWorkerから通信できてしまう。blob: のWorkerはページのCSP（`connect-src 'none'`）を引き継ぐ（E2Eで確認） |
+| Worker | HARの読み込み（`src/worker.ts`）と、判定（貼り付けとHARの解析、ルール、診断カバレッジ。`src/analyzeWorker.ts`が`src/engine/analyze.ts`を呼ぶ）はWeb Workerで行う（数万件のターゲットのHARでも画面を止めない。判定中は「判定しています」を表示し、判定し直したら前のWorkerを止めて古い結果を使わない）。画面の側は、版（`src/version.ts`）とOWASP API Top 10の対応表（`src/engine/standards.ts`）だけを使い、ルールとcsp\_evaluatorを読み込まない（同じコードを画面とWorkerの両方に入れない）。Viteの`?worker&inline`でblob: URLのWorkerとして作り、メタCSPに`worker-src blob:`を加える。別ファイルのWorkerには、そのファイルのHTTP応答のCSPが使われ、GitHub PagesはCSPヘッダを返さないため、生のHAR（Cookie・パスワード）を持つWorkerから通信できてしまう。blob: のWorkerはページのCSP（`connect-src 'none'`）を引き継ぐ（E2Eで確認） |
 | ファイル読込・ReDoS | `File.text()`で読み込み、サイズ上限5MB（HARと前回の結果のJSONは50MB。大きなHARを判定した結果のJSONは5MBを超えるため。例外ファイルと組織プロファイルは5MB）。上限を超えた設定ファイルには、そのファイルの上限を示す。正規表現は線形時間のパターンに限る |
 | ブラウザの保存領域 | localStorage・sessionStorage・IndexedDB・Cookieは使わない（何も保存しない）。共有PCに秘密情報が残るうえ、同じオリジン（`<組織名>.github.io`）の他のリポジトリのページから読めるため。例外ファイル・組織プロファイル・前回の結果は、毎回ファイルで読み込む |
 | 公開先とオリジン | 専用の組織アカウントのリポジトリで管理し、`https://<組織名>.github.io/curl-sec-analyzer/`で公開する。個人アカウントの他のGitHub Pagesとはオリジンが分かれる。ただし同じ組織の他のPagesとはオリジンを共有するので、次を前提にする。①ブラウザの保存領域を使わない（上の行）。②他のページへの埋め込みを拒否する（同じ組織の他のページからの埋め込みも含む）。③同じ組織のPagesに、信頼できないコードや外部のスクリプトを読み込むページを置かない（同じオリジンのページは、このツールをウィンドウで開いて画面の内容を読めるため）。③を守れなくなったら、ツールごとに組織を分けるか、独自ドメイン（有料）を割り当てる |
@@ -778,16 +778,18 @@ curl-sec-analyzer/
 ├─ index.html                 # UIの骨格（メタCSPは本番ビルドで挿入）
 ├─ run.sh                     # 簡易版の採取スクリプト（正式にはコマンド生成器を使う）
 ├─ src/
-│  ├─ main.ts i18n.ts messagesEn.ts recommendationsEn.ts commands.ts mask.ts shownText.ts tokenShape.ts model.ts worker.ts sample.ts sample.txt styles.css
+│  ├─ main.ts i18n.ts messagesEn.ts recommendationsEn.ts commands.ts mask.ts shownText.ts tokenShape.ts model.ts version.ts
+│  │  worker.ts（HARの読み込み）analyzeWorker.ts（判定） sample.ts sample.txt styles.css
 │  ├─ ui/      state.ts dom.ts results.ts har.ts generator.ts dialog.ts
 │  ├─ parser/  input.ts har.ts target.ts openssl.ts setCookie.ts
 │  ├─ rules/   ruleset.ts util.ts headers.ts csp.ts cookies.ts cors.ts transport.ts hostRules.ts
 │  │           exposure.ts html.ts api.ts cross.ts probes.ts（C13 のプローブの判定パターン）
-│  ├─ engine/  run.ts labels.ts labels.json items.json asvs-levels.json standards.ts coverage.ts suppress.ts profile.ts diff.ts
+│  ├─ engine/  analyze.ts run.ts labels.ts labels.json items.json asvs-levels.json standards.ts coverage.ts suppress.ts profile.ts diff.ts
 │  │           summarize.ts targetKey.ts
 │  └─ export/  markdown.ts json.ts csv.ts cmdSummary.ts
 ├─ scripts/screenshot.mjs     # README の画像を撮り直す（npm run screenshot）
-├─ tests/                     # Vitest の単体テストと fixture（実際の curl 8.5.0・OpenSSL 3.0.13 の出力を含む）。tests/regression/ はレビューの回ごとの回帰テスト
+├─ scripts/capture-fixture.sh # tests/fixtures/generated_local.txt を、生成スクリプトをローカルのサーバに向けて実行して採り直す
+├─ tests/                     # Vitest の単体テストと fixture（実際の curl・OpenSSL の出力を含む。generated_local.txt は今の生成スクリプトを curl 8.18.0・OpenSSL 3.5.5 で実行したもの）。tests/regression/ はレビューの回ごとの回帰テスト
 ├─ e2e/                       # Playwright の E2E と axe-core のアクセシビリティ検査（本番ビルドに対して実行）
 ├─ docs/design.md             # 設計書（正本）。docs/history.md はレビューの経緯、docs/screenshot.png は README の画像
 ├─ .github/                   # workflows/（checks・ci・deploy・codeql・dependency-review）、dependabot.yml、ISSUE_TEMPLATE/、pull_request_template.md
@@ -841,6 +843,7 @@ Settings→PagesでSourceを「GitHub Actions」にし、「Enforce HTTPS」を�
 | 型（Target、Finding、Rule、Profile など） | `src/model.ts` |
 | 入力モデル・パース（#TARGET、-i、-D -、-v、-L、header_json、openssl） | `src/parser/input.ts`、`src/parser/openssl.ts`、`src/parser/target.ts` |
 | HAR形式の取り込み | `src/parser/har.ts`、`src/worker.ts` |
+| 入力から判定まで（画面はWeb Workerで実行） | `src/engine/analyze.ts`、`src/analyzeWorker.ts` |
 | ラベルと適用する項目、必要なラベル | `src/engine/labels.json`、`src/engine/labels.ts` |
 | ルール（第1〜6章） | `src/rules/`（登録は`ruleset.ts`、CSPの振り分けは`csp.ts`、横断ルールは`cross.ts`、ホスト単位は`hostRules.ts`） |
 | 評価の順序、二重減点の除去 | `src/engine/run.ts` |

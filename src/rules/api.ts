@@ -32,11 +32,7 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     return out.length ? out : [mk(jsonHeaders, ctx, 'ok', 'info', 'pass', ct, '')];
   } };
 
-/** OWASP API Security Top 10 2023 との対応（画面とエクスポートに表示） */
-export const API_TOP10: Record<string, string> = {
-  'A-01': 'API2:2023', 'A-02': 'API2:2023・API8:2023', 'A-03': 'API2:2023', 'A-04': 'API4:2023', 'A-05': 'API4:2023', 'A-06': 'API4:2023',
-  'A-07': 'API3:2023', 'A-08': 'API8:2023', 'A-09': 'API8:2023', 'A-10': 'API8:2023', 'A-11': 'API5:2023・API9:2023',
-};
+export { API_TOP10 } from '../engine/standards';
 
 /**
  * A-01・A-08・A-11 が判定に使う応答（r）とステータス。同じページへの転送（末尾の / への 307 など）はたどった先（hop）で見る。

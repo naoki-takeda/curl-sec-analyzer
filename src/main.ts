@@ -1,16 +1,14 @@
 // main.ts：画面の入口（ツール設計3「画面設計」）。描画の部品は ui/ の下にある
 import './styles.css';
-import { parseInput } from './parser/input';
-import { HAR_MAX_BYTES, harTargets, isHar, suggestLabels } from './parser/har';
-import { assignHopUrls, uniqueLabels } from './parser/target';
-import { runAll } from './engine/run';
+import { HAR_MAX_BYTES, isHar, suggestLabels } from './parser/har';
+import type { AnalyzeRequest, AnalyzeResult } from './engine/analyze';
+import AnalyzeWorker from './analyzeWorker.ts?worker&inline';
 import { countBySeverity, overall } from './engine/summarize';
-import { coverage, ITEMS } from './engine/coverage';
 import { isActive, parseSuppressions } from './engine/suppress';
 import { parseProfile, profileTemplate, withProfile } from './engine/profile';
 import { diff, parseBaseline } from './engine/diff';
 import { legacyHarKey } from './engine/targetKey';
-import { IMPLEMENTED, RULESET_VERSION, TOOL_VERSION } from './rules/ruleset';
+import { RULESET_VERSION, TOOL_VERSION } from './version';
 import { type Lang, getLang, setLang, tr } from './i18n';
 import sample from './sample';
 import { BTN, LINK, PRIMARY, button, download, el, fileInput as hidden, labelFor, link, reducedMotion } from './ui/dom';
@@ -23,7 +21,7 @@ import { joinMessages } from './messagesEn';
 const MAX_BYTES = 5 * 1024 * 1024;
 const app = document.querySelector<HTMLDivElement>('#app')!;
 refs.dialog = el('dialog', 'm-auto w-[min(32rem,92vw)] rounded-md border border-line bg-surface p-0 text-ink backdrop:bg-black/40');
-Object.assign(actions, { analyze, say, renderSettings, openGenerator, loadSample });
+Object.assign(actions, { analyze, cancelAnalysis, isAnalyzing: () => !!analyzing, say, renderSettings, openGenerator, loadSample });
 
 // ?lang= は ja・en（en-US などは en）だけを受け付ける。それ以外はブラウザの言語で決める（不明な値だと文言の表が引けず、判定で止まる）
 const qLang = new URLSearchParams(location.search).get('lang')?.toLowerCase() ?? '';
@@ -112,7 +110,7 @@ function buildShell() {
             button(T.analyze, PRIMARY, analyze),
             button(T.openFile, BTN, () => fileIn.click()),
             button(T.sample, BTN, loadSample),
-            button(T.clear, 'rounded-md px-3 py-2 text-muted underline-offset-4 hover:underline', () => { refs.input.value = ''; cancelHarLoad(); state.har = null; renderHar(); say(''); state.last = null; state.view.inputHidden = false; applyInputVisibility(); renderEmpty(); refs.input.focus(); }),
+            button(T.clear, 'rounded-md px-3 py-2 text-muted underline-offset-4 hover:underline', () => { refs.input.value = ''; cancelAnalysis(); cancelHarLoad(); state.har = null; renderHar(); say(''); state.last = null; state.view.inputHidden = false; applyInputVisibility(); renderEmpty(); refs.input.focus(); }),
             fileIn, supIn, profIn, baseIn),
           refs.message,
           refs.genDetails,
@@ -138,10 +136,10 @@ let current: (() => string) | undefined;
 function say(m: Message) { current = typeof m === 'function' ? m : undefined; refs.message.textContent = typeof m === 'function' ? m() : m; }
 function saySummary(s: [number, number, number]) { say(() => tr().analyzed(...s)); }
 /** 設定を読み込んだあとに判定し直す。読み込みのエラーは判定のあとに表示する（analyze は最初に表示を消すため、先に出すと消えてしまう） */
-function refresh(msg: () => string = () => '') {
+async function refresh(msg: () => string = () => '') {
   renderSettings();
-  const again = !!(state.last || state.har);
-  if (again) analyze();
+  const again = !!(state.last || state.har || analyzing);
+  if (again) await analyze();
   if (msg() || !again) say(msg);
 }
 function renderSettings() {
@@ -176,34 +174,52 @@ async function openFile(f: File) {
   if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge); return; }
   refs.input.value = await f.text(); analyze();
 }
-function analyze() {
-  // 判定の途中の例外（想定外の入力）で、前の入力の結果を表示・出力したままにしない
-  try { analyzeUnsafe(); }
-  catch { say(() => tr().analysisFailed); state.last = null; renderEmpty(); }
+// 判定の世代と、判定中の Worker・その Promise の解決。判定し直したり、消去・HAR を外すを押したりしたら、前の Worker を止め、前の結果は
+// 使わない（古い結果で新しい入力の表示を上書きしない）。止めた判定の Promise も解決する（待っている呼び出し側を止めたままにしない）
+let analyzeGen = 0; let analyzing: { worker: Worker; settle: (shown: boolean) => void } | undefined;
+/** 判定中の Worker を止める（結果は使わない） */
+function cancelAnalysis() {
+  analyzeGen++;
+  const a = analyzing; analyzing = undefined;
+  if (a) { a.worker.terminate(); a.settle(false); }
 }
-function analyzeUnsafe() {
+/**
+ * 入力を判定して表示する。判定は Web Worker で行う（数万件のターゲットの HAR などで画面を止めない）。Worker は HAR の読み込みと同じく
+ * blob: URL で作る（ページの CSP の connect-src 'none' を引き継ぐ。ui/har.ts）。表示まで終わったら解決する（判定のあとに出すメッセージのため）。
+ * 解決する値は、この判定の結果を表示したか（止められた・置き換わった・判定できなかったときは false。描き直した結果にフォーカスを移すため）
+ */
+function analyze(): Promise<boolean> {
   say('');
   const text = refs.input.value;
-  if (!text.trim() && !state.har) { say(() => tr().emptyInput); state.last = null; renderEmpty(); return; }
+  const fail = (m: () => string) => { cancelAnalysis(); say(m); state.last = null; renderEmpty(); };
+  if (!text.trim() && !state.har) { fail(() => tr().emptyInput); return Promise.resolve(false); }
   // 判定できなかったときは前の結果を消す（残すと、言語の切り替えなどで別の入力の結果が表示・出力される）
-  if (new Blob([text]).size > MAX_BYTES) { say(() => tr().tooLarge); state.last = null; renderEmpty(); return; }
-  const parsed = text.trim() ? parseInput(text) : { targets: [], warnings: [] };
-  const fromHar = state.har ? withProfile(state.profile, () => harTargets(state.har!.imp, state.har!.hosts)) : { targets: [], warnings: [] };
-  const targets = [...parsed.targets, ...fromHar.targets];
-  const merged = uniqueLabels(targets);                       // 貼り付けと HAR で同じラベル（login など）を付けた場合
-  const u = refs.urlInput.value.trim();
-  // URL 欄で補ったターゲットにも、各ホップの URL を付け直す（-L で http から https に転送されたかを判定するため。parseInput の中では URL が分からない）
-  if (u) for (const t of targets) if (!t.url && t.label === 'default') { t.url = u; assignHopUrls(t); }
+  if (new Blob([text]).size > MAX_BYTES) { fail(() => tr().tooLarge); return Promise.resolve(false); }
+  const req: AnalyzeRequest = { text, url: refs.urlInput.value, har: state.har ? { imp: state.har.imp, hosts: state.har.hosts } : undefined,
+    suppressions: state.suppressions, profile: state.profile };
+  cancelAnalysis();
+  const w = new AnalyzeWorker(); const gen = analyzeGen;
+  say(() => tr().analyzing);
+  return new Promise<boolean>(resolve => {
+    analyzing = { worker: w, settle: resolve };
+    const done = () => { w.terminate(); if (analyzing?.worker === w) analyzing = undefined; };
+    w.onmessage = (e: MessageEvent<{ ok: boolean; result?: AnalyzeResult }>) => {
+      done();
+      if (gen !== analyzeGen) { resolve(false); return; }   // 古い判定の結果
+      // 判定の途中の例外（想定外の入力）で、前の入力の結果を表示・出力したままにしない
+      let shown = false;
+      if (!e.data.ok || !e.data.result) fail(() => tr().analysisFailed);
+      else { try { show(e.data.result, text); shown = true; } catch { fail(() => tr().analysisFailed); } }
+      resolve(shown);                                   // 表示まで終わってから解決する
+    };
+    w.onerror = () => { done(); if (gen === analyzeGen) fail(() => tr().analysisFailed); resolve(false); };
+    w.postMessage(req);
+  });
+}
+/** 判定の結果を表示する */
+function show({ targets, warnings, findings, cov }: AnalyzeResult, text: string) {
   if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return; }
-  // URL 欄の値がスキームのある URL でなければ（www.example.com）、#TARGET の url= と同じく警告する（HTTPS かどうかを使う項目
-  // （H-01①・C-01① など）が、警告なしに判定されなくなるのを防ぐ）
-  const urlOk = /^[a-z][\w+.-]*:\/\/[^/?#\s]/i.test(u);
-  // パーサの「url= を付けてください」は、URL 欄で補ったターゲットには出さない（URL 欄の誤りは、URL 欄の警告として1つだけ出す）。
-  // 文言はほかの解析の警告と同じく日本語に固定する（判定した時点の言語で作ると、言語を切り替えたあとも古い言語のまま残る）
-  const warnings = [...parsed.warnings, ...fromHar.warnings, ...merged].filter(w => !(u && w.kind === 'unknown-url' && w.label === 'default'));   // URL欄で補ったのは default だけ
-  if (u && !urlOk && targets.some(t => t.url === u)) warnings.push({ kind: 'unknown-url', label: 'default', detail: 'URL 欄の値を URL として読めません。HTTPSかどうかを使う項目は判定できません（https:// から書いてください）' });
-  const findings = runAll(targets, { suppressions: state.suppressions, profile: state.profile });
-  state.last = { targets, warnings, findings, cov: coverage(findings, IMPLEMENTED, ITEMS, state.profile?.exclude), diff: state.baseline ? diff(state.baseline.findings, findings) : undefined };
+  state.last = { targets, warnings, findings, cov, diff: state.baseline ? diff(state.baseline.findings, findings) : undefined };
   if (text.trim()) state.view.inputHidden = true;            // 判定できたら、生の出力を隠す
   applyInputVisibility();
   render();

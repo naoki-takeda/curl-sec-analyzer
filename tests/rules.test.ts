@@ -95,8 +95,7 @@ describe('R-01 Origin反射・T-04 HTTP→HTTPS', () => {
   });
 });
 
-// 第48回のレビュー（判定ルール）で見つかった誤検知・取り決め違反
-describe('第48回：ルールの誤検知', () => {
+describe('ルールの誤検知', () => {
   const page = (body: string) => `#TARGET url=https://www.example.com/ label=page\n#META at=2026-11-01T10:00:00\n${HTML}\n${body}\n`;
   it('E-09①：入力の検証の規則・autocomplete の値・正規表現を秘密の値とみなさない（本物のキーは今までどおり）', () => {
     for (const s of ['<script>const schema={email:"required|email",password:"required|min:8|max:64"};</script>',
@@ -124,8 +123,7 @@ describe('第48回：ルールの誤検知', () => {
   });
 });
 
-// 第49回のレビュー（判定ルール）
-describe('第49回：ルールの誤検知・見逃し', () => {
+describe('ルールの誤検知・見逃し', () => {
   const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/x label=t\n${AT}\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('t');
   it('A-07①：API の検証の規則・autocomplete の値・エラーの項目の値を、パスワードの露出とみなさない（本物は今までどおり）', () => {
     for (const b of ['{"rules":{"email":"required|email","password":"required|min:8|max:64"}}', '{"autocomplete":{"password":"current-password"}}', '{"errors":{"password":"TOO_SHORT"}}']) {
@@ -152,7 +150,7 @@ describe('第49回：ルールの誤検知・見逃し', () => {
   });
 });
 
-describe('第50回：E-09・A-07 の画面の部品の値、R-04・R-06・E-05', () => {
+describe('E-09・A-07 の画面の部品の値、R-04・R-06・E-05', () => {
   const page = (js: string) => `#TARGET url=https://www.example.com/login label=t\nHTTP/2 200\ncontent-type: text/html\n\n<html><script>${js}</script></html>\n`;
   const e09 = (js: string) => ids(page(js)).filter(i => i === 'E-09.1');
   it('E-09①：セレクタ・項目の名前・エスケープした日本語の文言は秘密の値ではない', () => {
@@ -186,13 +184,13 @@ describe('第50回：E-09・A-07 の画面の部品の値、R-04・R-06・E-05',
     const r = evaluate('#TARGET url=https://www.example.com/actuator/env label=page\nHTTP/2 503\ncontent-type: application/json\n\n{"error":"x"}\n').ids('page').filter(x => x.startsWith('E-05'));
     expect(r).toEqual(['E-05.na']);
   });
-  it('E-09①・A-07①（束のレビュー）：秘密の語のほかの語を含む値・セレクタの形でない値・エスケープが1つの値は、秘密の値として扱う', () => {
+  it('E-09①・A-07①：秘密の語のほかの語を含む値・セレクタの形でない値・エスケープが1つの値は、秘密の値として扱う', () => {
     for (const js of ['var cfg={secret_key:"my-super-secret-key"}', 'var cfg={password:"changeme_password"}', 'var cfg={password:"Pass[1]Secret!x"}', 'var cfg={password:"S3cr3t\\u00e9Value99"}', 'var cfg={password:"/Ab3xY9qLmZ81PwQr"}'])
       expect(e09(js), js).toEqual(['E-09.1']);
     const api = evaluate('#TARGET url=https://www.example.com/api/me label=api sensitive=1\nHTTP/2 200\ncontent-type: application/json\n\n{"user":{"password":"admin_pass"}}\n').ids('api');
     expect(api).toContain('A-07.1');
   });
-  it('（2回目の束のレビュー）E-09：語として読める翻訳キー・パスは除き、A-07：ユーザー情報のある URL・合言葉は除かない', () => {
+  it('E-09：語として読める翻訳キー・パスは除き、A-07：ユーザー情報のある URL・合言葉は除かない', () => {
     for (const js of ['var s={password:"auth.passwordLabel"}', 'var s={password:"user.newPassword"}', 'var s={password:"/Account/ForgotPassword"}', 'var s={password:"/users/password/new?locale=ja"}'])
       expect(e09(js), js).toEqual([]);
     const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/me label=api sensitive=1\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('api');
@@ -201,7 +199,7 @@ describe('第50回：E-09・A-07 の画面の部品の値、R-04・R-06・E-05',
   });
 });
 
-describe('第51回：文書の仮の値・公開のクライアントのキー・H-02③ の主語・T-09 の重複', () => {
+describe('文書の仮の値・公開のクライアントのキー・H-02③ の主語・T-09 の重複', () => {
   const page = (js: string) => `#TARGET url=https://www.example.com/docs label=t\nHTTP/2 200\ncontent-type: text/html\n\n<html><script>${js}</script></html>\n`;
   it('E-09①：文書の仮の値は秘密の値ではない', () => {
     for (const js of ['var c={api_key:"YOUR_API_KEY_HERE"}', 'var c={client_secret:"<your-client-secret>"}', 'var c={access_token:"INSERT_TOKEN_HERE"}'])
@@ -212,7 +210,7 @@ describe('第51回：文書の仮の値・公開のクライアントのキー�
     const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/config label=api sensitive=1\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('api');
     expect(api('{"algolia":{"appId":"ABCDEF1234","searchOnlyApiKey":"0123456789abcdef0123456789abcdef"}}')).not.toContain('A-07.1');
     expect(api('{"docsearch":{"appId":"ABCDEF1234","apiKey":"0123456789abcdef0123456789abcdef"}}')).not.toContain('A-07.1');
-    // 管理用・マスターのキーも apiKey という名前なので、Algolia・Typesense の apiKey は除かない（束のレビュー）
+    // 管理用・マスターのキーも apiKey という名前なので、Algolia・Typesense の apiKey は除かない
     expect(api('{"algolia":{"appId":"ABCDEF1234","apiKey":"0123456789abcdef0123456789abcdef"}}')).toContain('A-07.1');
     expect(api('{"typesense":{"apiKey":"Xy7Qp2Lm9ZaB3cD4eF5gH6iJ7kL8mN9o"}}')).toContain('A-07.1');
     expect(api('{"posthog":{"api_key":"phc_AbCdEf0123456789AbCdEf0123456789AbCdEf01"}}')).not.toContain('A-07.1');
@@ -228,12 +226,12 @@ describe('第51回：文書の仮の値・公開のクライアントのキー�
     const ev = evaluate(t(1) + t(2)).findings.find(f => f.ruleId === 'T-09.1')?.evidence ?? '';
     expect(ev.match(/tls1_1/g)).toHaveLength(1);
   });
-  it('（束のレビュー）example・sample を含む本物のパスワードは仮の値とみなさない', () => {
+  it('example・sample を含む本物のパスワードは仮の値とみなさない', () => {
     expect(ids(page('var c={password:"my_example_password"}')).filter(i => i === 'E-09.1')).toEqual(['E-09.1']);
   });
 });
 
-describe('第52回：重要度「高」の条件の見逃し', () => {
+describe('重要度「高」の条件の見逃し', () => {
   const SESSION = 'set-cookie: sessionid=Zx9k2LmQ8vT4pR7wN1yB6cH3; Path=/';
   it('C-01①・C-02①：数字だけの Expires（0・-1）はブラウザが無視するので、セッションCookieのまま判定する', () => {
     for (const exp of ['; Expires=0', '; Expires=-1', '; expires=2099']) {
@@ -384,7 +382,7 @@ describe('ルールの登録', () => {
   });
 });
 
-describe('第56回：H-04⑥ の \'unsafe-hashes\'', () => {
+describe('H-04⑥ の \'unsafe-hashes\'', () => {
   const h04 = (csp: string) => evaluate(target('https://a.example/', `${HTML}content-security-policy: ${csp}; object-src 'none'; base-uri 'none'`)).findings.filter(f => f.item === 'H-04' && f.ruleId !== 'H-04.na');   // H-04.na は csp-sample のない横断の⑤
   const HASH = "'sha256-B2yPHKaXnvFWtRChIbabYmUBFZdVfKKXHbWtWidDVF8='";
   it('ハッシュのあるディレクティブの \'unsafe-hashes\' は、情報として出す', () => {
@@ -404,7 +402,7 @@ describe('第56回：H-04⑥ の \'unsafe-hashes\'', () => {
   });
 });
 
-describe('第56回：E-09 の hidden の欄・A-09 の Content-Type の空白・E-04 の Expires', () => {
+describe('E-09 の hidden の欄・A-09 の Content-Type の空白・E-04 の Expires', () => {
   const JWT = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyMTIzNDU2Nzg5MCIsImlzcyI6Imh0dHBzOi8vaWRwIn0.c2lnbmF0dXJlLXNpZ25hdHVyZS1zaWduYXR1cmU';
   const page = (input: string) => target('https://idp.example/', `${HTML}\n<html><body><form method="post" action="https://app.example/cb">${input}</form></body></html>`);
   it('E-09：form_post の id_token の欄は、属性の値に > があっても欄ごと除く', () => {
@@ -426,7 +424,7 @@ describe('第56回：E-09 の hidden の欄・A-09 の Content-Type の空白・
   });
 });
 
-describe('第56回：E-01・A-07 の本文を採取していない応答', () => {
+describe('E-01・A-07 の本文を採取していない応答', () => {
   const only = (input: string, item: string) => evaluate(input).findings.filter(f => f.item === item).map(f => f.ruleId);
   const t = (label: string, url: string, head: string) => `#TARGET url=${url} label=${label}\n${head.trim()}\n`;
   it('E-01：エラーの応答（4xx・5xx）と error-* で本文を採取していないなら na', () => {
@@ -444,7 +442,7 @@ describe('第56回：E-01・A-07 の本文を採取していない応答', () =>
   });
 });
 
-describe('第56回（束のレビュー）：\'unsafe-hashes\' の効くディレクティブと、ポリシーが複数のとき', () => {
+describe('\'unsafe-hashes\' の効くディレクティブと、ポリシーが複数のとき', () => {
   const HASH = "'sha256-B2yPHKaXnvFWtRChIbabYmUBFZdVfKKXHbWtWidDVF8='";
   const h04f = (...csps: string[]) => evaluate(target('https://a.example/', `${HTML}${csps.map(c => `content-security-policy: ${c}; object-src 'none'; base-uri 'none'`).join('\n')}`))
     .findings.filter(f => f.item === 'H-04' && f.ruleId !== 'H-04.na');
@@ -461,7 +459,7 @@ describe('第56回（束のレビュー）：\'unsafe-hashes\' の効くディ�
   });
 });
 
-describe('第56回（束のレビュー）：先頭が0の条件番号', () => {
+describe('先頭が0の条件番号', () => {
   it('H-01.01 は H-01.1 と照合されず効かないのでエラーにする', async () => {
     const { parseProfile } = await import('../src/engine/profile');
     expect(parseProfile(JSON.stringify({ severity: { 'H-01.01': 'low' } })).errors).toEqual(['severity：「H-01.01」は条件番号がH-01にありません（1〜4）']);

@@ -31,7 +31,8 @@ export function loadHar(f: File) {
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));
     state.har = { imp, hosts: defaultHarHosts(imp), name: f.name };
     renderHar(); say('');
-    if (state.last) actions.analyze();              // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない
+    // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない。判定中（初回を含む）なら、読み込んだ HAR も入れて判定し直す
+    if (state.last || actions.isAnalyzing()) actions.analyze();
     if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直してエラーが出たら、そちらを残す
   };
   w.onerror = () => { w.terminate(); if (gen === harLoad) say(() => tr().har.failed('worker')); };
@@ -39,8 +40,9 @@ export function loadHar(f: File) {
 }
 /** HAR を外す。判定結果に HAR のターゲットが残らないよう、貼り付けがあれば判定し直し、なければ結果を消す */
 function removeHar() {
-  cancelHarLoad(); state.har = null; renderHar(); say('');
-  if (!state.last) return;
+  const was = actions.isAnalyzing();
+  cancelHarLoad(); actions.cancelAnalysis(); state.har = null; renderHar(); say('');
+  if (!state.last && !was) return;
   if (refs.input.value.trim()) actions.analyze();
   else { state.last = null; renderEmpty(); }
 }

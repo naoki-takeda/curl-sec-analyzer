@@ -1,4 +1,4 @@
-// CSV の「実施コマンド」「実施日時」の要約（src/export/cmdSummary.ts）の性質のテスト（第31回）。
+// CSV の「実施コマンド」「実施日時」の要約（src/export/cmdSummary.ts）の性質のテスト。
 // 要約は残してよい形だけを残す（許可リスト）。ここでは、出る語がどれも決めた形のどれかであること（許可リストの外の語が出ないこと）と、
 // 値の置き場所に置いた秘密が出ないことを、作った入力の全体で確かめる。許可する形は、実装とは別にここで書き下す
 import { readFileSync } from 'node:fs';
@@ -50,7 +50,7 @@ const VALUE_PLACES: ((t: string) => string[])[] = [
   t => [`https://a.example/cb?access_token=${t}&x=1`], t => [`https://alice:${t}@a.example/`], t => [`https://a.example/reset/${t}`], t => [`https://a.example/x#${t}`],
   t => [`https://a.example/app;jsessionid=${t}`], t => ['-x', `alice:${t}@proxy:3128`], t => [`Authorization:Bearer_${t}`], t => [`api_key==${t}`], t => [`password=${t}`],
   t => [`X-Api-Key:${t}`], t => [t], t => [`'${t}'`], t => [`"a b ${t}"`], t => [`-${t}`], t => [`--${t.toLowerCase()}=${t}`],
-  // 値の中に「_--」「_-」「==」「#」を含むもの（第31回のレビューで見つかった形）
+  // 値の中に「_--」「_-」「==」「#」を含むもの（区切りや名前と読み違えやすい形）
   t => ['-u', `alice:my_--${t}`], t => ['-b', `sid=abc_-${t}`], t => [`X-Token:abc_${t}==`], t => [`https://alice:2024#${t}@a.example/`],
   t => ['-a', `alice:${t}`], t => ['--auth', `alice:${t}`], t => [`admin:${t}@localhost:5000/api`], t => ['--cert-key-pass', t],
 ];
@@ -58,16 +58,16 @@ const VALUE_PLACES: ((t: string) => string[])[] = [
 const USER_PLACES: ((u: string) => string[])[] = [
   u => ['-u', `${u}:pw`], u => [`-u${u}:pw`], u => ['-a', `${u}:pw`], u => [`${u}:pw@localhost:5000/api`], u => [`https://${u}:pw@a.example/`],
   u => ['-x', `${u}:pw@proxy:3128`], u => [`https://${u}:12#pw@a.example/`], u => ['--user', u], u => [`${u}==x`], u => [`${u}:x`],
-  // 「_」「.」「\」を含むユーザー名、数字で始まるパスワード、引用符を含むパスワード（第31回の2回目のレビューで見つかった形）
+  // 「_」「.」「\」を含むユーザー名、数字で始まるパスワード、引用符を含むパスワード（ユーザー情報の途中で切りやすい形）
   u => [`https://svc_${u}:Passw0rd@api.example.com/v1`], u => [`https://${u}.ext_x:pw@h.example/`], u => ['-x', `http://proxy_${u}:Secret99@proxy.local:3128`],
   u => [`https://${u}:12345_x@a.example/`], u => [`https://${u}:"Secret 1"@h.example/`], u => [`https://CONTOSO\\${u}:Secret1@a.example/`],
   u => [`HTTPS://${u}_x:pw@a.example/`], u => [`ftp://${u}_adm:pw@ftp.example/data.tar`], u => [`https://a.example/reset?${u}`], u => [`https://a.example/x?sort=${u}`],
-  // 「.」を含むユーザー名で、URL がユーザー情報の途中で切れるもの（引用符・\"・・・閉じない引用符・数字だけのパスワード・パスの /@。T9 のレビュー）と、
+  // 「.」を含むユーザー名で、URL がユーザー情報の途中で切れるもの（引用符・\"・・・閉じない引用符・数字だけのパスワード・パスの /@）と、
   // 「_」で区切ったコマンドで URL のあとの値の @（-u・-d・-F）
   u => [`https://${u}.doe:2024/@api.example.com/v1`], u => [`'https://${u}.doe:'"$PASS"'@api.example.com/v1'`], u => [`"https://${u}.doe:\\"Pw\\"@api.example.com/v1"`],
   u => [`"https://${u}.doe_svc:Secret@corp.example/`], u => [`https://${u}.doe:1234・abc@a.example.com/x`], u => [`https://${u}.doe:2024#x@localhost:8080/`],
   u => [`https://${u}.doe:p@ss.word_1@host.example/`], u => ['-u', `${u}.doe@corp.example:2024`], u => ['-d', `@${u}-cv.json`], u => ['-F', `file=@${u}-cv.pdf`],
-  // 引用符の中の空白・\ ・・の前の引用符・引用符の入れ子で切れるもの（第33回の2回目のコミット前のレビュー）
+  // 引用符の中の空白・\ ・・の前の引用符・引用符の入れ子で切れるもの（引用符の途中で切りやすい形）
   u => [`https://${u}.doe:2024"my secret"@api.example.com/`], u => [`https://${u}.doe:1234\\ abc@a.example.com/`], u => [`https://${u}.doe:2024"・"y@api.example.com/`],
   u => [`"https://${u}.doe:2024'x・y@api.example.com/"`], u => [`email=x@${u}.example`], u => [`cv=@${u}-cv.pdf`],
 ];
@@ -140,7 +140,7 @@ describe('実施コマンドの要約の性質', () => {
   });
 
   it('URL・引用符・・の多い入力でも、長さを4倍にして時間が4倍程度（2乗なら16倍）', { tags: ['perf'] }, () => {
-    // 閉じない引用符と \"、空のコマンド、ポートのある URL、次のコマンドがあるときの URL の繰り返し（第33回）。URL は1つずつキーの形にするので
+    // 閉じない引用符と \"、空のコマンド、ポートのある URL、次のコマンドがあるときの URL の繰り返し。URL は1つずつキーの形にするので
     // 1つの時間が長い。合計の時間ではなく、長さを4倍にしたときの増え方を見る（並べて動かしたときの遅さで失敗しないように）
     const time = (s: string) => { const t = performance.now(); summarizeCommand(s); return performance.now() - t; };
     for (const make of [(n: number) => `curl${' "\\"'.repeat(n)}`, (n: number) => `curl${' -d "\\'.repeat(n)}`, (n: number) => `curl${'・'.repeat(n)}`,

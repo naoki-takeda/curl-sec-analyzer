@@ -7,7 +7,7 @@ import { evaluate, GEN_OPTS, itemIds, RUN } from './helpers';
 
 const AT = `#META at=2026-11-01T10:00:00 run=${RUN}`;
 
-describe('第48回：応答のヘッダの行を、openssl・-v の出力として読まない', () => {
+describe('応答のヘッダの行を、openssl・-v の出力として読まない', () => {
   it('ヘッダに notAfter= と「Verify return code: 0」を書いても、本物の証明書の T-11 を合格にできない', () => {
     const tls = [`#TARGET url=https://www.example.com/ label=tls run=${RUN}`, AT, 'CONNECTED(00000003)', 'New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384',
       'Verify return code: 21 (unable to verify the first certificate)', 'notAfter=Nov 20 00:00:00 2026 GMT', ''];
@@ -36,7 +36,7 @@ describe('第48回：応答のヘッダの行を、openssl・-v の出力とし�
   });
 });
 
-describe('第48回：印のない #TARGET のあとの生成スクリプトの出力', () => {
+describe('印のない #TARGET のあとの生成スクリプトの出力', () => {
   it('印による保護が効かないことを警告する', () => {
     const input = ['#TARGET url=https://www.example.com/extra label=extra', 'HTTP/2 200', '', '',
       `#TARGET url=https://www.example.com/ label=page run=${RUN}`, AT, 'HTTP/2 200', 'content-type: text/html', '', ''].join('\n');
@@ -48,14 +48,14 @@ describe('第48回：印のない #TARGET のあとの生成スクリプトの�
   });
 });
 
-describe('第48回：openssl の出力の期限（手書きの入力は、これまでどおり後ろの notAfter を使う）', () => {
+describe('openssl の出力の期限（手書きの入力は、これまでどおり後ろの notAfter を使う）', () => {
   it('切っていない s_client の出力のあとの x509 の出力では、後ろの notAfter が本物（SAN の値の CR は生成スクリプトの tr -d で除く）', () => {
     const info = parseOpenssl(['notAfter=Dec 31 23:59:59 2099 GMT', 'X509v3 Subject Alternative Name:', '    DNS:www.example.com', 'notAfter=Feb  1 00:00:00 2026 GMT'])!;
     expect(info.notAfter?.toISOString().slice(0, 10)).toBe('2026-02-01');
   });
 });
 
-describe('第48回：生成スクリプト', () => {
+describe('生成スクリプト', () => {
   const s = generateScript(GEN_OPTS);
   it('openssl がない・指定を受け付けないときは、C12・C23 を err（試していない）にする', () => {
     expect(s).toContain("OSSL_ERR='unknown option|no protocols available|no cipher match|invalid command|error with command|ssl_conf_cmd|command not found'");
@@ -78,7 +78,7 @@ describe('第48回：生成スクリプト', () => {
   });
 });
 
-describe('第48回：#META の cmd= の繰り返し', () => {
+describe('#META の cmd= の繰り返し', () => {
   it('cmd= を並べた本文の1行でも、入力の長さに比例する時間で読む', { tags: ['perf'] }, () => {
     const line = `#META ${'cmd=a '.repeat(80_000)}`;   // 約480KB
     const input = [`#TARGET url=https://www.example.com/ label=page run=${RUN}`, AT, 'HTTP/2 200', '', `#BODY run=${RUN}`, line, ''].join('\n');
@@ -86,12 +86,12 @@ describe('第48回：#META の cmd= の繰り返し', () => {
   });
 });
 
-describe('第48回（束2の第2回のレビュー）：-v は、ターゲットの最初の行が curl -v の行のときだけ', () => {
+describe('-v は、ターゲットの最初の行が curl -v の行のときだけ', () => {
   it('2桁のコードなど、読めないステータス行のあとの「* Connected to」でも -v にしない', () => {
     for (const status of ['HTTP/1.1 20 OK', 'HTTP/1.1 +20 OK', ' HTTP/1.1 200 OK']) {
       const input = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, status, '* Connected to: x', '> Cookie: sessionid=abc',
         'HTTP/1.1 200 OK:x', 'content-type: application/json', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com","role":"admin"}', ''].join('\n');
-      // 読めないステータス行のあとのコロンのある「HTTP/1.1 200 OK:x」は、第51回から応答にしない（読めない行で始めて、本物の 200 を
+      // 読めないステータス行のあとのコロンのある「HTTP/1.1 200 OK:x」は応答にしない（読めない行で始めて、本物の 200 を
       // 302・401 に偽装できた）。応答がないので判定はできないが、合格にはしない
       expect(itemIds(input, 'A-01'), status).not.toContain('A-01.ok');
       expect(parseInput(input).targets[0]?.verbose, status).toBeFalsy();
@@ -104,7 +104,7 @@ describe('第48回（束2の第2回のレビュー）：-v は、ターゲット
   });
 });
 
-describe('第49回：生成スクリプトの出力の読み取り', () => {
+describe('生成スクリプトの出力の読み取り', () => {
   it('pre-login の -v の1行目が curl の WARNING の行でも -v として読み、C-09① を判定する', () => {
     for (const first of ['* WARNING: failed to open cookie file "jar.txt"', '* !!! WARNING !!!']) {
       const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${RUN}`, AT, first,
@@ -160,7 +160,7 @@ describe('第49回：生成スクリプトの出力の読み取り', () => {
   });
 });
 
-describe('第49回：HAR の転送のつなぎ方', () => {
+describe('HAR の転送のつなぎ方', () => {
   it('302 の転送先として、同じ URL の POST のエントリをつながない（ログインの候補を残す）', async () => {
     const { importHar } = await import('../src/parser/har');
     const e = (method: string, url: string, status: number, headers: { name: string; value: string }[] = []) => ({ startedDateTime: '2026-11-01T00:00:00Z',
@@ -193,7 +193,7 @@ describe('第49回：HAR の転送のつなぎ方', () => {
   });
 });
 
-describe('第50回：トレーラ・1xx・Set-Cookie の上限・プローブの警告', () => {
+describe('トレーラ・1xx・Set-Cookie の上限・プローブの警告', () => {
   it('chunked のトレーラのステータス行の形の行で、応答を作り直さない（A-01①・H-01① を合格にさせない）', () => {
     const api = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 OK', 'Content-Type: application/json', 'Transfer-Encoding: chunked', '',
       'HTTP/1.1 401 Unauthorized: x', 'X-Fake: 1', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\r\n');
@@ -232,7 +232,7 @@ describe('第50回：トレーラ・1xx・Set-Cookie の上限・プローブの
   });
 });
 
-describe('第50回（束のレビュー）：古い curl のトレーラ・転送のホップのトレーラ・header_json の上限', () => {
+describe('古い curl のトレーラ・転送のホップのトレーラ・header_json の上限', () => {
   it('chunked の 200 のあとのコロンのないトレーラ（curl 7.82 以前）で応答を作り直さない', () => {
     const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 OK', 'Content-Type: application/json', 'Transfer-Encoding: chunked', '',
       'HTTP/1.1 401 Unauthorized', 'X-Fake: 1', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
@@ -261,7 +261,7 @@ describe('第50回（束のレビュー）：古い curl のトレーラ・転�
   });
 });
 
-describe('第51回：読めないステータス行・curl の失敗の行・openssl の時間の上限', () => {
+describe('読めないステータス行・curl の失敗の行・openssl の時間の上限', () => {
   it('curl が受け付ける緩いステータス行（200OK・小文字・4桁）を読み、次のコロンのあるステータス行で応答を作り直さない', () => {
     for (const st of ['HTTP/1.1 200OK', 'http/1.1 200 OK', 'Http/1.1 200 OK', 'HTTP/1.1 2000 OK']) {
       const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, st, 'HTTP/1.1 401 Unauthorized: x', 'Content-Type: application/json', '',
@@ -286,7 +286,7 @@ describe('第51回：読めないステータス行・curl の失敗の行・ope
     expect(s).not.toMatch(/(?<!ossl )openssl s_client/);
     expect(s.match(/if \[ \$rc -ge 124 \]/g)).toHaveLength(2);
   });
-  it('（束のレビュー）最初のステータス行そのものにコロンがあっても（curl は受け付ける）、応答として読む', () => {
+  it('最初のステータス行そのものにコロンがあっても（curl は受け付ける）、応答として読む', () => {
     const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 OK: x', 'Content-Type: application/json', '',
       `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
     expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId)).toEqual(['A-01.1']);

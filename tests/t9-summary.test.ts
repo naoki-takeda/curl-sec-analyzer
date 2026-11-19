@@ -1,4 +1,4 @@
-// CSV の「実施コマンド」「実施日時」の要約（src/export/cmdSummary.ts）の独立したレビュー（T9、第33回）で見つかった漏れと誤りの再現テスト。
+// CSV の「実施コマンド」「実施日時」の要約（src/export/cmdSummary.ts）の漏れと誤りの再現テスト。
 // 入力はすべて作ったもの（example のホスト、作った名前と値）
 import { describe, expect, it } from 'vitest';
 import { summarizeAt, summarizeCommand as f } from '../src/export/cmdSummary';
@@ -26,7 +26,7 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
       `curl -x "http://first.last:1234\\"x@proxy.example.com:3128" https://a.example.com/`, 'curl https://first.last:1234・abc@a.example.com/x',
       'curl https://first.last:1234\nabc@a.example.com/x', `curl "https://first.last@corp.example.com:"Secret"@api.example.com/v1"`,
       `curl 'https://localhost:1234'x@a.example.com/`,
-      // 空のコマンド・空白を挟んだもの（コミット前のレビュー）
+      // 空のコマンド・空白を挟んだもの
       'curl https://first.last:1234・・abc@a.example.com/x', 'curl https://first.last:1234\n\nabc@a.example.com/x', 'curl https://first.last:1234・ abc@a.example.com/x',
       `curl_'https://first.last:12/c'@api.example.com/`])
       noLeak(s, 'first', 'last', '1234', 'corp', 'Secret');
@@ -47,7 +47,7 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
     noLeak('curl_https://api.example.com_-d_email=alice.smith@contoso.example', 'alice', 'contoso');
     noLeak('curl_https://api.example.com_-H_From:alice@home.example', 'alice', 'home');
     noLeak('http_https://api.example.com_X-Note:alice@home.example', 'alice', 'home');
-    // ユーザー情報の中の「_-x」「_;」などで切れたもの（コミット前のレビューで見つかった、この回の最初の修正の漏れ）
+    // ユーザー情報の中の「_-x」「_;」などで切れたもの
     for (const sep of ['-x', ';x', '|x', '<x', '>x', '&&x', 'https:x'])
       noLeak(`curl_https://john.doe:2024_${sep}@corp.example/`, 'john', '2024');
     noLeak('curl_https://john.doe_-x:pw@corp.example/', 'john');
@@ -58,7 +58,7 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
     noLeak('curl_https://john.doe:p@ss.word_1@host.example/', 'john', 'ss.word', 'word');
   });
 
-  it('2回目のコミット前のレビュー：引用符の中の空白・\\ ・全角の空白、引用符の入れ子、・・改行の前の引用符で切れたもの', () => {
+  it('引用符の中の空白・\\ ・全角の空白、引用符の入れ子、・・改行の前の引用符で切れたもの', () => {
     for (const s of ['curl https://first.last:2024"my secret"@api.example.com/', "curl https://first.last:2024'my secret'@api.example.com/",
       'curl -u x https://first.last:2024"$(pass show api)"@api.example.com/v1', 'curl https://first.last:1234\\ abc@a.example.com/',
       'curl https://first.last:1234　abc@a.example.com/', 'curl https://first.last:1234 abc@a.example.com/',
@@ -69,13 +69,13 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
     noLeak('curl https://first.last@corp.example.com:2024"Se cret"@api.example.com/', 'first', 'corp', '2024');
   });
 
-  it('2回目のコミット前のレビュー：「_」で区切ったコマンドで、ユーザー情報が httpie の項目・ファイル・リダイレクトを越えたもの', () => {
+  it('「_」で区切ったコマンドで、ユーザー情報が httpie の項目・ファイル・リダイレクトを越えたもの', () => {
     for (const s of ['http_POST_https://api.example.com_email=alice@corp.example', 'http_POST_https://api.example.com:8443_email=alice@corp.example',
       'http_POST_https://api.example.com_cv=@alice-cv.pdf', 'http_-f_POST_https://api.example.com_cv@alice-cv.pdf', 'curl_https://api.example.com_2>alice@corp.example'])
       noLeak(s, 'alice', 'corp');
   });
 
-  it('3回目のコミット前のレビュー：閉じない引用符のあとの引用符、2つ以上の・、・の前の全角の空白・NBSP・CR、メールアドレスのユーザー名', () => {
+  it('閉じない引用符のあとの引用符、2つ以上の・、・の前の全角の空白・NBSP・CR、メールアドレスのユーザー名', () => {
     const BS = String.fromCharCode(92);
     for (const s of [`curl "https://first.last:2024'x ・y@api.example.com/"`, `curl 'https://first.last:2024"a"b c@api.example.com/v1`,
       `curl "https://first.last:2024'x y'z w@api.example.com/`, 'curl https://first.last:12・34・56@api.example.com/', 'curl "https://first.last:2024\nk・@api.example.com/v1"',
@@ -87,7 +87,7 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
       noLeak(s, 'first', 'last', 'corp', '2024', '1234', 'Pass');
   });
 
-  it('4回目のコミット前のレビュー：#META の cmd= の値が引用符・空白で切れても、行のあとの @ で URL を伏せる', () => {
+  it('#META の cmd= の値が引用符・空白で切れても、行のあとの @ で URL を伏せる', () => {
     for (const line of [`#META cmd="curl 'https://first.last:'"$PASS"'@example.com/'"`, '#META cmd="curl https://first.last:2024"$SUFFIX"@example.com/"',
       `#META cmd="curl 'https://first.last:2024'"'@example.com/'"`, `#META cmd=curl_'https://first.last:2024 x'@example.com/`, '#META cmd=curl_https://first.last:2024 @example.com/']) {
       const { targets } = parseInput(`#TARGET url=https://a.example/ label=top\n${line}\nHTTP/1.1 200 OK\n\n`);
@@ -97,7 +97,7 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
     expect(targets[0].meta.cmd).toBe('C1');
   });
 
-  it('2回目のコミット前のレビュー：引用符の中に空白がある「_」で区切ったコマンドは、「_」で区切って読む', () => {
+  it('引用符の中に空白がある「_」で区切ったコマンドは、「_」で区切って読む', () => {
     expect(f('curl_-H_"X-Note: a b"_https://a.example.com/')).toBe('curl -H X-Note:**** https://a.example.com/');
     expect(f(`curl_-sS_'https://a.example.com/x'_-d_'a b'`)).toBe('curl -sS https://a.example.com/x -d ****');
   });

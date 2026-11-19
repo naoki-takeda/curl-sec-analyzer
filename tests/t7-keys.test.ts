@@ -1,4 +1,4 @@
-// 第28回（T7：突き合わせのキーをマスクから切り離し、性質のテストを加える）で、性質のテスト（tests/properties.test.ts）が見つけた誤りの再現テスト。
+// 性質のテスト（tests/properties.test.ts）が見つけた、突き合わせのキーとマスクの誤りの再現テスト。
 // 性質のテストは入力を毎回作り直すので、見つけた反例はここに例として残す
 import { describe, expect, it } from 'vitest';
 import { maskText } from '../src/mask';
@@ -36,8 +36,8 @@ describe('突き合わせのキー', () => {
   });
 });
 
-describe('#META cmd= の実施コマンド（第28回の反例。第31回から、残してよい形だけを残す要約）', () => {
-  // 第28回に summarizeCommand で見つかった漏れの入力。要約は値を出さないので、どの入力でも秘密は出ない
+describe('#META cmd= の実施コマンド（残してよい形だけを残す要約）', () => {
+  // 性質のテストが見つけた漏れの入力。要約は値を出さないので、どの入力でも秘密は出ない
   const cases: [string, string[]][] = [
     [`curl_--json_{"password":"pw"}_-HAuthorization:_Bearer_${TOKEN}_-u_alice:pw`, [TOKEN]],
     [`curl_https://a.example/cb?access_token=${TOKEN}_-L_-F_token=Zq8wErT5yUi9oP3a`, [TOKEN, 'Zq8wErT5yUi9oP3a']],
@@ -81,12 +81,12 @@ describe('#META cmd= の実施コマンド（第28回の反例。第31回から�
     summarizeCommand(`curl_-d_${'_-HAuthorization:'.repeat(12000)}`);
     summarizeCommand(`curl_-d_x${'_-Hz:a'.repeat(33000)}`);
     summarizeCommand(`curl_${'Cookie:a…(1 chars)_'.repeat(8000)}`);
-    summarizeCommand(`curl${'_-daaaaa'.repeat(8000)}`);   // 第28回の未対応（summarizeCommand では5万文字で十数秒）
+    summarizeCommand(`curl${'_-daaaaa'.repeat(8000)}`);   // 長い繰り返しでも時間がかからない
     expect(performance.now() - t).toBeLessThan(1500);
   });
 });
 
-describe('画面のマスク（コミット前のレビューで見つかったもの）', () => {
+describe('画面のマスク', () => {
   it('エンコードした URL のホスト名をユーザー情報として伏せない', () => {
     for (const s of ['?next=https%3A//a.example%2Fcb%3Fe=bob@example.com', '/a%20//bob@example.com']) expect(maskText(s)).toBe(s);
   });

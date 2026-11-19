@@ -9,7 +9,7 @@ const LOGOUT = (head: string, body = '') => ['#TARGET url=https://www.example.co
 const AFTER = (body = '') => ['#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1', AT, 'HTTP/2 200', 'content-type: text/html; charset=utf-8', '', body, ''].join('\n');
 const DELETED = 'HTTP/2 302\nlocation: /login\nset-cookie: SESSIONID=deleted; Max-Age=0';
 
-describe('第48回：C-12① ログアウト後', () => {
+describe('C-12① ログアウト後', () => {
   it('本文のない after-logout の 200 は na（本文を採取し直す案内）。本文があれば今までどおり①', () => {
     const na = evaluate(LOGOUT(DELETED) + AFTER()).findings.filter(f => f.item === 'C-12' && f.target === 'after-logout');
     expect(na.map(f => f.ruleId)).toEqual(['C-12.na']);
@@ -28,7 +28,7 @@ describe('第48回：C-12① ログアウト後', () => {
   });
 });
 
-describe('第48回：C-09①・C-07② の比べる Cookie', () => {
+describe('C-09①・C-07② の比べる Cookie', () => {
   const PRE = ['#TARGET url=https://www.example.com/login label=pre-login', AT, 'HTTP/2 200', 'content-type: text/html',
     'set-cookie: JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly',
     'set-cookie: __Secure-next-auth.callback-url=https%3A%2F%2Fwww.example.com%2Fmypage; Path=/; Secure; HttpOnly', '', ''].join('\n');
@@ -56,7 +56,7 @@ describe('第48回：C-09①・C-07② の比べる Cookie', () => {
   });
 });
 
-describe('第48回：生成スクリプトの logout・after-logout', () => {
+describe('生成スクリプトの logout・after-logout', () => {
   it('logout は -v のまま本文も出し、after-logout は本文も取る', async () => {
     const { generateScript } = await import('../src/commands');
     const s = generateScript(GEN_OPTS);
@@ -70,7 +70,7 @@ describe('第48回：生成スクリプトの logout・after-logout', () => {
   });
 });
 
-describe('第48回（束3〜5のレビュー）', () => {
+describe('ログアウトの確認画面・Rails のセッション', () => {
   it('本物のログアウトの画面（WebForms・action のないフォーム・購読のフォーム）を確認画面とみなさず、C-12① を隠さない', () => {
     for (const body of ['<form method="post" action="./Logout.aspx"><input type="hidden" name="__VIEWSTATE" value="x"><p>ログアウトしました</p></form>',
       '<p>ログアウトしました</p><form method="post"><input name="user"><input type="password" name="pw"></form>', '<p>Bye</p><form method="post"><input name="email"><button>Subscribe</button></form>']) {
@@ -99,7 +99,7 @@ describe('第48回（束3〜5のレビュー）', () => {
   });
 });
 
-describe('第49回：ログイン・ログアウトとセッション Cookie', () => {
+describe('ログイン・ログアウトとセッション Cookie', () => {
   const AFTER49 = (ct: string, body: string) => ['#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1', AT, 'HTTP/2 200', `content-type: ${ct}`, '', body, ''].join('\n');
   it('C-12①・A-01①：{"authenticated":false,"message":…} はデータを返していない', () => {
     expect(ids(LOGOUT(DELETED) + AFTER49('application/json', '{"authenticated":false,"message":"Not logged in"}'), 'C-12')).not.toContain('C-12.1');
@@ -154,7 +154,7 @@ describe('第49回：ログイン・ログアウトとセッション Cookie', (
   });
 });
 
-describe('第50回：暗号化した Cookie と解析用の Cookie', () => {
+describe('暗号化した Cookie と解析用の Cookie', () => {
   const lv = (iv: string, value = 'U2Vzc2lvbklEZml4ZWRWYWx1ZUFBQUFBQUFBQUFBQUFBQUFB') => Buffer.from(JSON.stringify({ iv, value, mac: 'a'.repeat(64), tag: '' })).toString('base64');
   it('C-09：Laravel の暗号化したセッションCookie は、値が変わっても再発行したとはみなさない（na）', () => {
     const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, 'HTTP/2 200', `set-cookie: laravel_session=${lv('MTIzNDU2Nzg5MDEyMzQ1Ng==')}; path=/; secure; httponly; samesite=lax`, '', '',
@@ -184,7 +184,7 @@ describe('第50回：暗号化した Cookie と解析用の Cookie', () => {
   });
 });
 
-describe('第51回：主のセッションIDの名前・期限の Cookie', () => {
+describe('主のセッションIDの名前・期限の Cookie', () => {
   it('C-09①：__Host-sid・connect.sid を同じ値で送り直し、別の Cookie を発行しただけのログインは①', () => {
     for (const name of ['__Host-sid', 'connect.sid']) {
       const v = 'a'.repeat(64);
@@ -206,7 +206,7 @@ describe('第51回：主のセッションIDの名前・期限の Cookie', () =>
     expect(page('last_login=1731900000; Path=/; Secure')).toEqual([]);
     expect(page('SESSIONID=1731900000; Path=/; Secure')).toContain('C-02.1');
   });
-  it('（束のレビュー）時刻の語のない名前の Unix 時刻の形の値（auth=1000000001）はセッションIDとして判定し、キャメルケースの sessionExpiry は除く', () => {
+  it('時刻の語のない名前の Unix 時刻の形の値（auth=1000000001）はセッションIDとして判定し、キャメルケースの sessionExpiry は除く', () => {
     const page = (c: string) => evaluate(`#TARGET url=https://www.example.com/ label=top\n${AT}\nHTTP/2 200\nset-cookie: ${c}\n\n`).ids('top').filter(i => i.startsWith('C-02'));
     expect(page('auth_token=1000000042; Path=/; Secure')).toContain('C-02.1');
     expect(page('sessionExpiry=1763460007; Path=/')).toEqual([]);

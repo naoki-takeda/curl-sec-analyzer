@@ -1202,3 +1202,18 @@ v1.0 の範囲を実装し、要確認事項（第44回）を確かめたので�
 | 束のレビュー | 先頭が0の条件番号（`H-01.01`）を受け付けたが、照合（例外は ruleId の文字列、重要度は「項目.条件」）で `H-01.1` と一致せず効かなかった（中）。ポリシーが複数のとき、H-04⑥ を条件番号だけで「同じくらい緩い」と比べ、`'unsafe-inline'` の別のポリシーがあると `'unsafe-hashes'` を消し、短い nonce の別のポリシーがあると出した。`script-src-attr 'none'` があっても `default-src` の `'unsafe-hashes'` を出した（低） | 先頭が0の番号をエラーにする。H-04⑥ は指摘の種類で比べ、`'unsafe-hashes'` は `'unsafe-inline'` のポリシーでも止まらないとする。イベントハンドラに効くディレクティブのものだけを出す | `src/engine/profile.ts`、`src/rules/headers.ts`、`src/rules/csp.ts` |
 | 判断したこと | 本文が実際に空の応答（`-i` の 401 で Content-Length がないもの）と、HAR の HEAD・OPTIONS の応答も、本文を採取していないものと見分けられず na になる。ターゲットはリクエストのメソッドを持たないので、見分けるには入力のモデルを変える必要があり、まれなので今回は直さない | — | — |
 | 未対応 | 古い curl の、CR だけの行をヘッダの値に含む応答（第48回のまま）。印のある入力で、理由句にコロンのある本物の次のホップ（第50回のまま）。巨大な HAR の判定を Worker に移すこと（第50回のまま）。プローブのパターンを実際の応答で確かめること（第44回のまま） | 次回以降 | — |
+
+### 構造・テストの整理（第57回、1.0.0 の公開の前）
+
+第50回・第53回・第43回で「次回以降」とした構造とテストの積み残しを直した。判定の範囲と条件は変えない（ゴールデンの期待結果は、採り直したフィクスチャのものだけが変わる）。第53回の `mask.ts` の `Hider` は第55回で外していた。
+
+| 対象 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 判定を Worker へ（第50回） | 判定（貼り付けと HAR の解析、ルール）をメインスレッドで行い、数万件のターゲットの HAR では画面を止めた | 入力から判定まで（URL 欄の補い・URL 欄の警告・カバレッジを含む）を `engine/analyze.ts` の `analyzeInput` にまとめ、HAR の読み込みと同じ blob: の Worker（`analyzeWorker.ts`）で実行する。判定中は「判定しています…」を出し、判定し直したら前の Worker を止めて古い結果を使わない。`analyze()` は表示したかを返す Promise にし、設定の読み込みのエラーは判定のあとに出す | `src/engine/analyze.ts`、`src/analyzeWorker.ts`、`src/main.ts`、`src/ui/`、`src/i18n.ts`、`tests/analyze.test.ts`、`e2e/app.spec.ts` |
+| バンドル | Worker にルールと csp_evaluator を入れると、画面の側も版の番号と API Top 10 の対応表と実装済みの項目のために `rules/ruleset.ts`・`rules/api.ts` を読み込み、同じコードが2回入った（389KB→610KB） | 版を `src/version.ts`、API Top 10 の対応表を `engine/standards.ts` に移し（元の場所からも export する）、カバレッジは Worker で計算する。画面の側はルールを読み込まない（約437KB） | `src/version.ts`、`src/engine/standards.ts`、`src/rules/ruleset.ts`、`src/rules/api.ts`、`src/export/`、`src/ui/` |
+| フィクスチャ（第43回） | `tests/fixtures/generated_local.txt` は、本文を `#BODY` で分けて採る前の生成スクリプトの出力で、今のスクリプトの形（`#BODY`・`run=` の印、logout・after-logout の本文、`unauth-api`）を確かめていなかった。採り方の記録もなかった | 今の生成スクリプト（apex あり・検証環境の試験あり）を、元と同じく `openssl s_server -WWW` のローカルの HTTPS サーバに向けて Linux（curl 8.18.0・OpenSSL 3.5.5）で実行して採り直し、採り方を `scripts/capture-fixture.sh` にした。ゴールデンの差分は、どのターゲットにも属さない行（古い形の警告の行）がなくなったこと、`unauth-api` の A-01①、本文を採った after-logout の C-12①、T-11 の証跡の日付 | `tests/fixtures/generated_local.txt`、`scripts/capture-fixture.sh`、ゴールデン、CONTRIBUTING.md |
+| テストの経緯（第53回） | テストの名前・コメントに、レビューの回の番号（「第N回」「束のレビュー」「コミット前のレビュー」）が約90か所残っていた | 確かめる内容と理由だけを残す（`tests/regression/` は変えない）。名前のなかった2つの describe には内容の名前を付けた | `tests/`、`e2e/app.spec.ts` |
+| 束のレビュー | 判定中に「消去」「HAR を外す」を押すと、前の入力の結果があとから出た。初回の判定中に読み込んだ設定・HAR が判定に入らなかった。例外を登録したあと、描き直しでフォーカスが body に落ちた（WCAG 2.4.3）。置き換わった判定の Promise が解決しなかった（中・低） | 判定を止める処理を1つ（`cancelAnalysis`）にし、消去・HAR を外すでも止める。判定中も「判定し直す」に含める。フォーカスは描き直したあとに移す。止めた判定の Promise も解決する | `src/main.ts`、`src/ui/har.ts`、`src/ui/dialog.ts`、`src/ui/state.ts` |
+| 2回目の束のレビュー | フォーカスの E2E が描き直す前に通っていた（中）。消去の E2E が遅い環境で何も確かめずに通りうる。置き換わった判定のあとに古い見出しへフォーカスした（低） | 件数のメッセージを待ってから確かめる。待つ時間を延ばす。`analyze()` は表示したかを返し、表示したときだけフォーカスを移す | `e2e/app.spec.ts`、`src/main.ts`、`src/ui/dialog.ts` |
+| 判断したこと | 設定ファイルを読み込んで判定中に別の判定が始まると、読み込みのエラーは一瞬だけ出て、あとから届く件数で消える（以前はまったく出なかった）。判定中は前の結果の表示・エクスポートを残す（届いた結果で置き換える）。Firefox・WebKit の E2E は手元で起動できないので、CI で確かめる | — | — |
+| 未対応 | 古い curl の、CR だけの行をヘッダの値に含む応答（第48回のまま）。印のある入力で、理由句にコロンのある本物の次のホップ（第50回のまま）。本文が実際に空の応答と HAR の HEAD の na（第56回のまま）。プローブのパターンを実際の応答で確かめること（第44回のまま） | 次回以降 | — |

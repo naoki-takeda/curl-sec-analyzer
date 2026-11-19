@@ -1,6 +1,6 @@
 // export/json.ts：Finding の配列、診断カバレッジ、版、生成日時、組織プロファイル、例外一覧、規格の対応表
 import type { Coverage, Finding, Profile, Suppression } from '../model';
-import { RULESET_VERSION, TOOL_VERSION } from '../rules/ruleset';
+import { RULESET_VERSION, TOOL_VERSION } from '../version';
 import { standardsTable } from '../engine/standards';
 
 export function toJson(fs: Finding[], cov: Coverage[], suppressions: Suppression[], generatedAt = new Date(), profile?: Profile): string {

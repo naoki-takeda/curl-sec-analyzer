@@ -63,7 +63,7 @@ describe('A1 生成スクリプト：login は本文も採取する', () => {
   });
   it('pre-login は今までどおり -v（送った Cookie の名前を C-09 で使う）', () => {
     const pre = s.split('\n').findIndex(l => l.includes('label=pre-login'));
-    // -b jar.txt は付けない（スクリプトの初めに jar.txt を消すので、-v の1行目に cookie file の警告を出した。第49回）
+    // -b jar.txt は付けない（スクリプトの初めに jar.txt を消すので、-v の1行目に cookie file の警告が出る）
     expect(s.split('\n').slice(pre, pre + 3).join('\n')).toMatch(/curl .*-v -o \/dev\/null -c jar\.txt "\$H"/);
   });
 });
