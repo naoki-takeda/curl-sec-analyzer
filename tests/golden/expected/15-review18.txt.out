@@ -42,7 +42,7 @@ about | R-04.na | info | na | ACAOなし（Origin を送っていない、また
 about | T-12.ok | info | pass | HTTP/2
 after-logout | C-12.na | info | na | 旧Cookieでの認証後ページが HTTP 200（SPA の画面。旧Cookie が使えたかは分からない）
 cors-reflect | R-01.1 | high | fail | Origin: https://evil.example → ACAO: https://evil.example / ACAC: true
-cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）
+cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない。Origin: null を送ったターゲットで判定）
 cors-reflect | R-04.ok | info | pass | ACAO: https://evil.example
 cors-reflect | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
 csp-sample-* | H-04.na | info | na | 
@@ -170,7 +170,7 @@ H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定�
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=4
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-08 | evaluated | fails=4 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）
+H-08 | evaluated | fails=4 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答は対象外）
 H-09 | evaluated | fails=4
 H-10 | evaluated | fails=4
 H-11 | evaluated | fails=3 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける

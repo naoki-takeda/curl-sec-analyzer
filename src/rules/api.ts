@@ -1,9 +1,9 @@
 // rules/api.ts：第6章 WebAPI（A-01〜A-03、A-07〜A-11。A-04〜A-06は手動確認）
 import type { CrossContext, Finding, HttpResponse, Rule, RuleContext } from '../model';
-import { baseLabel, finalResponse, responseKind, sameDocumentHop, targetUrl } from '../parser/target';
+import { baseLabel, finalResponse, isRedirectWithLocation, responseKind, sameDocumentHop, targetUrl } from '../parser/target';
 import { JWT_IN_TEXT } from '../parser/setCookie';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { FOLLOW_REC, NO_BODY_REC, NO_CONTENT_REC, bodyNotCaptured, cf, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, noResponse, notSecretFormat, notSecretText, nothingToSniff, zeroLength } from './util';
+import { FOLLOW_REC, NO_BODY_REC, NO_CONTENT_REC, bodyNotCaptured, cf, cspPolicies, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, noResponse, notSecretFormat, notSecretText, nothingToSniff, zeroLength } from './util';
 import { loginForm } from './html';
 import { b64urlJson } from './jwt';
 
@@ -25,7 +25,7 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     // 本文のない応答は、スニッフィングされる本文がない（H-08 と同じ）
     if (nothingToSniff(ctx)) return out.length ? out : [mk(jsonHeaders, ctx, 'na', 'info', 'na', `HTTP ${f.status}（本文のない応答）`, NO_CONTENT_REC)];
     if (!isNosniff(ctx)) out.push(mk(jsonHeaders, ctx, 2, 'medium', 'fail', 'nosniff なし', 'X-Content-Type-Options: nosniff'));
-    if (!header(ctx, 'content-security-policy').length) out.push(mk(jsonHeaders, ctx, 3, 'info', 'fail', 'CSPなし', "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"));
+    if (!cspPolicies(ctx).length) out.push(mk(jsonHeaders, ctx, 3, 'info', 'fail', 'CSPなし', "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"));
     return out.length ? out : [mk(jsonHeaders, ctx, 'ok', 'info', 'pass', ct, '')];
   } };
 
@@ -78,13 +78,13 @@ function basicOverHttp(ctx: RuleContext): string | undefined {
 export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', appliesTo: 'any', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API2'],
   run(ctx) {
-    const f = ctx.final; if (!f) return [];
+    const f = ctx.final; if (!f) return ctx.target.label.startsWith('unauth-') ? [noResponse(unauthAccess, ctx)] : [];
     const www = (f.headers.get('www-authenticate') ?? []).join(', ');
     const basic = ctx.isHttps === false ? basicOverHttp(ctx) : undefined;
     if (basic) return [mk(unauthAccess, ctx, 3, 'high', 'fail', `HTTPで WWW-Authenticate: ${basic}`, 'Basic認証はHTTPSだけで受け付ける')];
     if (!ctx.target.label.startsWith('unauth-')) return [];   // ①②は認証情報を付けずに送ったターゲット（unauth-*）だけ
     if (ctx.target.sentAuth) return [mk(unauthAccess, ctx, 'na', 'info', 'na', '認証情報（Cookie・Authorization）を送っている', 'unauth-* は認証情報を付けずに採取する')];
-    const { hop, r, unfollowed, status: s } = judged(ctx);
+    const { r, unfollowed, status: s } = judged(ctx);
     if (unfollowed) return [mk(unauthAccess, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, FOLLOW_REC)];
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!s) return [mk(unauthAccess, ctx, 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
@@ -107,7 +107,8 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
       }
       return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
     }
-    if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${hop?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
+    // 転送先のない 3xx（条件付きの GET の 304 など）は転送ではない（下で、認証で守られているかは分からない na）
+    if (isRedirectWithLocation(r)) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${r?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
     // 合格は、認証を求めた・断られた応答（401・403）と、メソッドで断られた応答（405）だけ。404（URL の誤りの可能性）と 5xx（認証の前に
     // 落ちた可能性）、400・429 などは、認証で守られているかが分からない（A-08 と同じ考え方）
     if (s !== 401 && s !== 403 && s !== 405) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（認証で守られているかは分からない）`, '存在する API の URL で、認証情報を付けずに採取し直す')];
@@ -137,7 +138,8 @@ export const tokenExposure: Rule = { id: 'A-02', title: 'トークンの露出',
     const tokenEndpoint = (() => { try { return /\/token\/?$/i.test(new URL(ctx.target.url ?? '').pathname); } catch { return false; } })();
     if (!['login', 'pre-login'].includes(baseLabel(ctx.target.label)) && !tokenEndpoint && /"refresh_token"\s*:\s*"[^"]{16,}"/.test(body))
       out.push(mk(tokenExposure, ctx, 2, 'medium', 'fail', '本文に refresh_token（値は表示しない）', 'ログイン・トークン発行以外の応答で長期トークンを返さない'));
-    return out.length ? out : [mk(tokenExposure, ctx, 'ok', 'info', 'pass', 'URL・Location・本文にトークンなし', '')];
+    // 本文を採取していない API の応答では、本文の refresh_token（②）は見ていない
+    return out.length ? out : [mk(tokenExposure, ctx, 'ok', 'info', 'pass', ctx.responseKind === 'api' && bodyNotCaptured(ctx) ? 'URL・Location にトークンなし（本文は採取していない）' : 'URL・Location・本文にトークンなし', '')];
   } };
 
 /** JWT の header と payload をデコードする（署名は検証しない。値は画面に出さない） */

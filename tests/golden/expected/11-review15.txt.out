@@ -18,7 +18,7 @@ reset | https://www.example.com/reset/AbCd…(22 chars) | key=reset | responses=
 ## findings
 after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200（同じページへの転送のあと）
 cors-preflight | R-01.2 | medium | fail | Origin: https://evil.example → ACAO: https://evil.example
-cors-preflight | R-02.na | info | na | Origin: (不明)（null では試していない）
+cors-preflight | R-02.na | info | na | Origin: (不明)（null では試していない。Origin: null を送ったターゲットで判定）
 cors-preflight | R-04.ok | info | pass | ACAO: https://evil.example
 cors-preflight | R-05.1 | medium | fail | ACAO: https://evil.example / Allow-Methods: GET, PUT, DELETE
 csp-sample-* | H-04.na | info | na | 

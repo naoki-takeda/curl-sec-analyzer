@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { AT, evaluate, fixture, sampleText, target } from './helpers';
-import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../src/rules/ruleset';
+import { AT, evaluate, fixture, itemIds, sampleText, target } from './helpers';
+import { ALL_CROSS_RULES, HOST_RULES, IMPLEMENTED, TARGET_RULES } from '../src/rules/ruleset';
+import { coverage } from '../src/engine/coverage';
 
 const HTML = 'HTTP/2 200\ncontent-type: text/html\n';
 const ids = (input: string) => evaluate(input).ids('t');
@@ -532,5 +533,69 @@ describe('拡張子・Content-Type・プロトコルの名前', () => {
   it('T-09：旧バージョンのプローブがないときは、手元の OpenSSL のせいにしない', () => {
     const r = evaluate('#TARGET url=https://www.example.com/ label=tls\n#TLSPROBE v=tls1_2 ok=1\n#TLSPROBE v=tls1_3 ok=1\n');
     expect(r.findings.find(f => f.ruleId === 'T-09.na')?.evidence).toContain('#TLSPROBE がない');
+  });
+});
+
+describe('転送・304・5xx の応答で合格にしない', () => {
+  const one = (label: string, url: string, head: string, item: string) => itemIds(`#TARGET url=${url} label=${label}\n${head}\n\n`, item);
+  it('E-03・E-13①：プローブが転送された（apex から www へ）なら、取得できなかったとして合格にしない', () => {
+    const r = evaluate(['#TARGET url=https://example.com/ label=probes',
+      ...['/.git/HEAD', '/.env', '/backup.zip', '/app.js.map'].map(p => `#PROBE path=${p} head= code=301 size=0 ct=text/html`), ''].join('\n'));
+    const e03 = r.findings.filter(f => f.item === 'E-03'); const e13 = r.findings.filter(f => f.item === 'E-13');
+    expect(e03.map(f => f.ruleId)).toEqual(['E-03.na']); expect(e03[0].evidence).toContain('転送された');
+    expect(e13.map(f => f.ruleId)).toEqual(['E-13.na']);
+  });
+  it('A-01②：転送先のない 304 は、ログイン画面への転送ではない', () => {
+    expect(one('unauth-me', 'https://a.example/api/me', 'HTTP/2 304\netag: "x"', 'A-01')).toEqual(['A-01.na']);
+    expect(one('unauth-me', 'https://a.example/api/me', 'HTTP/2 302\nlocation: /login', 'A-01')).toEqual(['A-01.2']);
+    expect(evaluate('#TARGET url=https://a.example/api/me label=unauth-me\nHTTP/2 302\nlocation: /login\n\n').findings.find(f => f.ruleId === 'A-01.2')?.evidence).toContain('/login');
+  });
+  it('E-05：304 は公開していないとは言えない', () => {
+    expect(one('t', 'https://a.example/actuator/env', 'HTTP/2 304', 'E-05')).toEqual(['E-05.na']);
+  });
+  it('E-02：転送の応答の本文（nginx の 301 の画面）で「一覧表示なし」にしない', () => {
+    expect(one('t', 'https://a.example/images', 'HTTP/1.1 301 Moved Permanently\ncontent-type: text/html\nlocation: https://a.example/images/\n\n<html><title>301 Moved Permanently</title></html>', 'E-02')).toEqual([]);
+  });
+  it('E-04：robots.txt の 5xx は na', () => {
+    expect(one('t', 'https://a.example/robots.txt', 'HTTP/2 503\ncontent-type: text/html', 'E-04')).toEqual(['E-04.na']);
+  });
+  it('E-06・E-13②：2xx でない応答（404 の画面・ログインへの転送）は、反映・参照がないことを示さない', () => {
+    expect(one('t', 'https://a.example/api?callback=cb', 'HTTP/2 404\ncontent-type: text/html\n\n<h1>Not found</h1>', 'E-06')).toEqual([]);
+    expect(one('t', 'https://a.example/static/app.js', 'HTTP/2 404\ncontent-type: text/html\n\n<h1>Not found</h1>', 'E-13')).toEqual([]);
+    expect(one('t', 'https://a.example/static/app.js', 'HTTP/2 302\nlocation: /login', 'E-13')).toEqual([]);
+    expect(one('t', 'https://a.example/static/app.js', 'HTTP/2 200\ncontent-type: text/javascript\n\nconsole.log(1)', 'E-13')).toEqual(['E-13.ok']);
+  });
+  it('A-09③：空の Content-Security-Policy は CSP なし', () => {
+    expect(one('t', 'https://a.example/api/me', 'HTTP/2 200\ncontent-type: application/json\nx-content-type-options: nosniff\ncontent-security-policy: \n\n{"a":1}', 'A-09')).toEqual(['A-09.3']);
+  });
+  it('A-01・R-05：ラベルが当てはまるターゲットに応答がなければ na（適用外にしない）', () => {
+    expect(one('unauth-me', 'https://a.example/api/me', 'HTTP/1.1 200 Connection established', 'A-01')).toEqual(['A-01.na']);
+    expect(one('cors-preflight', 'https://a.example/api', 'HTTP/1.1 200 Connection established', 'R-05')).toEqual(['R-05.na']);
+  });
+});
+
+describe('CORS のカバレッジと Cookie の二重の指摘', () => {
+  it('R-01・R-02：cors-evil と cors-null を採取していれば、互いのターゲットを入力不足に数えない', () => {
+    const v = (label: string, origin: string) => [`#TARGET url=https://a.example/api label=${label}`, '* Connected to a.example (192.0.2.1) port 443', '> GET /api HTTP/2',
+      `> Origin: ${origin}`, '>', '< HTTP/2 200', '< content-type: application/json', '<', ''];
+    const input = [...v('cors-evil', 'https://evil.example'), ...v('cors-null', 'null')].join('\n');
+    const { findings } = evaluate(input);
+    const cov = coverage(findings, IMPLEMENTED);
+    for (const id of ['R-01', 'R-02']) expect(cov.find(c => c.item === id)).toMatchObject({ status: 'evaluated', reasons: [] });
+  });
+  it('R-01：送った Origin の見えない -i の cors-partial は R-03 に任せる（ACAO がないことで合格にしない）', () => {
+    expect(itemIds('#TARGET url=https://a.example/api label=cors-partial\nHTTP/2 200\ncontent-type: application/json\n\n', 'R-01')).toEqual([]);
+  });
+  it('C-01・C-10：http から -L で https に転送したとき、http のホップの同じ Cookie を両方で指摘しない', () => {
+    const sid = `sessionid=${'0123456789abcdef'.repeat(2)}; path=/; httponly; samesite=lax`;
+    const r = evaluate(['#TARGET url=http://a.example/ label=t', 'HTTP/1.1 301 Moved Permanently', 'location: https://a.example/', `set-cookie: ${sid}`, '',
+      'HTTP/2 200', 'content-type: text/html', ''].join('\n'));
+    const fails = r.findings.filter(f => f.status === 'fail' && /^C-(?:01|10)/.test(f.ruleId)).map(f => f.ruleId);
+    expect(fails).toEqual(['C-01.1']);
+    expect(r.findings.find(f => f.ruleId === 'C-10.1')?.dedupedBy).toBe('C-01.1');
+  });
+  it('C-10：分割した Cookie の印（chunks-2）は中身と別に数えない', () => {
+    const r = evaluate(target('http://a.example/', `HTTP/1.1 200 OK\ncontent-type: text/html\nset-cookie: .AspNetCore.Cookies=chunks-2; path=/\nset-cookie: .AspNetCore.CookiesC1=${'a'.repeat(40)}; path=/\nset-cookie: .AspNetCore.CookiesC2=${'b'.repeat(40)}; path=/`));
+    expect(r.findings.filter(f => f.item === 'C-10' && f.status === 'fail')).toHaveLength(2);
   });
 });

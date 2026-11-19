@@ -76,6 +76,15 @@ export function download(name: string, type: string, body: string) {
 export const focusable = <T extends HTMLElement>(n: T, key: string): T => { n.dataset.focus = key; return n; };
 export const focusedKey = () => (document.activeElement as HTMLElement | null)?.dataset?.focus;
 export const restoreFocus = (box: ParentNode, key: string | undefined) => { if (key) box.querySelector<HTMLElement>(`[data-focus="${CSS.escape(key)}"]`)?.focus(); };
+/**
+ * 結果を描き直して、フォーカスが落ちた（body にある・描き直しで消えた・隠した入力欄にある）ときだけ、結果の最初の見出しに移す（WCAG 2.4.3。
+ * 例外の登録のボタン、空の画面の「サンプルで試す」、Ctrl+Enter で判定した入力欄）。判定し直しを待つあいだに利用者が移したフォーカスは奪わない
+ */
+export function focusResultsIfLost(results: ParentNode) {
+  const a = document.activeElement as HTMLElement | null;
+  if (a && a !== document.body && a.isConnected && a.getClientRects().length) return;
+  const h = results.querySelector<HTMLElement>('h2'); if (h) { h.tabIndex = -1; h.focus(); }
+}
 
 /** 折りたたみ（details）の見出しの先頭に付ける開閉の目印。summary を flex にするとブラウザの三角が消えるため自前で付ける */
 export const disclosure = () => { const s = el('span', 'disclosure inline-block w-4 shrink-0 text-muted'); s.setAttribute('aria-hidden', 'true'); return s; };

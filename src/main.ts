@@ -11,7 +11,7 @@ import { legacyHarKey } from './engine/targetKey';
 import { RULESET_VERSION, TOOL_VERSION } from './version';
 import { type Lang, getLang, setLang, tr } from './i18n';
 import sample from './sample.txt?raw';   // 「サンプルを入れる」の入力例（値はすべてダミー。192.0.2.0/24 は文書用のアドレス）
-import { BTN, LINK, PRIMARY, button, download, el, fileInput as hidden, labelFor, link, reducedMotion } from './ui/dom';
+import { BTN, LINK, PRIMARY, button, download, el, fileInput as hidden, focusResultsIfLost, labelFor, link, reducedMotion } from './ui/dom';
 import { type AnalyzeSource, type AnalyzedInput, type Message, actions, refs, state } from './ui/state';
 import { render, renderEmpty } from './ui/results';
 import { cancelHarLoad, loadHar, renderHar } from './ui/har';
@@ -63,7 +63,7 @@ function buildShell() {
     if (list.length || !errors.length) state.suppressions = list;
     // * を含むものは、以前の形式のキーでもパターンとして照合する（engine/suppress.ts の matches）ので、登録し直しを促さない
     const legacy = list.filter(s => !s.target.includes('*') && legacyHarKey(s.target)).length;
-    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors)) : legacy ? t.legacyHarKeys(legacy) : ''; });
+    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsName, joinMessages(errors)) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
   const profIn = hidden('.json,application/json', async f => {
     const text = await readSettings(f, MAX_BYTES); if (text === undefined) return;
@@ -75,7 +75,7 @@ function buildShell() {
     // （判定に使うプロファイルと食い違わないため）
     if (p && !kept && state.har) { const chains = state.har.imp.chains; withProfile(p, () => suggestLabels(chains, true)); renderHar(); }
     // 残したときは、そのことを知らせる（「既定の24時間を使います」などのエラーの文言だけでは、古いプロファイルを使い続けることが分からない）
-    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.loadProfile, joinMessages(errors)) + (kept ? t.profileKept : '') : ''; });
+    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.profileName, joinMessages(errors)) + (kept ? t.profileKept : '') : ''; });
   });
   const baseIn = hidden('.json,application/json', async f => {
     // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超えるので、貼り付けと同じ上限では自分のエクスポートを読めない）
@@ -132,9 +132,9 @@ async function readSettings(f: File, limit: number): Promise<string | undefined>
   if (f.size > limit) { say(() => tr().settingsTooLarge(limit / 1024 / 1024)); return undefined; }
   return f.text();
 }
-/** 入力・HAR・結果を消す（設定ファイルは残す） */
+/** 入力（URL 欄を含む）・HAR・結果を消す（設定ファイルは残す。URL 欄を残すと、次に貼った別のサイトの出力を前の URL で判定する） */
 function clearAll() {
-  refs.input.value = ''; cancelAnalysis(); cancelHarLoad(); state.har = null; renderHar(); say();
+  refs.input.value = ''; refs.urlInput.value = ''; cancelAnalysis(); cancelHarLoad(); state.har = null; renderHar(); say();
   state.last = null; state.view.inputHidden = false; applyInputVisibility(); renderEmpty(); refs.input.focus();
 }
 function keepDraft() { state.draft = { input: refs.input.value, url: refs.urlInput.value }; }
@@ -191,9 +191,9 @@ async function openFile(f: File) {
 }
 // 判定の世代と、判定中の Worker・その Promise の解決。判定し直したり、消去・HAR を外すを押したりしたら、前の Worker を止め、前の結果は
 // 使わない（古い結果で新しい入力の表示を上書きしない）。止めた判定の Promise も解決する（待っている呼び出し側を止めたままにしない）
+let analyzeGen = 0; let analyzing: { worker: Worker; settle: (shown: boolean) => void; text: string; url: string; source: AnalyzeSource } | undefined;
 // 最後に表示した結果が、表示中の結果の入力で判定し直したもので、入力欄がその入力と違ったか（入力欄の変更をまだ判定していない）
 let formNotAnalyzed = false;
-let analyzeGen = 0; let analyzing: { worker: Worker; settle: (shown: boolean) => void; text: string; url: string; source: AnalyzeSource } | undefined;
 /** 判定中の Worker を止める（結果は使わない） */
 function cancelAnalysis() {
   analyzeGen++;
@@ -270,7 +270,7 @@ function show({ targets, warnings, findings, cov }: AnalyzeResult, input: Analyz
   // 判定できたら、生の出力を隠す。書き換えた入力欄は隠さない（書き換えている途中の入力欄を隠さない）
   if (input.text.trim() && !formNotAnalyzed) state.view.inputHidden = true;
   applyInputVisibility();
-  render();
+  render(); focusResultsIfLost(refs.results);
   // 件数は画面の集計（項目×条件で一意に数える。ui/results.ts と同じ）に合わせる。ターゲットごとの指摘を数えると、画面と違う数を読み上げる
   const rows = overall(findings); const high = countBySeverity(rows).high;
   const note = formNotAnalyzed;

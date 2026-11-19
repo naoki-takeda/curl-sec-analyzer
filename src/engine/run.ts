@@ -19,18 +19,25 @@ const HTML_ONLY_ITEMS = new Set(['H-03', 'H-04', 'H-05', 'H-06', 'H-07', 'H-09',
 
 /**
  * 二重減点の除去（第0章 0.2「同じ事象は1つの項目でだけ減点」、評価順序の⑧）。
- * 同じターゲットで keep が fail のとき、drop の fail は数えない（status を na にし、dedupedBy に keep を残す）
+ * 同じターゲットで keep が fail のとき、drop の fail は数えない（status を na にし、dedupedBy に keep を残す）。
+ * perCookie は Cookie ごとの指摘で、同じ Cookie（証跡の末尾の「（…）」の注記を除いて同じ）のときだけ数えない
  */
-const DEDUPE: { keep: string; drop: string; why: string }[] = [
+const DEDUPE: { keep: string; drop: string; why: string; perCookie?: boolean }[] = [
   { keep: 'A-09.2', drop: 'H-08.1', why: 'API応答の nosniff なしは A-09② で数える' },
   { keep: 'A-09.3', drop: 'H-03.1', why: 'API応答の CSP なしは A-09③ で数える' },
   { keep: 'A-09.1', drop: 'H-13.2', why: 'JSON を text/html で返す件は A-09① で数える（第0章 0.2）' },
+  // http から -L で https に転送したターゲットの、http のホップが発行した Secure のない Cookie（C-01 は https のターゲットのすべてのホップを見る）
+  { keep: 'C-01.1', drop: 'C-10.1', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
+  { keep: 'C-01.2', drop: 'C-10.2', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
+  { keep: 'C-01.3', drop: 'C-10.2', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
 ];
+/** perCookie の突き合わせのキー：Cookie の証跡（C-01②③の「（ホストのHSTSなし…）」の注記を除く） */
+const cookieKey = (ev: string) => ev.replace(/（[^（）]*）$/, '');
 function dedupe(fs: Finding[]): Finding[] {
-  const fails = new Set(fs.filter(f => f.status === 'fail').map(f => `${f.ruleId}\u0000${f.target}`));
+  const fails = new Set(fs.filter(f => f.status === 'fail').flatMap(f => [`${f.ruleId}\u0000${f.target}`, `${f.ruleId}\u0000${f.target}\u0000${cookieKey(f.evidence)}`]));
   return fs.map(f => {
     if (f.status !== 'fail') return f;
-    const d = DEDUPE.find(x => x.drop === f.ruleId && fails.has(`${x.keep}\u0000${f.target}`));
+    const d = DEDUPE.find(x => x.drop === f.ruleId && fails.has(`${x.keep}\u0000${f.target}${x.perCookie ? `\u0000${cookieKey(f.evidence)}` : ''}`));
     return d ? { ...f, status: 'na', dedupedBy: d.keep, recommendation: `${d.keep} として数える（${d.why}）` } : f;
   });
 }

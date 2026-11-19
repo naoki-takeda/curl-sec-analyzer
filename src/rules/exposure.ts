@@ -2,8 +2,8 @@
 import type { HttpResponse, Rule, RuleContext } from '../model';
 import { clip } from '../mask';
 import { probePattern } from './probes';
-import { ASSET_CT, FOLLOW_REC, NO_BODY_REC, PROBE_UNREACHED_REC, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk, noContent } from './util';
-import { baseLabel, ownChain } from '../parser/target';
+import { ASSET_CT, FOLLOW_REC, NO_BODY_REC, PROBE_REDIRECT_REC, PROBE_UNREACHED_REC, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk, noContent } from './util';
+import { baseLabel, isRedirectWithLocation, ownChain } from '../parser/target';
 import { allowedItems } from '../engine/labels';
 import { AWS_KEY, noHtmlBody } from './html';
 
@@ -103,7 +103,8 @@ export const dirListing: Rule = { id: 'E-02', title: 'ディレクトリリス�
     // オブジェクトストレージの一覧（S3・GCS の <ListBucketResult>、Azure Blob の <EnumerationResults>）も一覧表示（XML の応答）
     const bucket = b?.match(/^\s*(?:<\?xml[^>]*>\s*)?<(ListBucketResult|EnumerationResults)\b/);
     if (bucket) return [mk(dirListing, ctx, 1, 'medium', 'fail', `${bucket[1]}（オブジェクトストレージの一覧）`, 'バケット・コンテナの一覧の公開を無効にする（S3 のブロックパブリックアクセス、Azure のコンテナのアクセスレベルを private に）')];
-    if (ctx.responseKind !== 'html') return [];
+    // 転送の応答の本文（nginx の「301 Moved Permanently」の画面）は、転送先が一覧かどうかを示さない
+    if (ctx.responseKind !== 'html' || isRedirectWithLocation(ctx.final)) return [];
     if (!b) return noHtmlBody(dirListing, ctx);
     // nginx・Apache の「Index of /」、Python の http.server、IIS の「[To Parent Directory]」、Tomcat の「Directory Listing For [/…]」、
     // Jetty の「<title>Directory: /…」、Express の serve-index の「listing directory /…」
@@ -138,6 +139,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     if (/\/robots\.txt$/.test(p)) {
       // 転送（3xx）を -L なしで採取したものは、転送先の robots.txt を見ていない
       if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, FOLLOW_REC)];
+      // 5xx は、robots.txt がないとは言えない（一時的な障害の可能性。E-05 の 5xx と同じく na）
+      if (st >= 500) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラーで、robots.txt があるかは分からない）`, '時間をおいて採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
       if (!b) return bodyNotCaptured(ctx) ? noBody() : st === 304 ? [] : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt が空（HTTP ${st}）`, '')];
       // どのパスにも index.html を返す SPA の 200 は robots.txt ではない（なしとして合格）。HTML かは本文で見る（robots.txt を text/html で返す
@@ -229,6 +232,8 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     if (!f.status) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
     // 5xx は、公開していないとは言えない（認証の前に落ちた・一時的な障害の可能性。A-01 の 5xx と同じく na）
     if (f.status >= 500) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。サーバのエラーで、公開しているかは分からない）`, '時間をおいて採取し直す')];
+    // 304 は、条件付きのリクエストにキャッシュがまだ新しいと答えたもの（そのパスは公開されている）
+    if (f.status === 304) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP 304。キャッシュの確認の応答で、公開しているかは分からない）`, 'If-None-Match・If-Modified-Since を付けずに採取し直す')];
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     // ①②は「未認証で使える・公開されている」。Cookie・Authorization を送った応答の 200 では、未認証で使えるかは分からない
     if (ctx.target.sentAuth) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。Cookie・Authorization を送った応答で、未認証で使えるかは分からない）`, 'Cookie・Authorization を付けずに採取し直す')];
@@ -261,7 +266,8 @@ export const jsonp: Rule = { id: 'E-06', title: 'JSONP', appliesTo: 'any', scope
     // 「cb(」「/**/cb(」のほか、Express の res.jsonp の形「/**/ typeof cb === 'function' && cb(」も JSONP とみなす
     const esc = cb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const hit = new RegExp(`^(?:/\\*\\*/\\s*)?(?:typeof\\s+${esc}\\s*===?\\s*['"]function['"]\\s*&&\\s*)?${esc}\\s*\\(`).test(b.slice(0, 2048));
-    if (!hit) return [mk(jsonp, ctx, 'ok', 'info', 'pass', `callback=${cb} は本文に反映されない`, '')];
+    // 2xx でない応答（404 の画面など）に反映されないことは、JSONP の API がないことを示さない（設計書の対象は 2xx）
+    if (!hit) return ctx.final.status && (ctx.final.status < 200 || ctx.final.status >= 300) ? [] : [mk(jsonp, ctx, 'ok', 'info', 'pass', `callback=${cb} は本文に反映されない`, '')];
     // 機密かどうか分からないときは①を判定しない（第0章 0.3）。JSONP があることは確かなので、より弱い②として出す
     if (ctx.sensitive === undefined) return [mk(jsonp, ctx, 2, 'low', 'fail', `本文が ${cb}( で始まる（機密応答かどうか分からない）`, 'JSONP をやめる。機密応答なら①（高）にあたる（#TARGET に sensitive=1 か sensitive=0 を付ける）')];
     return ctx.sensitive
@@ -319,9 +325,10 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     const maps = ctx.target.probes.filter(p => /\.map$/.test(p.path));
     if (maps.length) {                                         // ① probes ラベル：.map を取得できるか
       const got = maps.filter(p => probePattern(p.path, p.headB64, p.code)?.name === 'source-map');
-      const unreached = maps.filter(p => !p.code).length;
+      const unreached = maps.filter(p => !p.code).length; const redirected = maps.filter(p => p.code >= 300 && p.code < 400).length;
       return got.length ? got.map(p => mk(sourceMap, ctx, 1, 'medium', 'fail', `${p.path}（HTTP ${p.code}、一致したパターン: source-map）`, '本番では .map を配信しない（sourcesContent に元のソースがあるかは手動で確認）'))
         : unreached ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC)]
+        : redirected ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${redirected}件は転送された（HTTP 3xx。転送先を確かめていない）`, PROBE_REDIRECT_REC)]
         : [mk(sourceMap, ctx, 'ok', 'info', 'pass', `${maps.length}件の .map は取得できなかった`, '')];
     }
     if (!ctx.final) return [];
@@ -329,6 +336,9 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     const ref = header(ctx, 'sourcemap')[0] ?? header(ctx, 'x-sourcemap')[0] ?? b?.match(/\/[/*]#\s*sourceMappingURL=(\S+)/)?.[1];
     const isJs = /javascript|ecmascript/i.test(header(ctx, 'content-type')[0] ?? '') || /\.m?js$/.test(path(ctx));   // 拡張子はパスで見る（クエリの ?name=lib.js で JS にしない）
     if (!isJs && !ref) return [];
+    // 拡張子で JS とみなしても、2xx でない応答（404 の画面、ログインへの転送）と HTML の応答は JS の本文ではない（参照がないとは言えない）
+    const st = ctx.final.status;
+    if (!ref && ((st && (st < 200 || st >= 300) && st !== 304) || ctx.responseKind === 'html')) return [];
     // 本文のない応答（キャッシュした JS の 304 など）は適用外
     if (!ref && !b) return bodyNotCaptured(ctx) ? [mk(sourceMap, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
     if (!ref && bodyTruncated(ctx)) return [mk(sourceMap, ctx, 'na', 'info', 'na', '本文の先頭64KBに参照なし（参照は末尾にあることが多い）', NO_BODY_REC)];

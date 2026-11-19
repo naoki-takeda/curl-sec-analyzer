@@ -9,8 +9,11 @@ export const PARTIAL = '一部の条件（ほかのラベルと比べる条件�
 export const LIMITED = '機密応答では判定していない（静的リソース・機密でない応答だけ）';
 /** ターゲットごとの条件が、一部のターゲットで入力不足（本文を採取していないページなど）。件数はターゲットの数 */
 export const someTargets = (n: number) => `一部のターゲット（${n}件）は入力不足`;
-/** ほかの項目に任せた na（「HSTSがない（H-01で判定）」「…（HSTSの構文の誤り。H-01③で判定）」「強制モードのCSPがない（H-03で判定）」）。入力不足ではないので、上の件数に数えない */
-const DELEGATED = /[（。][A-Z]-\d{2}[①-⑳]?で判定）$/;
+/**
+ * ほかの項目・ターゲットに任せた na（「HSTSがない（H-01で判定）」「…（HSTSの構文の誤り。H-01③で判定）」「Origin: null を送った応答（R-02で判定）」
+ * 「…（null では試していない。Origin: null を送ったターゲットで判定）」）。入力不足ではないので、上の件数に数えない
+ */
+const DELEGATED = /[（。][^（）。]{1,40}で判定）$/;
 
 export function coverage(fs: Finding[], implemented: Set<string>, list: ItemInfo[] = ITEMS, excluded: string[] = []): Coverage[] {
   return list.map(it => {

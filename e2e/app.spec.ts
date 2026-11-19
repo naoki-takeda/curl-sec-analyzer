@@ -492,3 +492,32 @@ test('組織プロファイルで重要度を変えた指摘の「*」の意味�
   await expect(page.getByRole('cell', { name: /^低（元：高）$/ }).first()).toBeVisible();
   await expect(page.getByRole('cell', { name: /^低（元：高）$/ }).first()).toHaveText('低*（元：高）');
 });
+
+test('入力欄で Ctrl+Enter を押して判定すると、隠した入力欄から結果の見出しにフォーカスを移す', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.getByRole('button', { name: '入力を表示する' }).click();
+  await page.locator('#input').press('Control+Enter');
+  await analyzed(page);
+  await expect(page.locator('#input')).toBeHidden();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('H2');
+});
+
+test('組織プロファイルの読み込みのエラーは、ボタンの文言ではなくファイルの名前で知らせ、文を閉じる', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await expect(page.getByRole('status')).toHaveText(/^組織プロファイルの一部を読み込めませんでした：JSONとして読めません。/);
+});
+
+test('解析の警告に出す #TARGET の読めない名前も、許可リストを通す', async ({ page }) => {
+  const token = 'dXNlcjpwYXNzd29yZA';
+  await page.goto('/');
+  await page.locator('#input').fill(`#TARGET url=https://www.example.com/ label=api Authorization: Basic ${token}==\nHTTP/2 200\ncontent-type: text/html\n\n<p>x</p>\n`);
+  await page.getByRole('button', { name: '判定する' }).click();
+  await analyzed(page);
+  await expect(page.getByText(/#TARGET の指定を読めませんでした/)).toBeVisible();
+  expect(await page.locator('#app').innerText()).not.toContain(token);
+});

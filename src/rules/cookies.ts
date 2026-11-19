@@ -1,14 +1,23 @@
 // rules/cookies.ts：第2章 Cookie（C-01〜C-13。C-07②・C-09①・C-12①は横断ルール rules/cross.ts）
-import type { Finding, Rule, RuleContext } from '../model';
+import type { Finding, HttpResponse, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
 import { cookieDate, isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
 import { baseLabel, firstStatus, hostnameOf, siteResponses, targetUrl } from '../parser/target';
 import { logoutFailed } from './html';
 import { LOGOUT_FAILED_REC, cacheDirectives, directiveNames, mk, noResponse } from './util';
 
-/** ターゲットと同じサイトの応答（-L のホップを含む。parser/target.ts の siteResponses）から、削除用でない Set-Cookie を取り出す */
-function cookiesOf(ctx: RuleContext): SetCookie[] {
-  return siteResponses(ctx.target).flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
+/** 応答（既定はターゲットと同じサイトの応答。-L のホップを含む。parser/target.ts の siteResponses）から、削除用でない Set-Cookie を取り出す */
+function cookiesOf(ctx: RuleContext, responses = siteResponses(ctx.target)): SetCookie[] {
+  return responses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
+}
+/**
+ * ターゲットと同じサイトの http のホップ（http://…/app → http://…/app/ → https の2つ目のホップも）。ホップの URL で見る（HAR のターゲットの
+ * URL は転送先の https なので、curl と HAR で結果をそろえるため）。各ホップの URL はパーサ・HAR の取り込みが付ける（parser/target.ts の
+ * assignHopUrls）。URL の分からない最初のホップは、ターゲットの URL で見る。-L で別サイトへ転送した先の http のホップは含めない
+ */
+function httpHops(ctx: RuleContext): Set<HttpResponse> {
+  const site = new Set(siteResponses(ctx.target));
+  return new Set(ctx.chain.filter((r, i) => site.has(r) && /^http:\/\//i.test(r.url ?? (i === 0 ? ctx.target.url ?? '' : ''))));
 }
 /** 名前のない Cookie（値だけの Set-Cookie）の表示名 */
 export const cookieName = (c: SetCookie) => c.name || '（名前なし）';
@@ -34,7 +43,7 @@ export const cookieEvidence = (c: SetCookie) => {
   return `${cookieName(c)}=${maskValue(c.value)}${attrs}`;
 };
 
-/** 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ応答に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない） */
+/** 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ一覧（見る応答の Set-Cookie）に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない） */
 function withoutChunkMarkers<T>(list: T[], cookie: (x: T) => SetCookie): T[] {
   const names = new Set(list.map(x => cookie(x).name));
   return list.filter(x => !(isChunkMarker(cookie(x)) && names.has(`${cookie(x).name}C1`)));
@@ -200,14 +209,10 @@ export const sessionInUrl: Rule = { id: 'C-09', title: 'セッション固定化
 export const cookieOverHttp: Rule = { id: 'C-10', title: 'HTTP応答でのCookie発行', appliesTo: 'any', scope: 'target',
   basis: ['MDN'],
   run(ctx) {
-    // http のホップすべて（http://…/app → http://…/app/ → https の2つ目のホップで発行した Cookie も平文で送られる）。
-    // ホップの URL で見る（HAR のターゲットの URL は転送先の https なので、curl と HAR で結果をそろえるため）。各ホップの URL はパーサ・HAR の
-    // 取り込みが付ける（parser/target.ts の assignHopUrls）。URL の分からない最初のホップは、ターゲットの URL で見る。
-    // 対象のサイトのホップだけ（-L で別サイトへ転送した先の http のホップの Cookie は見ない）
-    const site = new Set(siteResponses(ctx.target));
-    const httpResponses = ctx.chain.filter((r, i) => site.has(r) && /^http:\/\//i.test(r.url ?? (i === 0 ? ctx.target.url ?? '' : '')));
-    if (!httpResponses.length) return [];
-    const cs = httpResponses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
+    // http のホップすべて（2つ目以降のホップで発行した Cookie も平文で送られる）。分割した Cookie の印は C-01〜C-08 と同じく数えない
+    const http = [...httpHops(ctx)];
+    if (!http.length) return [];
+    const cs = withoutChunkMarkers(cookiesOf(ctx, http), c => c);
     if (!cs.length) return [mk(cookieOverHttp, ctx, 'ok', 'info', 'pass', 'HTTP応答でCookieを発行していない', '')];
     return cs.map(c => looksLikeSession(c, ctx.now) && !c.attrs.has('secure')
       ? mk(cookieOverHttp, ctx, 1, 'high', 'fail', cookieEvidence(c), 'HTTPではCookieを発行せず、まずHTTPSへ転送する')

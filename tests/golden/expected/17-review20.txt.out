@@ -13,17 +13,16 @@ cors-partial | https://www.example.com/api/me | key=cors-partial | responses=1
 tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（tls1。判定不能）
 
 ## findings
-cors-null | R-01.na | info | na | Origin: null を送った応答（R-02 で判定する）
+cors-null | R-01.na | info | na | Origin: null を送った応答（R-02で判定）
 cors-null | R-02.2 | medium | fail | ACAO: null
 cors-null | R-04.ok | info | pass | ACAO: null
 cors-null | R-06.1 | low | fail | ACAO: null / Vary: (なし)
-cors-partial | R-01.na | info | na | ACAO: https://www.example.com.evil.net
-cors-partial | R-02.na | info | na | Origin: (不明)（null では試していない）
+cors-partial | R-02.na | info | na | Origin: (不明)（null では試していない。Origin: null を送ったターゲットで判定）
 cors-partial | R-03.1 | high | fail | Origin: https://www.example.com.evil.net → ACAO: https://www.example.com.evil.net / ACAC: true
 cors-partial | R-04.ok | info | pass | ACAO: https://www.example.com.evil.net
 cors-partial | R-06.na | info | na | ACAO: https://www.example.com.evil.net（送った Origin が分からない）
 cors-reflect | R-01.ok | info | pass | ACAO: https://evil.example, https://evil.example
-cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）
+cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない。Origin: null を送ったターゲットで判定）
 cors-reflect | R-04.ok | info | pass | ACAO: https://evil.example, https://evil.example
 cors-reflect | R-06.1 | low | fail | ACAO: https://evil.example, https://evil.example / Vary: (なし)
 csp-sample-* | H-04.na | info | na | 
@@ -174,8 +173,8 @@ C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
 C-13 | evaluated | fails=0
 C-14 | manual | fails=0
 C-15 | manual | fails=0
-R-01 | evaluated | fails=0 | 一部のターゲット（2件）は入力不足 / C6 のとおり許可外の Origin（https://evil.example）で採取する / 送信したOriginが分からない。-v 付きで再取得する
-R-02 | evaluated | fails=1 | 一部のターゲット（2件）は入力不足 / C7 のとおり Origin: null を送って採取する
+R-01 | evaluated | fails=0
+R-02 | evaluated | fails=1
 R-03 | evaluated | fails=1
 R-04 | evaluated | fails=0 | 一部のターゲット（4件）は入力不足 / C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*

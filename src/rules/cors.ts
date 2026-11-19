@@ -54,13 +54,15 @@ export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo:
   run(ctx) {
     if (!ctx.final) return [noResponse(corsReflect, ctx)];
     const acao = acaoOf(ctx);
-    if (isLookalike(ctx, ctx.target.sentOrigin)) return [];   // 似せたOriginのテストは R-03 で判定する
+    // 似せたOriginのテストは R-03 で判定する（送った Origin が見えない -i の cors-partial も。R-03 が na にするので、ACAO がないことで合格にしない）
+    if (isLookalike(ctx, ctx.target.sentOrigin) || (ctx.target.sentOrigin === undefined && baseLabel(ctx.target.label) === 'cors-partial')) return [];
     // 対象の URL 自身のオリジンを送った応答では、許可外の Origin を反射するかは分からない（反射しても正しい動作）
     if (isOwnOrigin(ctx, ctx.target.sentOrigin))
       return [mk(corsReflect, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin}（自サイトの Origin。許可外の Origin では試していない）`, 'C6 のとおり許可外の Origin（https://evil.example）で採取し直す')];
     if (noOriginSent(ctx)) return [mk(corsReflect, ctx, 'na', 'info', 'na', 'Origin を送っていない（-v の送信ヘッダに Origin がない）', NO_ORIGIN_REC)];
     // Origin: null を送った応答（cors-null）では、許可外の Origin を反射するかは試していない（null は R-02 で判定する）
-    if (sentNull(ctx)) return [mk(corsReflect, ctx, 'na', 'info', 'na', 'Origin: null を送った応答（R-02 で判定する）', 'C6 のとおり許可外の Origin（https://evil.example）で採取する')];
+    // 証跡は「…で判定）」の形にする（カバレッジの入力不足に数えない。engine/coverage.ts の DELEGATED）
+    if (sentNull(ctx)) return [mk(corsReflect, ctx, 'na', 'info', 'na', 'Origin: null を送った応答（R-02で判定）', 'C6 のとおり許可外の Origin（https://evil.example）で採取する')];
     const ok = () => [mk(corsReflect, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     if (!acao || acao === '*' || acao === 'null') return ok();   // * は R-04、null は R-02 で判定する
     const sent = ctx.target.sentOrigin ?? (TEST_ORIGINS.includes(acao) ? acao : undefined);
@@ -79,7 +81,8 @@ export const corsNull: Rule = { id: 'R-02', title: 'null許可', appliesTo: 'any
     if (acao !== 'null' && noOriginSent(ctx)) return [mk(corsNull, ctx, 'na', 'info', 'na', 'Origin を送っていない（-v の送信ヘッダに Origin がない）', NO_ORIGIN_REC)];
     // 合格にするのは、Origin: null を送った応答だけ。evil.example を送った応答の ACAO から、null を許可しないとは言えない
     // （どの Origin も反射するサーバは null も許可することが多い）
-    if (acao !== 'null' && !sentNull(ctx)) return [mk(corsNull, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin ?? '(不明)'}（null では試していない）`, 'C7 のとおり Origin: null を送って採取する')];
+    // 証跡は「…で判定）」の形にする（cors-null を判定していれば、ほかのターゲットを入力不足に数えない。engine/coverage.ts の DELEGATED）
+    if (acao !== 'null' && !sentNull(ctx)) return [mk(corsNull, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin ?? '(不明)'}（null では試していない。Origin: null を送ったターゲットで判定）`, 'C7 のとおり Origin: null を送って採取する')];
     if (acao !== 'null') return [mk(corsNull, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     const cred = credOf(ctx);
     return [mk(corsNull, ctx, cred ? 1 : 2, cred ? 'high' : 'medium', 'fail', `ACAO: null${cred ? ' / ACAC: true' : ''}`, 'Origin: null を許可しない（サンドボックス化したiframeやファイルから送られる）')];
@@ -130,7 +133,8 @@ export const corsPreflight: Rule = { id: 'R-05', title: 'プリフライト応�
     // プリフライトを許可しなかったので合格（適用外にせず、カバレッジで判定済みに数える）。Origin を送っていない OPTIONS はプリフライトではない
     // ので、許可しなかったとは言えない（R-01 と同じく na）
     if (!ctx.final || (!methods && !maxAge)) {
-      if (!ctx.final || baseLabel(ctx.target.label) !== 'cors-preflight') return [];
+      if (baseLabel(ctx.target.label) !== 'cors-preflight') return [];
+      if (!ctx.final) return [noResponse(corsPreflight, ctx)];
       if (noOriginSent(ctx)) return [mk(corsPreflight, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（Origin を送っていない）`, NO_ORIGIN_REC)];
       return [mk(corsPreflight, ctx, 'ok', 'info', 'pass', `HTTP ${ctx.final.status}（プリフライトを許可していない）`, '')];
     }

@@ -195,7 +195,7 @@ H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条
 H-05 | evaluated | fails=0
 H-06 | evaluated | fails=5
 H-07 | evaluated | fails=0
-H-08 | evaluated | fails=5 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）
+H-08 | evaluated | fails=5 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答は対象外）
 H-09 | evaluated | fails=5
 H-10 | evaluated | fails=5
 H-11 | evaluated | fails=4 | 一部のターゲット（3件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける

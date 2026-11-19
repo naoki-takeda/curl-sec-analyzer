@@ -14,33 +14,33 @@ websocket | https://app.example.com/ws | key=websocket | responses=1
 api.example.com | T-09.na | info | na | 旧バージョンの接続可否が分からない（#TLSPROBE がない。合意したバージョンだけでは分からない）
 api.example.com | T-10.na | info | na | 合意した暗号（TLSv1.3 / TLS_AES_128_GCM_SHA256）だけでは、弱い暗号を受け入れるか・鍵と署名は分からない
 cors-http-origin | R-01.1 | high | fail | Origin: http://api.example.com → ACAO: http://api.example.com / ACAC: true
-cors-http-origin | R-02.na | info | na | Origin: http://api.example.com（null では試していない）
+cors-http-origin | R-02.na | info | na | Origin: http://api.example.com（null では試していない。Origin: null を送ったターゲットで判定）
 cors-http-origin | R-04.ok | info | pass | ACAO: http://api.example.com
 cors-http-origin | R-06.1 | low | fail | ACAO: http://api.example.com / Vary: (なし)
-cors-null | R-01.na | info | na | Origin: null を送った応答（R-02 で判定する）
+cors-null | R-01.na | info | na | Origin: null を送った応答（R-02で判定）
 cors-null | R-02.2 | medium | fail | ACAO: null
 cors-null | R-04.ok | info | pass | ACAO: null
 cors-null | R-06.1 | low | fail | ACAO: null / Vary: x-origin-id
-cors-partial | R-02.na | info | na | Origin: https://example.com.evil.net（null では試していない）
+cors-partial | R-02.na | info | na | Origin: https://example.com.evil.net（null では試していない。Origin: null を送ったターゲットで判定）
 cors-partial | R-03.2 | medium | fail | Origin: https://example.com.evil.net → ACAO: https://example.com.evil.net
 cors-partial | R-04.ok | info | pass | ACAO: https://example.com.evil.net
 cors-partial | R-06.ok | info | pass | Vary: origin
 cors-preflight | R-01.2 | medium | fail | Origin: https://evil.example → ACAO: https://evil.example
-cors-preflight | R-02.na | info | na | Origin: https://evil.example（null では試していない）
+cors-preflight | R-02.na | info | na | Origin: https://evil.example（null では試していない。Origin: null を送ったターゲットで判定）
 cors-preflight | R-04.ok | info | pass | ACAO: https://evil.example
 cors-preflight | R-05.1 | medium | fail | ACAO: https://evil.example / Allow-Methods: *
 cors-preflight | R-05.2 | info | fail | Access-Control-Max-Age: 86400
 cors-reflect | R-01.1 | high | fail | Origin: https://evil.example → ACAO: https://evil.example / ACAC: true
-cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）
+cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない。Origin: null を送ったターゲットで判定）
 cors-reflect | R-04.ok | info | pass | ACAO: https://evil.example
 cors-reflect | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
 cors-reflect | R-07.1 | medium | fail | X-Auth-Token, X-CSRF-Token
 cors-self | R-01.na | info | na | Origin: https://api.example.com（自サイトの Origin。許可外の Origin では試していない）
-cors-self | R-02.na | info | na | Origin: https://api.example.com（null では試していない）
+cors-self | R-02.na | info | na | Origin: https://api.example.com（null では試していない。Origin: null を送ったターゲットで判定）
 cors-self | R-04.ok | info | pass | ACAO: https://api.example.com
 cors-self | R-06.ok | info | pass | Vary: origin
 cors-wildcard | R-01.ok | info | pass | ACAO: *
-cors-wildcard | R-02.na | info | na | Origin: (不明)（null では試していない）
+cors-wildcard | R-02.na | info | na | Origin: (不明)（null では試していない。Origin: null を送ったターゲットで判定）
 cors-wildcard | R-04.3 | info | fail | ACAO: *（機密応答かどうか分からない）
 cors-wildcard | R-07.2 | low | fail | *
 csp-sample-* | H-04.na | info | na | 
@@ -83,8 +83,8 @@ C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
 C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-14 | manual | fails=0
 C-15 | manual | fails=0
-R-01 | evaluated | fails=3 | 一部のターゲット（2件）は入力不足 / C6 のとおり許可外の Origin（https://evil.example）で採取する / C6 のとおり許可外の Origin（https://evil.example）で採取し直す
-R-02 | evaluated | fails=1 | 一部のターゲット（6件）は入力不足 / C7 のとおり Origin: null を送って採取する
+R-01 | evaluated | fails=3 | 一部のターゲット（1件）は入力不足 / C6 のとおり許可外の Origin（https://evil.example）で採取し直す
+R-02 | evaluated | fails=1
 R-03 | evaluated | fails=1
 R-04 | evaluated | fails=1
 R-05 | evaluated | fails=2

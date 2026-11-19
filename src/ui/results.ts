@@ -48,13 +48,13 @@ export function render() {
     // 例外を当てた指摘の件数（重要度別の件数には含めないので、ワイルドカードの例外で高が消えたことに画面から気づけるように）
     findings.some(f => f.status === 'suppressed') ? el('p', 'mt-2 text-sm text-muted', T.suppressedCount(new Set(findings.filter(f => f.status === 'suppressed').map(f => f.ruleId)).size)) : null,
     exportBar(),
-    warnings.length || hints.length ? warningList([...warnings.map(w => w.detail), ...hints]) : null,
+    warnings.length || hints.length ? warningList([...warnings.map(w => showText(w.detail)), ...hints]) : null,
     state.last.diff ? diffBlock(state.last.diff) : null,
     // 件数は、章で絞り込んだ表の行数と合わせる
     heading(T.findings, findingsCount(chapterRows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(chapterRows.filter(r => r.severity === 'info').length), chapterFilter())),
     rows.length ? overallTable(chapterRows) : el('p', 'text-muted', T.noFindings),
     heading(T.perTarget, T.count(targets.length), focusable(button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); }), 'show-all')),
-    // 「*」（組織プロファイルで変えた重要度）の凡例。ターゲットごとの表に「*」が出るとき（findingsTable と同じ絞り込みで見える指摘にあるとき）だけ
+    // 「*」（組織プロファイルで変えた重要度）の凡例。ターゲットごと・ホスト単位・横断の表に「*」が出るとき（findingsTable と同じ絞り込みで見える指摘にあるとき）だけ
     findings.some(f => f.status === 'fail' && f.originalSeverity && (state.view.showAll || state.view.showInfo || f.severity !== 'info'))
       ? el('p', 'mb-2 text-sm text-muted', T.profileLegend) : null,
     targetSummary(targets, byTarget),
@@ -85,7 +85,7 @@ function ledger(c: Record<Severity, number>) {
     ...SEVERITIES.map(s => el('div', `border-l-[6px] ${SEV_BORDER[s]} bg-surface px-4 py-3`,
       el('div', `num text-4xl font-bold leading-none ${c[s] ? SEV_TEXT[s] : 'text-muted'}`, String(c[s])),
       el('div', 'mt-1 text-sm text-muted', T.severity(sevLabel(s))))));
-  wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-label', SEVERITIES.map(s => `${T.severity(sevLabel(s))} ${c[s]}`).join(', '));
+  wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-label', SEVERITIES.map(s => `${T.severity(sevLabel(s))} ${c[s]}`).join(listSep()));
   return wrap;
 }
 function exportBar() {

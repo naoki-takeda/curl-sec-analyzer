@@ -93,7 +93,7 @@ const ja = {
     title: (name: string) => `HARのエントリ一覧（${name}）`, note: 'ラベルはリダイレクトをまとめた単位で付けます。after-logout・session-sample・CORS・TLS・既知ファイルなど細工したリクエストが必要な項目は、curl で別に採取してください。',
     sanitized: 'Cookie・Set-Cookie が含まれていません。ブラウザの設定で機密情報を含めて書き出すと、Cookie の項目も判定できます。', hosts: '対象ホスト：', remove: 'HARを外す', exclude: '除外',
     method: 'メソッド', status: 'ステータス', hops: (n: number) => `（${n}ホップ）`, labelFor: (m: string, u: string) => `${m} ${u} のラベル`, sensFor: (u: string) => `${u} の機密区分`, auto: (y: boolean): string => (y ? '自動（はい）' : '自動（不明）') },
-  readErrors: (what: string, e: string) => `${what}の一部を読み込めませんでした：${e}`,
+  readErrors: (what: string, e: string) => `${what}の一部を読み込めませんでした：${e}。`, suppressionsName: '例外ファイル', profileName: '組織プロファイル',
 };
 type Dict = typeof ja;
 
@@ -151,7 +151,7 @@ const en: Dict = {
   coverageNote: 'Checks marked “Missing input” run once you capture a target with the label shown. High coverage does not mean the system is secure. The ASVS (OWASP ASVS 5.0.0) and IPA (IPA “How to Secure Your Web Site”, 7th ed.) numbers next to each check are related requirements, not a verdict on whether the requirement is met.',
   allCategories: 'All statuses', filterCategory: 'Filter by status', manualNote: 'Record in the test record sheet', command: 'command',
   outOfScope: 'Out of scope (Ch. 7): authorization and business logic, input handling (XSS, SQL injection, etc.), logging and monitoring. Check these with OWASP ZAP, Burp Suite or code review.',
-  diff: 'Changes since previous results', diffSummary: (n, r, s, sup, nr, c) => `${n} new, ${r} resolved, ${s} severity changed, ${sup} exception registered, ${nr} not rechecked, ${c} unchanged`,
+  diff: 'Changes since previous results', diffSummary: (n, r, s, sup, nr, c) => `${n} new, ${r} resolved, ${s} severity changed, ${sup} exception${sup === 1 ? '' : 's'} registered, ${nr} not rechecked, ${c} unchanged`,
   diffNote: '“Not rechecked” means the previous finding’s target and check were not evaluated this time. “Exception registered” means an exception now applies to the finding; it is not counted as resolved. curl targets are matched by label, HAR targets by method and URL.',
   diffProfileWarning: 'The organization profile differs from the previous run, so some severity changes or resolutions come from the settings, not the system.',
   diffRulesetWarning: (a, b) => `The previous results used ruleset ${a}; this run uses ${b}. Some changes come from added or changed rules.`,
@@ -170,7 +170,7 @@ const en: Dict = {
     title: name => `HAR entries (${name})`, note: 'Labels apply to each redirect chain. Capture after-logout, session samples, CORS, TLS and known files separately with curl.',
     sanitized: 'This HAR has no Cookie or Set-Cookie headers. Export it with sensitive data included to check cookies.', hosts: 'Hosts:', remove: 'Remove HAR', exclude: 'Exclude',
     method: 'Method', status: 'Status', hops: n => ` (${n} hops)`, labelFor: (m, u) => `Label for ${m} ${u}`, sensFor: u => `Sensitivity for ${u}`, auto: y => (y ? 'Auto (yes)' : 'Auto (unknown)') },
-  readErrors: (what, e) => `Part of the ${what} could not be loaded: ${e}`,
+  readErrors: (what, e) => `Part of the ${what} could not be loaded: ${e}.`, suppressionsName: 'exceptions file', profileName: 'organization profile',
 };
 
 export const tr = (): Dict => (lang === 'en' ? en : ja);

@@ -143,13 +143,16 @@ export const bodyNotCaptured = (ctx: RuleContext): boolean => {
  * ないので、H-08・H-11・H-12・A-09 の対象外（ビーコンや XHR の 204 を指摘しない）
  */
 export const noContent = (ctx: RuleContext): boolean => ctx.final?.status === 204 || ctx.final?.status === 304;
-export const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）';
+/** 本文のない応答の na の推奨。どの応答を本文のないものとみなすかは項目による（H-11・H-12 は noContent、H-08・A-09 は nothingToSniff） */
+export const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（本文のない応答は対象外）';
 /** Content-Length: 0 の応答 */
 export const zeroLength = (ctx: RuleContext): boolean => header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
 /** スニッフィングする本文がない応答（H-08・A-09②）：204・304、Location のある 3xx（ブラウザは 3xx の本文を表示しない）、Content-Length: 0 */
 export const nothingToSniff = (ctx: RuleContext): boolean => noContent(ctx) || isRedirectWithLocation(ctx.final) || zeroLength(ctx);
 /** プローブ（C13）のコードが 000（接続できなかった）のときの推奨。ファイルがあるかどうかは分からないので、合格にしない（E-03・E-04・E-13） */
 export const PROBE_UNREACHED_REC = 'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）';
+/** C13 のプローブは -L を付けない（転送先のファイルを取らない）。転送された（3xx）パスは、ファイルがないことが分からない */
+export const PROBE_REDIRECT_REC = '転送先のホスト（www の有無など）・パスを URL にして C13 を実行し直す';
 const AUTH_FLAG = /^(?:is_?)?(?:authenticated|authorized|logged_?in|signed_?in|auth|ok|success|valid)$/i;
 // false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
 const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
