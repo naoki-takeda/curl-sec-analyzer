@@ -134,3 +134,22 @@ describe('以前の形式のキーの見分け方', () => {
     expect(isCurrentKey('top page https://a.example/ #2')).toBe(true);
   });
 });
+
+describe('第56回：存在しない条件番号', () => {
+  it('組織プロファイルの重要度は、項目にない条件番号（H-01.9・H-01.0）をエラーにし、ある条件番号は受け付ける', () => {
+    const r = parseProfile(JSON.stringify({ severity: { 'H-01.9': 'low', 'H-01.0': 'low', 'H-01.4': 'info', 'H-04.6': 'low' } }));
+    expect(r.errors).toEqual(['severity：「H-01.9」は条件番号がH-01にありません（1〜4）', 'severity：「H-01.0」は条件番号がH-01にありません（1〜4）']);
+    expect(r.profile?.severity).toEqual({ 'H-01.4': 'info', 'H-04.6': 'low' });
+  });
+  it('例外ファイルも、項目にない条件番号をエラーにする', async () => {
+    const { parseSuppressions } = await import('../src/engine/suppress');
+    const r = parseSuppressions(JSON.stringify([{ ruleId: 'H-08.2', target: 'top', reason: 'x' }, { ruleId: 'H-08.1', target: 'top', reason: 'x' }]));
+    expect(r.errors).toEqual(['1件目：ruleId「H-08.2」は条件番号がH-08にありません（1〜1）']);
+    expect(r.list.map(s => s.ruleId)).toEqual(['H-08.1']);
+  });
+  it('条件番号のエラーも英訳する', async () => {
+    const { messageEn } = await import('../src/messagesEn');
+    expect(messageEn('1件目：ruleId「H-08.2」は条件番号がH-08にありません（1〜1）')).toBe('Entry 1: ruleId "H-08.2" is not a condition of H-08 (1 to 1)');
+    expect(messageEn('severity：「H-01.9」は条件番号がH-01にありません（1〜4）')).toBe('severity: "H-01.9" is not a condition of H-01 (1 to 4)');
+  });
+});

@@ -41,6 +41,19 @@ describe('ASVS 5.0・IPA との対応（v1.0）', () => {
       expect({ asvs, ipa }, it.id).toEqual({ asvs: it.asvs, ipa: it.ipa });
     }
   });
+  it('設計書（第1〜6章の表の重要度の列）の条件の数と items.json の conditions が一致する', () => {
+    const doc = readFileSync(new URL('../docs/design.md', import.meta.url), 'utf8');
+    const counts = new Map<string, number>();
+    // 項目IDで始まる行は後ろの章（記録様式の例など）にもあるので、最初に出てくる行（第1〜6章の表）だけを使う
+    for (const line of doc.split(/\r?\n/)) {
+      const m = line.match(/^\| ([HCRTEA]-\d\d) \|/);
+      if (!m || counts.has(m[1])) continue;
+      // ID・項目・確認方法・推奨値・NG判定基準・リスク・重要度の7列目（NG判定基準の列は、ほかの項目への言及「H-16④」も含むので使わない）
+      const sev = line.split(/(?<!\\)\|/)[7];
+      counts.set(m[1], Math.max(1, ...[...sev].map(ch => '①②③④⑤⑥⑦⑧⑨⑩'.indexOf(ch) + 1)));
+    }
+    for (const it of ITEMS) expect(it.conditions, it.id).toBe(counts.get(it.id));
+  });
   it('Markdown と JSON に対応を出す', () => {
     const fs = evaluate(sampleText()).findings;
     const cov = coverage(fs, IMPLEMENTED);

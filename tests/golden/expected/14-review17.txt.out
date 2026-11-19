@@ -131,6 +131,7 @@ press | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 press | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 press | T-12.ok | info | pass | HTTP/2
 quoted label | A-02.ok | info | pass | URL・Location・本文にトークンなし
+quoted label | E-01.na | info | na | 本文を採取していない
 quoted label | H-01.1 | high | fail | (ヘッダなし)
 quoted label | H-02.na | info | na | HSTSがない（H-01で判定）
 quoted label | H-08.1 | medium | fail | (ヘッダなし)
@@ -241,7 +242,7 @@ T-10 | missing-input | fails=0 | C11 の出力にエラーがないか確認し�
 T-11 | evaluated | fails=0
 T-12 | evaluated | fails=0
 T-13 | manual | fails=0
-E-01 | evaluated | fails=1
+E-01 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 E-02 | evaluated | fails=0
 E-03 | missing-input | fails=0 | 必要なラベル: probes
 E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes

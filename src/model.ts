@@ -49,6 +49,7 @@ export interface CrossContext {     // ホスト単位・横断ルール用
 export type CoverageStatus = 'evaluated' | 'missing-input' | 'manual' | 'not-implemented' | 'excluded';
 export interface ItemInfo {
   id: string; title: string; titleEn: string; chapter: number; manual: boolean; phase: string;   // 必要なラベルは engine/labels.ts の requiredLabels で作る
+  conditions: number;               // NG判定基準の条件の数（①〜。設計書の表の重要度の列と同じ）。組織プロファイル・例外の条件番号の検証に使う
   asvs: string[];                   // 関連する OWASP ASVS 5.0.0 の要件ID（例：3.4.1）。engine/standards.ts
   ipa: string[];                    // 関連する IPA「安全なウェブサイトの作り方」改訂第7版の項番（例：4-(iii)、2.3-1)）
 }

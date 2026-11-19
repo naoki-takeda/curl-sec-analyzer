@@ -3,7 +3,7 @@ import type { CrossContext, Finding, HttpResponse, Rule, RuleContext } from '../
 import { baseLabel, finalResponse, responseKind, sameDocumentHop } from '../parser/target';
 import { JWT_IN_TEXT } from '../parser/setCookie';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { NO_BODY_REC, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, notSecretFormat, notSecretText } from './util';
+import { NO_BODY_REC, bodyNotCaptured, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, notSecretFormat, notSecretText } from './util';
 import { loginForm } from './html';
 import { cf } from './cross';
 import { b64urlJson } from './jwt';
@@ -16,7 +16,8 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     const ct = header(ctx, 'content-type')[0] ?? '';
     const looksJson = /^\s*[{[]/.test(f.body ?? '');
     if (ctx.responseKind !== 'api') {
-      return /^text\/html/i.test(ct) && looksJson
+      // 値の前の空白は、下の kind=api の分岐と同じく読み飛ばす（「Content-Type:  text/html」の折り返し・空白の多い値でも同じ判定にする）
+      return /^\s*text\/html/i.test(ct) && looksJson
         ? [mk(jsonHeaders, ctx, 1, 'medium', 'fail', `Content-Type: ${ct}（本文はJSON）`, 'JSONは application/json で返す（text/html だとXSSの原因になる）')]
         : [];                                                  // API応答ではないターゲットは適用外
     }
@@ -286,7 +287,9 @@ export const excessiveData: Rule = { id: 'A-07', title: '過剰なデータ露�
   basis: ['OWASP API Security Top 10 2023: API3'],
   run(ctx) {
     const f = ctx.final;
-    if (!f?.body) return [];
+    // 本文がなければ適用外。ただし 2xx の API の応答で本文を採取していないなら、返したデータが分からないので na
+    if (!f?.body?.trim()) return f && f.status >= 200 && f.status < 300 && bodyNotCaptured(ctx)
+      ? [mk(excessiveData, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
     let data: unknown;
     try { data = JSON.parse(f.body); } catch { return [mk(excessiveData, ctx, 'na', 'info', 'na', 'JSONを解析できない（64KBを超えて切れた可能性）', '')]; }
     const keys = jsonKeys(data).map(k => k.replace(/\[\d+\]/g, '[]'));

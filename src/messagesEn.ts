@@ -18,6 +18,7 @@ const FIELD: Record<string, string> = { API: 'API', ログイン: 'Login', 認�
 const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：ruleId が不正です$/, m => `Entry ${m[1]}: invalid ruleId`],
   [/^(\d+)件目：ruleId「(.*)」は項目IDではありません$/s, m => `Entry ${m[1]}: ruleId "${m[2]}" is not a check ID`],
+  [/^(\d+)件目：ruleId「(.*)」は条件番号が(.+)にありません（1〜(\d+)）$/s, m => `Entry ${m[1]}: ruleId "${m[2]}" is not a condition of ${m[3]} (1 to ${m[4]})`],
   [/^例外は(\d+)件までです（(\d+)件のうち、(\d+)件目からは読みません）$/, m => `At most ${m[1]} exceptions are read (the file has ${m[2]}; entries from ${m[3]} on are ignored)`],
   [/^(\d+)件目：target がありません$/, m => `Entry ${m[1]}: target is missing`],
   [/^(\d+)件目：target が長すぎます（(\d+)文字まで）$/, m => `Entry ${m[1]}: target is too long (${m[2]} characters at most)`],
@@ -26,6 +27,7 @@ const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：until は YYYY-MM-DD で書きます$/, m => `Entry ${m[1]}: until must be YYYY-MM-DD`],
   [/^「(.*)」は組織プロファイルの項目ではありません$/s, m => `"${m[1]}" is not a profile setting`],
   [/^severity：「(.*)」は項目IDではありません$/s,m => `severity: "${m[1]}" is not a check ID`],
+  [/^severity：「(.*)」は条件番号が(.+)にありません（1〜(\d+)）$/s, m => `severity: "${m[1]}" is not a condition of ${m[2]} (1 to ${m[3]})`],
   [/^severity：「(.*)」の重要度は high・medium・low・info のいずれか$/s, m => `severity: the severity for "${m[1]}" must be high, medium, low or info`],
   [/^(.+)のパスは \/ で始まる英数字と - \. _ ~ % \/ で書いてください$/, m => `${FIELD[m[1]] ?? m[1]} path: start with / and use only letters, digits and - . _ ~ % /`],
 ];

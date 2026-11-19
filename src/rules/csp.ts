@@ -1,6 +1,7 @@
 // rules/csp.ts：Google csp_evaluator（Apache-2.0）で CSP を評価し、チェックリストの項目・条件に振り分ける
 // csp_evaluator の指摘のうち「〜かもしれない」（HIGH_MAYBE・MEDIUM_MAYBE。'self' や未知のホストへの注意など）は、誤検知が多いため使わない。
-// 'unsafe-hashes'（SCRIPT_UNSAFE_HASHES）も MEDIUM_MAYBE なので指摘しない（'unsafe-inline' より安全で、ハッシュの合うイベントハンドラだけを許す）。
+// 'unsafe-hashes'（SCRIPT_UNSAFE_HASHES）は MEDIUM_MAYBE だが、同じディレクティブにハッシュがあるときだけ H-04⑥ の情報として出す（'unsafe-inline' より
+// 安全で、ハッシュの合うイベントハンドラ・style 属性だけを許す。ハッシュがなければ何も許さないので指摘しない）。
 // Strict CSP の推奨（STRICTCSP_CHECKS）は実行しない（evaluate() の既定のチェックだけを使う）
 import { CspEvaluator } from 'csp_evaluator/dist/evaluator.js';
 import { CspParser } from 'csp_evaluator/dist/parser.js';
@@ -41,7 +42,7 @@ function evaluateCspUnsafe(policy: string): CspIssue[] {
   for (const f of new CspEvaluator(csp).evaluate()) {
     const maybe = f.severity === EvSeverity.HIGH_MAYBE || f.severity === EvSeverity.MEDIUM_MAYBE;
     // 'unsafe-eval' は csp_evaluator では MEDIUM_MAYBE だが、チェックリスト（H-04③）では中として扱う
-    if ((maybe && f.type !== Type.SCRIPT_UNSAFE_EVAL) || f.severity === EvSeverity.NONE) continue;
+    if ((maybe && f.type !== Type.SCRIPT_UNSAFE_EVAL && f.type !== Type.SCRIPT_UNSAFE_HASHES) || f.severity === EvSeverity.NONE) continue;
     const base = { directive: f.directive, value: f.value, type: Type[f.type] ?? String(f.type), description: f.description };
     const isScript = isScriptDir(f.directive);
     switch (f.type) {
@@ -65,6 +66,12 @@ function evaluateCspUnsafe(policy: string): CspIssue[] {
         out.push({ ...base, item: 'H-07', condition: 4, severity: 'low' }); break;
       case Type.MISSING_SEMICOLON: case Type.INVALID_KEYWORD: case Type.NONCE_CHARSET:
         out.push({ ...base, item: 'H-07', condition: 4, severity: 'low' }); break;
+      // イベントハンドラに効くディレクティブ（script-src-attr、なければ script-src、なければ default-src）のものだけ（script-src-attr 'none' が
+      // あれば、script-src・default-src の 'unsafe-hashes' はハンドラを許さない。script-src-elem では意味がない）
+      case Type.SCRIPT_UNSAFE_HASHES:
+        if (f.directive === (has('script-src-attr') ? 'script-src-attr' : has('script-src') ? 'script-src' : 'default-src')
+          && (csp.directives[f.directive] ?? []).some(v => HASH_SOURCE.test(v))) out.push({ ...base, item: 'H-04', condition: 6, severity: 'info' });
+        break;
       case Type.NONCE_LENGTH: case Type.IP_SOURCE:
         if (isScript) out.push({ ...base, item: 'H-04', condition: 6, severity: sevOf(f.severity) });
         break;
@@ -73,6 +80,9 @@ function evaluateCspUnsafe(policy: string): CspIssue[] {
   }
   return out;
 }
+
+/** ハッシュのソース（'sha256-…'。引用符と大文字・小文字は CSP の仕様のとおり） */
+const HASH_SOURCE = /^'sha(?:256|384|512)-/i;
 
 /** csp_evaluator の一覧にない、CSP の仕様（Level 3 と関連仕様）にあるディレクティブ */
 const NEW_DIRECTIVES = new Set(['fenced-frame-src', 'webrtc', 'trusted-types', 'require-trusted-types-for', 'script-src-attr', 'script-src-elem', 'style-src-attr', 'style-src-elem']);

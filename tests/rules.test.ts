@@ -383,3 +383,87 @@ describe('ルールの登録', () => {
       for (const r of list) expect(r.scope, r.id).toBe(scope);
   });
 });
+
+describe('第56回：H-04⑥ の \'unsafe-hashes\'', () => {
+  const h04 = (csp: string) => evaluate(target('https://a.example/', `${HTML}content-security-policy: ${csp}; object-src 'none'; base-uri 'none'`)).findings.filter(f => f.item === 'H-04' && f.ruleId !== 'H-04.na');   // H-04.na は csp-sample のない横断の⑤
+  const HASH = "'sha256-B2yPHKaXnvFWtRChIbabYmUBFZdVfKKXHbWtWidDVF8='";
+  it('ハッシュのあるディレクティブの \'unsafe-hashes\' は、情報として出す', () => {
+    for (const csp of [`script-src 'self' 'unsafe-hashes' ${HASH}`, `script-src-attr 'unsafe-hashes' ${HASH}; script-src 'self'`, `default-src 'self' 'unsafe-hashes' ${HASH}`]) {
+      const f = h04(csp);
+      expect(f.map(x => x.ruleId), csp).toEqual(['H-04.6']);
+      expect(f[0].severity).toBe('info');
+      expect(f[0].evidence).toContain('SCRIPT_UNSAFE_HASHES');
+    }
+  });
+  it('ハッシュのない \'unsafe-hashes\'（何も許さない）と、script-src があるときの default-src のものは出さない', () => {
+    expect(h04("script-src 'self' 'unsafe-hashes'").map(x => x.ruleId)).toEqual(['H-04.ok']);
+    expect(h04(`default-src 'self' 'unsafe-hashes' ${HASH}; script-src 'self'`).map(x => x.ruleId)).toEqual(['H-04.ok']);
+  });
+  it('style-src の \'unsafe-hashes\' は H-04 ではない', () => {
+    expect(h04(`script-src 'self'; style-src 'self' 'unsafe-hashes' ${HASH}`).map(x => x.ruleId)).toEqual(['H-04.ok']);
+  });
+});
+
+describe('第56回：E-09 の hidden の欄・A-09 の Content-Type の空白・E-04 の Expires', () => {
+  const JWT = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyMTIzNDU2Nzg5MCIsImlzcyI6Imh0dHBzOi8vaWRwIn0.c2lnbmF0dXJlLXNpZ25hdHVyZS1zaWduYXR1cmU';
+  const page = (input: string) => target('https://idp.example/', `${HTML}\n<html><body><form method="post" action="https://app.example/cb">${input}</form></body></html>`);
+  it('E-09：form_post の id_token の欄は、属性の値に > があっても欄ごと除く', () => {
+    expect(ids(page(`<input type="hidden" name="id_token" value="${JWT}">`)).filter(x => x.startsWith('E-09'))).toEqual(['E-09.ok']);
+    expect(ids(page(`<input data-note="a>b" type="hidden" name="id_token" value="${JWT}">`)).filter(x => x.startsWith('E-09'))).toEqual(['E-09.ok']);
+  });
+  it('E-09：除いた欄の外の JWT は今までどおり①', () => {
+    expect(ids(page(`<input data-note="a>b" type="hidden" name="id_token" value="x"><script>var t="${JWT}"</script>`)).filter(x => x.startsWith('E-09'))).toEqual(['E-09.1']);
+  });
+  it('A-09：HAR の Content-Type の値の前に空白があっても、JSON の本文の text/html を①にする', async () => {
+    const { analyze } = await import('./golden/analyze');
+    const har = JSON.stringify({ log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z', request: { method: 'GET', url: 'https://a.example/data', headers: [] },
+      response: { status: 200, httpVersion: 'HTTP/2', headers: [{ name: 'Content-Type', value: ' text/html' }], content: { mimeType: 'text/html', text: '{"a":1}' } } }] } });
+    expect(analyze('', har).findings.filter(f => f.item === 'A-09').map(f => f.ruleId)).toEqual(['A-09.1']);
+  });
+  it('E-04：CRLF の行の Expires も日時として読む', () => {
+    const r = ids(target('https://a.example/.well-known/security.txt', 'HTTP/2 200\ncontent-type: text/plain\n\nContact: mailto:security@example.com\r\nExpires: 2099-01-01T00:00:00Z \r\n'));
+    expect(r.filter(x => x.startsWith('E-04'))).toEqual(['E-04.ok']);
+  });
+});
+
+describe('第56回：E-01・A-07 の本文を採取していない応答', () => {
+  const only = (input: string, item: string) => evaluate(input).findings.filter(f => f.item === item).map(f => f.ruleId);
+  const t = (label: string, url: string, head: string) => `#TARGET url=${url} label=${label}\n${head.trim()}\n`;
+  it('E-01：エラーの応答（4xx・5xx）と error-* で本文を採取していないなら na', () => {
+    expect(only(t('page', 'https://a.example/x', 'HTTP/2 500\ncontent-type: text/html'), 'E-01')).toEqual(['E-01.na']);
+    expect(only(t('error-404', 'https://a.example/api/none', 'HTTP/2 404\ncontent-type: application/json'), 'E-01')).toEqual(['E-01.na']);
+  });
+  it('E-01：2xx の本文のない応答、204・Content-Length: 0 の応答は適用外のまま', () => {
+    expect(only(t('page', 'https://a.example/', 'HTTP/2 200\ncontent-type: text/html'), 'E-01')).toEqual([]);
+    expect(only(t('page', 'https://a.example/x', 'HTTP/2 500\ncontent-length: 0'), 'E-01')).toEqual([]);
+  });
+  it('A-07：API の 2xx で本文を採取していないなら na、204 は適用外', () => {
+    expect(only(t('api', 'https://a.example/api/me', 'HTTP/2 200\ncontent-type: application/json'), 'A-07')).toEqual(['A-07.na']);
+    expect(only(t('api', 'https://a.example/api/me', 'HTTP/2 204\ncontent-type: application/json'), 'A-07')).toEqual([]);
+    expect(only(t('api', 'https://a.example/api/me', 'HTTP/2 200\ncontent-type: application/json\n\n{"id":1}'), 'A-07')).toEqual(['A-07.ok']);
+  });
+});
+
+describe('第56回（束のレビュー）：\'unsafe-hashes\' の効くディレクティブと、ポリシーが複数のとき', () => {
+  const HASH = "'sha256-B2yPHKaXnvFWtRChIbabYmUBFZdVfKKXHbWtWidDVF8='";
+  const h04f = (...csps: string[]) => evaluate(target('https://a.example/', `${HTML}${csps.map(c => `content-security-policy: ${c}; object-src 'none'; base-uri 'none'`).join('\n')}`))
+    .findings.filter(f => f.item === 'H-04' && f.ruleId !== 'H-04.na');
+  const h04 = (...csps: string[]) => h04f(...csps).map(f => f.ruleId);
+  const hashes = (...csps: string[]) => h04f(...csps).filter(f => f.evidence.includes('SCRIPT_UNSAFE_HASHES')).length;
+  it('script-src-attr があれば、script-src・default-src の \'unsafe-hashes\' は出さない', () => {
+    expect(h04(`default-src 'self' 'unsafe-hashes' ${HASH}; script-src-attr 'none'`)).toEqual(['H-04.ok']);
+    expect(h04(`script-src 'self' 'unsafe-hashes' ${HASH}; script-src-attr 'none'`)).toEqual(['H-04.ok']);
+  });
+  it('別のポリシーが \'unsafe-inline\' ならイベントハンドラを止めないので出し、短い nonce だけなら止めるので出さない', () => {
+    expect(hashes(`script-src 'self' 'unsafe-hashes' ${HASH}`, "script-src 'self' 'unsafe-inline'")).toBe(1);
+    expect(hashes(`script-src 'self' 'unsafe-hashes' ${HASH}`, "script-src 'self' 'nonce-a'")).toBe(0);
+    expect(hashes(`script-src 'self' 'unsafe-hashes' ${HASH}`, `script-src 'self' 'unsafe-hashes' ${HASH}`)).toBe(1);
+  });
+});
+
+describe('第56回（束のレビュー）：先頭が0の条件番号', () => {
+  it('H-01.01 は H-01.1 と照合されず効かないのでエラーにする', async () => {
+    const { parseProfile } = await import('../src/engine/profile');
+    expect(parseProfile(JSON.stringify({ severity: { 'H-01.01': 'low' } })).errors).toEqual(['severity：「H-01.01」は条件番号がH-01にありません（1〜4）']);
+  });
+});

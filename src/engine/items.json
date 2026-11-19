@@ -4,6 +4,7 @@
   "title": "Strict-Transport-Security",
   "chapter": 1,
   "manual": false,
+  "conditions": 4,
   "phase": "MVP",
   "titleEn": "Strict-Transport-Security",
   "asvs": [
@@ -18,6 +19,7 @@
   "title": "HSTS preload",
   "chapter": 1,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "HSTS preload",
   "asvs": [
@@ -30,6 +32,7 @@
   "title": "CSP（存在・強制）",
   "chapter": 1,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "CSP (presence and enforcement)",
   "asvs": [
@@ -42,6 +45,7 @@
   "title": "CSP：script-src",
   "chapter": 1,
   "manual": false,
+  "conditions": 6,
   "phase": "MVP",
   "titleEn": "CSP: script-src",
   "asvs": [
@@ -54,6 +58,7 @@
   "title": "CSP：object-src・base-uri",
   "chapter": 1,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "CSP: object-src and base-uri",
   "asvs": [
@@ -66,6 +71,7 @@
   "title": "クリックジャッキング対策（frame-ancestors・X-Frame-Options）",
   "chapter": 1,
   "manual": false,
+  "conditions": 4,
   "phase": "MVP",
   "titleEn": "Clickjacking protection (frame-ancestors, X-Frame-Options)",
   "asvs": [
@@ -80,6 +86,7 @@
   "title": "CSP：非推奨ディレクティブ・混在コンテンツ・構文",
   "chapter": 1,
   "manual": false,
+  "conditions": 4,
   "phase": "MVP",
   "titleEn": "CSP: deprecated directives, mixed content and syntax",
   "asvs": [
@@ -94,6 +101,7 @@
   "title": "X-Content-Type-Options",
   "chapter": 1,
   "manual": false,
+  "conditions": 1,
   "phase": "MVP",
   "titleEn": "X-Content-Type-Options",
   "asvs": [
@@ -106,6 +114,7 @@
   "title": "Referrer-Policy",
   "chapter": 1,
   "manual": false,
+  "conditions": 4,
   "phase": "MVP",
   "titleEn": "Referrer-Policy",
   "asvs": [
@@ -118,6 +127,7 @@
   "title": "Permissions-Policy",
   "chapter": 1,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Permissions-Policy",
   "asvs": [],
@@ -128,6 +138,7 @@
   "title": "COOP・COEP・CORP",
   "chapter": 1,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "COOP, COEP and CORP",
   "asvs": [
@@ -141,6 +152,7 @@
   "title": "Cache-Control",
   "chapter": 1,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "Cache-Control",
   "asvs": [
@@ -154,6 +166,7 @@
   "title": "Content-Typeとcharset",
   "chapter": 1,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Content-Type and charset",
   "asvs": [
@@ -168,6 +181,7 @@
   "title": "X-Permitted-Cross-Domain-Policies",
   "chapter": 1,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "X-Permitted-Cross-Domain-Policies",
   "asvs": [],
@@ -178,6 +192,7 @@
   "title": "Clear-Site-Data",
   "chapter": 1,
   "manual": false,
+  "conditions": 1,
   "phase": "MVP",
   "titleEn": "Clear-Site-Data",
   "asvs": [
@@ -190,6 +205,7 @@
   "title": "製品・バージョン・デバッグ情報の露出",
   "chapter": 1,
   "manual": false,
+  "conditions": 5,
   "phase": "MVP",
   "titleEn": "Product, version and debug information",
   "asvs": [
@@ -203,6 +219,7 @@
   "title": "廃止・非推奨ヘッダ",
   "chapter": 1,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Obsolete and deprecated headers",
   "asvs": [],
@@ -213,6 +230,7 @@
   "title": "Secure",
   "chapter": 2,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "Secure",
   "asvs": [
@@ -227,6 +245,7 @@
   "title": "HttpOnly",
   "chapter": 2,
   "manual": false,
+  "conditions": 1,
   "phase": "MVP",
   "titleEn": "HttpOnly",
   "asvs": [
@@ -241,6 +260,7 @@
   "title": "SameSite",
   "chapter": 2,
   "manual": false,
+  "conditions": 4,
   "phase": "MVP",
   "titleEn": "SameSite",
   "asvs": [
@@ -253,6 +273,7 @@
   "title": "Domain・Path",
   "chapter": 2,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "Domain and Path",
   "asvs": [
@@ -265,6 +286,7 @@
   "title": "Expires・Max-Age",
   "chapter": 2,
   "manual": false,
+  "conditions": 1,
   "phase": "MVP",
   "titleEn": "Expires and Max-Age",
   "asvs": [],
@@ -277,6 +299,7 @@
   "title": "__Host-・__Secure-プレフィックス",
   "chapter": 2,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "__Host- and __Secure- prefixes",
   "asvs": [
@@ -290,6 +313,7 @@
   "title": "セッションIDの長さ・推測可能性",
   "chapter": 2,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Session ID length and predictability",
   "asvs": [
@@ -305,6 +329,7 @@
   "title": "既定のCookie名",
   "chapter": 2,
   "manual": false,
+  "conditions": 1,
   "phase": "MVP",
   "titleEn": "Default cookie names",
   "asvs": [],
@@ -315,6 +340,7 @@
   "title": "セッション固定化",
   "chapter": 2,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Session fixation",
   "asvs": [
@@ -331,6 +357,7 @@
   "title": "HTTP応答でのCookie発行",
   "chapter": 2,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Cookies set over HTTP",
   "asvs": [
@@ -346,6 +373,7 @@
   "title": "Partitioned（CHIPS）",
   "chapter": 2,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.3",
   "titleEn": "Partitioned (CHIPS)",
   "asvs": [],
@@ -356,6 +384,7 @@
   "title": "ログアウト後のセッション無効化",
   "chapter": 2,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Session invalidation after logout",
   "asvs": [
@@ -368,6 +397,7 @@
   "title": "Set-Cookieと共有キャッシュ",
   "chapter": 2,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Set-Cookie and shared caches",
   "asvs": [
@@ -380,6 +410,7 @@
   "title": "セッションタイムアウト",
   "chapter": 2,
   "manual": true,
+  "conditions": 2,
   "phase": "手動",
   "titleEn": "Session timeout",
   "asvs": [
@@ -393,6 +424,7 @@
   "title": "アカウントの列挙",
   "chapter": 2,
   "manual": true,
+  "conditions": 2,
   "phase": "手動",
   "titleEn": "Account enumeration",
   "asvs": [
@@ -407,6 +439,7 @@
   "title": "Origin反射",
   "chapter": 3,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Origin reflection",
   "asvs": [
@@ -419,6 +452,7 @@
   "title": "null許可",
   "chapter": 3,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Allowing null",
   "asvs": [
@@ -431,6 +465,7 @@
   "title": "部分一致の不備",
   "chapter": 3,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Partial-match flaws",
   "asvs": [
@@ -443,6 +478,7 @@
   "title": "ワイルドカード",
   "chapter": 3,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "Wildcard",
   "asvs": [
@@ -455,6 +491,7 @@
   "title": "プリフライト応答",
   "chapter": 3,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Preflight responses",
   "asvs": [
@@ -468,6 +505,7 @@
   "title": "Vary: Origin",
   "chapter": 3,
   "manual": false,
+  "conditions": 1,
   "phase": "MVP",
   "titleEn": "Vary: Origin",
   "asvs": [],
@@ -478,6 +516,7 @@
   "title": "Access-Control-Expose-Headers",
   "chapter": 3,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Access-Control-Expose-Headers",
   "asvs": [],
@@ -488,6 +527,7 @@
   "title": "Timing-Allow-Origin",
   "chapter": 3,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.3",
   "titleEn": "Timing-Allow-Origin",
   "asvs": [],
@@ -498,6 +538,7 @@
   "title": "WebSocketのOrigin検証",
   "chapter": 3,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.3",
   "titleEn": "WebSocket Origin check",
   "asvs": [
@@ -510,6 +551,7 @@
   "title": "OPTIONS・TRACE",
   "chapter": 4,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.2",
   "titleEn": "OPTIONS and TRACE",
   "asvs": [
@@ -525,6 +567,7 @@
   "title": "PUT・DELETE（静的パス）",
   "chapter": 4,
   "manual": true,
+  "conditions": 1,
   "phase": "手動",
   "titleEn": "Dangerous methods",
   "asvs": [
@@ -537,6 +580,7 @@
   "title": "メソッド上書き",
   "chapter": 4,
   "manual": true,
+  "conditions": 1,
   "phase": "手動",
   "titleEn": "Method override",
   "asvs": [
@@ -549,6 +593,7 @@
   "title": "HTTP→HTTPSリダイレクト",
   "chapter": 4,
   "manual": false,
+  "conditions": 4,
   "phase": "MVP",
   "titleEn": "HTTP to HTTPS redirect",
   "asvs": [
@@ -564,6 +609,7 @@
   "title": "リダイレクトチェーン",
   "chapter": 4,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Redirect chain",
   "asvs": [
@@ -576,6 +622,7 @@
   "title": "オープンリダイレクト",
   "chapter": 4,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.2",
   "titleEn": "Open redirect",
   "asvs": [
@@ -590,6 +637,7 @@
   "title": "Host・X-Forwarded-Hostヘッダインジェクション",
   "chapter": 4,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "Host and X-Forwarded-Host header injection",
   "asvs": [
@@ -602,6 +650,7 @@
   "title": "CRLFインジェクション",
   "chapter": 4,
   "manual": false,
+  "conditions": 1,
   "phase": "MVP",
   "titleEn": "CRLF injection",
   "asvs": [
@@ -619,6 +668,7 @@
   "title": "TLSバージョン",
   "chapter": 4,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "TLS versions",
   "asvs": [
@@ -633,6 +683,7 @@
   "title": "暗号スイート・鍵",
   "chapter": 4,
   "manual": false,
+  "conditions": 3,
   "phase": "v0.2",
   "titleEn": "Cipher suites and keys",
   "asvs": [
@@ -645,6 +696,7 @@
   "title": "証明書",
   "chapter": 4,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.2",
   "titleEn": "Certificate",
   "asvs": [
@@ -657,6 +709,7 @@
   "title": "HTTP/2・HTTP/3",
   "chapter": 4,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.2",
   "titleEn": "HTTP/2 and HTTP/3",
   "asvs": [],
@@ -667,6 +720,7 @@
   "title": "送信元IPの偽装（X-Forwarded-Forなど）",
   "chapter": 4,
   "manual": true,
+  "conditions": 3,
   "phase": "手動",
   "titleEn": "Source IP spoofing",
   "asvs": [
@@ -680,6 +734,7 @@
   "title": "スタックトレース・デバッグ情報",
   "chapter": 5,
   "manual": false,
+  "conditions": 3,
   "phase": "v0.2",
   "titleEn": "Stack traces and debug information",
   "asvs": [
@@ -695,6 +750,7 @@
   "title": "ディレクトリリスティング",
   "chapter": 5,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.2",
   "titleEn": "Directory listing",
   "asvs": [
@@ -707,6 +763,7 @@
   "title": "既知ファイル（/.git、/.envなど）",
   "chapter": 5,
   "manual": false,
+  "conditions": 2,
   "phase": "MVP",
   "titleEn": "Known files (/.git, /.env, etc.)",
   "asvs": [
@@ -722,6 +779,7 @@
   "title": "robots.txt・security.txt",
   "chapter": 5,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.2",
   "titleEn": "robots.txt and security.txt",
   "asvs": [],
@@ -732,6 +790,7 @@
   "title": "API仕様・管理機能",
   "chapter": 5,
   "manual": false,
+  "conditions": 3,
   "phase": "v0.2",
   "titleEn": "API specs and admin endpoints",
   "asvs": [
@@ -745,6 +804,7 @@
   "title": "JSONP",
   "chapter": 5,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.2",
   "titleEn": "JSONP",
   "asvs": [
@@ -758,6 +818,7 @@
   "title": "HTML本文：混在コンテンツ",
   "chapter": 5,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.2",
   "titleEn": "HTML body: mixed content",
   "asvs": [
@@ -772,6 +833,7 @@
   "title": "HTML本文：第三者スクリプトのSRI",
   "chapter": 5,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.2",
   "titleEn": "HTML body: SRI for third-party scripts",
   "asvs": [
@@ -784,6 +846,7 @@
   "title": "HTML本文：機密・内部情報",
   "chapter": 5,
   "manual": false,
+  "conditions": 3,
   "phase": "v0.2",
   "titleEn": "HTML body: secrets and internal information",
   "asvs": [
@@ -796,6 +859,7 @@
   "title": "HTML本文：パスワードフォーム",
   "chapter": 5,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.2",
   "titleEn": "HTML body: password forms",
   "asvs": [
@@ -811,6 +875,7 @@
   "title": "ダウンロード応答",
   "chapter": 5,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.2",
   "titleEn": "Download responses",
   "asvs": [
@@ -824,6 +889,7 @@
   "title": "HTML本文：CSRFトークンの有無",
   "chapter": 5,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.2",
   "titleEn": "HTML body: CSRF tokens",
   "asvs": [
@@ -838,6 +904,7 @@
   "title": "ソースマップの露出",
   "chapter": 5,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.2",
   "titleEn": "Source map exposure",
   "asvs": [
@@ -850,6 +917,7 @@
   "title": "未認証アクセス",
   "chapter": 6,
   "manual": false,
+  "conditions": 3,
   "phase": "v0.3",
   "titleEn": "Unauthenticated access",
   "asvs": [
@@ -865,6 +933,7 @@
   "title": "トークンの露出",
   "chapter": 6,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.3",
   "titleEn": "Token exposure",
   "asvs": [
@@ -879,6 +948,7 @@
   "title": "JWTの中身",
   "chapter": 6,
   "manual": false,
+  "conditions": 3,
   "phase": "v0.3",
   "titleEn": "JWT contents",
   "asvs": [
@@ -892,6 +962,7 @@
   "title": "レート制限",
   "chapter": 6,
   "manual": true,
+  "conditions": 2,
   "phase": "手動",
   "titleEn": "Rate limiting",
   "asvs": [
@@ -904,6 +975,7 @@
   "title": "ページングの上限",
   "chapter": 6,
   "manual": true,
+  "conditions": 1,
   "phase": "手動",
   "titleEn": "Pagination limits",
   "asvs": [
@@ -916,6 +988,7 @@
   "title": "リクエストサイズの上限",
   "chapter": 6,
   "manual": true,
+  "conditions": 1,
   "phase": "手動",
   "titleEn": "Request size limits",
   "asvs": [
@@ -928,6 +1001,7 @@
   "title": "過剰なデータ露出",
   "chapter": 6,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.3",
   "titleEn": "Excessive data exposure",
   "asvs": [
@@ -941,6 +1015,7 @@
   "title": "リクエストのContent-Type",
   "chapter": 6,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.3",
   "titleEn": "Request Content-Type",
   "asvs": [
@@ -953,6 +1028,7 @@
   "title": "JSON応答のヘッダ",
   "chapter": 6,
   "manual": false,
+  "conditions": 3,
   "phase": "MVP",
   "titleEn": "JSON response headers",
   "asvs": [
@@ -967,6 +1043,7 @@
   "title": "エラー形式",
   "chapter": 6,
   "manual": false,
+  "conditions": 1,
   "phase": "v0.3",
   "titleEn": "Error format",
   "asvs": [
@@ -979,6 +1056,7 @@
   "title": "メソッド制御・旧版",
   "chapter": 6,
   "manual": false,
+  "conditions": 2,
   "phase": "v0.3",
   "titleEn": "Method control and old versions",
   "asvs": [

@@ -179,8 +179,15 @@ function coveredByOther(i: CspIssue, others: Policy[]): boolean {
   if (i.item !== 'H-04' && i.type !== 'MISSING_DIRECTIVES' && i.directive !== 'default-src') return false;
   const d = i.item === 'H-04' ? 'script-src' : i.item === 'H-05' ? 'object-src' : undefined;   // H-05 に振り分けるのは①（object-src）だけ
   return !!d && others.some(p => (p.dirs.has(d) || p.dirs.has('default-src'))
-    && !p.issues.some(x => (x.item === i.item && x.condition === i.condition) || x.type === EVALUATOR_ERROR));
+    && !p.issues.some(x => sameLooseness(i, x) || x.type === EVALUATOR_ERROR));
 }
+/**
+ * 別のポリシーの指摘 x が、指摘 i と同じくらい緩いか（緩ければ、そのポリシーは i を止めない）。H-04⑥ は種類の違う指摘（短い nonce・IP アドレス・
+ * 'unsafe-hashes'）をまとめた条件なので種類で比べる。'unsafe-hashes'（ハッシュの合うイベントハンドラを許す）は、'unsafe-inline'（①。ハンドラを
+ * すべて許す）のポリシーでも止まらない
+ */
+const sameLooseness = (i: CspIssue, x: CspIssue) => x.item === i.item && (x.condition === i.condition && (i.condition !== 6 || x.type === i.type)
+  || (i.type === 'SCRIPT_UNSAFE_HASHES' && x.type === 'SCRIPT_UNSAFE_INLINE'));
 
 /**
  * 強制モードの各ポリシー（ヘッダの CSP と HTML の <meta> の CSP。ブラウザは両方を強制する）を csp_evaluator で評価する（ポリシーごとの
@@ -216,7 +223,7 @@ const CSP_REC: Record<number, string> = {
   2: "* や https: などの広い指定をやめ、nonce＋'strict-dynamic' にする",
   3: "'unsafe-eval' を使わないようにする",
   4: 'JSONPを提供するホストを許可リストから外すか、nonce＋strict-dynamic にする',
-  6: 'csp_evaluator の指摘に従って修正する（nonce は十分な長さの乱数にする、IPアドレスでの許可を使わない など）',
+  6: "csp_evaluator の指摘に従って修正する（nonce は十分な長さの乱数にする、IPアドレスでの許可を使わない、インラインのイベントハンドラをやめて 'unsafe-hashes' を外す など）",
 };
 
 export const cspScript: Rule = { id: 'H-04', title: 'CSP：script-src', appliesTo: 'html', scope: 'target',

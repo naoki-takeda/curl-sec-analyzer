@@ -5,9 +5,25 @@ import { SEVERITIES } from './summarize';
 import ITEMS from './items.json';
 
 const ID = /^[HCRTEA]-\d\d(\.\d+)?$/;
-/** チェックリストにある項目か（H-99 のような存在しない項目を、黙って受け付けない） */
-const ITEM_IDS = new Set((ITEMS as { id: string }[]).map(i => i.id));
-export const knownItem = (id: string) => ID.test(id) && ITEM_IDS.has(id.replace(/\.\d+$/, ''));
+/**
+ * チェックリストにある項目・条件か（H-99 のような存在しない項目と、H-01.9・H-01.0 のような存在しない条件を、黙って受け付けない。
+ * 綴りを誤った重要度の上書きや例外が、効かないまま残るため）
+ */
+const CONDITIONS = new Map((ITEMS as { id: string; conditions: number }[]).map(i => [i.id, i.conditions]));
+/** 項目ID（H-01）か条件（H-01.1）の誤り：項目がない（item）、条件番号がない（condition）、正しい（undefined） */
+export const idProblem = (id: string): 'item' | 'condition' | undefined => {
+  const m = ID.exec(id);
+  const n = m ? CONDITIONS.get(id.slice(0, 4)) : undefined;
+  if (!n) return 'item';
+  if (m![1] === undefined) return undefined;
+  // 先頭が0の番号（H-01.01）は、照合（例外は ruleId の文字列、重要度は「項目.条件」）で H-01.1 と一致せず効かないので、誤りにする
+  const c = /^\.[1-9]\d*$/.test(m![1]) ? Number(m![1].slice(1)) : 0;
+  return c >= 1 && c <= n ? undefined : 'condition';
+};
+export const knownItem = (id: string) => idProblem(id) === undefined;
+/** 誤りの文言（「は項目IDではありません」か、条件番号の範囲を示すもの） */
+export const idProblemText = (id: string): string => idProblem(id) === 'condition'
+  ? `は条件番号が${id.slice(0, 4)}にありません（1〜${CONDITIONS.get(id.slice(0, 4))}）` : 'は項目IDではありません';
 const PROFILE_KEYS = ['name', 'severity', 'exclude', 'sessionCookieNames', 'sessionMaxAgeHours', 'trustedScriptOrigins'];
 // 配列にする項目が配列でない（"exclude": "T-12"）なら、黙って空にせずエラーにする（既定の設定のまま判定したことに気づけるように）
 const notArray = (v: unknown) => v !== undefined && !Array.isArray(v);
@@ -23,7 +39,7 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   const sevOk = d.severity === undefined || (!!d.severity && typeof d.severity === 'object' && !Array.isArray(d.severity));
   if (!sevOk) errors.push('severity：項目ID（例：H-10）と重要度の組のオブジェクトにしてください');
   for (const [k, v] of Object.entries(sevOk ? (d.severity as Record<string, unknown> | undefined) ?? {} : {})) {
-    if (!knownItem(k)) errors.push(`severity：「${k.slice(0, 40)}」は項目IDではありません`);
+    if (!knownItem(k)) errors.push(`severity：「${k.slice(0, 40)}」${idProblemText(k)}`);
     else if (!SEVERITIES.includes(v as Severity)) errors.push(`severity：「${k}」の重要度は high・medium・low・info のいずれか`);
     else severity[k] = v as Severity;
   }

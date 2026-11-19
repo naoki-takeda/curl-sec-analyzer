@@ -109,6 +109,14 @@ export const LOGIN_FAILED_REC = 'テスト用アカウントでログインで�
  * 本文がないのに「反映されない」「参照なし」と合格にすると、見逃しになり、カバレッジも水増しになる
  */
 export const NO_BODY_REC = '本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）';
+/**
+ * 最後の応答の本文を採取していないか（本文のない応答（204・304、Content-Length: 0）は、採取していても本文がないので含めない）。
+ * E-01・A-07 は、本文のない応答を適用外の [] にし、本文を見るべき応答（エラーの応答、API の 2xx）で採取していないものだけを na にする
+ */
+export const bodyNotCaptured = (ctx: RuleContext): boolean => {
+  const f = ctx.final;
+  return !!f && !f.body?.trim() && f.status !== 204 && f.status !== 304 && header(ctx, 'content-length')[0]?.trim() !== '0';
+};
 /** プローブ（C13）のコードが 000（接続できなかった）のときの推奨。ファイルがあるかどうかは分からないので、合格にしない（E-03・E-04・E-13） */
 export const PROBE_UNREACHED_REC = 'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）';
 const AUTH_FLAG = /^(?:is_?)?(?:authenticated|authorized|logged_?in|signed_?in|auth|ok|success|valid)$/i;

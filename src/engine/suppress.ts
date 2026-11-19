@@ -2,7 +2,7 @@
 import type { Finding, Suppression } from '../model';
 import { baseLabel } from '../parser/target';
 import { isCurrentKey, KEY_LABEL } from './targetKey';
-import { knownItem } from './profile';
+import { idProblemText, knownItem } from './profile';
 
 /**
  * URL のパターン照合（* は任意の文字列）。正規表現に変換すると、* の多いパターンでバックトラックが爆発する（ReDoS）ため、
@@ -94,7 +94,7 @@ export function parseSuppressions(text: string): { list: Suppression[]; errors: 
     const s = (x && typeof x === 'object' ? x : {}) as Partial<Suppression>;   // null や数値の要素でも落ちない
     if (typeof s.ruleId !== 'string' || !/^[A-Z]-\d\d(\.\d+)?$/.test(s.ruleId)) errors.push(`${i + 1}件目：ruleId が不正です`);
     // チェックリストにない項目（H-99・Z-99）は受け付けない（組織プロファイルと同じ。綴りを誤った例外が黙って効かないことを防ぐ）
-    else if (!knownItem(s.ruleId)) errors.push(`${i + 1}件目：ruleId「${s.ruleId}」は項目IDではありません`);
+    else if (!knownItem(s.ruleId)) errors.push(`${i + 1}件目：ruleId「${s.ruleId}」${idProblemText(s.ruleId)}`);
     else if (typeof s.target !== 'string' || !s.target) errors.push(`${i + 1}件目：target がありません`);
     else if (s.target.length > MAX_PATTERN) errors.push(`${i + 1}件目：target が長すぎます（${MAX_PATTERN}文字まで）`);
     else if (typeof s.reason !== 'string' || !s.reason.trim()) errors.push(`${i + 1}件目：reason（理由）がありません`);

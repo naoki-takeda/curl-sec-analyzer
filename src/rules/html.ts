@@ -8,6 +8,8 @@ import { b64urlJson } from './jwt';
 
 export interface Tag {
   name: string; attrs: Map<string, string>; index: number;
+  /** タグを閉じる > の位置（引用符で囲んだ属性の値の中の > では閉じない。E-09 がタグを取り除く範囲） */
+  end: number;
   /** 証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
   evidence: string;
   /** <script> などテキストの要素の中身か <template> の中のタグ（ブラウザは文書の要素として使わない。H-03 の meta の CSP、H-09 の meta の referrer） */
@@ -150,7 +152,7 @@ function scan(html: string, names: string[]): { tags: Tag[]; comments: [number, 
     // 同じ名前の属性は最初の値を使う（HTML の字句解析と同じ）
     for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) { const k = a[1].toLowerCase(); if (!attrs.has(k)) attrs.set(k, decodeEntities(a[2] ?? a[3] ?? a[4] ?? '')); }
     const name = m[1].toLowerCase();
-    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i,
+    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i, end,
       ...(!outside ? { inert: true, ...(rawText ? { text: true } : {}) } : i < templateEnd ? { inert: true } : {}) });
     i = end;                                         // 属性の中の < をタグの始まりとして読まない
   }
@@ -355,10 +357,11 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     const out = [];
     // OpenID Connect の response_mode=form_post：IdP は id_token・access_token を hidden の欄に入れて、アプリへ POST する画面を返す。
     // 利用者のブラウザに渡すのが仕事のトークンなので、その欄の値は秘密情報の露出として数えない（自社の Keycloak などを対象にしたとき）。
-    // 除くのはその input のタグだけ（値の文字列をページ全体から消すと、ほかの秘密の一部まで消える）
+    // 除くのはその input のタグだけ（値の文字列をページ全体から消すと、ほかの秘密の一部まで消える）。タグの終わりは字句解析の > で、
+    // 引用符で囲んだ属性の値の中の >（data-x="a>b"）では切らない（切ると、後ろの value のトークンを本文の秘密として E-09① にする）
     const posted = forms(html).filter(f => (f.form.attrs.get('method') ?? '').toLowerCase() === 'post')
       .flatMap(f => f.inputs).filter(i => i.attrs.get('type')?.toLowerCase() === 'hidden' && /^(?:id_token|access_token|code|state)$/i.test(i.attrs.get('name') ?? ''))
-      .map(i => [i.index, html.indexOf('>', i.index) + 1] as const).filter(([, e]) => e > 0).sort((a, b) => b[0] - a[0]);
+      .map(i => [i.index, i.end + 1] as const).sort((a, b) => b[0] - a[0]);
     const scan = posted.reduce((h, [s, e]) => h.slice(0, s) + h.slice(e), html);
     for (const [name, re] of SECRETS) if (re.test(scan)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
     const iu = internalUrl(html, pageHostOf(ctx)?.toLowerCase());

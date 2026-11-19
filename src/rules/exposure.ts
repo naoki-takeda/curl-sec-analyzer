@@ -2,8 +2,8 @@
 import type { HttpResponse, Rule, RuleContext } from '../model';
 import { clip } from '../mask';
 import { probePattern } from './probes';
-import { NO_BODY_REC, PROBE_UNREACHED_REC, bodyTruncated, header, isStaticResource, mk } from './util';
-import { ownChain } from '../parser/target';
+import { NO_BODY_REC, PROBE_UNREACHED_REC, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk } from './util';
+import { baseLabel, ownChain } from '../parser/target';
 import { allowedItems } from '../engine/labels';
 import { AWS_KEY, noHtmlBody } from './html';
 
@@ -43,7 +43,10 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     // ただし拡張子が静的リソースでも、エラーの応答（4xx・5xx）と、HTML・JSON を返したもの（/img/missing.png の 500 のエラーページ）は見る
     const doc = (ctx.final?.status ?? 0) >= 400 || DOC_CT.test(header(ctx, 'content-type')[0] ?? '');
     const b = isStaticResource(ctx) && !doc ? undefined : body(ctx);
-    if (!b) return [];
+    // 本文がなければ適用外。ただし、エラーの応答（4xx・5xx）と error-* のラベルで本文を採取していない（-v・-o /dev/null、HAR の本文なし）なら、
+    // エラーの詳細を出しているかが分からないので na（適用外にすると、エラーの画面を調べていないことが見えない）
+    if (!b) return ((ctx.final?.status ?? 0) >= 400 || /^error-/.test(baseLabel(ctx.target.label))) && bodyNotCaptured(ctx)
+      ? [mk(errorDetail, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
     const out = [];
     // HTML の応答の AWS のキーは E-09①（HTML本文の秘密情報）が数えるので、E-01① では見ない（第0章 0.2「同じ事象は1つの項目でだけ減点」）。
     // 任せるのは、そのラベルで E-09 を判定し、組織プロファイルで E-09 を対象外にしていないときだけ
