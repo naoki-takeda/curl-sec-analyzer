@@ -12,7 +12,7 @@ import { suppressionsJson, toJson } from '../export/json';
 import { toCsv } from '../export/csv';
 import { ITEM_COMMANDS, ITEM_COMMANDS_EN } from '../commands';
 import { hstsDirective } from '../rules/util';
-import { covLabel, diffLabel, getLang, listSep, sevLabel, statusLabel, tr } from '../i18n';
+import { covLabel, diffLabel, getLang, itemSep, listSep, sevLabel, statusLabel, tr } from '../i18n';
 import { showText } from '../shownText';
 import { recommendationEn } from '../recommendationsEn';
 import { BTN, type Child, LINK, PRIMARY, SEV_BORDER, SEV_TEXT, button, chapterOf, disclosure, download, el, focusable, focusedKey, options, restoreFocus, sevCell, table, td, titleCell } from './dom';
@@ -131,7 +131,7 @@ function overallTable(chapterRows: ReturnType<typeof overall>) {
   const rows = chapterRows.filter(r => state.view.showInfo || r.severity !== 'info');
   if (!rows.length) return el('p', 'text-muted', chapterRows.length ? T.nothingToShow : T.noFindingsInChapter);
   return table(T.tables.findings, [T.cols.severity, T.cols.item, T.cols.title, T.cols.targets], rows.map(r =>
-    el('tr', '', sevCell(r.severity), td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title), td('', r.targets.join(', ')))));
+    el('tr', '', sevCell(r.severity), td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title), td('', r.targets.join(itemSep())))));
 }
 /** 指摘をターゲット（ラベル）ごとにまとめる */
 function groupByTarget(fs: Finding[]): Map<string, Finding[]> {
@@ -162,7 +162,7 @@ function findingsTable(fs: Finding[], label: string, withTarget = false) {
   if (!shown.length) return el('p', 'mt-1 text-sm text-muted', T.nothingToShow);
   return table(label, [T.cols.severity, T.cols.item, ...(withTarget ? [T.cols.target] : []), T.cols.status, T.cols.evidence, T.cols.recommendation, ''], shown.map(x =>
     el('tr', '', x.status === 'fail' ? sevCell(x.severity, x.originalSeverity) : td('text-muted', '—'),
-      td('whitespace-nowrap num', x.items ? x.items.join(getLang() === 'en' ? ', ' : '・') : `${x.item}${circled(x.condition)}`),
+      td('whitespace-nowrap num', x.items ? x.items.join(itemSep()) : `${x.item}${circled(x.condition)}`),
       withTarget ? td('break-all', showText(x.target)) : null,
       td(`whitespace-nowrap ${x.status === 'pass' ? 'text-ok' : x.status === 'fail' ? '' : 'text-muted'}`, statusLabel(x.status)),
       td('font-mono text-[12px] break-all', x.evidence || '—'),

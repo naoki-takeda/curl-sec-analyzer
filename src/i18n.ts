@@ -21,6 +21,9 @@ const pathFields = (l: Lang) =>
 
 /** 理由・エラーの一覧の区切り（日本語は読点、英語は「; 」） */
 export const listSep = (l: Lang = lang) => (l === 'en' ? '; ' : '、');
+/** 項目ID・ラベル・基準の短い並びの区切り（日本語は中黒、英語は「, 」）。基準の種類（ASVS と IPA）の区切りは standardsSep */
+export const itemSep = (l: Lang = lang) => (l === 'en' ? ', ' : '・');
+export const standardsSep = (l: Lang = lang) => (l === 'en' ? '; ' : '・');
 
 const ja = {
   tagline: 'curl と openssl の出力、またはブラウザの HAR を読み込むと、HTTPヘッダ・Cookie・CORS・リダイレクト・TLS・APIの設定を判定します。',
@@ -41,7 +44,7 @@ const ja = {
   emptyInput: 'curlの出力を貼り付けてから「判定する」を押してください。', tooLarge: (mb: number) => `入力が大きすぎます（上限${mb}MB）。`,
   fileTooLarge: (mb: number) => `ファイルが大きすぎます（上限${mb}MB）。ターゲットを分けて読み込んでください。`,
   settingsTooLarge: (mb: number) => `ファイルが大きすぎます（上限${mb}MB）。このツールで書き出したファイルを選んでください。`,
-  profileKept: '（形式の違うファイルなので、読み込み済みの組織プロファイルを使い続けます）',
+  profileKept: '形式の違うファイルなので、読み込み済みの組織プロファイルを使い続けます。',
   suppressedCount: (n: number) => `例外を当てた指摘（項目×条件）：${n}件（重要度別の件数には含めていません。「合格・判定不能・例外も表示」で確認できます）`,
   noResponse: 'HTTPの応答が見つかりませんでした。curl に -i、-D -、-v のいずれかを付けて実行した出力を貼り付けてください。',
   analyzed: (targets: number, fails: number, high: number) => `${targets}件のターゲットを判定しました。指摘（項目×条件）${fails}件（うち重要度「高」${high}件）。`,
@@ -94,6 +97,7 @@ const ja = {
     sanitized: 'Cookie・Set-Cookie が含まれていません。ブラウザの設定で機密情報を含めて書き出すと、Cookie の項目も判定できます。', hosts: '対象ホスト：', remove: 'HARを外す', exclude: '除外',
     method: 'メソッド', status: 'ステータス', hops: (n: number) => `（${n}ホップ）`, labelFor: (m: string, u: string) => `${m} ${u} のラベル`, sensFor: (u: string) => `${u} の機密区分`, auto: (y: boolean): string => (y ? '自動（はい）' : '自動（不明）') },
   readErrors: (what: string, e: string) => `${what}の一部を読み込めませんでした：${e}。`, suppressionsName: '例外ファイル', profileName: '組織プロファイル',
+  baselineError: (e: string) => `前回の結果を読み込めませんでした：${e}。`,
 };
 type Dict = typeof ja;
 
@@ -118,7 +122,7 @@ const en: Dict = {
   emptyInput: 'Paste curl output, then select Analyze.', tooLarge: mb => `The input is too large (${mb} MB limit).`,
   fileTooLarge: mb => `The file is too large (${mb} MB limit). Split it by target.`,
   settingsTooLarge: mb => `The file is too large (${mb} MB limit). Choose a file exported by this tool.`,
-  profileKept: ' (The file is not a profile, so the loaded organization profile is kept.)',
+  profileKept: ' The file is not a profile, so the loaded organization profile is kept.',
   suppressedCount: n => `Findings (check × condition) covered by exceptions: ${n} (not in the severity counts; select Show passes, N/A and exceptions to see them).`,
   noResponse: 'No HTTP response found. Paste output from curl run with -i, -D - or -v.',
   analyzed: (targets, fails, high) => `Analyzed ${targets} target${s(targets)}: ${fails} finding${s(fails)}, ${high} high.`,
@@ -171,6 +175,7 @@ const en: Dict = {
     sanitized: 'This HAR has no Cookie or Set-Cookie headers. Export it with sensitive data included to check cookies.', hosts: 'Hosts:', remove: 'Remove HAR', exclude: 'Exclude',
     method: 'Method', status: 'Status', hops: n => ` (${n} hops)`, labelFor: (m, u) => `Label for ${m} ${u}`, sensFor: u => `Sensitivity for ${u}`, auto: y => (y ? 'Auto (yes)' : 'Auto (unknown)') },
   readErrors: (what, e) => `Part of the ${what} could not be loaded: ${e}.`, suppressionsName: 'exceptions file', profileName: 'organization profile',
+  baselineError: e => `Could not load the previous results: ${e}.`,
 };
 
 export const tr = (): Dict => (lang === 'en' ? en : ja);

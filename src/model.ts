@@ -6,7 +6,7 @@ export type ResponseKind = 'html' | 'api' | 'other';
 export interface HttpResponse {
   httpVersion: string; status: number; reason?: string;
   headers: Map<string, string[]>;   // 名前は小文字
-  body?: string;                    // 先頭64KBまで
+  body?: string;                    // 先頭64K文字まで
   // challenge：curl が認証し直した 401（--digest・--ntlm・--negotiate・--anyauth）。connect にはプロキシの 407 も含む
   kind: 'final' | 'redirect' | 'informational' | 'connect' | 'challenge';
   url?: string;                     // そのホップのリクエストのURL（HAR は記録から、curl はターゲットの URL から Location をたどって付ける）

@@ -52,7 +52,7 @@ curl-sec-analyzer の版ごとの変更です。版の付け方は [docs/design.
 - 生成スクリプトの出力が変わりました：logout・after-logout の本文も採取し（本文は先頭の 192KB）、C13 のプローブは形式によって先頭の4KB（server-status は1KB）を採り、C14（host-inj）はキャッシュよけの乱数をクエリに付け、openssl に20秒の時間の上限を付けます。
 - 判定は Web Worker で行います。判定中は結果を保存できず、判定中に入力・URL 欄を直すとその判定を止めます。
 - 例外の登録や設定ファイルの読み込みで判定し直すときは、表示中の結果の入力を使います（書き換えた入力欄は「判定する」を押すまで判定しません）。
-- C-11（Partitioned）は負荷分散・CDN の Cookie を指摘しません。security.txt の転送（3xx）は、転送先を見ていないので na にします。
+- C-11（Partitioned）は負荷分散・CDN の Cookie を指摘しません。security.txt・robots.txt の転送（3xx）と C13 のプローブ（E-03・E-13①）の転送は、転送先を見ていないので na にします。robots.txt の 5xx も na にします。http から https に転送したターゲットの http のホップの Secure のない Cookie は、C-01 だけで数えます（C-10 と二重に数えない）。
 
 ### 既知の限界
 
@@ -63,5 +63,5 @@ curl-sec-analyzer の版ごとの変更です。版の付け方は [docs/design.
   - そのため T-09②（TLS 1.3 非対応）と、合意した暗号による T-10 は判定できません。T-09①・T-10 は、C12・C23（openssl）で判定します。
 - 手で採取した `curl -i` の出力と、印のない openssl の出力は、診断対象のサーバが応答の本文やデータで判定を偽装できます。
   - 生成スクリプトの出力（印のある入力）では起きません。
-- マスクは、名前の付いていない短い合言葉（`hunter2`）と、区切りのないキャメルケースの名前（`userPassword: …`）・全角の名前を付けた値を伏せません（[docs/design.md](docs/design.md) の「マスキングの対象」）。
+- マスクは、名前の付いていない短い合言葉（`hunter2`）と、区切りのないキャメルケースの名前（`userPassword: …`）・全角の名前を付けた値（URL のパラメータ・JSON のキーを除く）を伏せません（[docs/design.md](docs/design.md) の「マスキングの対象」）。
 - メタ CSP のため、`frame-ancestors`・`report-uri`・`sandbox` は効きません（[SECURITY.md](SECURITY.md)）。

@@ -1,6 +1,6 @@
 // rules/exposure.ts：第5章 エラー・情報露出（E-01、E-02、E-04〜E-06、E-11、E-13）
 import type { HttpResponse, Rule, RuleContext } from '../model';
-import { clip } from '../mask';
+import { excerpt } from '../mask';
 import { probePattern } from './probes';
 import { ASSET_CT, FOLLOW_REC, NO_BODY_REC, PROBE_REDIRECT_REC, PROBE_UNREACHED_REC, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk, noContent } from './util';
 import { baseLabel, isRedirectWithLocation, ownChain } from '../parser/target';
@@ -64,7 +64,7 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
       // 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする。資格情報を含む jdbc: は①だけにする
       // （②にも出すと二重になる）。スタックトレースがあれば、そちらを証跡にする
       ?? (cred ? null : b.match(/\bjdbc:\w+:(?=\S)/));
-    if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
+    if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', excerpt(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る。Rails も同じく、既定のエラーページ
     // （public/404.html・500.html）と開発用の画面の文言で見る（「Ruby on Rails」はブログの記事などにも出る）
     const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Action Controller: Exception caught|<h1>Routing Error<\/h1>|We're sorry, but something went wrong\.|The page you were looking for doesn't exist\.|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|<title>Express<\/title>/i)
@@ -74,7 +74,7 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
       // <title>Error 404 - Page not found | MyShop</title> のような独自のエラーページを既定のページとしない
       ?? (/HTTP ERROR:?\s*\d{3}|Powered by Jetty/i.test(b) ? b.match(/<title>Error \d{3}[^<]*<\/title>/i) : null);
     // <title>Error 401 …</title>（Jetty など）の「…」は自由な文言で、アプリが「Invalid API key sk_live_…」のように秘密を入れうるので出さない
-    if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', clip(page[0].replace(/^(<title>Error \d{3})[^<]*/i, '$1 …'), 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
+    if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', excerpt(page[0].replace(/^(<title>Error \d{3})[^<]*/i, '$1 …'), 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
     return out.length ? out : [mk(errorDetail, ctx, 'ok', 'info', 'pass', 'エラーの詳細らしき記述なし', '')];
   } };
 
@@ -124,7 +124,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     const probe = ctx.target.probes.find(x => /\/security\.txt$/.test(x.path));
     if (probe) {                                              // C13 の存在確認（probes ラベル）
       if (!probe.code) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP 000、接続できなかった）`, PROBE_UNREACHED_REC)];
-      if (probe.code >= 300 && probe.code < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}、転送先を確かめていない）`, FOLLOW_REC)];
+      if (probe.code >= 300 && probe.code < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}、転送先を確かめていない）`, PROBE_REDIRECT_REC)];
+      if (probe.code >= 500) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。サーバのエラーで、security.txt があるかは分からない）`, '時間をおいて採取し直す')];
       const hit = probePattern(probe.path, probe.headB64, probe.code);
       if (hit?.name === 'security-txt-comment') return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。採った先頭がコメントだけで、Contact・Expires があるかは分からない）`, '本文を取得して（C2）、Contact と Expires があるか確かめる')];
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
@@ -133,7 +134,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     // 本文を取得したターゲット（一般のターゲット）。2xx でなければファイルがない（404 のエラーページの本文を、ファイルの中身として読まない）。
     // 2xx（ステータスの分からないものを含む）で本文を採取していない（-I、-o /dev/null、HAR の本文なし）なら、中身を判定できない。
     // 304 は中身が分からないので適用外。204・Content-Length: 0 は空のファイル
-    if (!ctx.final) return [];
+    if (!ctx.final || ctx.final.status === 304) return [];
     const st = ctx.final.status; const got = !st || (st >= 200 && st < 300);
     const noBody = () => [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)];
     if (/\/robots\.txt$/.test(p)) {
@@ -142,7 +143,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
       // 5xx は、robots.txt がないとは言えない（一時的な障害の可能性。E-05 の 5xx と同じく na）
       if (st >= 500) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラーで、robots.txt があるかは分からない）`, '時間をおいて採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
-      if (!b) return bodyNotCaptured(ctx) ? noBody() : st === 304 ? [] : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt が空（HTTP ${st}）`, '')];
+      if (!b) return bodyNotCaptured(ctx) ? noBody() : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt が空（HTTP ${st}）`, '')];
       // どのパスにも index.html を返す SPA の 200 は robots.txt ではない（なしとして合格）。HTML かは本文で見る（robots.txt を text/html で返す
       // サーバの User-agent・Disallow の行を見逃さない。robots.txt は < で始まらない）
       if (/^\s*</.test(b))
@@ -154,8 +155,9 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     if (/\/security\.txt$/.test(p)) {
       // RFC 9116 3 は転送を認めるので、-L なしの 3xx は転送先を見ていない
       if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, FOLLOW_REC)];
+      if (st >= 500) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラーで、security.txt があるかは分からない）`, '時間をおいて採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `security.txt を取得できない（HTTP ${st}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
-      if (!b && (bodyNotCaptured(ctx) || st === 304)) return st === 304 ? [] : noBody();
+      if (!b && bodyNotCaptured(ctx)) return noBody();
       const txt = b ?? '';
       // どのパスにも index.html を返す SPA の 200 は、security.txt ではない
       if (looksHtml(ctx, txt))
@@ -341,10 +343,10 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     if (!ref && ((st && (st < 200 || st >= 300) && st !== 304) || ctx.responseKind === 'html')) return [];
     // 本文のない応答（キャッシュした JS の 304 など）は適用外
     if (!ref && !b) return bodyNotCaptured(ctx) ? [mk(sourceMap, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
-    if (!ref && bodyTruncated(ctx)) return [mk(sourceMap, ctx, 'na', 'info', 'na', '本文の先頭64KBに参照なし（参照は末尾にあることが多い）', NO_BODY_REC)];
+    if (!ref && bodyTruncated(ctx)) return [mk(sourceMap, ctx, 'na', 'info', 'na', '本文の先頭64K文字に参照なし（参照は末尾にあることが多い）', NO_BODY_REC)];
     // 本文に埋め込んだソースマップ（data:application/json;base64,…）は、.map を配信しているのと同じ（sourcesContent に元のソースを含みうる）。
     // 「.map を C13 に追加して確かめる」は当てはまらないので、証跡と推奨を分ける（①はプローブ（probes ラベル）の条件なので②のまま。中身は証跡に出さない）
     if (ref && /^data:/i.test(ref)) return [mk(sourceMap, ctx, 2, 'low', 'fail', '本文に埋め込んだソースマップ（data:。中身は表示しない）', '本番ビルドではインラインのソースマップ（webpack の inline-source-map・Vite の sourcemap: \'inline\' など）を出さない（sourcesContent に元のソースがあるかは手動で確認）')];
-    return ref ? [mk(sourceMap, ctx, 2, 'low', 'fail', `参照: ${clip(ref, 120)}`, '本番ビルドでは sourceMappingURL を出さない。.map を C13 のパス一覧に追加して取得できるか確認する')]
+    return ref ? [mk(sourceMap, ctx, 2, 'low', 'fail', `参照: ${excerpt(ref, 120)}`, '本番ビルドでは sourceMappingURL を出さない。.map を C13 のパス一覧に追加して取得できるか確認する')]
                : [mk(sourceMap, ctx, 'ok', 'info', 'pass', 'ソースマップへの参照なし', '')];
   } };

@@ -83,7 +83,7 @@ function buildShell() {
     const { baseline: b, error, skipped } = parseBaseline(text);
     if (b) state.baseline = b;
     const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
-    refresh(() => { const t = tr(); return error ? joinMessages([error]) : skipped ? t.baselineSkipped(skipped) : legacy ? t.legacyHarKeys(legacy) : ''; });
+    refresh(() => { const t = tr(); return error ? t.baselineError(joinMessages([error])) : skipped ? t.baselineSkipped(skipped) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
 
   app.replaceChildren(
@@ -269,8 +269,9 @@ function show({ targets, warnings, findings, cov }: AnalyzeResult, input: Analyz
   formNotAnalyzed = fromResult && (refs.input.value !== input.text || refs.urlInput.value !== input.url);
   // 判定できたら、生の出力を隠す。書き換えた入力欄は隠さない（書き換えている途中の入力欄を隠さない）
   if (input.text.trim() && !formNotAnalyzed) state.view.inputHidden = true;
+  const focused = document.activeElement;
   applyInputVisibility();
-  render(); focusResultsIfLost(refs.results);
+  render(); focusResultsIfLost(refs.results, focused);
   // 件数は画面の集計（項目×条件で一意に数える。ui/results.ts と同じ）に合わせる。ターゲットごとの指摘を数えると、画面と違う数を読み上げる
   const rows = overall(findings); const high = countBySeverity(rows).high;
   const note = formNotAnalyzed;

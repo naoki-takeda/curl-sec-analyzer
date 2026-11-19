@@ -65,3 +65,24 @@ describe('突き合わせのキーのクエリの値', () => {
     expect(k).toContain('lang=ja'); expect(k).toContain('order=created_at');
   });
 });
+
+describe('突き合わせのキーの区切った番号とコード', () => {
+  it('カード番号・社会保障番号の形・招待のコードは、かけらごとに残さない（画面の許可リストと同じ形）', () => {
+    for (const [path, code] of [['/card/4111-1111-1111-1111', '4111'], ['/u/123-45-6789', '6789'], ['/invite/QWER-TYUI-ZXCV-ASDF', 'ZXCV'],
+      ['/invite/123456-654321-111111', '654321'], ['/r/ab12_cd34_ef56_gh78', 'cd34'], ['/invite/K7QX-9MZP', '9MZP']] as const) {
+      const k = urlKey(`https://a.example${path}`);
+      expect(k).not.toContain(code); expect(urlKey(k)).toBe(k);
+    }
+  });
+  it('日付・版・語のパスは残す', () => {
+    for (const p of ['/news/2026-11-19', '/docs/2026-annual-report-v2', '/api/v1/user-list', '/cipher/ECDHE-RSA-AES-GCM']) expect(urlKey(`https://a.example${p}`)).toBe(`https://a.example${p}`);
+  });
+});
+
+describe('#META の内部の印', () => {
+  it('入力の #META の source=・method= は受け付けない（HAR のターゲットのキーにしない）', () => {
+    const [t] = parseInput('#TARGET url=https://a.example/api label=t\n#META source=har method=Bearer_secret\nHTTP/2 200\n\n').targets;
+    expect(t.meta.source).toBeUndefined(); expect(t.meta.method).toBeUndefined();
+    expect(targetKeys([t])[0]).toBe('t');
+  });
+});

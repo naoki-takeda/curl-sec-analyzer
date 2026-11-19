@@ -81,7 +81,7 @@ const hasData = (t: Target) =>
 /** この応答のあとに次の応答が続きうるか（転送・1xx・認証のやり直し）。200 の本文の中のステータス行らしき行では分けない */
 const nextHopAfter = (status: number) => status < 200 || (status >= 300 && status < 400) || status === 401 || status === 407;
 const newResponse = (sm: RegExpMatchArray): HttpResponse => ({ httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), kind: 'final' });
-/** 本文に1行を足す。本文は先頭64KBまで（1行が長い本文（圧縮したHTMLなど）も途中で切る） */
+/** 本文に1行を足す。本文は先頭64K文字まで（1行が長い本文（圧縮したHTMLなど）も途中で切る） */
 const appendBody = (r: HttpResponse, line: string) => {
   const room = BODY_LIMIT - (r.body?.length ?? 0);
   if (room > 0) r.body = (r.body ?? '') + (line.length < room ? `${line}\n` : line.slice(0, room));
@@ -170,7 +170,8 @@ export function parseInput(input: string): ParseResult {
         if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push(`${t.label}：kind= は html・api・auto のいずれか`);
       }
       else if (tag === 'META') {
-        Object.assign(t.meta, a);
+        // source・method は HAR の取り込みが付ける印（突き合わせのキーの「HAR メソッド URL」、送ったヘッダが見えるか）。入力の #META では受け付けない
+        for (const [k, v] of Object.entries(a)) if (k !== 'source' && k !== 'method') t.meta[k] = v;
         // %{header_json} のあとに出した response_code（-w '%{header_json}' のあとの #META）も、その応答のステータスにする。
         // ステータスがまだない %{header_json} の応答だけを見る（行ごとに全応答を見直すと、#META の多い入力で2乗の時間になる）
         if (a.response_code) { for (const r of pendingJson) if (r.status === 0) r.status = Number(a.response_code) || 0; pendingJson.length = 0; }

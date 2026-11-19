@@ -475,3 +475,11 @@ export const clip = (s: string, n: number) => {
   for (let x = re.exec(m); x && x.index < n; x = re.exec(m)) if (x.index + x[0].length > n) return m.slice(0, x.index + x[0].length);
   return m.slice(0, n);
 };
+/**
+ * 証跡の抜粋（ルールが使う）：clip と同じく切り詰め、語の途中で切ったら、そのかけらを残さない（切れたトークンの先頭（ghp_R8kQ）は、あとで通す
+ * 許可リスト（showText）が短い語として残す）
+ */
+export const excerpt = (s: string, n: number) => {
+  const m = maskText(s); const c = clip(s, n);
+  return c.length < m.length && /[\w-]/.test(m[c.length]) ? c.replace(/[\w-]+$/, '') : c;
+};

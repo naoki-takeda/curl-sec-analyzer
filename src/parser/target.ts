@@ -1,7 +1,7 @@
 // parser/target.ts：ターゲットの共通の処理（ラベル・判定に使う応答のホップ・HTTPS か・機密か・採取時刻・Set-Cookie の上限）
 import type { HttpResponse, ParseWarning, ResponseKind, Target } from '../model';
 
-/** 読む本文の上限（curl の貼り付け・HAR とも先頭 64KB まで） */
+/** 読む本文の上限（curl の貼り付け・HAR とも先頭 64K 文字まで） */
 export const BODY_LIMIT = 64 * 1024;
 
 /** HTTP のトークン（RFC 9110 5.6.2 の token）の1文字。ヘッダ名・Cookie の名前・ディレクティブの名前の形 */

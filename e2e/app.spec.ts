@@ -521,3 +521,11 @@ test('解析の警告に出す #TARGET の読めない名前も、許可リス�
   await expect(page.getByText(/#TARGET の指定を読めませんでした/)).toBeVisible();
   expect(await page.locator('#app').innerText()).not.toContain(token);
 });
+
+test('前回の結果の読み込みのエラーは、どのファイルかを示して文を閉じる', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.locator('input[type=file]').nth(3).setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await expect(page.getByRole('status')).toHaveText(/^前回の結果を読み込めませんでした：.+。$/);
+});

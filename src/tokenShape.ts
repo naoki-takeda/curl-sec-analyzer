@@ -16,6 +16,25 @@ export function lowerToken(x: string): boolean {
   return rareBigrams(x) >= 0.35;
 }
 
+// ---- 区切った番号・コードの形。画面の許可リスト（shownText.ts の allowRun）と突き合わせのキー（engine/targetKey.ts の keySegment）で共有する ----
+/**
+ * 6桁までの数字だけのかけらが3つ以上続き、合わせて12桁以上になる部分があるか（カード番号 4111-1111-1111-1111・電話番号。日付の 20261118 の
+ * ような8桁を含む並び（db-backup-20261118-0300-01）は番号としない）
+ */
+export const digitRun = (pieces: string[]): boolean => {
+  let n = 0, len = 0;
+  for (const p of pieces) { if (/^\d{1,6}$/.test(p)) { n++; len += p.length; if (n >= 3 && len >= 12) return true; } else { n = 0; len = 0; } }
+  return false;
+};
+/**
+ * 同じ長さ（3〜5文字）の英数字のかけらをつないだコード（招待・パスワードの再設定の QWER-TYUI-ZXCV-ASDF・K7QX-9MZP）か。3つ以上なら半分以上、
+ * 2つなら両方が乱数のかけら（random は呼び出し側の判定。画面は暗号の名前などを除く）。数字だけのものは digitRun で見る。長さのそろわない
+ * 暗号の名前（ECDHE-RSA-RC4-SHA）は対象外
+ */
+export const codeGroups = (pieces: string[], random: (p: string) => boolean): boolean =>
+  pieces.length >= 2 && pieces.every(p => /^[A-Za-z0-9]{3,5}$/.test(p) && p.length === pieces[0].length) && !pieces.every(p => /^\d+$/.test(p))
+  && (pieces.length >= 3 ? pieces.filter(random).length * 2 >= pieces.length : pieces.every(random));
+
 /** 英小文字の並びのうち、よく現れる2文字の並びにないものの割合（2文字未満は0）。画面の許可リスト（shownText.ts）も使う */
 export function rareBigrams(x: string): number {
   if (x.length < 2) return 0;

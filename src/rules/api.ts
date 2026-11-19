@@ -285,7 +285,7 @@ export const excessiveData: Rule = { id: 'A-07', title: '過剰なデータ露�
     if (!f?.body?.trim()) return f && f.status >= 200 && f.status < 300 && bodyNotCaptured(ctx)
       ? [mk(excessiveData, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
     let data: unknown;
-    try { data = JSON.parse(f.body); } catch { return [mk(excessiveData, ctx, 'na', 'info', 'na', 'JSONを解析できない（64KBを超えて切れた可能性）', '')]; }
+    try { data = JSON.parse(f.body); } catch { return [mk(excessiveData, ctx, 'na', 'info', 'na', 'JSONを解析できない（64K文字を超えて切れた可能性）', '')]; }
     const keys = jsonKeys(data).map(k => k.replace(/\[\d+\]/g, '[]'));
     const uniq = [...new Set(keys)];
     const valued = secretValuedKeys(data);

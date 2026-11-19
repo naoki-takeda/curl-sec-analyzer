@@ -43,9 +43,11 @@ export const cookieEvidence = (c: SetCookie) => {
   return `${cookieName(c)}=${maskValue(c.value)}${attrs}`;
 };
 
-/** 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ一覧（見る応答の Set-Cookie）に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない） */
-function withoutChunkMarkers<T>(list: T[], cookie: (x: T) => SetCookie): T[] {
-  const names = new Set(list.map(x => cookie(x).name));
+/**
+ * 分割の印（.AspNetCore.Cookies=chunks-2）は、中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない）。中身は names（既定は
+ * 同じ一覧の名前）から探す。C-10 は、印を http のホップ、中身を https のホップで発行したものも除くので、サイトのすべての Cookie の名前を渡す
+ */
+function withoutChunkMarkers<T>(list: T[], cookie: (x: T) => SetCookie, names = new Set(list.map(x => cookie(x).name))): T[] {
   return list.filter(x => !(isChunkMarker(cookie(x)) && names.has(`${cookie(x).name}C1`)));
 }
 /** Cookie ごとの判定を集める。指摘が1件もなければ .ok を1件返す。Set-Cookie がなければ適用外（空配列） */
@@ -212,7 +214,7 @@ export const cookieOverHttp: Rule = { id: 'C-10', title: 'HTTP応答でのCookie
     // http のホップすべて（2つ目以降のホップで発行した Cookie も平文で送られる）。分割した Cookie の印は C-01〜C-08 と同じく数えない
     const http = [...httpHops(ctx)];
     if (!http.length) return [];
-    const cs = withoutChunkMarkers(cookiesOf(ctx, http), c => c);
+    const cs = withoutChunkMarkers(cookiesOf(ctx, http), c => c, new Set(cookiesOf(ctx).map(c => c.name)));
     if (!cs.length) return [mk(cookieOverHttp, ctx, 'ok', 'info', 'pass', 'HTTP応答でCookieを発行していない', '')];
     return cs.map(c => looksLikeSession(c, ctx.now) && !c.attrs.has('secure')
       ? mk(cookieOverHttp, ctx, 1, 'high', 'fail', cookieEvidence(c), 'HTTPではCookieを発行せず、まずHTTPSへ転送する')

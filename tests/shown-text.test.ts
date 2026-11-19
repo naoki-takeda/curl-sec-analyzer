@@ -3,7 +3,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { allowText, showText } from '../src/shownText';
-import { maskText } from '../src/mask';
+import { excerpt, maskText } from '../src/mask';
 import { AT, evaluate, FC_MULT, leaks } from './helpers';
 
 
@@ -474,5 +474,17 @@ describe('HTML・JS で書いた @、引用符、ユーザー情報のあとの�
   });
   it('クエリの & のあとのエンコードした @（OAuth の login_hint）では、ホスト名を伏せない', () => {
     expect(showText('?redirect_uri=https://d111111abcdef8.cloudfront.net&login_hint=alice%40example.com')).toContain('https://d111111abcdef8.cloudfront.net&');
+  });
+});
+
+describe('2つのかけらのコードと、切り詰めた証跡', () => {
+  it('同じ長さの乱数のかけら2つのコード（K7QX-9MZP）は伏せ、暗号の名前・略語は残す', () => {
+    expect(showText('backup code K7QX-9MZP')).not.toContain('9MZP');
+    for (const w of ['SHA-256', 'x264-h265', 'TLS-AES', 'pdf-img']) expect(showText(w)).toBe(w);
+  });
+  it('excerpt：語の途中で切ったトークンのかけらを残さない（clip はそのまま）', () => {
+    const s = `Found key in body: ${'x'.repeat(30)} ghp_R8kQ2mZxW4pL9vT1yN6bC3dF7hJ0sA5eU`;
+    expect(showText(excerpt(s, 58))).not.toContain('R8kQ');
+    expect(excerpt('abc def', 5)).toBe('abc ');
   });
 });

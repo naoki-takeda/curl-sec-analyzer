@@ -10,7 +10,7 @@
 // - URL のホスト名、決まった最上位ドメインのドメイン名、CSP のハッシュ（'sha256-…'）、伏せた印「…(N chars)」は、そのまま残す
 // 名前の付いた短い秘密（password=hunter2 の hunter2）は形では見分けられないので、maskText の名前による伏せ方と組み合わせて使う（showText）
 import { HASH_SOURCE, maskText } from './mask';
-import { rareBigrams, wordLike } from './tokenShape';
+import { codeGroups, digitRun, rareBigrams, wordLike } from './tokenShape';
 
 /** 英字に数字を付けた語のうち、残してよい英字の部分（暗号・プロトコル・文字コード・版の名前）。小文字で照合する */
 const MIXED_STEMS = new Set(('sha md aes rc des chacha poly secp sect prime ed curve x rsa ecdsa dsa dh ffdhe ecdhe dhe tls tlsv ssl sslv http https h brainpoolp ' +
@@ -118,8 +118,6 @@ const stemmedWord = (p: string) => { const m = p.match(STEM_DIGITS); return !!m 
  */
 const randomPiece = (p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !stemmedWord(p)
   : /^[A-Za-z]{4,}$/.test(p) && rareBigrams(p.toLowerCase()) >= 0.5);   // 英字3文字（pdf・img・MIT）は略語として乱数とみなさない
-/** 6桁までの数字だけのかけらが3つ以上続き、合わせて12桁以上になる部分があるか（日付の 20261118 のような8桁を含む並び（db-backup-20261118-0300-01）は番号としない） */
-const digitRun = (nums: string[]): boolean => { let n = 0, len = 0; for (const p of nums) { if (/^\d{1,6}$/.test(p)) { n++; len += p.length; if (n >= 3 && len >= 12) return true; } else { n = 0; len = 0; } } return false; };
 /**
  * 語の並びの、残してよい部分。並びの中に残せないかけらが1つでもあれば、そこから並びの終わりまでを伏せる（かけらを1つずつ見ると、- _ で区切った
  * 乱数のトークン（URL-safe の Base64・GitLab の glpat-…）の4文字までのかけらが語として残る）。それより前は、英字の語のかけら（glpat・sk・live・
@@ -132,10 +130,8 @@ function allowRun(run: string): string {
   // （並び全体が数字のときだけにすると、前に語が付いたものを残す）
   const nums = pieces.filter((_, i) => i % 2 === 0);
   if (digitRun(nums)) return `…(${run.length} chars)`;
-  // 同じ長さ（3〜5文字）の英数字のかけらを3つ以上つないだ番号（招待・パスワードの再設定の /invite/QWER-TYUI-ZXCV-ASDF・K7QX-9MZP-A2B4-C6D8）は、
-  // かけらの半分以上が randomPiece ならまとめて伏せる（4文字までのかけらとして残さない）。長さのそろわない暗号の名前（ECDHE-RSA-RC4-SHA）は対象外
-  if (nums.length >= 3 && nums.every(p => /^[A-Za-z0-9]{3,5}$/.test(p) && p.length === nums[0].length) && !nums.every(p => /^\d+$/.test(p))
-    && nums.filter(randomPiece).length * 2 >= nums.length) return `…(${run.length} chars)`;
+  // 招待・パスワードの再設定のコード（/invite/QWER-TYUI-ZXCV-ASDF・K7QX-9MZP）は、まとめて伏せる（4文字までのかけらとして残さない）
+  if (codeGroups(nums, randomPiece)) return `…(${run.length} chars)`;
   const bad = pieces.findIndex((p, i) => i % 2 === 0 && !allowedWord(p));
   if (bad < 0) return run;
   let keep = 0;

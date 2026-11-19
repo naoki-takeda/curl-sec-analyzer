@@ -25,11 +25,17 @@ const HTML_ONLY_ITEMS = new Set(['H-03', 'H-04', 'H-05', 'H-06', 'H-07', 'H-09',
 const DEDUPE: { keep: string; drop: string; why: string; perCookie?: boolean }[] = [
   { keep: 'A-09.2', drop: 'H-08.1', why: 'API応答の nosniff なしは A-09② で数える' },
   { keep: 'A-09.3', drop: 'H-03.1', why: 'API応答の CSP なしは A-09③ で数える' },
+  { keep: 'A-09.3', drop: 'H-03.2', why: 'API応答の CSP なし（Report-Only だけ）は A-09③ で数える' },
+  { keep: 'A-09.3', drop: 'H-03.3', why: 'API応答の CSP なし（効く指定がない）は A-09③ で数える' },
   { keep: 'A-09.1', drop: 'H-13.2', why: 'JSON を text/html で返す件は A-09① で数える（第0章 0.2）' },
   // http から -L で https に転送したターゲットの、http のホップが発行した Secure のない Cookie（C-01 は https のターゲットのすべてのホップを見る）
   { keep: 'C-01.1', drop: 'C-10.1', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
   { keep: 'C-01.2', drop: 'C-10.2', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
   { keep: 'C-01.3', drop: 'C-10.2', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
+  // Secure のない __Host-・__Secure- と SameSite=None の Cookie は、ブラウザが拒否して保存しない（平文で送られることはない）。拒否される理由の項目で数える
+  ...['C-01.1', 'C-01.2', 'C-01.3'].flatMap(drop => [
+    { keep: 'C-06.2', drop, why: 'Secure のない __Host-・__Secure- の Cookie はブラウザが拒否する（C-06② で数える）', perCookie: true },
+    { keep: 'C-03.4', drop, why: 'Secure のない SameSite=None の Cookie はブラウザが拒否する（C-03④ で数える）', perCookie: true }]),
 ];
 /** perCookie の突き合わせのキー：Cookie の証跡（C-01②③の「（ホストのHSTSなし…）」の注記を除く） */
 const cookieKey = (ev: string) => ev.replace(/（[^（）]*）$/, '');

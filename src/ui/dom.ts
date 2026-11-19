@@ -1,6 +1,6 @@
 // ui/dom.ts：DOM の組み立て。描画はすべて textContent で行い、innerHTML は使わない（ESLint でも禁止）
 import type { Severity } from '../model';
-import { itemTitle, sevLabel, tr } from '../i18n';
+import { itemSep, itemTitle, sevLabel, standardsSep, tr } from '../i18n';
 import { API_TOP10, asvsRef, standardsOf, standardsShort } from '../engine/standards';
 
 export type Child = Node | string | null | undefined | false;
@@ -59,10 +59,10 @@ export const sevCell = (s: Severity, from?: Severity) => {
 };
 /** 項目名に、関連する基準（OWASP API Top 10、ASVS 5.0、IPA）を小さく添える。ASVS のレベルは title（ツールチップ）で示す */
 export function titleCell(item: string, fallback: string) {
-  const s = standardsOf(item); const short = standardsShort(item);
+  const s = standardsOf(item); const short = standardsShort(item, standardsSep());
   const std = short ? el('span', 'ml-2 text-xs text-muted', short) : null;
   if (std && s.asvs.length) std.title = s.asvs.map(asvsRef).join('\n');
-  return td('', itemTitle(item, fallback), API_TOP10[item] ? el('span', 'ml-2 text-xs text-muted', `OWASP ${API_TOP10[item]}`) : null, std);
+  return td('', itemTitle(item, fallback), API_TOP10[item] ? el('span', 'ml-2 text-xs text-muted', `OWASP ${API_TOP10[item].replace(/・/g, itemSep())}`) : null, std);
 }
 export function download(name: string, type: string, body: string) {
   const a = el('a'); a.href = URL.createObjectURL(new Blob([body], { type })); a.download = name;
@@ -77,12 +77,12 @@ export const focusable = <T extends HTMLElement>(n: T, key: string): T => { n.da
 export const focusedKey = () => (document.activeElement as HTMLElement | null)?.dataset?.focus;
 export const restoreFocus = (box: ParentNode, key: string | undefined) => { if (key) box.querySelector<HTMLElement>(`[data-focus="${CSS.escape(key)}"]`)?.focus(); };
 /**
- * 結果を描き直して、フォーカスが落ちた（body にある・描き直しで消えた・隠した入力欄にある）ときだけ、結果の最初の見出しに移す（WCAG 2.4.3。
- * 例外の登録のボタン、空の画面の「サンプルで試す」、Ctrl+Enter で判定した入力欄）。判定し直しを待つあいだに利用者が移したフォーカスは奪わない
+ * 結果を描き直したあと、描き直す前にフォーカスのあった部品（before）が消えた・隠れたときだけ、結果の最初の見出しに移す（WCAG 2.4.3。
+ * 例外の登録のボタン、空の画面の「サンプルで試す」、Ctrl+Enter で判定して隠した入力欄）。判定し直しを待つあいだに利用者が移したフォーカスは
+ * 奪わない。body のとき（Safari・macOS の Firefox はマウスで押したボタンにフォーカスしない）も移さない（判定のたびに見出しまで飛ばさない）
  */
-export function focusResultsIfLost(results: ParentNode) {
-  const a = document.activeElement as HTMLElement | null;
-  if (a && a !== document.body && a.isConnected && a.getClientRects().length) return;
+export function focusResultsIfLost(results: ParentNode, before: Element | null) {
+  if (!(before instanceof HTMLElement) || before === document.body || (before.isConnected && before.getClientRects().length)) return;
   const h = results.querySelector<HTMLElement>('h2'); if (h) { h.tabIndex = -1; h.focus(); }
 }
 

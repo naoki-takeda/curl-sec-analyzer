@@ -28,10 +28,10 @@ export const standardsOf = (item: string): Standards => {
 export const asvsRef = (id: string) => `v${ASVS_VERSION}-${id}${LEVELS[id] ? ` (L${LEVELS[id]})` : ''}`;
 export const asvsLevel = (id: string): number | undefined => LEVELS[id];
 
-/** 表のセル用の短い表記：「ASVS 3.4.1・IPA 2.3-1)」。対応がなければ空文字 */
-export function standardsShort(item: string): string {
+/** 表のセル用の短い表記：「ASVS 3.4.1・IPA 2.3-1)」（英語の画面・Markdown は sep に「; 」を渡す）。対応がなければ空文字 */
+export function standardsShort(item: string, sep = '・'): string {
   const s = standardsOf(item);
-  return [s.asvs.length ? `ASVS ${s.asvs.join(', ')}` : '', s.ipa.length ? `IPA ${s.ipa.join(', ')}` : ''].filter(Boolean).join('・');
+  return [s.asvs.length ? `ASVS ${s.asvs.join(', ')}` : '', s.ipa.length ? `IPA ${s.ipa.join(', ')}` : ''].filter(Boolean).join(sep);
 }
 
 /** JSON エクスポート用の対応表（ほかのツールで読み込めるように、版とレベルも入れる） */

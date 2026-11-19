@@ -1,10 +1,10 @@
-// rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64KBまで。タグとコメントは HTML の字句解析をなぞった走査（scan）で読む
+// rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64K文字まで。タグとコメントは HTML の字句解析をなぞった走査（scan）で読む
 import type { Finding, Rule, RuleContext, Target } from '../model';
 import { LOGOUT_WORD, finalResponse, firstStatus, hostOf, ownChain } from '../parser/target';
 import { looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { isTrustedOrigin } from '../engine/profile';
 import { INTERNAL_HOST, NO_BODY_REC, SENSITIVE_REC, bodyNotCaptured, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
-import { clip } from '../mask';
+import { excerpt } from '../mask';
 import { b64urlJson } from './jwt';
 
 interface Tag {
@@ -31,7 +31,7 @@ interface Tag {
 const SHOWN_ATTRS = new Set(['src', 'href', 'action', 'data', 'rel', 'method', 'type', 'name', 'content', 'integrity', 'crossorigin', 'as']);
 function tagEvidence(name: string, attrs: Map<string, string>): string {
   const parts = [...attrs].map(([k, v]) => (SHOWN_ATTRS.has(k) ? `${k}="${v}"` : v === '' ? k : `${k}="…"`));
-  return clip(`<${[name, ...parts].join(' ')}>`, 200);
+  return excerpt(`<${[name, ...parts].join(' ')}>`, 200);
 }
 
 /**
@@ -366,7 +366,7 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     const text = posted.reduce((h, [s, e]) => h.slice(0, s) + h.slice(e), html);
     for (const [name, re] of SECRETS) if (re.test(text)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
     const iu = internalUrl(html, pageHostOf(ctx)?.toLowerCase());
-    if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
+    if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${excerpt(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
     // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す
     const dc = devCommentWord(html);
     if (dc) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `開発用コメント（「${dc}」を含む。中身は表示しない）`, 'ビルド時にコメントを削除する'));

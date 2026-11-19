@@ -1,5 +1,5 @@
 // parser/har.ts：HAR（HTTP Archive）の取り込み（ツール設計1「HAR形式の取り込み」）
-// - request.postData（ログインのパスワードなど）は読まない。本文は HTML・JSON・JS・テキスト・XML の先頭64KBだけ残す
+// - request.postData（ログインのパスワードなど）は読まない。本文は HTML・JSON・JS・テキスト・XML の先頭64K文字だけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
 import { autoAuthScheme, cookieNames, JWT_IN_TEXT, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';

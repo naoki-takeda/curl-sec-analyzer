@@ -5,7 +5,7 @@ import { SEVERITIES, circled, countBySeverity, overall } from '../engine/summari
 import { type DiffRow, diffSummary } from '../engine/diff';
 import { RULESET_VERSION, TOOL_VERSION } from '../version';
 import { API_TOP10, ASVS_VERSION, IPA_EDITION, IPA_EDITION_EN, asvsLevel, standardsOf, standardsShort } from '../engine/standards';
-import { covLabel, diffLabel, getLang, itemTitle, listSep, sevLabel } from '../i18n';
+import { covLabel, diffLabel, getLang, itemSep, itemTitle, listSep, sevLabel, standardsSep } from '../i18n';
 import { recommendationEn } from '../recommendationsEn';
 
 // 証跡には診断対象の HTML（<img src=…> など）がそのまま入るので、表示側でタグとして描画されないよう < > を実体参照にする。
@@ -45,7 +45,7 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
   }
   L.push(en ? '## Findings' : '## 指摘', '', `| ${en ? 'Severity' : '重要度'} | ${en ? 'Check' : '項目'} | ${en ? 'Target' : '対象'} | ${en ? 'Evidence (masked)' : '証跡（マスク済み）'} | ${en ? 'Recommendation' : '推奨対応'} |`, '| --- | --- | --- | --- | --- |');
   for (const f of fs.filter(x => x.status === 'fail').sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity)))
-    L.push(`| ${sevLabel(f.severity)}${f.originalSeverity ? `*` : ''} | ${f.item}${circled(f.condition)} ${cell(itemTitle(f.item, f.title))}${API_TOP10[f.item] ? par(`OWASP ${en ? API_TOP10[f.item].replace(/・/g, ', ') : API_TOP10[f.item]}`) : ''}${standardsShort(f.item) ? std(cell(standardsShort(f.item))) : ''} | ${cell(f.target)}${f.url ? par(cell(f.url)) : ''} | ${cell(f.evidence)} | ${cell(en ? recommendationEn(f.recommendation) : f.recommendation)} |`);
+    L.push(`| ${sevLabel(f.severity)}${f.originalSeverity ? `*` : ''} | ${f.item}${circled(f.condition)} ${cell(itemTitle(f.item, f.title))}${API_TOP10[f.item] ? par(`OWASP ${API_TOP10[f.item].replace(/・/g, itemSep())}`) : ''}${standardsShort(f.item) ? std(cell(standardsShort(f.item, standardsSep()))) : ''} | ${cell(f.target)}${f.url ? par(cell(f.url)) : ''} | ${cell(f.evidence)} | ${cell(en ? recommendationEn(f.recommendation) : f.recommendation)} |`);
   if (fs.some(f => f.originalSeverity)) L.push('', en ? '\\* Severity changed by the organization profile.' : '\\* 組織プロファイルで重要度を変えた指摘。');
   const sup = fs.filter(f => f.status === 'suppressed');
   if (sup.length) {

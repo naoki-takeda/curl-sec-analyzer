@@ -68,7 +68,7 @@ function loginFormAction(b: string): boolean {
   });
 }
 /**
- * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64KB で、閉じタグまで）：type="application/json" のスクリプト、
+ * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64K 文字で、閉じタグまで）：type="application/json" のスクリプト、
  * オブジェクト・配列の代入、JSON.parse のうち、中身が STATE_DATA に当てはまるもの。ld+json（構造化データ）と設定だけのものはデータとしない
  */
 function inlineData(b: string): boolean {

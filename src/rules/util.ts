@@ -209,7 +209,7 @@ export const graphqlError = (body: string | undefined): 'denied' | 'error' | und
   if (!(d === null || d === undefined || (typeof d === 'object' && Object.values(d as Record<string, unknown>).every(v => v === null)))) return undefined;
   return /UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|not authenticated|unauthori[sz]ed|authentication required|access denied|not logged in|login required/i.test(JSON.stringify(j.errors)) ? 'denied' : 'error';
 };
-/** 本文の上限（パーサが残す先頭64KB）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
+/** 本文の上限（パーサが残す先頭64K文字）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
 export const bodyTruncated = (ctx: RuleContext) => (ctx.final?.body?.length ?? 0) >= BODY_LIMIT;
 
 // 内部のホスト：プライベート・ループバックの IPv4 アドレスと localhost、最後のラベルが internal・local などのホスト名

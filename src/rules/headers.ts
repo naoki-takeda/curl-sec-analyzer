@@ -1,7 +1,7 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext, Target } from '../model';
 import { INTERNAL_HOST_IN_TEXT, LOGOUT_FAILED_REC, NO_BODY_REC, NO_CONTENT_REC, SENSITIVE_REC, cacheDirectives, cspPolicies, directiveNames, header, hstsDirective, isNosniff, isStaticResource, mk, noContent, noResponse, nothingToSniff, parseCsp, parseHsts, sensitiveUnlessStatic, zeroLength } from './util';
-import { clip, maskValue } from '../mask';
+import { excerpt, maskValue } from '../mask';
 import { baseLabel, chainOf, firstStatus, hostnameOf, isRedirectWithLocation, isToken, siteResponses } from '../parser/target';
 import { htmlBody, logoutFailed, metaCspPolicies, mixedContent, tags } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
@@ -451,8 +451,8 @@ export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン�
       if (INTERNAL_HOST_IN_TEXT.test(v)) out.push(mk(productInfo, ctx, 4, 'low', 'fail', `${h}: ${v}`, '内部ホスト名・IPアドレスを出さない'));
     // Server-Timing の証跡は項目の名前だけにする（desc に SQL・メールアドレス・キーを入れる実装がある）
     for (const v of header(ctx, 'server-timing')) { const names = appTimings(v);
-      if (names.length) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `server-timing: ${names.map(n => clip(n, 40)).join(', ')}（desc・dur の値は表示しない）`, '本番では内部処理の名前や時間を外部に返さない')); }
-    for (const v of header(ctx, 'x-runtime')) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `x-runtime: ${clip(v, 40)}`, '本番では内部処理の名前や時間を外部に返さない'));
+      if (names.length) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `server-timing: ${names.map(n => excerpt(n, 40)).join(', ')}（desc・dur の値は表示しない）`, '本番では内部処理の名前や時間を外部に返さない')); }
+    for (const v of header(ctx, 'x-runtime')) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `x-runtime: ${excerpt(v, 40)}`, '本番では内部処理の名前や時間を外部に返さない'));
     return out.length ? out : [mk(productInfo, ctx, 'ok', 'info', 'pass', '製品・デバッグ情報のヘッダなし', '')];
   } };
 

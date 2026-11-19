@@ -599,3 +599,34 @@ describe('CORS のカバレッジと Cookie の二重の指摘', () => {
     expect(r.findings.filter(f => f.item === 'C-10' && f.status === 'fail')).toHaveLength(2);
   });
 });
+
+describe('転送・304・5xx・ブラウザが拒否する Cookie', () => {
+  const one = (label: string, url: string, head: string, item: string) => itemIds(`#TARGET url=${url} label=${label}\n${head}\n\n`, item);
+  it('R-01〜R-04：ACAO のない転送の応答（ログインへの 302）は、許可外の Origin を拒否したとしない', () => {
+    const v = (label: string, origin: string) => evaluate([`#TARGET url=https://a.example/api/me label=${label}`, '* Connected to a.example (192.0.2.1) port 443', '> GET /api/me HTTP/2',
+      `> Origin: ${origin}`, '>', '< HTTP/2 302', '< location: https://a.example/login', '<', ''].join('\n')).findings;
+    expect(v('cors-reflect', 'https://evil.example').filter(f => /^R-0[14]/.test(f.ruleId)).map(f => f.ruleId).sort()).toEqual(['R-01.na', 'R-04.na']);
+    expect(v('cors-null', 'null').filter(f => f.item === 'R-02').map(f => f.ruleId)).toEqual(['R-02.na']);
+    expect(v('cors-partial', 'https://a.example.evil.net').filter(f => f.item === 'R-03').map(f => f.ruleId)).toEqual(['R-03.na']);
+  });
+  it('E-04：304 は適用外（転送とみなさない）。security.txt の 5xx は na', () => {
+    expect(one('t', 'https://a.example/robots.txt', 'HTTP/2 304', 'E-04')).toEqual([]);
+    expect(one('t', 'https://a.example/.well-known/security.txt', 'HTTP/2 304', 'E-04')).toEqual([]);
+    expect(one('t', 'https://a.example/.well-known/security.txt', 'HTTP/2 503\ncontent-type: text/html', 'E-04')).toEqual(['E-04.na']);
+  });
+  it('Secure のない __Host- と SameSite=None の Cookie は、C-01 と二重に指摘しない（ブラウザが拒否する）', () => {
+    const fails = (cookie: string) => evaluate(target('https://a.example/', `HTTP/2 200\ncontent-type: text/html\nset-cookie: ${cookie}`)).findings
+      .filter(f => f.status === 'fail' && /^C-0[136]/.test(f.ruleId)).map(f => f.ruleId).sort();
+    expect(fails(`__Host-sid=${'0123456789abcdef'.repeat(2)}; Path=/; HttpOnly; SameSite=Lax`)).toEqual(['C-06.2']);
+    expect(fails(`sid=${'0123456789abcdef'.repeat(2)}; Path=/; HttpOnly; SameSite=None`)).toEqual(['C-03.4', 'C-06.1']);
+  });
+  it('A-09③：API の応答の Report-Only だけの CSP は、H-03② と二重に指摘しない', () => {
+    const r = evaluate(target('https://a.example/api/me', "HTTP/2 200\ncontent-type: application/json\nx-content-type-options: nosniff\ncontent-security-policy-report-only: default-src 'none'\n\n{\"a\":1}"));
+    expect(r.findings.filter(f => f.status === 'fail' && /^(?:H-03|A-09)/.test(f.ruleId)).map(f => f.ruleId)).toEqual(['A-09.3']);
+  });
+  it('C-10：http のホップの分割の印は、https のホップの中身があれば数えない', () => {
+    const r = evaluate(['#TARGET url=http://a.example/ label=t', 'HTTP/1.1 301 Moved Permanently', 'location: https://a.example/', 'set-cookie: .AspNetCore.Cookies=chunks-2; path=/', '',
+      'HTTP/2 200', 'content-type: text/html', `set-cookie: .AspNetCore.CookiesC1=${'a'.repeat(40)}; path=/; secure; httponly`, ''].join('\n'));
+    expect(r.findings.filter(f => f.item === 'C-10' && f.status === 'fail')).toEqual([]);
+  });
+});

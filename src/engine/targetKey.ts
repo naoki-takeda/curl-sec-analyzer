@@ -6,7 +6,7 @@
 // - 入力の順番で変わらない（クエリのパラメータの順番、同じ名前の値の順番、貼り付けたターゲットの順番）
 import type { Target } from '../model';
 import { baseLabel } from '../parser/target';
-import { lowerToken, wordLike } from '../tokenShape';
+import { codeGroups, digitRun, lowerToken, rareBigrams, wordLike } from '../tokenShape';
 
 /**
  * 例外と前回の結果の突き合わせに使う URL（HAR と、同じラベルが複数ある curl の targetKey、Finding.keyUrl、CSV の実施コマンドの URL）。URL の形だけで作る：
@@ -66,7 +66,17 @@ const keyPiece = (p: string): boolean => {
   if (/^[A-Z]+$/.test(p)) return p.length <= 10;
   return (p.match(/[a-z]+|[A-Z]+/g) ?? []).length <= 4;
 };
-const keySegment = (s: string): string => s.replace(/[^-_.~]+/g, piece => (keyPiece(piece) ? piece : '*')).replace(/\*(?:[-_.~]\*)+/g, '*');
+/** コードのかけらとして、語として読めないもの：英字と数字が混ざる（K7QX）か、英字4文字以上でまれな2文字の並びが半分以上（ZXCV） */
+const keyRandomPiece = (p: string) => (/\d/.test(p) && /[A-Za-z]/.test(p)) || (/^[A-Za-z]{4,}$/.test(p) && rareBigrams(p.toLowerCase()) >= 0.5);
+/**
+ * かけらを1つずつ見ると残る、区切った番号とコード（カード番号・電話番号・米国の社会保障番号の形、招待のコード QWER-TYUI-ZXCV-ASDF）は、部分ごと
+ * * にする（画面の許可リスト（shownText.ts の allowRun）と同じ形。キーが CSV の実施コマンドと JSON の keyUrl に入るため）
+ */
+const keySegment = (s: string): string => {
+  const pieces = s.split(/[-_.~]/);
+  if (digitRun(pieces) || /^\d{3}-\d{2}-\d{4}$/.test(s) || codeGroups(pieces, keyRandomPiece)) return '*';
+  return s.replace(/[^-_.~]+/g, piece => (keyPiece(piece) ? piece : '*')).replace(/\*(?:[-_.~]\*)+/g, '*');
+};
 /** キーに値を残すパラメータの名前（秘密や個人情報を入れない決まった名前だけ）。数字の値（ページ送り）と英字の語の値（並べ替え・表示の切り替え） */
 const KEY_NUMBER_NAMES = /^(?:page|per_page|page_size|pagesize|offset|limit|start)$/i;
 const KEY_WORD_NAMES = /^(?:sort|order|orderby|dir|lang|locale|hl|tab|view|mode|type|format|_task)$/i;
