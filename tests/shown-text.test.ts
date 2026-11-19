@@ -2,7 +2,7 @@
 // どこに置いても出さない。読める語（ヘッダの名前・値、版、暗号の名前、日時）は残す
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { allowText, showText } from '../src/shownText';
+import { allowText, showTarget, showText } from '../src/shownText';
 import { excerpt, maskText } from '../src/mask';
 import { AT, evaluate, FC_MULT, leaks } from './helpers';
 
@@ -522,5 +522,33 @@ describe('. : で区切ったコードの前後と、英字と数字の語の並
       '4xx-5xx-errors', 'W3C.WAI.a11y', '4k.8k.hdr', '(Linux; Android 13; Build/TQ3A.230901.001.C2; wv)', 'T10:30:00Z', '1.0.0a1.dev2',
       'X25519:P256:P384', 'db1.k8s.lan'])
       expect(showText(s), s).toBe(s);
+  });
+});
+
+describe('ホスト単位の指摘の対象（URL.host）', () => {
+  it('URL のホスト名と同じく、伏せずに出す（知らない最上位ドメイン・IDN・ポート・IPv6）', () => {
+    for (const h of ['xk9qz2mpl7rtv.shop.tokyo', 'xn--eckwd4c7c.xn--zckzah', 'www.example.co.jp:8443', '[2001:db8::1]:8443', '192.168.0.1'])
+      expect(showTarget(h, h), h).toBe(h);
+  });
+  it('ホスト名の形でないもの・ホスト単位でない対象（ラベルの組）は、許可リストを通す', () => {
+    expect(showTarget('ghp_abcdefghijklmnopqrstuvwxyz0123456789', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789')).not.toContain('abcdefghijklmnop');
+    expect(showTarget('a.example/ghp_abcdefghijklmnopqrstuvwxyz0123456789', 'a.example/ghp_abcdefghijklmnopqrstuvwxyz0123456789')).not.toContain('abcdefghijklmnop');
+    expect(showTarget('xk9qz2mpl7rtv.shop.tokyo')).toBe(showText('xk9qz2mpl7rtv.shop.tokyo'));
+    expect(showTarget('pre-login/login')).toBe('pre-login/login');
+  });
+  it('URL の列でも伏せるホスト名（カード番号のラベル）は伏せ、末尾の . のホスト名はそのまま出す', () => {
+    expect(showTarget('4111111111111111.shop.tokyo', '4111111111111111.shop.tokyo')).not.toContain('4111111111111111');
+    expect(showTarget('xk9qz2mpl7rtv.shop.tokyo.', 'xk9qz2mpl7rtv.shop.tokyo.')).toBe('xk9qz2mpl7rtv.shop.tokyo.');
+  });
+  it('ユーザー情報のあとでは URL の列が伏せる点のない乱数のホスト名は伏せ、今のターゲットのラベルはそのまま出す', () => {
+    const h = 'a8f3k2m9x7q1w5e6r4t0y2u8i3o5p7a9';
+    expect(showTarget(h, h)).not.toContain(h);
+    expect(showTarget('web01', undefined, new Set(['web01']))).toBe('web01');
+    expect(showTarget('web01')).toBe(showText('web01'));
+  });
+  it('ホスト単位の指摘は、対象と host が同じ URL.host になる', () => {
+    const r = evaluate('#TARGET url=https://xk9qz2mpl7rtv.shop.tokyo:8443/ label=tls\n#TLSPROBE v=tls1 ok=1\n');
+    const f = r.findings.find(x => x.item === 'T-09');
+    expect(f?.target).toBe('xk9qz2mpl7rtv.shop.tokyo:8443'); expect(f?.host).toBe(f?.target);
   });
 });

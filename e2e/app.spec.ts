@@ -543,3 +543,43 @@ test('判定を待つあいだに章の絞り込みへ移したフォーカス�
   await analyzed(page);
   expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.focus)).toBe('chapter');
 });
+
+test('ホスト単位の表の対象の列は、知らない最上位ドメインの乱数のラベル・IDN のホスト名も伏せずに出す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill(['#TARGET url=https://xk9qz2mpl7rtv.shop.tokyo/ label=tls', '#TLSPROBE v=tls1 ok=1',
+    '#TARGET url=https://xn--eckwd4c7c.xn--zckzah/ label=tls2', '#TLSPROBE v=tls1 ok=1', ''].join('\n'));
+  await page.getByRole('button', { name: '判定する' }).click();
+  const cross = page.getByRole('region', { name: 'ホスト単位・ターゲット横断の判定' });
+  await expect(cross.getByRole('cell', { name: 'xk9qz2mpl7rtv.shop.tokyo', exact: true }).first()).toBeVisible();
+  await expect(cross.getByRole('cell', { name: 'xn--eckwd4c7c.xn--zckzah', exact: true }).first()).toBeVisible();
+});
+
+test('指摘の一覧・例外の登録のダイアログ・差分の表の対象：ホスト名は URL の列と同じく出し、ラベルはそのまま出す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill(['#TARGET url=https://4111111111111111.shop.tokyo/ label=web01', '#TLSPROBE v=tls1 ok=1',
+    '#TARGET url=https://xn--eckwd4c7c.xn--zckzah/ label=web02', '#TLSPROBE v=tls1 ok=1',
+    '#TARGET url=http://www.example.com/ label=web03', 'HTTP/1.1 200 OK', 'content-type: text/html', '', '<html></html>', ''].join('\n'));
+  await page.getByRole('button', { name: '判定する' }).click();
+  const list = page.getByRole('region', { name: '指摘の一覧' });
+  // カード番号のラベルのホスト名は、URL の列と同じく伏せる（行があることを先に確かめる）。IDN とラベルはそのまま
+  await expect(list).toContainText('…(16 chars).shop.tokyo');
+  await expect(list).not.toContainText('4111111111111111');
+  await expect(list).toContainText('xn--eckwd4c7c.xn--zckzah');
+  await expect(list).toContainText('web03');
+  // 例外の登録のダイアログも同じ
+  const t = page.getByRole('region', { name: 'ターゲット「web03」の判定' });
+  await t.getByRole('button', { name: '例外に登録' }).first().click();
+  await expect(page.getByRole('dialog')).toContainText('（対象：web03）');
+  await page.getByRole('button', { name: 'やめる' }).click();
+  const cross = page.getByRole('region', { name: 'ホスト単位・ターゲット横断の判定' });
+  await cross.getByRole('row').filter({ hasText: '.shop.tokyo' }).first().getByRole('button', { name: '例外に登録' }).click();
+  await expect(page.getByRole('dialog')).toContainText('…(16 chars).shop.tokyo');
+  await page.getByRole('button', { name: 'やめる' }).click();
+  // 前回の結果にだけある行の対象は、host を書いてあってもファイルの値なので許可リストを通す
+  const token = 'glpat-abcdefghijklmnopqrst';
+  const baseline = { generatedAt: '2026-11-01T00:00:00Z', findings: [{ ruleId: 'T-09.1', item: 'T-09', severity: 'high', status: 'fail', target: token, host: token, evidence: '' }] };
+  await page.locator('input[type=file]').nth(3).setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(baseline)) });
+  const diff = page.getByRole('region', { name: '前回との差分の一覧' });
+  await expect(diff).toContainText('glpat-…(20 chars)');
+  await expect(diff).not.toContainText(token);
+});

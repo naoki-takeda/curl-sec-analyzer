@@ -15,7 +15,7 @@ import { hstsDirective } from '../rules/util';
 import { covLabel, diffLabel, getLang, itemSep, listSep, sevLabel, statusLabel, tr } from '../i18n';
 import { showText } from '../shownText';
 import { recommendationEn } from '../recommendationsEn';
-import { BTN, type Child, LINK, PRIMARY, SEV_BORDER, SEV_TEXT, button, chapterOf, disclosure, download, el, focusable, focusedKey, options, restoreFocus, sevCell, table, td, titleCell } from './dom';
+import { BTN, type Child, LINK, PRIMARY, SEV_BORDER, SEV_TEXT, button, chapterOf, disclosure, download, el, focusable, focusedKey, options, restoreFocus, sevCell, table, targetNames, targetText, type TargetNames, td, titleCell } from './dom';
 import { actions, refs, state } from './state';
 import { openSuppressDialog } from './dialog';
 
@@ -39,6 +39,7 @@ export function render() {
   const rows = overall(findings);
   const byTarget = groupByTarget(findings);   // ターゲットごとに全指摘を絞り込み直すと、ターゲット数×指摘数になる（数千件で数秒）
   const hints = missingLabelHints(targets);
+  const names = targetNames(targets, findings);
   // 絞り込み・表示の切り替えの部品は描き直すので、操作した部品にフォーカスを戻す
   const focusKey = focusedKey();
   // 章で絞り込んだ行（見出しの件数と「情報」の件数を、表の行数と合わせる）
@@ -49,17 +50,17 @@ export function render() {
     findings.some(f => f.status === 'suppressed') ? el('p', 'mt-2 text-sm text-muted', T.suppressedCount(new Set(findings.filter(f => f.status === 'suppressed').map(f => f.ruleId)).size)) : null,
     exportBar(),
     warnings.length || hints.length ? warningList([...warnings.map(w => showText(w.detail)), ...hints]) : null,
-    state.last.diff ? diffBlock(state.last.diff) : null,
+    state.last.diff ? diffBlock(state.last.diff, names) : null,
     // 件数は、章で絞り込んだ表の行数と合わせる
     heading(T.findings, findingsCount(chapterRows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(chapterRows.filter(r => r.severity === 'info').length), chapterFilter())),
-    rows.length ? overallTable(chapterRows) : el('p', 'text-muted', T.noFindings),
+    rows.length ? overallTable(chapterRows, names) : el('p', 'text-muted', T.noFindings),
     heading(T.perTarget, T.count(targets.length), focusable(button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); }), 'show-all')),
     // 「*」（組織プロファイルで変えた重要度）の凡例。ターゲットごと・ホスト単位・横断の表に「*」が出るとき（findingsTable と同じ絞り込みで見える指摘にあるとき）だけ
     findings.some(f => f.status === 'fail' && f.originalSeverity && (state.view.showAll || state.view.showInfo || f.severity !== 'info'))
       ? el('p', 'mb-2 text-sm text-muted', T.profileLegend) : null,
     targetSummary(targets, byTarget),
     ...targets.map(t => targetBlock(t, byTarget.get(t.label) ?? [])),
-    crossBlock(findings, targets),
+    crossBlock(findings, targets, names),
     coverageBlock(cov),
   ];
   refs.results.replaceChildren(...parts.filter((p): p is Node => p instanceof Node));
@@ -126,12 +127,13 @@ function chapterFilter() {
   return sel;
 }
 /** 章で絞り込んだ行の表。「情報」を隠して行が残らないときは、章に指摘がないとは書かない（見出しに隠した件数を出している） */
-function overallTable(chapterRows: ReturnType<typeof overall>) {
+function overallTable(chapterRows: ReturnType<typeof overall>, names: TargetNames) {
   const T = tr();
   const rows = chapterRows.filter(r => state.view.showInfo || r.severity !== 'info');
   if (!rows.length) return el('p', 'text-muted', chapterRows.length ? T.nothingToShow : T.noFindingsInChapter);
   return table(T.tables.findings, [T.cols.severity, T.cols.item, T.cols.title, T.cols.targets], rows.map(r =>
-    el('tr', '', sevCell(r.severity), td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title), td('', r.targets.join(itemSep())))));
+    el('tr', '', sevCell(r.severity), td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title),
+      td('', r.targets.map(t => targetText(t, names)).join(itemSep())))));
 }
 /** 指摘をターゲット（ラベル）ごとにまとめる */
 function groupByTarget(fs: Finding[]): Map<string, Finding[]> {
@@ -155,15 +157,15 @@ const STATUS_ORDER = ['fail', 'suppressed', 'na', 'pass'];
 /** 指摘を先に、重要度の高い順、項目IDの順に並べる */
 const byImportance = (a: Finding, b: Finding) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
   || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.ruleId.localeCompare(b.ruleId);
-/** withTarget：対象（ホスト・ラベルの組）の列を出す（ホスト単位・横断の表で、どのホストの指摘かが分かるように） */
-function findingsTable(fs: Finding[], label: string, withTarget = false) {
+/** names：対象（ホスト・ラベルの組）の列を出す（ホスト単位・横断の表で、どのホストの指摘かが分かるように） */
+function findingsTable(fs: Finding[], label: string, names?: TargetNames) {
   const T = tr();
   const shown = mergeNa(fs.filter(f => state.view.showAll || (f.status === 'fail' && (state.view.showInfo || f.severity !== 'info'))).sort(byImportance));
   if (!shown.length) return el('p', 'mt-1 text-sm text-muted', T.nothingToShow);
-  return table(label, [T.cols.severity, T.cols.item, ...(withTarget ? [T.cols.target] : []), T.cols.status, T.cols.evidence, T.cols.recommendation, ''], shown.map(x =>
+  return table(label, [T.cols.severity, T.cols.item, ...(names ? [T.cols.target] : []), T.cols.status, T.cols.evidence, T.cols.recommendation, ''], shown.map(x =>
     el('tr', '', x.status === 'fail' ? sevCell(x.severity, x.originalSeverity) : td('text-muted', '—'),
       td('whitespace-nowrap num', x.items ? x.items.join(itemSep()) : `${x.item}${circled(x.condition)}`),
-      withTarget ? td('break-all', showText(x.target)) : null,
+      names ? td('break-all', targetText(x.target, names)) : null,
       td(`whitespace-nowrap ${x.status === 'pass' ? 'text-ok' : x.status === 'fail' ? '' : 'text-muted'}`, statusLabel(x.status)),
       td('font-mono text-[12px] break-all', x.evidence || '—'),
       td('', x.status === 'suppressed' ? T.suppressedNote(x.suppressedBy!.reason, x.suppressedBy!.approver, x.suppressedBy!.until) : rec(x.recommendation) || '—'),
@@ -187,13 +189,13 @@ function targetBlock(t: Target, fs: Finding[]) {
   d.open = state.view.showAll || fs.some(x => x.status === 'fail' && x.severity !== 'info');   // 情報以外の指摘があるものだけ開く
   return d;
 }
-function crossBlock(findings: Finding[], targets: Target[]) {
+function crossBlock(findings: Finding[], targets: Target[], names: TargetNames) {
   const labels = new Set(targets.map(t => t.label));
   const fs = findings.filter(f => !labels.has(f.target));
   if (!fs.length) return null;
   const d = el('details', 'mt-3 rounded-md border border-line bg-surface',
     el('summary', 'summary-custom flex cursor-pointer flex-wrap items-baseline gap-x-3 px-3 py-2', disclosure(), el('span', 'font-bold', tr().crossTitle), counts(fs)),
-    el('div', 'border-t border-line p-2', findingsTable(fs, tr().crossTitle, true)));
+    el('div', 'border-t border-line p-2', findingsTable(fs, tr().crossTitle, names)));
   d.open = state.view.showAll || fs.some(x => x.status === 'fail' && x.severity !== 'info');
   return d;
 }
@@ -203,7 +205,7 @@ function diffWarnings(): { rulesetWarning?: string; profileWarning?: string } {
   return { rulesetWarning: b?.rulesetVersion && b.rulesetVersion !== RULESET_VERSION ? T.diffRulesetWarning(b.rulesetVersion, RULESET_VERSION) : undefined,
            profileWarning: profileDiffers(b?.profile, s?.profile) ? T.diffProfileWarning : undefined };
 }
-function diffBlock(rows: DiffRow[]) {
+function diffBlock(rows: DiffRow[], names: TargetNames) {
   const T = tr(); const s = diffSummary(rows); const w = diffWarnings();
   const shown = rows.filter(r => r.kind !== 'continuing');
   return el('section', '',
@@ -213,7 +215,7 @@ function diffBlock(rows: DiffRow[]) {
     shown.length ? table(T.tables.diff, [T.cols.change, T.cols.severity, T.cols.item, T.cols.title, T.cols.target], shown.map(r =>
       el('tr', '', td(`whitespace-nowrap font-bold ${r.kind === 'new' ? 'text-sev-high' : r.kind === 'resolved' ? 'text-ok' : 'text-muted'}`, diffLabel(r.kind)),
         td(`whitespace-nowrap ${SEV_TEXT[r.severity]}`, sevLabel(r.severity), r.before ? (getLang() === 'en' ? ` (was ${sevLabel(r.before)})` : `（← ${sevLabel(r.before)}）`) : ''),
-        td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title), td('', r.target)))) : null,
+        td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title), td('', targetText(r.target, names))))) : null,
     el('p', 'mt-2 text-sm text-muted', T.diffNote));
 }
 function coverageBlock(cov: Coverage[]) {

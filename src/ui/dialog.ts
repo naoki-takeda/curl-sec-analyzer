@@ -3,7 +3,7 @@ import type { Finding } from '../model';
 import { circled } from '../engine/summarize';
 import { localDate } from '../engine/suppress';
 import { itemTitle, tr } from '../i18n';
-import { BTN, button, el, labelFor, options } from './dom';
+import { BTN, button, el, labelFor, options, targetNames, targetText } from './dom';
 import { actions, refs, state } from './state';
 
 // ---- 例外の登録 ----
@@ -26,7 +26,7 @@ export function openSuppressDialog(f: Finding) {
   });
   refs.dialog.replaceChildren(el('div', 'p-5',
     Object.assign(el('h2', 'text-lg font-bold', T.title), { id: 'sup-title' }),
-    el('p', 'mt-1 text-sm text-muted', T.note(`${f.item}${circled(f.condition)} ${itemTitle(f.item, f.title)}`, f.target)),
+    el('p', 'mt-1 text-sm text-muted', T.note(`${f.item}${circled(f.condition)} ${itemTitle(f.item, f.title)}`, targetText(f.target, targetNames(state.last?.targets ?? [], state.last?.findings ?? [])))),
     el('div', 'mt-3', labelFor('sup-scope', T.scope), scope),
     field('sup-reason', T.reason, reason), field('sup-approver', T.approver, approver), field('sup-until', T.until, until), err,
     el('div', 'mt-4 flex justify-end gap-2', button(T.cancel, BTN, () => refs.dialog.close()), save)));

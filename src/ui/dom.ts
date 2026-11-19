@@ -1,5 +1,6 @@
 // ui/dom.ts：DOM の組み立て。描画はすべて textContent で行い、innerHTML は使わない（ESLint でも禁止）
-import type { Severity } from '../model';
+import type { Finding, Severity, Target } from '../model';
+import { showTarget } from '../shownText';
 import { itemSep, itemTitle, sevLabel, standardsSep, tr } from '../i18n';
 import { apiTop10Short, asvsRef, standardsOf, standardsShort } from '../engine/standards';
 
@@ -91,3 +92,18 @@ export function focusResultsIfLost(results: ParentNode, before: Element | null) 
 
 /** 折りたたみ（details）の見出しの先頭に付ける開閉の目印。summary を flex にするとブラウザの三角が消えるため自前で付ける */
 export const disclosure = () => { const s = el('span', 'disclosure inline-block w-4 shrink-0 text-muted'); s.setAttribute('aria-hidden', 'true'); return s; };
+
+/** 画面の「対象」の列で、そのまま出してよい名前：今のターゲットのラベルと、ホスト単位の指摘の対象（host と同じ URL.host） */
+/** shown：出す文字列の使い回し（ホスト名は showText を3回通すので、1回の描画の中で同じ対象を数え直さない） */
+export interface TargetNames { labels: ReadonlySet<string>; hosts: ReadonlySet<string>; shown: Map<string, string> }
+export const targetNames = (targets: readonly Target[], findings: readonly Finding[]): TargetNames =>
+  ({ labels: new Set(targets.map(t => t.label)), hosts: new Set(findings.filter(f => f.host !== undefined && f.target === f.host).map(f => f.target)), shown: new Map() });
+/**
+ * 「対象」の列の文字列（指摘の一覧・ホスト単位の表・差分の表・例外の登録のダイアログ）。ホスト名かどうかは今の結果で決める（前回の結果にだけある
+ * 対象は、ファイルに書かれた値なので showText を通す）。出し方は shownText.ts の showTarget
+ */
+export const targetText = (target: string, names: TargetNames) => {
+  let v = names.shown.get(target);
+  if (v === undefined) names.shown.set(target, v = showTarget(target, names.hosts.has(target) ? target : undefined, names.labels));
+  return v;
+};

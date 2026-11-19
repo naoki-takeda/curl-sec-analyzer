@@ -163,6 +163,22 @@ function escapeRun(run: string): string {
   return (d.match(/[A-Za-z0-9]+/g) ?? []).every(allowedWord) && allowText(d) === d ? run : `…(${run.length} chars)`;
 }
 
+/** URL.host の形（英小文字・数字・ハイフンのラベル（末尾の . を含む）、IPv4、[IPv6]、ポート） */
+const HOST_SHAPE = /^(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})*\.?|\[[0-9a-f:.]+\])(?::\d{1,5})?$/;
+/**
+ * 画面の「対象」の列に出す文字列（指摘の一覧・ホスト単位の表・差分の表・例外の登録のダイアログ）：
+ * - 今のターゲットのラベル（labels）は、そのまま出す（ターゲットの一覧・見出し・エクスポートと同じ。web01 を伏せると、どのターゲットか分からない）
+ * - ホスト単位の指摘の対象（host と同じ URL.host）は、URL の列と同じ出し方にする：「https://ホスト/」と、ユーザー情報の付いた「https://u@ホスト/」の
+ *   どちらで showText を通してもホスト名が変わらなければ、そのまま出す（スキームのないホスト名は、知らない最上位ドメインの乱数のラベル・IDN の xn-- を
+ *   伏せてしまう）。URL の列で伏せるもの（カード番号のラベル、ユーザー情報のあとの点のない乱数のホスト名）は伏せる
+ * - それ以外（ホスト名の形でないもの、横断のラベルの組、前回の結果にだけある対象）は showText を通す
+ */
+export const showTarget = (target: string, host?: string, labels?: ReadonlySet<string>): string => {
+  if (labels?.has(target)) return target;
+  const asUrlHost = HOST_SHAPE.test(target) && showText(`https://${target}/`) === `https://${target}/` && showText(`https://u@${target}/`).endsWith(`@${target}/`);
+  return host !== undefined && target === host && asUrlHost ? target : showText(target);
+};
+
 /**
  * 画面・エクスポートに出す文字列（証跡・URL）：名前による伏せ方（maskText）のあとに、許可リストを通す。変わらなくなるまで繰り返して冪等にする
  * （伏せた語「…(8 chars)」の直後の「//…@」をユーザー情報として伏せ直すなど、1回目の結果が2回目の手がかりを変える）。ふつうは2回で止まる
