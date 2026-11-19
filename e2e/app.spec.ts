@@ -479,3 +479,16 @@ test('「判定する」の判定中に設定ファイルを読み込むと、�
   await page.locator('#input').pressSequentially('x');
   await expect(page.getByRole('status')).toHaveText(/判定を止めました/);
 });
+
+test('組織プロファイルで重要度を変えた指摘の「*」の意味を、凡例と読み上げで示す', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  const legend = page.getByText('「*」は、組織プロファイルで重要度を変えた指摘です');
+  await expect(legend).toHaveCount(0);
+  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"t","severity":{"C-01.1":"low"}}') });
+  await expect(legend).toBeVisible();
+  // 元の重要度は文字で出す（title だけではキーボード・読み上げで分からない）。「*」は読み上げない
+  await expect(page.getByRole('cell', { name: /^低（元：高）$/ }).first()).toBeVisible();
+  await expect(page.getByRole('cell', { name: /^低（元：高）$/ }).first()).toHaveText('低*（元：高）');
+});

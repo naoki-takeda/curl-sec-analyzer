@@ -60,10 +60,19 @@ function allowedWord(w: string): boolean {
 const USERINFO = String.raw`(?:[^/\s?#@<>"']|["'](?=[\w@-])|…\(\d+ chars\)){0,256}@`;
 // 英小文字のドメイン名（スキームのない CSP のホスト ajax.aspnetcdn.com、Via の app01.prod.example.com）。決まった最上位ドメインのものだけ
 // （/reset/<トークン>.pdf のようなファイル名を残さない）
-const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost)(?![\w-])`;
-const KEEP = String.raw`…\(\d+ chars\)|${HASH_SOURCE}|(?<=:\/\/${USERINFO})[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|${DOMAIN}`;
-// ↑ ユーザー情報のない URL のホスト名は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない。区切り直すと、
-// ホスト名らしい並びのあとに @ がある入力（https://a.a.a…@evil/）で1文字ずつ短くするたびに @ まで読み直し、2乗の時間になる）
+const TLD = 'com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost';
+const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:${TLD})(?![\w-])`;
+// スキームのない URL（HTML の src="//cdn…/lib.js"、CSS の url(//…)、CSP の //cdn…）のホスト名。CDN の乱数のラベル（//d111111abcdef8.cloudfront.net）も
+// 残す。「//」は文字列の始めか、空白・引用符・=・(・カンマの直後だけ（パスの途中の a.example//… と、タグの直後の JS のコメント >//… を除く）。
+// スキームがなく URL かどうかが確かでない（Authorization: Bearer //…・Cookie の値・JS のコメントにも同じ形が出る）ので、英小文字で、決まった
+// 最上位ドメインで終わるものだけを残す（//QwErTy….AsDf… や //AKIA… のようなトークンを残さない）
+const NO_SCHEME = String.raw`(?:^|[\s"'=(,])\/\/`;
+const HOST_NAME = String.raw`(?:[a-z0-9-]{1,63}\.)+(?:${TLD})(?![\w.-])`;
+const KEEP = String.raw`…\(\d+ chars\)|${HASH_SOURCE}|(?<=:\/\/${USERINFO})[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|` +
+  String.raw`(?<=${NO_SCHEME}${USERINFO})${HOST_NAME}|(?<=${NO_SCHEME})${HOST_NAME}(?!${USERINFO})|${DOMAIN}`;
+// ↑ スキームのある URL のホスト名（ユーザー情報のないもの）は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない。
+// 区切り直すと、ホスト名らしい並びのあとに @ がある入力（https://a.a.a…@evil/）で1文字ずつ短くするたびに @ まで読み直し、2乗の時間になる）。
+// スキームのないホスト名（HOST_NAME）は、終わりが (?![\w.-]) で1か所に決まるので、区切り直しても @ まで読み直さない
 // JOIN：- _ + でつないだ語の並び（glpat-<トークン>・sk_live_<トークン>・Strict-Transport-Security）は、まとめて見る。パーセントエンコードした
 // + / = 空白 - .（%2B・%2F・%3D・%20・%2D・%2E。二重エンコードを含む）も区切りとする（エンコードした Base64 のトークンや、区切った番号
 // 1234%205678%209012 を短いかけらに分けて残さない）

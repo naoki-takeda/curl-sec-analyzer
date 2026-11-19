@@ -54,6 +54,9 @@ export function render() {
     heading(T.findings, findingsCount(chapterRows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(chapterRows.filter(r => r.severity === 'info').length), chapterFilter())),
     rows.length ? overallTable(chapterRows) : el('p', 'text-muted', T.noFindings),
     heading(T.perTarget, T.count(targets.length), focusable(button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); }), 'show-all')),
+    // 「*」（組織プロファイルで変えた重要度）の凡例。ターゲットごとの表に「*」が出るとき（findingsTable と同じ絞り込みで見える指摘にあるとき）だけ
+    findings.some(f => f.status === 'fail' && f.originalSeverity && (state.view.showAll || state.view.showInfo || f.severity !== 'info'))
+      ? el('p', 'mb-2 text-sm text-muted', T.profileLegend) : null,
     targetSummary(targets, byTarget),
     ...targets.map(t => targetBlock(t, byTarget.get(t.label) ?? [])),
     crossBlock(findings, targets),

@@ -45,9 +45,16 @@ export function table(label: string, head: string[], body: HTMLTableRowElement[]
   return wrap;
 }
 export const td = (cls: string, ...c: Child[]) => el('td', `border-t border-line px-3 py-2 align-top ${cls}`, ...c);
+/**
+ * 重要度のセル。組織プロファイルで変えた重要度には「*」と元の重要度（「低*（元：高）」）を付ける。元の重要度は文字で出す（title だけでは
+ * キーボード・読み上げで分からない）。「*」は読み上げない（意味は結果の凡例 profileLegend）
+ */
 export const sevCell = (s: Severity, from?: Severity) => {
-  const c = td(`whitespace-nowrap font-bold ${SEV_TEXT[s]}`, sevLabel(s), from ? '*' : '');
-  if (from) c.title = tr().profileChanged(sevLabel(from));
+  const c = td(`whitespace-nowrap font-bold ${SEV_TEXT[s]}`, sevLabel(s));
+  if (from) {
+    const star = el('span', '', '*'); star.setAttribute('aria-hidden', 'true');
+    c.append(star, el('span', 'text-sm font-normal text-muted', tr().profileWas(sevLabel(from))));
+  }
   return c;
 };
 /** 項目名に、関連する基準（OWASP API Top 10、ASVS 5.0、IPA）を小さく添える。ASVS のレベルは title（ツールチップ）で示す */

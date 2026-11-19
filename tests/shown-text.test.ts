@@ -421,3 +421,30 @@ describe('パスワードの中の生の @', () => {
     expect(showText('1-%' + '25'.repeat(10) + '31-%31%31')).not.toContain('2525');
   });
 });
+
+describe('スキームのない URL（//ホスト）', () => {
+  it.each([
+    '<script src="//d111111abcdef8.cloudfront.net/app.js"></script>',
+    "src='//d111111abcdef8.cloudfront.net/app.js'",
+    'background: url(//d111111abcdef8.cloudfront.net/bg.png)',
+    '<img srcset="//d111111abcdef8.cloudfront.net/a.png 1x, //d222222abcdef9.cloudfront.net/b.png 2x">',
+    "script-src 'self' //d111111abcdef8.cloudfront.net",
+    '//d111111abcdef8.cloudfront.net:8443/app.js',
+    '//user:****@d111111abcdef8.cloudfront.net/x',
+  ])('https:// の URL と同じく、ホスト名を残す：%s', s => {
+    expect(showText(s)).toBe(s);
+  });
+  it('ホスト名の形でないもの・ユーザー名・コメントに置いたトークンは残さない', () => {
+    for (const s of ['"//AKIAIOSFODNN7EXAMPLE"', '"//AKIAIOSFODNN7EXAMPLE.abcd1234"', '<script>//AKIAIOSFODNN7EXAMPLE.cloudfront.net</script>',
+      '// AKIAIOSFODNN7EXAMPLE', 'x=//AKIAIOSFODNN7EXAMPLE.cloud:x-oauth-basic@api.example/', 'a.example//AKIAIOSFODNN7EXAMPLE.cloudfront.net',
+      ' //AKIAIOSFODNN7EXAMPLE.wJalrXUtnFEMIK']) {
+      expect(showText(s), s).not.toMatch(/AKIAIOSFODNN7/);
+    }
+  });
+  it('URL でない場所（Authorization・Cookie の値・JS のコメント・JSON）の「//」のあとのドットで区切ったトークンは残さない', () => {
+    for (const s of ['Authorization: Bearer //QwErTyUiOp.AsDfGhJkLz', 'Cookie: a=1, sid=//QwErTyUiOp.AsDfGhJkLz', 'x = 1  //QwErTyUiOpAsDfGhJkLz.ZxCvBnMqWeRtYu',
+      '{"k":"//MTk4NjIyNDgzNDcxOTI1MjQ4.Cl2FMQ.ZnCjmXVWvRzebCqseKWs"}', '(//ya29.a0AfH6SMBxQwErTy.AbCdEfGh', 'Bearer //qwrtzxkpmnbvcdfgh.zxcvbnmqwrt']) {
+      expect(showText(s), s).not.toMatch(/QwErTyUiOp|MTk4NjIy|a0AfH6SMBx|qwrtzxkpmnbvcdfgh/);
+    }
+  });
+});
