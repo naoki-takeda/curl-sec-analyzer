@@ -14,7 +14,9 @@ export default tseslint.config(
     rules: {
       'no-restricted-properties': ['error',
         { property: 'innerHTML', message: NO_HTML }, { property: 'outerHTML', message: NO_HTML },
-        { property: 'insertAdjacentHTML', message: NO_HTML }, { object: 'document', property: 'write', message: NO_HTML }],
+        { property: 'insertAdjacentHTML', message: NO_HTML }, { object: 'document', property: 'write', message: NO_HTML },
+        { property: 'setHTMLUnsafe', message: NO_HTML }, { property: 'createContextualFragment', message: NO_HTML }, { property: 'srcdoc', message: NO_HTML },
+        { property: 'parseFromString', message: NO_HTML }],
       'no-eval': 'error', 'no-implied-eval': 'error', 'no-new-func': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },

@@ -310,13 +310,13 @@ const JSON_NUMBERS: RegExp[] = [
 const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token|ssn|cvv|cvc|card|ccnum|暗証番号|パスワード/i;
 /**
  * 配列の値（"password":["a","b"]・入れ子の [["a"]]・エスケープした \"password\":[…]・URL エンコードした %22password%22%3A%5B…）の、すべての
- * 文字列の要素を伏せる。中身は 64KB まで、入れ子は1段まで
+ * 文字列の要素を伏せる。中身は 64K 文字まで（入れ子の [ … ] は1つに数える）、入れ子は1段まで
  */
 // 中身：括弧の外の文字（整形した JSON の改行を含む）と、1段の入れ子の [ … ]。] で中身を終える（, のあとの別のキーの配列まで読まない）。
 // 閉じの ] を待たない（中身が上限を超えた配列でも、上限までの要素を伏せる）
 const IN_ARRAY = String.raw`((?:[^[\]]|\[[^[\]]*\]){0,65536})`;
 const E_OPEN = String.raw`%(?:25)*5[Bb]|\[`, E_CLOSE = String.raw`%(?:25)*5[Dd]|\]`, E_CH = String.raw`(?:(?!${E_OPEN}|${E_CLOSE})[^&\s"'<>#])`;
-// 値がオブジェクト（"password":{"value":"…"}）のときも、中の文字列の値を伏せる。中身は入れ子のない { … } の 64KB まで
+// 値がオブジェクト（"password":{"value":"…"}）のときも、中の文字列の値を伏せる。中身は入れ子のない { … } の 64K 文字まで
 const IN_OBJECT = String.raw`([^{}]{0,65536})`;
 const O_OPEN = String.raw`%(?:25)*7[Bb]|\{`, O_CH = String.raw`(?:(?!${O_OPEN}|%(?:25)*7[Dd]|\})[^&\s"'<>#])`;
 // 中身の文字列。あとに : が続くもの（オブジェクトのキー "v":）は伏せずに読み進める（キーの閉じの " から次の " までを文字列として読まない）。
@@ -467,8 +467,9 @@ export const maskText = (s: string): string => {
  * 証跡の抜粋：マスクしてから切り詰める。切り詰めてからマスクすると、途中で切れた JWT（ドットが足りない）や
  * パラメータが一致せず、生の値が残るため
  */
-export const clip = (s: string, n: number) => {
-  const m = maskText(s);
+export const clip = (s: string, n: number) => clipMasked(maskText(s), n);
+/** マスク済みの文字列 m を切り詰める（clip・excerpt で共有し、マスクを2回かけない） */
+const clipMasked = (m: string, n: number) => {
   if (m.length <= n) return m;
   // 伏せた値の印（…(N chars)）の途中で切らない（「abcd…(3」では長さが読めない）。印にかかるなら、印の終わりまで含める
   const re = /…\(\d+ chars\)/g; re.lastIndex = Math.max(0, n - 20);
@@ -480,6 +481,6 @@ export const clip = (s: string, n: number) => {
  * 許可リスト（showText）が短い語として残す）
  */
 export const excerpt = (s: string, n: number) => {
-  const m = maskText(s); const c = clip(s, n);
+  const m = maskText(s); const c = clipMasked(m, n);
   return c.length < m.length && /[\w-]/.test(m[c.length]) ? c.replace(/[\w-]+$/, '') : c;
 };

@@ -86,3 +86,16 @@ describe('#META の内部の印', () => {
     expect(targetKeys([t])[0]).toBe('t');
   });
 });
+
+describe('突き合わせのキーの番号とコード（第70回）', () => {
+  it('拡張子の付いた社会保障番号の形は残さず、版・IP アドレス・語と数字の組は残す', () => {
+    expect(urlKey('https://a.example/x/123-45-6789.pdf')).not.toContain('6789');
+    for (const p of ['/download/10.0.19045.3803/setup.exe', '/ip/192.168.100.200', '/f/x86-x64', '/f/md5-rc4'])
+      expect(urlKey(`https://a.example${p}`)).toBe(`https://a.example${p}`);
+  });
+  it('「HAR 」で始まるラベルは使えない（HAR のターゲットのキーにしない）', () => {
+    const { targets } = parseInput('#TARGET url=https://a.example/x label="HAR GET"\nHTTP/2 200\n\n#TARGET url=https://a.example/y label="HAR GET"\nHTTP/2 200\n\n');
+    expect(targets.every(t => t.label.startsWith('invalid-label'))).toBe(true);
+    expect(targetKeys(targets).some(k => k.startsWith('HAR '))).toBe(false);
+  });
+});

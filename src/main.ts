@@ -61,9 +61,12 @@ function buildShell() {
     const { list, errors } = parseSuppressions(text);
     // 1件も読めなかった（形式の違うファイル）ときは、登録済みの例外を残す（画面で登録しただけの例外を消さない）
     if (list.length || !errors.length) state.suppressions = list;
-    // * を含むものは、以前の形式のキーでもパターンとして照合する（engine/suppress.ts の matches）ので、登録し直しを促さない
-    const legacy = list.filter(s => !s.target.includes('*') && legacyHarKey(s.target)).length;
-    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsName, joinMessages(errors)) : legacy ? t.legacyHarKeys(legacy) : ''; });
+    // 手で書いたパターン（* が語に続く admin*）は、以前の形式のキーでもパターンとして照合する（engine/suppress.ts の matches）ので、登録し直しを
+    // 促さない。画面で登録したキーの * は区切りのあいだの部分だけ（/f/*/x）で、形の変わったキーはパターンとしても合わないので知らせる
+    const legacy = list.filter(s => !/[\w%]\*|\*[\w%]/.test(s.target) && legacyHarKey(s.target)).length;
+    // 1件も読めなかったときは「一部」と書かない。登録済みの例外を残したことも知らせる（組織プロファイルの profileKept と同じ）
+    refresh(() => { const t = tr(); const e = joinMessages(errors);
+      return errors.length ? (list.length ? t.readErrors(t.suppressionsName, e) : t.readFailed(t.suppressionsName, e) + (state.suppressions.length ? t.suppressionsKept : '')) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
   const profIn = hidden('.json,application/json', async f => {
     const text = await readSettings(f, MAX_BYTES); if (text === undefined) return;
@@ -75,7 +78,8 @@ function buildShell() {
     // （判定に使うプロファイルと食い違わないため）
     if (p && !kept && state.har) { const chains = state.har.imp.chains; withProfile(p, () => suggestLabels(chains, true)); renderHar(); }
     // 残したときは、そのことを知らせる（「既定の24時間を使います」などのエラーの文言だけでは、古いプロファイルを使い続けることが分からない）
-    refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.profileName, joinMessages(errors)) + (kept ? t.profileKept : '') : ''; });
+    refresh(() => { const t = tr(); const e = joinMessages(errors);
+      return errors.length ? (p && !kept ? t.readErrors(t.profileName, e) : t.readFailed(t.profileName, e)) + (kept ? t.profileKept : '') : ''; });
   });
   const baseIn = hidden('.json,application/json', async f => {
     // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超えるので、貼り付けと同じ上限では自分のエクスポートを読めない）

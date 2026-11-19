@@ -1,7 +1,7 @@
 // ui/dom.ts：DOM の組み立て。描画はすべて textContent で行い、innerHTML は使わない（ESLint でも禁止）
 import type { Severity } from '../model';
 import { itemSep, itemTitle, sevLabel, standardsSep, tr } from '../i18n';
-import { API_TOP10, asvsRef, standardsOf, standardsShort } from '../engine/standards';
+import { apiTop10Short, asvsRef, standardsOf, standardsShort } from '../engine/standards';
 
 export type Child = Node | string | null | undefined | false;
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', ...children: Child[]): HTMLElementTagNameMap[K] {
@@ -62,7 +62,7 @@ export function titleCell(item: string, fallback: string) {
   const s = standardsOf(item); const short = standardsShort(item, standardsSep());
   const std = short ? el('span', 'ml-2 text-xs text-muted', short) : null;
   if (std && s.asvs.length) std.title = s.asvs.map(asvsRef).join('\n');
-  return td('', itemTitle(item, fallback), API_TOP10[item] ? el('span', 'ml-2 text-xs text-muted', `OWASP ${API_TOP10[item].replace(/・/g, itemSep())}`) : null, std);
+  return td('', itemTitle(item, fallback), apiTop10Short(item) ? el('span', 'ml-2 text-xs text-muted', apiTop10Short(item, itemSep())) : null, std);
 }
 export function download(name: string, type: string, body: string) {
   const a = el('a'); a.href = URL.createObjectURL(new Blob([body], { type })); a.download = name;
@@ -83,6 +83,9 @@ export const restoreFocus = (box: ParentNode, key: string | undefined) => { if (
  */
 export function focusResultsIfLost(results: ParentNode, before: Element | null) {
   if (!(before instanceof HTMLElement) || before === document.body || (before.isConnected && before.getClientRects().length)) return;
+  // 描き直しが同じ印の部品にフォーカスを戻した（restoreFocus。章の絞り込み・表示の切り替え）なら、そのままにする
+  const now = document.activeElement;
+  if (now && now !== document.body && now !== before && now.isConnected) return;
   const h = results.querySelector<HTMLElement>('h2'); if (h) { h.tabIndex = -1; h.focus(); }
 }
 

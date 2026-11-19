@@ -159,7 +159,7 @@ test('判定のあとに読み込んだ設定ファイルのエラーが消え�
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
   await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
-  await expect(page.getByRole('status')).toHaveText(/例外ファイルの一部を読み込めませんでした：JSONとして読めません/);
+  await expect(page.getByRole('status')).toHaveText(/例外ファイルを読み込めませんでした：JSONとして読めません。/);
 });
 
 test('HAR の一覧の読み上げ名でもトークンをマスクし、HAR を外すと結果からも消える', async ({ page }) => {
@@ -504,12 +504,12 @@ test('入力欄で Ctrl+Enter を押して判定すると、隠した入力欄�
   expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('H2');
 });
 
-test('組織プロファイルの読み込みのエラーは、ボタンの文言ではなくファイルの名前で知らせ、文を閉じる', async ({ page }) => {
+test('組織プロファイルの読み込みのエラーは、ボタンの文言ではなくファイルの名前で知らせ、1件も読めなければ「一部」と書かない', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
   await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
-  await expect(page.getByRole('status')).toHaveText(/^組織プロファイルの一部を読み込めませんでした：JSONとして読めません。/);
+  await expect(page.getByRole('status')).toHaveText(/^組織プロファイルを読み込めませんでした：JSONとして読めません。/);
 });
 
 test('解析の警告に出す #TARGET の読めない名前も、許可リストを通す', async ({ page }) => {
@@ -528,4 +528,18 @@ test('前回の結果の読み込みのエラーは、どのファイルかを�
   await analyzed(page);
   await page.locator('input[type=file]').nth(3).setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await expect(page.getByRole('status')).toHaveText(/^前回の結果を読み込めませんでした：.+。$/);
+});
+
+test('判定を待つあいだに章の絞り込みへ移したフォーカスは、結果を描き直しても見出しに奪わない', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.getByRole('button', { name: '入力を表示する' }).click();
+  // 判定する を押して、結果が届く前に章の絞り込みへフォーカスを移す
+  await page.evaluate(() => {
+    [...document.querySelectorAll('button')].find(b => b.textContent === '判定する')!.click();
+    document.querySelector<HTMLSelectElement>('select[data-focus="chapter"]')!.focus();
+  });
+  await analyzed(page);
+  expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.focus)).toBe('chapter');
 });

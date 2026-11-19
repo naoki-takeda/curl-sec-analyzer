@@ -6,6 +6,7 @@ import { IMPLEMENTED } from '../src/rules/ruleset';
 import { toMarkdown } from '../src/export/markdown';
 import { toJson } from '../src/export/json';
 import { evaluate, sampleText } from './helpers';
+import { setLang } from '../src/i18n';
 
 describe('ASVS 5.0・IPA との対応（v1.0）', () => {
   it('すべての項目が対応の配列を持ち、ASVS の要件IDは原典にあるもの（レベル付き）だけ', () => {
@@ -71,5 +72,19 @@ describe('ASVS 5.0 に合わせた既定の基準', () => {
   it('C-07①：セッションIDは128bit以上（7.2.3）。16進16文字（64bit）は不足、32文字（128bit）は合格', () => {
     expect(login('sid=0123456789abcdef')).toContain('C-07.1');
     expect(login('sid=0123456789abcdef0123456789abcdef')).not.toContain('C-07.1');
+  });
+});
+
+describe('基準の表記の区切り', () => {
+  it('英語の Markdown は、OWASP API Top 10 を「, 」、ASVS と IPA を「; 」で区切る（日本語は「・」）', () => {
+    const r = evaluate('#TARGET url=https://api.example.com/v1/x?access_token=QwErTyUiOpAsDfGhJkLz123456 label=t\nHTTP/2 200\ncontent-type: text/html\nset-cookie: SESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/\n\n<p>x</p>\n');
+    const md = (lang: 'ja' | 'en') => {
+      const g = globalThis as { document?: unknown }; const had = 'document' in g;
+      if (!had) g.document = { documentElement: {} };
+      setLang(lang);
+      try { return toMarkdown(r.findings, coverage(r.findings, IMPLEMENTED), [], new Date('2026-11-01T00:00:00Z')); } finally { setLang('ja'); if (!had) delete g.document; }
+    };
+    expect(md('en')).toContain('OWASP API2:2023, API8:2023'); expect(md('en')).toMatch(/ASVS [\d., ]+; IPA/);
+    expect(md('ja')).toContain('OWASP API2:2023・API8:2023'); expect(md('ja')).toMatch(/ASVS [\d., ]+・IPA/);
   });
 });

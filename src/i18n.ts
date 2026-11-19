@@ -39,7 +39,7 @@ const ja = {
   loadBaseline: '前回の結果（JSON）を読み込む',
   noSuppressions: '例外の登録はありません', suppressionsStatus: (n: number, a: number) => `例外 ${n}件（有効 ${a}件、期限切れ ${n - a}件）`,
   noProfile: '組織プロファイル：なし（既定の重要度）', profileStatus: (name: string) => `組織プロファイル：${name || '（名前なし）'}`,
-  legacyHarKeys: (n: number) => `前回の結果・例外のうち${n}件は以前の版（v0.4.30 まで）の形式で記録されているため、今の結果と突き合いません（例外は登録し直し、前回の結果はこの版で出力し直してください）。`,
+  legacyHarKeys: (n: number) => `前回の結果・例外のうち${n}件は以前の版の形式で記録されているため、今の結果と突き合いません（例外は登録し直し、前回の結果はこの版で出力し直してください）。`,
   noBaseline: '前回の結果：なし', baselineSkipped: (n: number) => `前回の結果のうち${n}件は、形式が正しくないため除外しました（このツールでエクスポートしたJSONを使ってください）。`, baselineStatus: (at: string) => `前回の結果：${at || '日時不明'}`,
   emptyInput: 'curlの出力を貼り付けてから「判定する」を押してください。', tooLarge: (mb: number) => `入力が大きすぎます（上限${mb}MB）。`,
   fileTooLarge: (mb: number) => `ファイルが大きすぎます（上限${mb}MB）。ターゲットを分けて読み込んでください。`,
@@ -97,6 +97,7 @@ const ja = {
     sanitized: 'Cookie・Set-Cookie が含まれていません。ブラウザの設定で機密情報を含めて書き出すと、Cookie の項目も判定できます。', hosts: '対象ホスト：', remove: 'HARを外す', exclude: '除外',
     method: 'メソッド', status: 'ステータス', hops: (n: number) => `（${n}ホップ）`, labelFor: (m: string, u: string) => `${m} ${u} のラベル`, sensFor: (u: string) => `${u} の機密区分`, auto: (y: boolean): string => (y ? '自動（はい）' : '自動（不明）') },
   readErrors: (what: string, e: string) => `${what}の一部を読み込めませんでした：${e}。`, suppressionsName: '例外ファイル', profileName: '組織プロファイル',
+  readFailed: (what: string, e: string) => `${what}を読み込めませんでした：${e}。`, suppressionsKept: '登録済みの例外を使い続けます。',
   baselineError: (e: string) => `前回の結果を読み込めませんでした：${e}。`,
 };
 type Dict = typeof ja;
@@ -117,7 +118,7 @@ const en: Dict = {
   loadBaseline: 'Load previous results (JSON)',
   noSuppressions: 'No exceptions', suppressionsStatus: (n, a) => `${n} exception${s(n)} (${a} active, ${n - a} expired)`,
   noProfile: 'Organization profile: none (default severities)', profileStatus: name => `Organization profile: ${name || '(unnamed)'}`,
-  legacyHarKeys: n => `${n} entr${n === 1 ? 'y uses' : 'ies use'} the format of an earlier version (v0.4.30 or before), so ${n === 1 ? 'it does' : 'they do'} not match the current results (register the exceptions again, and export the previous results again with this version).`,
+  legacyHarKeys: n => `${n} entr${n === 1 ? 'y uses' : 'ies use'} the format of an earlier version, so ${n === 1 ? 'it does' : 'they do'} not match the current results (register the exceptions again, and export the previous results again with this version).`,
   noBaseline: 'Previous results: none', baselineSkipped: n => `${n} of the previous findings ${n === 1 ? 'was' : 'were'} skipped because their format is invalid (use JSON exported by this tool).`, baselineStatus: at => `Previous results: ${at || 'date unknown'}`,
   emptyInput: 'Paste curl output, then select Analyze.', tooLarge: mb => `The input is too large (${mb} MB limit).`,
   fileTooLarge: mb => `The file is too large (${mb} MB limit). Split it by target.`,
@@ -175,6 +176,7 @@ const en: Dict = {
     sanitized: 'This HAR has no Cookie or Set-Cookie headers. Export it with sensitive data included to check cookies.', hosts: 'Hosts:', remove: 'Remove HAR', exclude: 'Exclude',
     method: 'Method', status: 'Status', hops: n => ` (${n} hops)`, labelFor: (m, u) => `Label for ${m} ${u}`, sensFor: u => `Sensitivity for ${u}`, auto: y => (y ? 'Auto (yes)' : 'Auto (unknown)') },
   readErrors: (what, e) => `Part of the ${what} could not be loaded: ${e}.`, suppressionsName: 'exceptions file', profileName: 'organization profile',
+  readFailed: (what, e) => `Could not load the ${what}: ${e}.`, suppressionsKept: ' The registered exceptions are kept.',
   baselineError: e => `Could not load the previous results: ${e}.`,
 };
 

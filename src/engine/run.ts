@@ -32,19 +32,30 @@ const DEDUPE: { keep: string; drop: string; why: string; perCookie?: boolean }[]
   { keep: 'C-01.1', drop: 'C-10.1', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
   { keep: 'C-01.2', drop: 'C-10.2', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
   { keep: 'C-01.3', drop: 'C-10.2', why: 'http のホップが発行した Secure のない Cookie は C-01 で数える', perCookie: true },
-  // Secure のない __Host-・__Secure- と SameSite=None の Cookie は、ブラウザが拒否して保存しない（平文で送られることはない）。拒否される理由の項目で数える
-  ...['C-01.1', 'C-01.2', 'C-01.3'].flatMap(drop => [
-    { keep: 'C-06.2', drop, why: 'Secure のない __Host-・__Secure- の Cookie はブラウザが拒否する（C-06② で数える）', perCookie: true },
-    { keep: 'C-03.4', drop, why: 'Secure のない SameSite=None の Cookie はブラウザが拒否する（C-03④ で数える）', perCookie: true }]),
+  // Secure のない __Host-・__Secure- の Cookie は、どの主要なブラウザも拒否して保存しない（平文で送られることはない）。拒否される理由の C-06② で数える
+  ...['C-01.1', 'C-01.2', 'C-01.3'].map(drop => ({ keep: 'C-06.2', drop, why: 'Secure のない __Host-・__Secure- の Cookie はブラウザが拒否する（C-06② で数える）', perCookie: true })),
+  // Secure のない SameSite=None の Cookie を拒否するのは Chromium だけ（Safari・Firefox は保存して平文でも送る）。Secure がないことは C-01 で数える
+  ...['C-01.1', 'C-01.2', 'C-01.3'].map(keep => ({ keep, drop: 'C-03.4', why: 'Secure のない SameSite=None の Cookie は C-01 で数える', perCookie: true })),
 ];
 /** perCookie の突き合わせのキー：Cookie の証跡（C-01②③の「（ホストのHSTSなし…）」の注記を除く） */
 const cookieKey = (ev: string) => ev.replace(/（[^（）]*）$/, '');
 function dedupe(fs: Finding[]): Finding[] {
-  const fails = new Set(fs.filter(f => f.status === 'fail').flatMap(f => [`${f.ruleId}\u0000${f.target}`, `${f.ruleId}\u0000${f.target}\u0000${cookieKey(f.evidence)}`]));
+  const fails = new Map<string, Finding>();
+  for (const f of fs) if (f.status === 'fail') { fails.set(`${f.ruleId}\u0000${f.target}`, f); fails.set(`${f.ruleId}\u0000${f.target}\u0000${cookieKey(f.evidence)}`, f); }
+  const keepOf = (f: Finding) => {
+    for (const x of DEDUPE) {
+      const keep = x.drop === f.ruleId ? fails.get(`${x.keep}\u0000${f.target}${x.perCookie ? `\u0000${cookieKey(f.evidence)}` : ''}`) : undefined;
+      if (keep) return { keep, why: x.why };
+    }
+    return undefined;
+  };
   return fs.map(f => {
     if (f.status !== 'fail') return f;
-    const d = DEDUPE.find(x => x.drop === f.ruleId && fails.has(`${x.keep}\u0000${f.target}${x.perCookie ? `\u0000${cookieKey(f.evidence)}` : ''}`));
-    return d ? { ...f, status: 'na', dedupedBy: d.keep, recommendation: `${d.keep} として数える（${d.why}）` } : f;
+    let d = keepOf(f); if (!d) return f;
+    // keep もほかの keep に数えられるなら、数える指摘までたどる（C-10① → C-01① → C-06②。数えない指摘を「…として数える」と示さない）。
+    // 組は項目の順に一方向なので、たどりは止まる（念のため回数に上限を付ける）
+    for (let i = 0, next = keepOf(d.keep); next && i < DEDUPE.length; i++, next = keepOf(d.keep)) d = next;
+    return { ...f, status: 'na', dedupedBy: d.keep.ruleId, recommendation: `${d.keep.ruleId} として数える（${d.why}）` };
   });
 }
 

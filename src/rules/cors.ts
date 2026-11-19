@@ -54,7 +54,8 @@ const NO_ORIGIN_REC = 'C6 のとおり Origin を付けて（-H "Origin: https:/
  * 拒否したとは言えない（C6・C7 は -L を付けない）。R-01〜R-04 は合格にせず na にする（R-05 のプリフライトは、ブラウザが転送を失敗にするので合格のまま）
  */
 const redirectNa = (rule: Rule, ctx: RuleContext): Finding[] | undefined => (isRedirectWithLocation(ctx.final) && !acaoOf(ctx)
-  ? [mk(rule, ctx, 'na', 'info', 'na', `HTTP ${ctx.final?.status}（転送の応答。転送先の応答を見ていない）`, '転送先の URL を #TARGET の url= にして採取し直す')] : undefined);
+  ? [mk(rule, ctx, 'na', 'info', 'na', `HTTP ${ctx.final?.status}（転送の応答。転送先の応答を見ていない）`,
+    ctx.target.meta.source === 'har' ? '転送先の応答まで記録した HAR で判定し直す' : '転送先の URL を #TARGET の url= にして採取し直す')] : undefined);
 export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo: 'any', scope: 'target',
   basis: ['PortSwigger Web Security Academy: CORS', 'OWASP WSTG'],
   run(ctx) {
@@ -122,6 +123,9 @@ export const corsWildcard: Rule = { id: 'R-04', title: 'ワイルドカード', 
     // cors-* のラベル（C6 のとおり Origin を送る）でなければ、送ったとは分からないので同じく na（curl と HAR で結果をそろえる）
     if (!acao && !ctx.target.sentOrigin && (noOriginSent(ctx) || !/^cors-/.test(baseLabel(ctx.target.label))))
       return [mk(corsWildcard, ctx, 'na', 'info', 'na', 'ACAOなし（Origin を送っていない、または送ったかが分からない）', NO_ORIGIN_REC)];
+    // 自サイトの Origin（HAR の同じオリジンの POST など）の ACAO のなさは、ほかの Origin に * を返さないことを示さない（R-01 と同じく na）
+    if (!acao && isOwnOrigin(ctx, ctx.target.sentOrigin))
+      return [mk(corsWildcard, ctx, 'na', 'info', 'na', `Origin: ${ctx.target.sentOrigin}（自サイトの Origin。許可外の Origin では試していない）`, 'C6 のとおり許可外の Origin（https://evil.example）で採取し直す')];
     if (acao !== '*') return redirectNa(corsWildcard, ctx) ?? [mk(corsWildcard, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
     if (credOf(ctx)) return [mk(corsWildcard, ctx, 2, 'low', 'fail', 'ACAO: * / ACAC: true', '仕様上ブラウザが拒否する組み合わせ。設定を見直す')];
     const sensitive = sensitiveUnlessStatic(ctx);    // JS・フォントは CDN から * で配ることが多い。sensitive=1 の明示がなければ機密としない

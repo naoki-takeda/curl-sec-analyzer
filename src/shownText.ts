@@ -10,13 +10,8 @@
 // - URL のホスト名、決まった最上位ドメインのドメイン名、CSP のハッシュ（'sha256-…'）、伏せた印「…(N chars)」は、そのまま残す
 // 名前の付いた短い秘密（password=hunter2 の hunter2）は形では見分けられないので、maskText の名前による伏せ方と組み合わせて使う（showText）
 import { HASH_SOURCE, maskText } from './mask';
-import { codeGroups, digitRun, rareBigrams, wordLike } from './tokenShape';
+import { MIXED_STEMS, STEM_DIGITS, codeGroups, digitRun, rareBigrams, wordLike } from './tokenShape';
 
-/** 英字に数字を付けた語のうち、残してよい英字の部分（暗号・プロトコル・文字コード・版の名前）。小文字で照合する */
-const MIXED_STEMS = new Set(('sha md aes rc des chacha poly secp sect prime ed curve x rsa ecdsa dsa dh ffdhe ecdhe dhe tls tlsv ssl sslv http https h brainpoolp ' +
-  'utf base ipv iso ucs cp windows win latin v r ubuntu deb el fc jdk java node php python net pkcs mp gzip ws wss rfc es hs rs ps cve cwe owasp ie ' +
-  'chrome firefox safari edge android ios macos jre asvs api level l a').split(' '));
-const STEM_DIGITS = /^([a-z]{1,10})(\d{1,5})(?:([a-z]{1,2})\d{1,3})?$/i;
 /** 日時（2026-11-01T10:00:00Z の 01T10）と、数字に単位を付けたもの（30s・500ms・64KB・2xx・1st） */
 const DATE_OR_UNIT = /^(?:x25519(?:mlkem768|kyber768draft00)?|x448|secp256r1mlkem768|secp384r1mlkem1024|mlkem(?:512|768|1024)|\d{1,2}T\d{1,2}|\d{1,6}(?:ms|s|m|h|d|w|y|kb|mb|gb|tb|px|em|rem|vh|vw|x|xx|st|nd|rd|th|k)|\d{1,3}(?:ubuntu|deb|el|fc|build|beta|alpha|rc|dev|p|pl)\d{1,3})$/i;
 
@@ -81,10 +76,10 @@ const KEEP = String.raw`…\(\d+ chars\)|${HASH_SOURCE}|` +
 // ↑ スキームのある URL のホスト名は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない。区切り直すと、
 // ホスト名らしい並びのあとに @ がある入力（https://a.a.a…@evil/）で1文字ずつ短くするたびに @ まで読み直し、2乗の時間になる）。
 // スキームのないホスト名（HOST_NAME）は、終わりが (?![\w.-]) で1か所に決まるので、区切り直しても @ まで読み直さない
-// JOIN：- _ + でつないだ語の並び（glpat-<トークン>・sk_live_<トークン>・Strict-Transport-Security）は、まとめて見る。パーセントエンコードした
+// JOIN：- _ + ~ でつないだ語の並び（glpat-<トークン>・sk_live_<トークン>・Strict-Transport-Security）は、まとめて見る。パーセントエンコードした
 // + / = 空白 - .（%2B・%2F・%3D・%20・%2D・%2E。二重エンコードを含む）も区切りとする（エンコードした Base64 のトークンや、区切った番号
 // 1234%205678%209012 を短いかけらに分けて残さない）
-const JOIN = String.raw`(?:[-_+]|%(?:25)*(?:2[BbFf0DdEe]|3[Dd]))+`;
+const JOIN = String.raw`(?:[-_+~]|%(?:25)*(?:2[BbFf0DdEe]|3[Dd]))+`;
 // パーセントエンコードした文字の並び（%2F。二重エンコードの %252F も）。語の一部として読まず（%2Fv1 を語 2Fv1 と読まない）、並びとして escapeRun で
 // 見る（1つずつを区切りとして残すと、エンコードしたバイナリ・暗号文 ?d=%8F%1A%C3%77… がそのまま残る）。生の - _ + . でつないだ並びも1つとして
 // 見る（全体をエンコードした番号 %34%31%31%31-%31%31%31%31-… を、戻すと4桁の数字になる並びごとに残さない）
@@ -108,16 +103,6 @@ const maskMixedDigits = (s: string): string => s.replace(MIXED_DIGITS, m => {
 });
 const WORDS = new RegExp(`(${ESCAPES})|(${KEEP})|[A-Za-z0-9]+(?:${JOIN}[A-Za-z0-9]+)*`, 'g');
 const JOIN_SPLIT = new RegExp(`(${JOIN})`);
-// 暗号の略語（CBC・GCM・DHE・ADH・SRP）。まれな2文字の並びが多いが、番号のかけらとみなさない（ECDHE-RSA-RC4-SHA を伏せない）
-const CRYPTO_WORDS = new Set('aes des ede rc2 rc4 md5 sha cbc gcm ccm rsa dss dhe edh ecdh ecdhe adh aecdh srp psk idea exp null anon seed aria camellia chacha poly ecdsa tls ssl sm2 sm3 sm4 gost'.split(' '));
-/** 残してよい英字に数字を付けた語（rc4・md5・sha1） */
-const stemmedWord = (p: string) => { const m = p.match(STEM_DIGITS); return !!m && MIXED_STEMS.has(m[1].toLowerCase()); };
-/**
- * 番号のかけらとして、語として読めないもの：英字と数字が混ざる（K7QX・a1b2。rc4・md5・sha1 のような残してよい語は除く）か、英字4文字以上で
- * まれな2文字の並びが半分以上（ZXCV・ASDF）
- */
-const randomPiece = (p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !stemmedWord(p)
-  : /^[A-Za-z]{4,}$/.test(p) && rareBigrams(p.toLowerCase()) >= 0.5);   // 英字3文字（pdf・img・MIT）は略語として乱数とみなさない
 /**
  * 語の並びの、残してよい部分。並びの中に残せないかけらが1つでもあれば、そこから並びの終わりまでを伏せる（かけらを1つずつ見ると、- _ で区切った
  * 乱数のトークン（URL-safe の Base64・GitLab の glpat-…）の4文字までのかけらが語として残る）。それより前は、英字の語のかけら（glpat・sk・live・
@@ -131,7 +116,7 @@ function allowRun(run: string): string {
   const nums = pieces.filter((_, i) => i % 2 === 0);
   if (digitRun(nums)) return `…(${run.length} chars)`;
   // 招待・パスワードの再設定のコード（/invite/QWER-TYUI-ZXCV-ASDF・K7QX-9MZP）は、まとめて伏せる（4文字までのかけらとして残さない）
-  if (codeGroups(nums, randomPiece)) return `…(${run.length} chars)`;
+  if (codeGroups(nums)) return `…(${run.length} chars)`;
   const bad = pieces.findIndex((p, i) => i % 2 === 0 && !allowedWord(p));
   if (bad < 0) return run;
   let keep = 0;

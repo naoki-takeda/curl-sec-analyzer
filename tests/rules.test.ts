@@ -614,11 +614,11 @@ describe('転送・304・5xx・ブラウザが拒否する Cookie', () => {
     expect(one('t', 'https://a.example/.well-known/security.txt', 'HTTP/2 304', 'E-04')).toEqual([]);
     expect(one('t', 'https://a.example/.well-known/security.txt', 'HTTP/2 503\ncontent-type: text/html', 'E-04')).toEqual(['E-04.na']);
   });
-  it('Secure のない __Host- と SameSite=None の Cookie は、C-01 と二重に指摘しない（ブラウザが拒否する）', () => {
+  it('Secure のない __Host- の Cookie は C-06②（ブラウザが拒否する）、SameSite=None の Cookie は C-01 で数え、二重に指摘しない', () => {
     const fails = (cookie: string) => evaluate(target('https://a.example/', `HTTP/2 200\ncontent-type: text/html\nset-cookie: ${cookie}`)).findings
       .filter(f => f.status === 'fail' && /^C-0[136]/.test(f.ruleId)).map(f => f.ruleId).sort();
     expect(fails(`__Host-sid=${'0123456789abcdef'.repeat(2)}; Path=/; HttpOnly; SameSite=Lax`)).toEqual(['C-06.2']);
-    expect(fails(`sid=${'0123456789abcdef'.repeat(2)}; Path=/; HttpOnly; SameSite=None`)).toEqual(['C-03.4', 'C-06.1']);
+    expect(fails(`sid=${'0123456789abcdef'.repeat(2)}; Path=/; HttpOnly; SameSite=None`)).toEqual(['C-01.1', 'C-06.1']);
   });
   it('A-09③：API の応答の Report-Only だけの CSP は、H-03② と二重に指摘しない', () => {
     const r = evaluate(target('https://a.example/api/me', "HTTP/2 200\ncontent-type: application/json\nx-content-type-options: nosniff\ncontent-security-policy-report-only: default-src 'none'\n\n{\"a\":1}"));
@@ -628,5 +628,20 @@ describe('転送・304・5xx・ブラウザが拒否する Cookie', () => {
     const r = evaluate(['#TARGET url=http://a.example/ label=t', 'HTTP/1.1 301 Moved Permanently', 'location: https://a.example/', 'set-cookie: .AspNetCore.Cookies=chunks-2; path=/', '',
       'HTTP/2 200', 'content-type: text/html', `set-cookie: .AspNetCore.CookiesC1=${'a'.repeat(40)}; path=/; secure; httponly`, ''].join('\n'));
     expect(r.findings.filter(f => f.item === 'C-10' && f.status === 'fail')).toEqual([]);
+  });
+});
+
+describe('二重の指摘の除去のたどりと、自サイトの Origin の R-04', () => {
+  it('数えない指摘を keep にしない（C-10① → C-01① → C-06② と、数える指摘までたどる）', () => {
+    const r = evaluate(['#TARGET url=http://a.example/ label=t', 'HTTP/1.1 301 Moved Permanently', 'location: https://a.example/',
+      `set-cookie: __Host-sid=${'0123456789abcdef'.repeat(2)}; path=/; httponly; samesite=lax`, '', 'HTTP/2 200', 'content-type: text/html', ''].join('\n'));
+    const by = (id: string) => r.findings.find(f => f.ruleId === id)?.dedupedBy;
+    expect([by('C-10.1'), by('C-01.1')]).toEqual(['C-06.2', 'C-06.2']);
+    expect(r.findings.find(f => f.ruleId === 'C-10.1')?.recommendation).toContain('C-06.2 として数える');
+  });
+  it('R-04：自サイトの Origin を送った応答の ACAO のなさは合格にしない', () => {
+    const r = evaluate(['#TARGET url=https://a.example/api/me label=t', '* Connected to a.example (192.0.2.1) port 443', '> POST /api/me HTTP/2', '> Origin: https://a.example',
+      '>', '< HTTP/2 200', '< content-type: application/json', '<', ''].join('\n'));
+    expect(r.findings.filter(f => f.item === 'R-04').map(f => f.ruleId)).toEqual(['R-04.na']);
   });
 });

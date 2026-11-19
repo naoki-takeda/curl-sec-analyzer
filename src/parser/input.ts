@@ -63,7 +63,7 @@ export function attrs(s: string): Record<string, string> {
 
 /**
  * ラベルとして受け付ける形（英数字・日本語などの文字と _ . -、64文字まで。引用符で囲んだラベルの中の空白（label="top page"）も認める）。
- * * は使えない（例外の照合で任意の文字列の意味になる）。それ以外（引用符・記号を含むもの）は invalid-label にする。
+ * * は使えない（例外の照合で任意の文字列の意味になる）。「HAR 」で始まるもの（HAR のターゲットの突き合わせのキーと同じ形）も使えない。それ以外（引用符・記号を含むもの）は invalid-label にする。
  * ラベルは画面・エクスポート・例外ファイルにそのまま出るので、本文に入れた「#TARGET label=…」の残り（"password":"…"）を出さない
  */
 const LABEL_OK = /^[\p{L}\p{N}_.-](?:[\p{L}\p{N}_. -]{0,62}[\p{L}\p{N}_.-])?$/u;
@@ -71,7 +71,7 @@ const SENS_TRUE = /^(?:1|true|yes)$/i, SENS_FALSE = /^(?:0|false|no)$/i;
 /** #TARGET で読む名前（run= は採取の印） */
 const TARGET_KEYS = new Set(['url', 'label', 'kind', 'sensitive', 'run']);
 const newTarget = (a: Record<string, string>): Target => ({
-  label: a.label === undefined ? 'default' : LABEL_OK.test(a.label) ? a.label : 'invalid-label', url: a.url, kind: (['html', 'api'].includes(a.kind?.toLowerCase() ?? '') ? a.kind.toLowerCase() : 'auto') as Target['kind'],   // kind=API も受け付ける
+  label: a.label === undefined ? 'default' : LABEL_OK.test(a.label) && !/^HAR /i.test(a.label) ? a.label : 'invalid-label', url: a.url, kind: (['html', 'api'].includes(a.kind?.toLowerCase() ?? '') ? a.kind.toLowerCase() : 'auto') as Target['kind'],   // kind=API も受け付ける
   // sensitive は 1・true・yes と 0・false・no を受け付ける。ほかの値は読まずに警告する（黙って無視すると、機密応答の項目が na や弱い判定になる）
   sensitive: SENS_TRUE.test(a.sensitive ?? '') ? true : SENS_FALSE.test(a.sensitive ?? '') ? false : undefined,
   verbose: false, responses: [], sentAuth: false, sentTokens: [], info: [], meta: {}, probes: [], tlsProbes: [], cipherProbes: [], openssl: [],
@@ -166,7 +166,7 @@ export function parseInput(input: string): ParseResult {
         // 横断の判定（C-09 など）が動かない理由が分からない）。値は出さない（ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
         const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
         if (unknown.length) badTargetAttrs.push(`${t.label}：${unknown.slice(0, 3).map(k => (/^[A-Za-z_][\w-]{0,30}$/.test(k) ? k : '…')).join('・')}=（使える名前は url・label・kind・sensitive）`);
-        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push('invalid-label：label= に使えるのは英数字・日本語などの文字と _ . - と空白（64文字まで）');
+        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push('invalid-label：label= に使えるのは英数字・日本語などの文字と _ . - と空白（64文字まで。「HAR 」で始まるものは使えない）');
         if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push(`${t.label}：kind= は html・api・auto のいずれか`);
       }
       else if (tag === 'META') {

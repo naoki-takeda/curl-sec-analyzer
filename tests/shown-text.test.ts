@@ -488,3 +488,10 @@ describe('2つのかけらのコードと、切り詰めた証跡', () => {
     expect(excerpt('abc def', 5)).toBe('abc ');
   });
 });
+
+describe('~ でつないだ番号とコード', () => {
+  it('~ で区切ったカード番号・コードも伏せる', () => {
+    expect(showText('4111~1111~1111~1111')).not.toContain('1111');
+    expect(showText('QWER~TYUI~ZXCV~ASDF')).not.toContain('ZXCV');
+  });
+});

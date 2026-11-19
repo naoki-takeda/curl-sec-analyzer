@@ -112,6 +112,7 @@ export const EXACT: Record<string, string> = {
   '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する': 'Return a generic error message and log details only on the server. Rotate any leaked values',
   'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない': 'Do not include stack traces, SQL statements, connection strings or absolute paths in responses',
   'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）': 'Check the network and run C13 again (HTTP 000 means the connection failed)',
+  '転送先の応答まで記録した HAR で判定し直す': 'Analyze a HAR that also records the response of the redirect target',
   '転送先の URL を #TARGET の url= にして採取し直す': 'Capture again with the redirect target as url= in #TARGET',
   'If-None-Match・If-Modified-Since を付けずに採取し直す': 'Capture again without If-None-Match or If-Modified-Since',
   '転送先のホスト（www の有無など）・パスを URL にして C13 を実行し直す': 'Run C13 again with the redirect target (the host with or without www, or the path) as the URL',
