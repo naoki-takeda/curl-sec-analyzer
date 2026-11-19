@@ -10,10 +10,11 @@ http | http://www.example.com/ | key=http | responses=1
 tls | https://www.example.com/ | key=- | responses=0
 
 ## warnings
-tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
+tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（RC4-SHA。判定不能）
 
 ## findings
 chain | A-02.ok | info | pass | URL・Location・本文にトークンなし
+chain | C-10.ok | info | pass | HTTP応答でCookieを発行していない
 chain | H-01.1 | high | fail | (ヘッダなし)
 chain | H-02.na | info | na | HSTSがない（H-01で判定）
 chain | H-08.na | info | na | HTTP 302（本文のない応答）
@@ -22,7 +23,7 @@ chain | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシ
 chain | H-13.na | info | na | HTTP 302（別のサイトへの転送で終わる。転送先の応答は判定しない）
 chain | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 chain | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-chain | R-04.ok | info | pass | (ACAOなし)
+chain | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 chain | T-05.2 | low | fail | Location: https://internal-app01.corp:8443/final
 chain | T-12.ok | info | pass | HTTP/2
 crlf | T-08.1 | high | fail | 注入したヘッダ（Set-Cookie: crlf=1）が応答に現れた
@@ -58,7 +59,7 @@ own-port | H-13.ok | info | pass | text/html; charset=utf-8
 own-port | H-14.1 | low | fail | (ヘッダなし)
 own-port | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 own-port | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-own-port | R-04.ok | info | pass | (ACAOなし)
+own-port | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 own-port | T-05.ok | info | pass | 1回の転送
 own-port | T-12.1 | info | fail | HTTP/1.1
 pre-login/login | C-09.na | info | na | 
@@ -108,7 +109,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

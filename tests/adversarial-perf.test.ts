@@ -21,9 +21,19 @@ const PATTERNS = ['<!--', '<!-- x', '<script ', '<a href="', '<form ', '<input t
   '%2B', '%25', '&', ';', '=', ':', 'eyJ', 'eyJa.', 'nonce-', "'nonce-a", 'https://', 'http://evil.example/', '#META ', '#TARGET ', 'password=', '"password":"',
   'aaaa', 'A1b2', ' ', '\t', '…(1 chars)', 'a-', 'a_b', 'x:y@', '?a=', '/a', 'a/', '(S(', 'sha256-', 'pass ', 'CONNECTED(1)\n', 'HTTP/1.1 200 OK\n',
   // 第40回の束6：全角・ゼロ幅の名前、番号の形、パスワードの名前の値
-  '?ａ', '&ｐａｓｓ\u200b', '\u200b', '1234 ', '1234-', '1234.', '123-45-', '4111 1111 1111 1111 ', 'password: secure ', '"cvv":1'];
+  '?ａ', '&ｐａｓｓ\u200b', '\u200b', '1234 ', '1234-', '1234.', '123-45-', '4111 1111 1111 1111 ', 'password: secure ', '"cvv":1',
+  // 第48回：エンコードした URL のユーザー情報・エンコードした区切りの番号・ユーザー名と組の p=・区切りのある番号
+  '%2F%2Fa%3A', '%3A//a:', '%253A%252F%252F', '1234%20', '123%2D45%2D', '?u=a&p=', 'QWER-', 'a1b2-',
+  '.%2F%2F%40', '=%2F%2F%40', 'a.%2F%2F%2540', 'https:%2F%2Fa:', '?u=a&p=…(1 chars) ',
+  // 第49回：// の数が標準でない URL、引用符と @、フラグメントの p=、日本語の名前
+  'https:\\a:', 'http:/a:', "a'@", '#u=a&p=', '?パ=',
+  // 第50回：値の中の生の ;、長いパラメータの名前、pass で終わる名前、配列の値
+  '?password=a;', ';a', '&aaaaaaaaaa', 'xpass=', 'password":["',
+  '"password":[[', 'password: [a, ', ';a a ', '%22password%22%3A%5B', 'password":[{"v":"',
+  // 第51回：配列の空の要素、オブジェクトの値、CSP の ;、エスケープした //
+  '"password":["",', '"password":{"v":"', ';script-src ', 'a:\\/\\/b:'];
 
-describe('2乗の時間にならない', () => {
+describe('2乗の時間にならない', { tags: ['perf'] }, () => {
   it.each(PATTERNS)('本文・ヘッダに「%s」の繰り返し', p => {
     const v = fill(p).replace(/[\r\n]/g, ' ');
     const input = [
@@ -42,5 +52,43 @@ describe('2乗の時間にならない', () => {
     const v = fill(p);
     for (const [name, f] of [['maskText', maskText], ['showText', showText], ['summarizeCommand', summarizeCommand], ['urlKey', (s: string) => urlKey(`https://a.example/${s}`)]] as const)
       expect(ms(() => f(v)), `${name} ${p}`).toBeLessThan(1500);
+  });
+});
+
+describe('第49回：HAR の転送のつなぎ方が2乗の時間にならない', { tags: ['perf'] }, () => {
+  it('同じ URL へ転送する 302 と、メソッドの違う同じ URL のエントリが多い HAR', async () => {
+    const { importHar } = await import('../src/parser/har');
+    const e = (method: string, url: string, status: number, loc?: string) => ({ startedDateTime: '2026-11-01T00:00:00Z',
+      request: { method, url, headers: [] }, response: { status, httpVersion: 'HTTP/2', headers: loc ? [{ name: 'location', value: loc }] : [], content: { mimeType: 'text/html', text: '' } } });
+    const N = 20000;
+    const entries = [
+      ...Array.from({ length: N }, (_, i) => e('GET', `https://a.example/p${i}`, 302, '/login')),
+      ...Array.from({ length: N }, () => e('POST', 'https://a.example/login', 200)),
+    ];
+    const har = JSON.stringify({ log: { entries } });
+    expect(ms(() => importHar(har)), 'importHar').toBeLessThan(4000);
+  });
+  it('転送先の URL の使っていないエントリが、転送元より前に多くある HAR', async () => {
+    const { importHar } = await import('../src/parser/har');
+    const e = (url: string, status: number, loc?: string) => ({ startedDateTime: '2026-11-01T00:00:00Z',
+      request: { method: 'GET', url, headers: [] }, response: { status, httpVersion: 'HTTP/2', headers: loc ? [{ name: 'location', value: loc }] : [], content: { mimeType: 'text/html', text: '' } } });
+    const N = 15000;
+    const entries = [
+      ...Array.from({ length: N }, (_, i) => e(`https://a.example/a${i}`, 302, `/b${i}`)),
+      ...Array.from({ length: N }, () => e('https://a.example/x', 200)),
+      ...Array.from({ length: N }, (_, i) => e(`https://a.example/b${i}`, 302, '/x')),
+    ];
+    const har = JSON.stringify({ log: { entries } });
+    expect(ms(() => importHar(har)), 'importHar').toBeLessThan(4000);
+  });
+});
+
+describe('第50回：Set-Cookie の多い応答の判定が長くならない', { tags: ['perf'] }, () => {
+  it('5MB の Set-Cookie の行', () => {
+    const lines = ['#TARGET url=https://a.example/ label=page', 'HTTP/2 200', 'content-type: text/html'];
+    for (let n = 0, len = 0; len < 5_000_000; n++) { const l = `set-cookie: sess${n}=v${n}abcdefghijklmnop; Path=/; Secure; HttpOnly; SameSite=Lax`; lines.push(l); len += l.length + 1; }
+    lines.push('', '<html></html>', '');
+    const input = lines.join('\n');
+    expect(ms(() => runAll(parseInput(input).targets)), 'parse+runAll').toBeLessThan(4000);
   });
 });

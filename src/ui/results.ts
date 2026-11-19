@@ -39,21 +39,32 @@ export function render() {
   const rows = overall(findings);
   const byTarget = groupByTarget(findings);   // ターゲットごとに全指摘を絞り込み直すと、ターゲット数×指摘数になる（数千件で数秒）
   const hints = missingLabelHints(targets);
+  // 絞り込み・表示の切り替えの部品は描き直すので、操作した部品にフォーカスを戻す（data-focus で同じ部品を探す。select を矢印で変えると、
+  // 1回でフォーカスが body に落ちた。第50回）
+  const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
+  // 章で絞り込んだ行（見出しの件数と「情報」の件数を、表の行数と合わせる。束のレビュー）
+  const chapterRows = rows.filter(r => !state.view.chapter || chapterOf(r.item) === state.view.chapter);
   const parts: Child[] = [
     ledger(countBySeverity(rows)),
+    // 例外を当てた指摘の件数（重要度別の件数には含めない。ワイルドカードの例外で高が消えても、画面から気づけなかった。第49回）
+    findings.some(f => f.status === 'suppressed') ? el('p', 'mt-2 text-sm text-muted', T.suppressedCount(new Set(findings.filter(f => f.status === 'suppressed').map(f => f.ruleId)).size)) : null,
     exportBar(),
     warnings.length || hints.length ? warningList([...warnings.map(w => w.detail), ...hints]) : null,
     state.last.diff ? diffBlock(state.last.diff) : null,
-    heading(T.findings, findingsCount(rows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(rows.filter(r => r.severity === 'info').length), chapterFilter())),
+    // 件数は、章で絞り込んだ表の行数と合わせる（絞り込む前の全体の件数を出していた。第51回）
+    heading(T.findings, findingsCount(chapterRows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(chapterRows.filter(r => r.severity === 'info').length), chapterFilter())),
     rows.length ? overallTable(rows.filter(r => (!state.view.chapter || chapterOf(r.item) === state.view.chapter) && (state.view.showInfo || r.severity !== 'info'))) : el('p', 'text-muted', T.noFindings),
-    heading(T.perTarget, T.count(targets.length), button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); })),
+    heading(T.perTarget, T.count(targets.length), focusable(button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); }), 'show-all')),
     targetSummary(targets, byTarget),
     ...targets.map(t => targetBlock(t, byTarget.get(t.label) ?? [])),
     crossBlock(findings),
     coverageBlock(cov),
   ];
   refs.results.replaceChildren(...parts.filter((p): p is Node => p instanceof Node));
+  if (focusKey) refs.results.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.focus();
 }
+/** 描き直したあとにフォーカスを戻す部品の印 */
+const focusable = <T extends HTMLElement>(n: T, key: string): T => { n.dataset.focus = key; return n; };
 /** 指摘の件数。「情報」を隠しているときは、表の行数と合うように内訳を添える */
 function findingsCount(rows: ReturnType<typeof overall>) {
   const info = rows.filter(r => r.severity === 'info').length;
@@ -62,7 +73,7 @@ function findingsCount(rows: ReturnType<typeof overall>) {
 
 export function infoToggle(n: number) {
   if (!n) return null;
-  return button(state.view.showInfo ? tr().hideInfo : tr().showInfo(n), LINK, () => { state.view.showInfo = !state.view.showInfo; render(); });
+  return focusable(button(state.view.showInfo ? tr().hideInfo : tr().showInfo(n), LINK, () => { state.view.showInfo = !state.view.showInfo; render(); }), 'show-info');
 }
 export function heading(text: string, aside?: string, right?: Node) {
   return el('div', 'mt-8 mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1',
@@ -82,7 +93,8 @@ export function exportBar() {
   return el('div', 'mt-3 flex flex-wrap items-center gap-2 text-sm',
     el('span', 'text-muted', T.save),
     button('Markdown', BTN, () => state.last && download(`sec-report-${stamp}.md`, 'text/markdown',
-      toMarkdown(state.last.findings, state.last.cov, state.suppressions, new Date(), { profile: state.profile, diff: state.last.diff && state.baseline ? { rows: state.last.diff, baselineAt: state.baseline.generatedAt, rulesetWarning: state.baseline.rulesetVersion && state.baseline.rulesetVersion !== RULESET_VERSION ? tr().diffRulesetWarning(state.baseline.rulesetVersion, RULESET_VERSION) : undefined } : undefined }))),
+      toMarkdown(state.last.findings, state.last.cov, state.suppressions, new Date(), { profile: state.profile, diff: state.last.diff && state.baseline ? { rows: state.last.diff, baselineAt: state.baseline.generatedAt, rulesetWarning: state.baseline.rulesetVersion && state.baseline.rulesetVersion !== RULESET_VERSION ? tr().diffRulesetWarning(state.baseline.rulesetVersion, RULESET_VERSION) : undefined,
+        profileWarning: profileDiffers(state.baseline.profile, state.profile) ? tr().diffProfileWarning : undefined } : undefined }))),
     button('JSON', BTN, () => state.last && download(`sec-report-${stamp}.json`, 'application/json', toJson(state.last.findings, state.last.cov, state.suppressions, new Date(), state.profile))),
     button(T.csv, BTN, () => state.last && download(`sec-report-${stamp}.csv`, 'text/csv', toCsv(state.last.findings, state.last.targets))),
     button(T.suppressionsFile, BTN, () => download('suppressions.json', 'application/json', suppressionsJson(state.suppressions))));
@@ -102,6 +114,7 @@ export function chapterFilter() {
   const sel = options(el('select', 'rounded-md border border-line bg-surface px-2 py-1 text-sm'),
     [['0', T.allChapters], ...T.chapters.map((c, i): [string, string] => [String(i + 1), T.chapter(i + 1, c)])], String(state.view.chapter));
   sel.setAttribute('aria-label', T.filterChapter);
+  focusable(sel, 'chapter');
   sel.addEventListener('change', () => { state.view.chapter = Number(sel.value); render(); });
   return sel;
 }
@@ -124,7 +137,7 @@ export function targetSummary(targets: Target[], byTarget: Map<string, Finding[]
     const fails = (byTarget.get(t.label) ?? []).filter(x => x.status === 'fail');
     return el('tr', '',
       td('whitespace-nowrap font-bold', t.label), td('break-all text-muted', t.url ? showText(t.url) : T.urlUnknown),
-      td('whitespace-nowrap', `${T.kinds[responseKind(t, f)]}（${getLang() === 'en' ? labelRow(t.label).nameEn : labelRow(t.label).name}）`),
+      td('whitespace-nowrap', getLang() === 'en' ? `${T.kinds[responseKind(t, f)]} (${labelRow(t.label).nameEn})` : `${T.kinds[responseKind(t, f)]}（${labelRow(t.label).name}）`),
       td('whitespace-nowrap', s === undefined ? T.unknown : s ? T.yes : T.no),
       ...SEVERITIES.map(sv => { const n = fails.filter(x => x.severity === sv).length; return td(`num ${n ? SEV_TEXT[sv] + ' font-bold' : 'text-muted'}`, String(n)); }));
   }));
@@ -133,13 +146,15 @@ export const STATUS_ORDER = ['fail', 'suppressed', 'na', 'pass'];
 /** 指摘を先に、重要度の高い順、項目IDの順に並べる */
 export const byImportance = (a: Finding, b: Finding) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
   || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.ruleId.localeCompare(b.ruleId);
-export function findingsTable(fs: Finding[], label: string) {
+/** withTarget：対象（ホスト・ラベルの組）の列を出す。ホスト単位・横断の表で、どのホストの指摘かが画面から分からなかった（第51回） */
+export function findingsTable(fs: Finding[], label: string, withTarget = false) {
   const T = tr();
   const shown = mergeNa(fs.filter(f => state.view.showAll || (f.status === 'fail' && (state.view.showInfo || f.severity !== 'info'))).sort(byImportance));
   if (!shown.length) return el('p', 'mt-1 text-sm text-muted', T.nothingToShow);
-  return table(label, [T.cols.severity, T.cols.item, T.cols.status, T.cols.evidence, T.cols.recommendation, ''], shown.map(x =>
+  return table(label, [T.cols.severity, T.cols.item, ...(withTarget ? [T.cols.target] : []), T.cols.status, T.cols.evidence, T.cols.recommendation, ''], shown.map(x =>
     el('tr', '', x.status === 'fail' ? sevCell(x.severity, x.originalSeverity) : td('text-muted', '—'),
       td('whitespace-nowrap num', x.items ? x.items.join(getLang() === 'en' ? ', ' : '・') : `${x.item}${circled(x.condition)}`),
+      withTarget ? td('break-all', showText(x.target)) : null,
       td(`whitespace-nowrap ${x.status === 'pass' ? 'text-ok' : x.status === 'fail' ? '' : 'text-muted'}`, statusLabel(x.status)),
       td('font-mono text-[12px] break-all', x.evidence || '—'),
       td('', x.status === 'suppressed' ? T.suppressedNote(x.suppressedBy!.reason, x.suppressedBy!.approver, x.suppressedBy!.until) : rec(x.recommendation) || '—'),
@@ -169,7 +184,7 @@ export function crossBlock(findings: Finding[]) {
   if (!fs.length) return null;
   const d = el('details', 'mt-3 rounded-md border border-line bg-surface',
     el('summary', 'summary-custom flex cursor-pointer flex-wrap items-baseline gap-x-3 px-3 py-2', disclosure(), el('span', 'font-bold', tr().crossTitle), counts(fs)),
-    el('div', 'border-t border-line p-2', findingsTable(fs, tr().crossTitle)));
+    el('div', 'border-t border-line p-2', findingsTable(fs, tr().crossTitle, true)));
   d.open = state.view.showAll || fs.some(x => x.status === 'fail' && x.severity !== 'info');
   return d;
 }
@@ -183,7 +198,7 @@ export function diffBlock(rows: DiffRow[]) {
     state.baseline?.rulesetVersion && state.baseline.rulesetVersion !== RULESET_VERSION ? el('p', 'mb-2 text-sm text-sev-medium', T.diffRulesetWarning(state.baseline.rulesetVersion, RULESET_VERSION)) : null,
     shown.length ? table(T.tables.diff, [T.cols.change, T.cols.severity, T.cols.item, T.cols.title, T.cols.target], shown.map(r =>
       el('tr', '', td(`whitespace-nowrap font-bold ${r.kind === 'new' ? 'text-sev-high' : r.kind === 'resolved' ? 'text-ok' : 'text-muted'}`, diffLabel(r.kind)),
-        td(`whitespace-nowrap ${SEV_TEXT[r.severity]}`, sevLabel(r.severity), r.before ? `（← ${sevLabel(r.before)}）` : ''),
+        td(`whitespace-nowrap ${SEV_TEXT[r.severity]}`, sevLabel(r.severity), r.before ? (getLang() === 'en' ? ` (was ${sevLabel(r.before)})` : `（← ${sevLabel(r.before)}）`) : ''),
         td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title), td('', r.target)))) : null,
     el('p', 'mt-2 text-sm text-muted', T.diffNote));
 }
@@ -192,6 +207,7 @@ export function coverageBlock(cov: Coverage[]) {
   const sel = options(el('select', 'rounded-md border border-line bg-surface px-2 py-1 text-sm'),
     [['all', T.allCategories], ...(['evaluated', 'missing-input', 'manual', 'not-implemented', 'excluded'] as const).map((k): [string, string] => [k, covLabel(k)])], state.view.covFilter);
   sel.setAttribute('aria-label', T.filterCategory);
+  focusable(sel, 'cov-filter');
   sel.addEventListener('change', () => { state.view.covFilter = sel.value; render(); });
   const rows = cov.filter(c => state.view.covFilter === 'all' || c.status === state.view.covFilter);
   return el('section', '',
@@ -201,7 +217,7 @@ export function coverageBlock(cov: Coverage[]) {
       el('tr', '', td('whitespace-nowrap num', c.item), titleCell(c.item, c.title),
         td(`whitespace-nowrap ${c.status === 'evaluated' ? (c.fails ? 'text-sev-medium' : 'text-ok') : 'text-muted'}`, covLabel(c.status), c.status === 'evaluated' && c.fails ? ` (${c.fails})` : ''),
         td('text-muted', c.status === 'manual' ? T.manualNote
-          : c.status === 'missing-input' && commandsFor(c.item) ? `${c.reasons.map(rec).join(getLang() === 'en' ? '; ' : '、')}（${T.command}：${commandsFor(c.item)}）`
+          : c.status === 'missing-input' && commandsFor(c.item) ? (getLang() === 'en' ? `${c.reasons.map(rec).join('; ')} (${T.command}: ${commandsFor(c.item)})` : `${c.reasons.map(rec).join('、')}（${T.command}：${commandsFor(c.item)}）`)
           : c.reasons.map(rec).join(getLang() === 'en' ? '; ' : '、'))))),
     el('p', 'mt-3 text-sm text-muted', T.outOfScope));
 }

@@ -9,7 +9,7 @@ robots | https://www.example.com/robots.txt | key=robots | responses=1
 tls | https://www.example.com/ | key=- | responses=0
 
 ## warnings
-tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
+tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（DES-CBC3-SHA。判定不能）
 
 ## findings
 actuator | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -34,7 +34,7 @@ actuator | H-13.ok | info | pass | application/json
 actuator | H-14.1 | info | fail | (ヘッダなし)
 actuator | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 actuator | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-actuator | R-04.ok | info | pass | (ACAOなし)
+actuator | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 actuator | T-12.ok | info | pass | HTTP/2
 csp-sample-* | H-04.na | info | na | 
 ctype | A-08.na | info | na | HTTP 302（Content-Type を確かめるところまで届いたかが分からない）
@@ -63,7 +63,7 @@ page | H-13.ok | info | pass | text/html; charset=utf-8
 page | H-14.1 | low | fail | (ヘッダなし)
 page | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 page | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-page | R-04.ok | info | pass | (ACAOなし)
+page | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 page | T-12.ok | info | pass | HTTP/2
 pre-login/login | C-09.na | info | na | 
 robots | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -75,7 +75,7 @@ robots | H-11.ok | info | pass | (該当なし)
 robots | H-12.3 | info | fail | (ヘッダなし)
 robots | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 robots | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-robots | R-04.ok | info | pass | (ACAOなし)
+robots | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 robots | T-05.ok | info | pass | 1回の転送
 robots | T-12.ok | info | pass | HTTP/2
 session-sample-* | C-07.na | info | na | 
@@ -115,7 +115,7 @@ C-06 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, lo
 C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
-C-10 | missing-input | fails=0 | 必要なラベル: http
+C-10 | missing-input | fails=0 | 必要なラベル: （一般）, http, pre-login, login, session-sample-*
 C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
 C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
@@ -124,7 +124,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

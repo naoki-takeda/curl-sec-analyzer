@@ -2,7 +2,7 @@
 import type { CrossContext, Finding, Rule, RuleContext } from '../model';
 import { baseLabel, finalResponse, responseKind, sameDocumentHop } from '../parser/target';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { NO_BODY_REC, graphqlError as graphqlErrorOf, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson } from './util';
+import { NO_BODY_REC, graphqlError as graphqlErrorOf, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, notSecretFormat, notSecretText } from './util';
 import { loginForm } from './html';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
@@ -227,7 +227,13 @@ export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(
   if (Array.isArray(v)) v.slice(0, 50).forEach(x => secretValuedKeys(x, `${prefix}[]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
     const p = prefix ? `${prefix}.${k}` : k;
-    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x) && !isPlaceholderValue(x) && !stateWord(x)) out.add(p);
+    // 入力の検証の規則・autocomplete の値・正規表現と、エラーの項目の中の値（errors.password の TOO_SHORT）は秘密の値ではない（第49回）。
+    // パス・URL・項目の名前（{"menu":{"password":"/settings/password"}}）も、E-09 と同じく除く（第50回）
+    // 検索専用のキー（searchOnlyApiKey・search_api_key と、DocSearch の apiKey）は、ブラウザから使う公開のキー（HTML の docsearch と同じ。第51回）。
+    // Algolia・Meilisearch・Typesense の apiKey は、管理用・マスターのキーも同じ名前なので除かない（束のレビュー）
+    if (typeof x === 'string' && (/^search_?(?:only_?)?(?:api_?)?key$/i.test(k) || (/(?:^|\.)docsearch(?:\[\])?$/i.test(prefix) && /^api_?key$/i.test(k)))) continue;
+    if (typeof x === 'string' && x && !/[\s\u0080-￿]/.test(x) && !isLabelText(k, x) && !isPublicClientValue(x) && !isPlaceholderValue(x) && !stateWord(x)
+      && !notSecretFormat(x) && !notSecretText(x) && !/(?:^|\.)(?:errors?|validation(?:_?errors)?)(?:\[\])?$/i.test(prefix)) out.add(p);   // errors・validation の直下だけ（束のレビュー）
     secretValuedKeys(x, p, out, depth + 1);
   }
   return out;
@@ -349,7 +355,7 @@ export const errorFormat: Rule = { id: 'A-10', title: 'エラー形式', applies
     // ブラウザ向けのHTMLのエラーページ（error-url など）は対象外（情報の露出は E-01 で判定）。unauth-* の 401 なども含めない
     // 付け直したラベル（error-api#2）は除く。横断の判定には最初のものだけを使う（parser/target.ts の uniqueLabels）
     const errs = x.targets.filter(t => { const f = finalResponse(t); return t.label.startsWith('error-') && !/#\d+$/.test(t.label) && f && f.status >= 400 && responseKind(t, f) !== 'html'; });
-    const base = { item: 'A-10', title: errorFormat.title, target: 'error-*', references: errorFormat.basis, score: 0 };
+    const base = { item: 'A-10', title: errorFormat.title, target: 'error-*', references: errorFormat.basis };
     if (errs.length < 2) return [{ ...base, ruleId: 'A-10.na', severity: 'info', status: 'na', evidence: '', recommendation: '必要なラベル: error-*（APIのエラー応答を2つ以上）' }];
     const types = new Map<string, string[]>();
     for (const t of errs) { const ct = normCt(finalResponse(t)!.headers.get('content-type')?.[0] ?? ''); types.set(ct, [...(types.get(ct) ?? []), t.label]); }

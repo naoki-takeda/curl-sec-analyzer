@@ -34,7 +34,7 @@ har-1 | H-13.2 | medium | fail | text/html
 har-1 | H-14.1 | low | fail | (ヘッダなし)
 har-1 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 har-1 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-1 | R-04.ok | info | pass | (ACAOなし)
+har-1 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 har-1 | T-12.ok | info | pass | HTTP/2
 har-2 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 har-2 | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -58,7 +58,7 @@ har-2 | H-13.2 | medium | fail | text/html
 har-2 | H-14.1 | low | fail | (ヘッダなし)
 har-2 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 har-2 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-2 | R-04.ok | info | pass | (ACAOなし)
+har-2 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 har-2 | T-12.ok | info | pass | HTTP/2
 har-3 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 har-3 | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -82,7 +82,7 @@ har-3 | H-13.2 | medium | fail | text/html
 har-3 | H-14.1 | low | fail | (ヘッダなし)
 har-3 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 har-3 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-3 | R-04.ok | info | pass | (ACAOなし)
+har-3 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 har-3 | T-12.ok | info | pass | HTTP/2
 har-4 | A-02.1 | high | fail | https://www.example.com/list?page=2&v=20261116&token=CANA…(21 chars)
 har-4 | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -106,7 +106,7 @@ har-4 | H-13.2 | medium | fail | text/html
 har-4 | H-14.1 | low | fail | (ヘッダなし)
 har-4 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 har-4 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-4 | R-04.ok | info | pass | (ACAOなし)
+har-4 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 har-4 | T-12.ok | info | pass | HTTP/2
 har-5 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 har-5 | E-13.ok | info | pass | ソースマップへの参照なし
@@ -118,7 +118,7 @@ har-5 | H-12.3 | info | fail | (ヘッダなし)
 har-5 | H-13.ok | info | pass | application/javascript
 har-5 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 har-5 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-5 | R-04.ok | info | pass | (ACAOなし)
+har-5 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 har-5 | T-12.ok | info | pass | HTTP/2
 har-6 | A-02.ok | info | pass | URL・Location・本文にトークンなし
 har-6 | E-13.ok | info | pass | ソースマップへの参照なし
@@ -130,7 +130,7 @@ har-6 | H-12.3 | info | fail | (ヘッダなし)
 har-6 | H-13.ok | info | pass | application/javascript
 har-6 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 har-6 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-6 | R-04.ok | info | pass | (ACAOなし)
+har-6 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 har-6 | T-12.ok | info | pass | HTTP/2
 logout/after-logout | C-12.na | info | na | 
 pre-login/login | C-09.na | info | na | 
@@ -163,7 +163,7 @@ C-06 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, lo
 C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
-C-10 | missing-input | fails=0 | 必要なラベル: http
+C-10 | missing-input | fails=0 | 必要なラベル: （一般）, http, pre-login, login, session-sample-*
 C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
 C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
@@ -172,7 +172,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

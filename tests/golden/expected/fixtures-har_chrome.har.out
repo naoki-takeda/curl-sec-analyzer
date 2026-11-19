@@ -31,7 +31,7 @@ har-4 | H-13.ok | info | pass | application/json
 har-4 | H-14.1 | info | fail | (ヘッダなし)
 har-4 | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 har-4 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-har-4 | R-04.ok | info | pass | (ACAOなし)
+har-4 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 har-4 | T-12.ok | info | pass | HTTP/2
 login | A-02.ok | info | pass | URL・Location・本文にトークンなし
 login | C-01.1 | high | fail | SESSIONID=aaaa…(32 chars); Path=/; HttpOnly
@@ -92,7 +92,7 @@ C-06 | evaluated | fails=2
 C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | evaluated | fails=0
 C-09 | evaluated | fails=1
-C-10 | missing-input | fails=0 | 必要なラベル: http
+C-10 | missing-input | fails=0 | 必要なラベル: （一般）, http, pre-login, login, session-sample-*
 C-11 | evaluated | fails=0
 C-12 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: logout, after-logout
 C-13 | evaluated | fails=0
@@ -101,7 +101,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

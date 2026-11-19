@@ -55,16 +55,27 @@ export const isSecretParamName = (name: string): boolean => {
   // 最後の語が type・method などの名前は、種類や設定を表す公開の値（client_assertion_type=urn:…、token_type=Bearer、code_challenge_method=S256、
   // token_endpoint_auth_method、key_size=2048、max_password_length=64）。伏せると、PKCE の方式のようなセキュリティ上意味のある値が読めなくなる
   if (words.length > 1 && PUBLIC_LAST_WORDS.has(words[words.length - 1])) return false;
+  // 日本語と主な外国語のパスワード・暗証番号の名前（?パスワード=…、{"暗証番号":"4821"}、?senha=…。伏せなかった。第49回）
+  if (LOCAL_SECRET.test(n) || words.some(w => LOCAL_WORDS.has(w)) || /mot[-_]?de[-_]?passe/i.test(n)) return true;
   if (words.includes('code') && words.every(w => w === 'code' || PLAIN_CODE_WORDS.has(w))) return false;
+  // pass で終わる語（newpass1・newpass_confirm・user[newpass]・dbpass.value）。名前全体の末尾だけを見ると、語のあとに数字・区切りが続く名前を
+  // 見逃した（束のレビュー）。bypass・compass などは除く
+  if (words.some(w => /pass\d*$/.test(w) && !/(?:by|com|encom|over|under|tres|sur|im)pass\d*$/.test(w))) return true;
   // 区切りのない1語の名前（authtoken、apitoken、secretkey、cftoken、sesskey、passphrase など）は、部分一致でも見る（伏せすぎるほうが安全）
   return words.some(w => MASK_WORDS.has(w)) || SECRET_PART.test(n.toLowerCase());
 };
 /** 末尾の数字を外して照合する語（pass1・pass2・otp1・token2）。key1・code128・mac1・pin2・hash1 は、例や品番などにも使うので外さない */
+// ラテン文字以外の名前は部分一致（パスワード確認・新しい暗証番号）、ラテン文字の名前は区切った語の完全一致（hasLogin の haslo・
+// 「語」の意味の parola を伏せない。束のレビュー）
+const LOCAL_SECRET = /パスワード|暗証番号|合言葉|ワンタイム|密码|密碼|비밀번호|пароль/i;
+const LOCAL_WORDS = new Set(['senha', 'wachtwoord', 'contrasena', 'contraseña', 'passwort', 'kennwort', 'motdepasse', 'hasło', 'haslo', 'lösenord', 'salasana', 'adgangskode']);
 const STRIP_DIGIT_WORDS = new Set(['password', 'passwd', 'pass', 'pw', 'pwd', 'otp', 'token', 'secret', 'passcode']);
 const PUBLIC_LAST_WORDS = new Set(['type', 'method', 'methods', 'size', 'length', 'len', 'policy', 'timeout', 'ttl', 'alg', 'algorithm']);
 // pw で終わる名前（userpw・loginpw）と nonce（WordPress の CSRF トークン _wpnonce）も含める
 // 区切りのない1語のワンタイムコードの名前（authcode・otpcode・smscode・mfacode・vcode・totp）も含める（zipcode・errorcode は含めない）
-const SECRET_PART = /token|secret|passw|passphrase|pwd|apikey|authkey|accesskey|privatekey|sessid|sesskey|credential|signature|nonce|[a-z]pw$|(?:auth|otp|sms|mfa|pin|login|reset|verif\w*|activation|confirm|email|v)code$|^totp$|^otp/;
+// pass で終わる名前（userpass・newpass・dbpass・confirmpass）と pword・pswrd・pswd も含める（bypass・compass・overpass・trespass などは含めない。
+// pass で終わる名前の値をまったく伏せず、GET のログインフォームの HAR でパスワードを出した。第50回）
+const SECRET_PART = /token|secret|passw|passphrase|pwd|(?<!by|com|encom|over|under|tres|sur|im)pass$|pword|pswr?d|apikey|authkey|accesskey|privatekey|sessid|sesskey|credential|signature|nonce|[a-z]pw$|(?:auth|otp|sms|mfa|pin|login|reset|verif\w*|activation|confirm|email|v)code$|^totp$|^otp/;
 /** 値を伏せるパラメータか（名前のほかに、state は値も見る） */
 const secretParam = (name: string, value: string) => isSecretParamName(name) || (STATE_PARAM.test(name) && !plainStateValue(value));
 // パラメータの区切り：? & # ; と、そのエンコード（%3F・%26・%23・%3B と二重エンコードの %253F など、JS のエスケープ（\u0026 の6文字、\x26）、HTML の文字参照（&amp;・&#38;・&#x3D; など））。
@@ -79,10 +90,19 @@ const EQ = String.raw`=|%(?:25)*3[Dd]|\\u003[Dd]|\\x3[Dd]|&#0*61;|&#[xX]0*3[Dd];
 // 伏せ済みとみなしてトークンを残した：#META cmd= の ?access_token=<トークン>_-L_-F_token=vi…(17 chars)）
 // 伏せ済みの値（先頭の4文字までと印。nonce- を先に伏せたものを含む）は、印の終わりで値を終える（続けて読むと、#META cmd= の
 // &token=00…(16 chars)_-o_out.txt_https://… の後ろの引数まで値に入れて伏せた）
+// 値は、生の ; のあとが「名前=」・空白・引用符・区切り・終わりでなければ続ける（?password=Summer;2024 の ;2024 を残した。第50回）
+// 名前は300文字まで（Rails の入れ子のフォームをエンコードした名前は100文字を超え、値を伏せなかった。第50回）
 // 名前は + を含んでよい（password+= は、フォームの読み方で「password 」という名前になる。+ で名前が切れて、値を伏せなかった）
 // 名前は全角の英数字・記号（ｐａｓｓｗｏｒｄ）とゼロ幅の文字・ソフトハイフン（pass<U+200B>word）を含んでよい（含めないと、isSecretParamName の
 // 正規化を通らず、値を伏せなかった）
-const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%+[\]\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,100}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|\\\/)+)`, 'g');
+// 値の中の生の ; の続き（?password=Summer;2024）。; のあとが名前=（空白を含む接続文字列の Max Pool Size= も）・Cookie の属性（Secure・
+// HttpOnly・Partitioned）・空白・引用符・区切り・終わりなら、値はそこまで（後ろの属性・設定まで伏せすぎた。束のレビュー）。
+// CSP のディレクティブ（;script-src 'self'。helmet は ; のあとに空白を入れない）の前でも切る（ディレクティブの名前まで伏せ、証跡の 'unsafe-inline' が
+// どのディレクティブのものか読めなかった。第51回）
+// CSP のディレクティブの名前（一覧で照合する。ハイフンでつないだ語の全般にすると、値の中の ;correct-horse-battery で切った。束のレビュー）
+const CSP_DIRECTIVE = String.raw`(?:(?:child|connect|default|font|frame|img|manifest|media|object|prefetch|script|style|worker)-src(?:-elem|-attr)?|base-uri|form-action|frame-ancestors|navigate-to|report-uri|report-to|sandbox|upgrade-insecure-requests|block-all-mixed-content|require-trusted-types-for|trusted-types|plugin-types|fenced-frame-src)`;
+const SEMI_CONT = String.raw`;(?![\s;"'<>&#\\]|$|(?:[Ss]ecure|SECURE|[Hh]ttp[Oo]nly|HTTPONLY|[Pp]artitioned)(?![\w-])|[\w.%+[\] -]{1,300}(?:=|%(?:25)*3[Dd])|[^;\s/]{0,300}\/|${CSP_DIRECTIVE}(?=[\s;]|$))`;
+const ANY_PARAM = new RegExp(String.raw`(${SEP})([\w.%+[\]\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,300}?)((?:${EQ})['"]?)((?:nonce-)?[^…\s&#;"'<>\\=]{0,4}…\(\d+ chars\)|(?:…\(\d+ chars\)|(?!%(?:25)*(?:26|23)|\\u00(?:26)|\\x26)[^&\s#;"'<>\\]|${SEMI_CONT}|\\\/)+)`, 'g');
 // JWT：直前が英数字・ハイフンでないところから（パーセントエンコードした文字の直後（%3D・%20 など）も含める）。\b だと「-eyJ」の繰り返しで入力の長さの2乗の時間がかかる。
 // 「Bearer_eyJ…」「access_token_eyJ…」のように語と _ でつないだものも含める（直前の語は _ を含めて40文字までで、その前が語の外のときだけ。
 // 「_eyJ」の繰り返しで2乗の時間にしない）。JWE（5つの部分。鍵の部分が空の dir 形式「eyJ….. iv.暗号文.タグ」を含む）は5つ目まで、JWS は3つ目まで伏せる
@@ -92,13 +112,37 @@ const JWT = /(?:(?<=%[0-9A-Fa-f]{2})|(?<![\w-])|(?<=(?:^|[^\w-])[A-Za-z0-9_]{1,4
 // スキームのない「//ユーザー情報@ホスト」（<script src="//user:pass@cdn…">）も含める
 // スキームの前が数字のとき（エンコードした引用符 %22https://…、%3Dhttps://…）も含める（\b だと「2」と「h」の間を語の先頭とみなさず、パスワードを残した）。
 // スキームは英字の直後でないところから始める（「-」「.」の直後も含める。除くと、32文字を超える corp-egress-…-https://user:pw@ を見逃した）
-const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:\/\/|(?<![\w:/])\/\/)([^/\s?#<>"']{1,512})@/g;
+// ユーザー情報には引用符（' "）も入る（new URL も curl も受け付ける。除くと、https://alice:Summer'2024@host/ のパスワードをまったく伏せなかった）。
+// ただし、引用符は後ろに語の文字か @ が続くとき（パスワードの末尾の Summer2024'@ も。第49回）だけ（JSON の {"site":"https://a.example","id":"x@<トークン>"} の「","」や、属性の「' title=」の後ろを
+// ユーザー情報とみなすと、@ の後ろのトークンをホスト名として残し、メールアドレスを伏せた。第48回の束1のレビュー）
+// JSON でエスケープした「\/\/」（PHP の json_encode の既定。postgres:\/\/alice:pw@db）も含める（特別なスキームしか見ておらず、ほかのスキームの
+// パスワードを残した。第51回）
+// ユーザー情報の \ は、エスケープした「\/」（パスの始まり）の前でだけ止める（\ を止めると、smb://CORP\alice:pw@・pw に \ を含むものを伏せなかった。
+// 束のレビュー）
+const URL_CRED = /((?<![A-Za-z])[A-Za-z][\w+.-]{0,31}:(?:\/\/|\\\/\\\/)|(?<![\w:/])\/\/)((?:[^/\\\s?#<>"']|\\(?!\/)|["'](?=[\w@-])){1,512})@/g;
+/**
+ * 特別なスキーム（http・https・ws・wss・ftp）で、// の数が標準でないもの（https:///u:pw@h、https:\\u:pw@h、http:/u:pw@h、https:u:pw@h）。
+ * WHATWG の URL はどれもユーザー情報として読む（HTML の属性・CSP の生の文字列で、パスワードをそのまま出した。第49回）。// のものは URL_CRED が見る
+ */
+const URL_CRED_SPECIAL = /((?<![A-Za-z])(?:https?|wss?|ftp):)([\\/]*)((?:[^/\\\s?#<>"']|["'](?=[\w@-])){1,512})@/gi;
+/**
+ * コロンだけをエンコードしたスキームの URL（パラメータの値の https%3A//alice:<パスワード>@idp…。伏せなかった）。ユーザー情報には、エンコードした
+ * / ? #（%2F・%3F・%23）を含めない（?next=https%3A//a.example%2Fcb%3Fe=bob@example.com のパスの中のメールアドレスを、ユーザー情報とみなさない）
+ */
+const URL_CRED_PCT = /(?<=%(?:25)?3[Aa])(\/\/)((?:(?!%(?:25)?(?:2[Ff]|3[Ff]|23))[^/\s?#<>]){1,512})@/g;
 /**
  * パラメータの値に入れた、エンコードした URL のユーザー情報（?redirect=https%3A%2F%2Falice%3A<パスワード>%40evil.example）。
  * パスワード（%3A の後ろ、%40 の前）を伏せる。伏せ済みの「****」は伏せ直さない
  */
 // スキームは語の先頭から（どの位置からも試すと、長い語の本文で位置ごとに32文字ずつ読み、マスク全体の時間が2倍になった）
-const URL_CRED_ENCODED = /((?<![\w+.-])[A-Za-z][\w+.-]{0,31}%3A%2F%2F)([^\s?#&<>"'/%]{0,256})%3A(?!\*{4}%40)(?:(?!%2[Ff]|%3[Ff]|%23)[^\s?#&<>"'/]){1,512}?%40/gi;
+// スキームのない「%2F%2Fユーザー%3Aパスワード%40」、多重のエンコード（%253A%252F%252F…%2540）、スキームの前のエンコードした文字（%22https%3A…・
+// 入れ子の %3Dhttps%3A…）、:// と %3A の混在（https:%2F%2F…・https%3A//alice%3A…%40）、ユーザー名のメールアドレス（bob%40corp%3A…）、パスワードの中の
+// エンコードした / ? # も含める（どれも伏せなかった）。ポートのあとのパス（host%3A8443%2Fusers%2Fbob%40…）は伏せない（%3A の直後が数字と / のもの）。
+// パスワードは、コロンと同じ深さのエンコードの %40 で終える（中の URL を正しくエンコードすると、パスワードの @ は %2540 になる。深さを見ずに
+// 最初の %40 で終えると、%2540 の後ろのパスワードを残した）。ユーザー名の先読みは256文字まで（上限がないと、%2F%2F%40 の繰り返しで2乗の時間）
+const URL_CRED_ENCODED = new RegExp(String.raw`((?:(?:(?<![\w+.-])|(?<=%[0-9A-Fa-f]{2}))[A-Za-z][\w+.-]{0,31}(?::|%(?:25)*3A)|(?<![\w%]))(?:%(?:25)*2F%(?:25)*2F|\/\/))((?:[^\s?#&<>"'/%:@]|%(?:25)*40(?=[^\s?#&<>"'/]{0,256}?%(?:25)*3A)){0,256})(%(?<lv>(?:25)*)3A)(?!\*{4}%)(?!\d{1,5}(?:%(?:25)*2F|\/))(?:[^\s?#&<>"'/@%]|%(?!\k<lv>40)[0-9A-Fa-f]{2}){1,512}?(%\k<lv>40)`, 'gi');
+/** エンコードした // のあとの、生の : と @ のユーザー情報（https:%2F%2Falice:<パスワード>@idp…） */
+const URL_CRED_MIXED = new RegExp(String.raw`((?:(?<![\w+.-])|(?<=%[0-9A-Fa-f]{2}))[A-Za-z][\w+.-]{0,31}(?::|%(?:25)*3A)%(?:25)*2F%(?:25)*2F)([^\s?#&<>"'/%:@]{0,256}):(?!\*{4}@)(?!\d{1,5}(?:%|\/))[^\s?#&<>"'/@]{1,512}@`, 'gi');
 /** パスワードがあればユーザー名を残してパスワードを伏せる。ユーザー名だけ（https://<トークン>@host/ の形）なら、それをトークンとしてマスクする */
 const maskUserinfo = (u: string, h: Hider) => { const i = u.indexOf(':'); return i >= 0 ? `${u.slice(0, i)}:****` : h.value(u); };
 
@@ -248,17 +292,57 @@ const bareNonce = (all: string, q: string | undefined, v: string, h: Hider) =>
 const Q = '%(?:25)*22', SP = '(?:%(?:25)*20|\\+)*';
 // キーは全角の英数字・ゼロ幅の文字を含んでよい（{"ｐａｓｓｗｏｒｄ":"…"}。secretParam が正規化してから照合する。ANY_PARAM と同じ）
 const JSON_PAIRS: RegExp[] = [
-  /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
-  /(\\"([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
+  /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,64})"\s*:\s*")((?:[^"\\\r\n]|\\.)*)(")/g,
+  /(\\"([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,64})\\"\s*:\s*\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")/g,
   new RegExp(`(${Q}([\\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}${Q})((?:(?!${Q})[^&\\s"'<>#])*)(${Q})`, 'g'),
 ];
 // 数値の値は、ワンタイムの番号・パスワード・個人の番号らしい名前だけ（"code":404・"status":500 のようなエラーの番号は残す）。
 // 3桁から（カードのセキュリティコード "cvv":123）
-const JSON_NUMBER = /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e]{1,64})"\s*:\s*)(\d{3,})(?![\d.])()/g;
-const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token|ssn|cvv|cvc|card|ccnum/i;
+const JSON_NUMBER = /("([\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,64})"\s*:\s*)(\d{3,})(?![\d.])()/g;
+const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token|ssn|cvv|cvc|card|ccnum|暗証番号|パスワード/i;
+/**
+ * 配列の値（"password":["a","b"]・入れ子の [["a"]]・エスケープした \"password\":[…]・URL エンコードした %22password%22%3A%5B…）の、すべての
+ * 文字列の要素を伏せる。中身は 4096 文字まで、入れ子は1段まで
+ */
+const ARRAY_KEY = String.raw`[\w.$\-\u00ad\u200b-\u200f\u2060\ufeff\uff01-\uff5e\u3040-\u30ff\u4e00-\u9fff\u00c0-\u024f\u0400-\u04ff\uac00-\ud7af]{1,64}`;
+// 中身：括弧の外の文字（改行を含む。整形した JSON の2つ目からの要素を伏せなかった）と、1段の入れ子の [ … ]。] で中身を終える（, のあとの別の
+// キーの配列まで読まない）。閉じの ] を待たない（中身が上限を超えた配列で、正規表現が丸ごと外れた。束のレビュー）。中身は 64KB まで
+const IN_ARRAY = String.raw`((?:[^[\]]|\[[^[\]]*\]){0,65536})`;
+const E_OPEN = String.raw`%(?:25)*5[Bb]|\[`, E_CLOSE = String.raw`%(?:25)*5[Dd]|\]`, E_CH = String.raw`(?:(?!${E_OPEN}|${E_CLOSE})[^&\s"'<>#])`;
+// 要素の文字列。あとに : が続くもの（配列の中のオブジェクトのキー "v":）は伏せずに読み進める（読み飛ばすだけだと、キーの閉じの " から次の " までを
+// 文字列として伏せた。束のレビュー）。空の文字列（""）も要素として読む（1文字以上にすると、"" の閉じと次の要素の開きを組にして、後ろの要素の
+// パスワードを残した。第51回）
+// 値がオブジェクト（"password":{"value":"…"}）のときも、中の文字列の値を伏せる（中身を伏せなかった。第51回）。中身は入れ子のない { … } の 64KB まで
+const IN_OBJECT = String.raw`([^{}]{0,65536})`;
+const O_OPEN = String.raw`%(?:25)*7[Bb]|\{`, O_CH = String.raw`(?:(?!${O_OPEN}|%(?:25)*7[Dd]|\})[^&\s"'<>#])`;
+const RAW_STR = /(")((?:[^"\\\r\n]|\\.)*)(")(\s*:)?/g, ESC_STR = /(\\")((?:[^"\\\r\n]|\\[^"\r\n])*)(\\")(\s*:)?/g;
+const ENC_STR = new RegExp(String.raw`(${Q})((?:(?!${Q})[^&\s"'<>#])*)(${Q})(${SP}(?:%(?:25)*3[Aa]|:))?`, 'g');
+/**
+ * [キーと開きの括弧, 中身（キーの直後から読む。y フラグ）, 中身の文字列]。キーと中身を1つの正規表現で読むと、秘密でない親のキー（"user":{）が
+ * 中身を読み込み、その中の "password":{…}・"password":[…] を伏せなかった（束のレビュー）。中身は、秘密の名前のときだけ読む
+ */
+const JSON_ARRAYS: [RegExp, RegExp, RegExp][] = [
+  [new RegExp(String.raw`"(${ARRAY_KEY})"\s*:\s*\[`, 'g'), new RegExp(IN_ARRAY, 'y'), RAW_STR],
+  [new RegExp(String.raw`\\"(${ARRAY_KEY})\\"\s*:\s*\[`, 'g'), new RegExp(IN_ARRAY, 'y'), ESC_STR],
+  [new RegExp(String.raw`${Q}([\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}(?:${E_OPEN})`, 'g'), new RegExp(String.raw`((?:${E_CH}|(?:${E_OPEN})${E_CH}*(?:${E_CLOSE})){0,65536})`, 'y'), ENC_STR],
+  [new RegExp(String.raw`"(${ARRAY_KEY})"\s*:\s*\{`, 'g'), new RegExp(IN_OBJECT, 'y'), RAW_STR],
+  [new RegExp(String.raw`\\"(${ARRAY_KEY})\\"\s*:\s*\{`, 'g'), new RegExp(IN_OBJECT, 'y'), ESC_STR],
+  [new RegExp(String.raw`${Q}([\w.$-]{1,64})${Q}${SP}(?:%(?:25)*3[Aa]|:)${SP}(?:${O_OPEN})`, 'g'), new RegExp(String.raw`(${O_CH}{0,65536})`, 'y'), ENC_STR],
+];
+const maskArrays = (s: string, h: Hider) => JSON_ARRAYS.reduce((acc, [keyRe, bodyRe, str]) => {
+  let out = '', last = 0; keyRe.lastIndex = 0;
+  for (let m = keyRe.exec(acc); m; m = keyRe.exec(acc)) {
+    if (!secretParam(m[1], '')) continue;   // 秘密でない名前は中身を読まずに進む（中の秘密の名前を見つけるため）
+    const end = m.index + m[0].length; bodyRe.lastIndex = end;
+    const body = bodyRe.exec(acc)?.[1] ?? '';
+    out += acc.slice(last, end) + body.replace(str, (a: string, o: string, v: string, c: string, colon?: string) => (colon || !v || /…\(\d+/.test(v) ? a : `${o}${h.value(v)}${c}`));
+    last = end + body.length; keyRe.lastIndex = last;
+  }
+  return out + acc.slice(last);
+}, s);
 const maskJsonPairs = (s: string, h: Hider) => {
   const rep = (all: string, pre: string, k: string, v: string, close: string) => (v && secretParam(k, v) && !/…\(\d+/.test(v) ? `${pre}${h.value(v)}${close}` : all);
-  return JSON_PAIRS.reduce((acc, re) => acc.replace(re, rep), s)
+  return JSON_PAIRS.reduce((acc, re) => acc.replace(re, rep), maskArrays(s, h))
     .replace(JSON_NUMBER, (all, pre: string, k: string, v: string) => (NUMERIC_SECRET.test(k) ? rep(all, pre, k, v, '') : all));
 };
 
@@ -267,13 +351,18 @@ const maskJsonPairs = (s: string, h: Hider) => {
  * 短い合言葉は形では見分けられない（shownText.ts の許可リストは hunter2 を語として残す）ので、名前で伏せる。名前は、最後の語が
  * password・secret・token・api_key などのものだけ（Access-Control-Allow-Credentials・token_type は対象外）。値は ASCII の文字だけ
  */
-// 名前の前置きは64文字まで（SPRING_DATASOURCE_PRIMARY_CONNECTIONPOOL_PASSWORD）
-const FREE_NAME = String.raw`(?:[A-Za-z][\w-]{0,62}[_-])?(?:password|passwd|passphrase|pwd|pass|secret|api[_-]?key|apikey|token|private[_-]?key|ssn|cvv2?|cvc|card[_-]?number|ccnum)`;
+// 名前の前置きは64文字まで（SPRING_DATASOURCE_PRIMARY_CONNECTIONPOOL_PASSWORD）。区切りのない pass で終わる名前（dbpass・userpass）も含める（第50回）
+const FREE_NAME = String.raw`(?:[A-Za-z][\w-]{0,62}[_-])?(?:password|passwd|passphrase|pwd|pass|[a-z]{1,16}pass(?<!(?:by|com|encom|over|under|tres|sur|im)pass)|secret|api[_-]?key|apikey|token|private[_-]?key|ssn|cvv2?|cvc|card[_-]?number|ccnum)\d{0,3}`;
 // 名前と値の区切り：= : と、PHP の配列の =>、define('DB_PASSWORD', '…') のカンマ（値が引用符で囲まれているときだけ）
 const FREE_SEP = String.raw`\s*(?:=>|[:=]|,(?=\s*["']))\s*`;
 // 引用符で囲んだ値は、閉じの引用符まで（secret="Tr0ub4dor&3" の & で切って、残りを出した）
-const FREE_QUOTED = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2${FREE_SEP}(["']))((?:(?!\3)[^\\\r\n]|\\.)+)(?=\3)`, 'gi');
-const FREE_PAIR = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*[:=]\s*)([^\s"'<>,;&)}\]\\]+)`, 'gi');
+// 値が配列（"password":["…"]）なら、最初の要素を伏せる（括弧の1文字を値として伏せ、中身を残した。第50回）
+const FREE_ARRAY = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*(?:=>|[:=])\s*\[)${IN_ARRAY}`, 'gi');
+// 値がオブジェクト（password: {value: '…'}・password = {"value": "…"}・{'password': {'value': '…'}}・=> {"value" => "…"}）なら、最初のキーのあとの値を
+// 伏せる（キーを値として伏せ、値を残した。束のレビュー）
+const FREE_INNER_KEY = String.raw`(?:\{\s*["']?[\w$-]{1,64}["']?\s*(?::|=>)\s*)`;
+const FREE_QUOTED = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2${FREE_SEP}(?:\[\s*|${FREE_INNER_KEY})?(["']))((?:(?!\3)[^\\\r\n]|\\.)+)(?=\3)`, 'gi');
+const FREE_PAIR = new RegExp(String.raw`((?<![\w-])(["']?)${FREE_NAME}\2\s*(?:=>|[:=])\s*(?:${FREE_INNER_KEY}|(?:[[{]\s*){0,2}))(?![[{"']|[\w$-]{1,64}\s*(?::|=>))((?:[^\s"'<>,;&)}\]\\]|${SEMI_CONT})+)`, 'gi');
 // XML（<password>…</password>）と .NET の設定（<add key="Password" value="…"/>）
 const FREE_XML = new RegExp(String.raw`(<(${FREE_NAME})>)([^<]{1,512})(<\/\2>)`, 'gi');
 const FREE_KEY_VALUE = new RegExp(String.raw`(\bkey\s*=\s*(["'])${FREE_NAME}\2\s+value\s*=\s*(["']))([^"']{1,512})(?=\3)`, 'gi');
@@ -286,6 +375,11 @@ const PASSWORD_PLAIN = /^(?:true|false|null|nil|empty|n\/a|-)$/i;
 const freeValue = (all: string, pre: string, v: string, h: Hider, post = '') =>
   (v.includes('…') || (PASSWORD_NAME.test(pre) ? PASSWORD_PLAIN : FREE_PLAIN).test(v) || !/^[\x21-\x7e][\x20-\x7e]*$/.test(v) ? all : `${pre}${h.value(v)}${post}`);
 const maskFreePairs = (s: string, h: Hider) => s
+  // 配列の要素：引用符で囲んだもの（オブジェクトのキーは除く）と、引用符のないもの（password: [Winter2024, Summer2025] の2つ目。束のレビュー）
+  .replace(FREE_ARRAY, (_all, pre: string, _q: string, body: string) => pre + body.replace(/[^\s,"'[\]{}]*…\(\d+ chars\)|(["'])((?:(?!\1)[^\\\r\n]|\\.)*)\1(\s*:)?|(?<=^|[\s,[])([^\s,"'[\]{}()…]+)(?=\s*[,\]]|\s*$)/g,
+    // 伏せ済みの値（…(N chars)。空白を含む）はそのまま（引用符のない要素として「chars)」を伏せ直し、冪等でなかった）
+    (a: string, q: string | undefined, v: string | undefined, colon: string | undefined, bare: string | undefined) =>
+      (q ? (colon ? a : freeValue(a, q, v!, h, q)) : bare ? freeValue(a, '', bare, h) : a)))
   .replace(FREE_XML, (all, open: string, _n: string, v: string, close: string) => freeValue(all, open, v, h, close))
   .replace(FREE_KEY_VALUE, (all, pre: string, _q1: string, _q2: string, v: string) => freeValue(all, pre, v, h))
   .replace(FREE_QUOTED, (all, pre: string, _q1: string, _q2: string, v: string) => freeValue(all, pre, v, h))
@@ -311,23 +405,42 @@ function maskParams(s: string, h: Hider, depth = 0): string {
  * 区切りのない15・16桁で 3〜6 で始まるもの）。13桁のミリ秒の時刻などは対象外。
  * 前後が英数字・_・- のもの（パスのトークンの途中 ab12…123-45-6789ij…）は対象外（途中を伏せると、残りのかけらが短くなり、パスの部分として伏せられなくなった）
  */
-const SSN = /(?<![\w-])\d{3}-\d{2}-\d{4}(?![\w-])/g;
-const CARD = /(?<![\w.-])(?:\d{4}([ .-])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ .-])\d{6}\2\d{5}|[3-6]\d{14,15})(?![\w-]|\.\d)/g;
+// 区切りをパーセントエンコードしたもの（%20・%2D・%2E。encodeURIComponent で組み立てた URL の ?card=4111%201111%201111%201111）も含める
+// （伏せずに、すべての行の URL に出た）
+const SEP_NUM = String.raw`(?:[ .+-]|%2[0DdEe])`;
+const SSN = /(?:(?<![\w-])|(?<=%[0-9A-Fa-f]{2}|\+))\d{3}(-|%2[Dd]|\+)\d{2}\1\d{4}(?![\w-])/g;
+const CARD = new RegExp(String.raw`(?:(?<![\w.-])|(?<=%[0-9A-Fa-f]{2}|\+))(?:\d{4}(${SEP_NUM})\d{4}\1\d{4}\1\d{1,7}|\d{4}(${SEP_NUM})\d{6}\2\d{5}|[3-6]\d{14,15})(?![\w-]|\.\d)`, 'g');
+/** 番号の数字だけ（エンコードした区切りの「20」「2D」を数字に数えない） */
+const numDigits = (v: string) => v.replace(/%2[0DdEe]/g, '').replace(/\D/g, '');
+// ↑ エンコードした区切り・+ の直後の番号（?q=card%204111%201111…・?q=ssn+123-45-6789）も伏せる（%20 の 0 が語の文字なので、前を見る条件で外れた）
 const luhn = (d: string) => {
   let sum = 0;
   for (let i = 0; i < d.length; i++) { let x = d.charCodeAt(d.length - 1 - i) - 48; if (i % 2) { x *= 2; if (x > 9) x -= 9; } sum += x; }
   return d.length >= 13 && sum % 10 === 0;
 };
+/**
+ * 同じクエリにユーザー名（u・user・username・login・usr・uid・email など）があるときの p の値（Subsonic などの ?u=admin&p=<パスワード>）。
+ * p だけの名前はページ番号（?p=2）にも使うので、ユーザー名と組のときだけ伏せる。伏せ済みの値（Su…(10 chars)）は値の空白で切らずにそのまま残す
+ * （切ると「Su…(10」を伏せ直し、かけるたびに長くなった。第48回の束1のレビュー）。HTML の &amp;・エンコードした %26・; の区切りも見る
+ */
+const USER_PARAM = /(?:[?&;#]|&amp;|%3F|%26)(?:u|user|username|user_name|login|login_id|loginid|usr|uid|userid|user_id|email|mail|account)(?:=|%3D)/i;
+const P_PARAM = /((?:[?&;#]|&amp;|%3F|%26)p(?:=|%3D))((?:nonce-)?[^…\s&#;"'<>=]{0,4}…\(\d+ chars\)|(?:(?!%26|&amp;)[^&\s#;"'<>])+)/gi;
+const maskUserPass = (s: string, h: Hider) => s.replace(/[?#](?:…\(\d+ chars\)|[^\s"'<>]){0,4096}/g, q => (!USER_PARAM.test(q) ? q
+  : q.replace(P_PARAM, (all: string, k: string, v: string) => (MASKED_PARAM.test(v) ? all : `${k}${h.value(v)}`))));
 function mask(s: string, h: Hider): string {
   // 順序：nonce → JSON の組（値の中の JSON を、パラメータの区切りで分ける前に見る） → パラメータ → JWT（パスに置いた JWT を、かけらに分けずに丸ごと伏せる）
   // → ユーザー情報 → ASP.NET のセッション → パスの部分
-  const nonce = s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) ? all : `'nonce-${h.value(v)}'`)).replace(BARE_NONCE, (all, q: string | undefined, v: string) => bareNonce(all, q, v, h));
-  return maskFreePairs(maskParams(maskJsonPairs(nonce, h), h), h)
+  // 値が「…」だけのもの（推奨対応の決まった文言 script-src 'nonce-…'）は伏せ済みとして残す（'nonce-…(1 chars)' に化けた）
+  const nonce = s.replace(CSP_NONCE, (all, v: string) => (MASKED.test(v) || v === '…' ? all : `'nonce-${h.value(v)}'`)).replace(BARE_NONCE, (all, q: string | undefined, v: string) => bareNonce(all, q, v, h));
+  return maskUserPass(maskFreePairs(maskParams(maskJsonPairs(nonce, h), h), h), h)
           .replace(JWT, t => h.value(t))
           .replace(SSN, v => h.bare(v))
-          .replace(CARD, v => (luhn(v.replace(/\D/g, '')) ? h.bare(v) : v))
+          .replace(CARD, v => (luhn(numDigits(v)) ? h.bare(v) : v))
           .replace(URL_CRED, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
-          .replace(URL_CRED_ENCODED, (_, sc: string, user: string) => `${sc}${user}%3A****%40`)
+          .replace(URL_CRED_SPECIAL, (all: string, sc: string, sl: string, u: string) => (sl === '//' ? all : `${sc}${sl}${maskUserinfo(u, h)}@`))
+          .replace(URL_CRED_PCT, (_, sc: string, u: string) => `${sc}${maskUserinfo(u, h)}@`)
+          .replace(URL_CRED_ENCODED, (_, sc: string, user: string, colon: string, _lv: string, at: string) => `${sc}${user}${colon}****${at}`)
+          .replace(URL_CRED_MIXED, (_, sc: string, user: string) => `${sc}${user}:****@`)
           .replace(ASPNET_COOKIELESS, (_, inner: string) => `/(${inner.replace(/([A-Z])\(([^()]+)\)/g, (__, k: string, v: string) => `${k}(${h.value(v)})`)})`)
           .replace(HASH_OR_SEGMENT, (seg, hash: string | undefined) => (hash ? seg : maskSegment(seg, h)));
 }
@@ -359,50 +472,3 @@ export const clip = (s: string, n: number) => {
 };
 
 // #META cmd= のコマンド（CSV の「実施コマンド」）は、ここで伏せない。残してよい形だけを残す要約（export/cmdSummary.ts）を出す
-
-// #PROBE の head は判定にだけ使い、表示・エクスポートにはパターン名だけを出す。
-// [パターン名, 判定する項目, 対象パス, 先頭64バイトの目安]（ツール設計1「プローブの判定パターン」）
-// パスと中身の両方が一致したときだけ、その項目のルールが使う（1つのプローブを複数の項目で計上しない）
-const PROBE_PATTERNS: [string, string, RegExp, RegExp][] = [
-  // detached HEAD（CI・デプロイで多い）は、コミットの ID（SHA-1 の40桁、SHA-256 の64桁）だけの1行
-  ['git-head',      'E-03', /\/\.git\/HEAD$/,        /^(?:ref: refs\/|[0-9a-f]{40}(?:[0-9a-f]{24})?\s*$)/],
-  // 中身のパターンは、エラーページ（JSON・XMLのエラー応答）に一致しないものにする（<?xml だけ、{ だけでは判定しない）
-  ['svn-entries',   'E-03', /\/\.svn\/entries$/,     /^\d+\s*$|<wc-entries\b/m],
-  // eslint-disable-next-line no-control-regex -- .DS_Store のマジックバイト（00 00 00 01 Bud1）を照合する
-  ['ds-store',      'E-03', /\/\.DS_Store$/,         /^\x00\x00\x00\x01Bud1/],
-  // export KEY=…（シェルで読み込む形）と、= の前後の空白（KEY = value）も。小文字の名前は、ほかの平文の応答と見分けにくいので入れない
-  ['dotenv',        'E-03', /\/\.env$/,              /^(?:export[ \t]+)?[A-Z_][A-Z0-9_]*[ \t]*=/m],
-  ['web-xml',       'E-03', /\/WEB-INF\/web\.xml$/,  /<web-app\b|<!DOCTYPE web-app/i],
-  // package.json・composer.json は、そのファイルに特有のキーか、名前の形（@scope/名前、vendor/名前）が先頭64バイトにあるときだけ。name・version・
-  // type のような一般的なキーだけで一致させると、どのパスにも {"name":"api","version":"1.0"} を返す API で E-03①（高）の誤検知になった。
-  // 特有のキーが64バイトより後ろにある本物のファイルは、②（判定保留。中身を手動で確認する）になる
-  ['package-json',  'E-03', /\/package\.json$/,      /^\s*\{[\s\S]*?(?:"(?:private|scripts|dependencies|devDependencies|peerDependencies|workspaces|main|module|exports|bin|engines|packageManager)"\s*:|"name"\s*:\s*"@[\w.-]+\/)/],
-  ['composer-json', 'E-03', /\/composer\.json$/,     /^\s*\{[\s\S]*?(?:"(?:require|require-dev|autoload|autoload-dev|minimum-stability|prefer-stable|repositories)"\s*:|"name"\s*:\s*"[\w.-]+\/[\w.-]+")/],
-  // eslint-disable-next-line no-control-regex -- ZIP のマジックバイト（PK 03 04）を照合する
-  ['backup',        'E-03', /\/backup\.zip$/,        /^PK\x03\x04/],
-  ['phpinfo',       'E-03', /\/phpinfo\.php$/,       /phpinfo\(\)|PHP Version/],
-  ['server-status', 'E-03', /\/server-status$/,      /Apache Server Status|Server Version:/],
-  // security.txt はコメント（# で始まる行）から始めてよい（先頭の64バイトがコメントだけのものを「ない」とした）。HTML・JSON のエラー画面は # で始まらない
-  // コメントで始まるのは、ファイルの先頭が「#」のときだけ（行の始めの # を見ると、CSS の #app{ を含む HTML の画面まで security.txt とした）
-  // 先頭の64バイトに Contact・Expires がなくコメントだけのもの（security-txt-comment）は、本当の security.txt かが分からない（どのパスにも
-  // 「# …」の平文を返すサーバもある）ので、E-04 は合格にせず na にする
-  // RFC 9116 のフィールドのどれか（Canonical・Policy などで始まり、Contact が64バイトより後ろにあるものを「ない」とした）。
-  // フィールド名は大文字・小文字を区別しない（RFC 9116）
-  ['security-txt',  'E-04', /\/security\.txt$/,      /^(?:Contact|Expires|Encryption|Acknowledgments|Preferred-Languages|Canonical|Policy|Hiring):/im],
-  ['security-txt-comment', 'E-04', /\/security\.txt$/, /(?<![\s\S])#/],
-  ['robots',        'E-04', /\/robots\.txt$/,        /^(User-agent|Disallow|Allow|Sitemap):/im],
-  // XSSI 対策の前置き（)]}' の行）を付けたソースマップもある（ブラウザの開発ツールは読む。前置きがあると「取得できない」とした）
-  // "version":3（ソースマップの版）か、ソースマップに特有のキーがあるときだけ。"version"・"file" だけで一致させると、どのパスにも
-  // {"version":"2.1.0"} を返す API で E-13①（中）の誤検知になった
-  ['source-map',    'E-13', /\.map$/,                /^(?:\)\]\}'[^\n]*\n)?\s*\{[\s\S]*?(?:"version"\s*:\s*3\b|"(?:sources|sourceRoot|sourcesContent|mappings|names|sections)"\s*:)/]];
-/**
- * プローブのパスと中身が既知のファイルに一致するか。取得できた（HTTP 2xx の）ときだけ一致とする。
- * 404・403 のエラーページの中身（JSON・XML）がパターンに一致しても、そのファイルを取得できたことにはならない
- */
-export function probePattern(path: string, headB64: string, code: number): { name: string; item: string } | undefined {
-  if (!(code >= 200 && code < 300)) return undefined;
-  let head = '';
-  try { head = atob(headB64); } catch { return undefined; }
-  const hit = PROBE_PATTERNS.find(([, , p, re]) => p.test(path) && re.test(head));
-  return hit && { name: hit[0], item: hit[1] };
-}

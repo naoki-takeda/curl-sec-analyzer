@@ -218,5 +218,6 @@ describe('判定の結果の性質', () => {
         .map(f => `${f.ruleId} | ${(f.targetKey ?? f.target).replace(/#\d+$/, '').trim()} | ${f.status} | ${f.severity}`).sort();
       expect(result(shuffled)).toEqual(result(bs));
     }), { numRuns: 200 * MULT });
-  });
+  // 単独で約1.5秒。ほかのテストと並べて流すと既定の5秒を超えることがあった（第48回。4000回試しても反例はなかった）
+  }, 30_000);
 });

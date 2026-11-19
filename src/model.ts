@@ -12,9 +12,10 @@ export interface HttpResponse {
   // challenge：curl が認証し直した 401（--digest・--ntlm・--negotiate・--anyauth）。connect にはプロキシの 407 も含む
   kind: 'final' | 'redirect' | 'informational' | 'connect' | 'challenge';
   url?: string;                     // そのホップのリクエストのURL（HAR は記録から、curl はターゲットの URL から Location をたどって付ける）
+  droppedCookies?: number;          // 上限（MAX_SET_COOKIES）を超えて読まなかった Set-Cookie の数
 }
 export interface ParseWarning {
-  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'proxy-only' | 'invalid-attr';
+  kind: 'unparsed-lines' | 'orphan-block' | 'unknown-url' | 'tls-probe-error' | 'har-excluded' | 'har-sanitized' | 'duplicate-label' | 'ignored-marker' | 'mixed-run' | 'proxy-only' | 'invalid-attr' | 'too-many-cookies';
   detail: string;
   label?: string;                   // unknown-url：URLが分からないターゲットのラベル（画面のURL欄で補ったものだけ警告を消すため）
 }
@@ -65,16 +66,16 @@ export interface Finding {
   ruleId: string;                   // 例: H-01.1 / H-01.ok / H-01.na
   item: string;                     // 例: H-01
   condition?: number;               // 例: 1（①）
-  obsId?: string; title: string; severity: Severity; status: Status;
+  title: string; severity: Severity; status: Status;
   target: string; url?: string; host?: string;
   partial?: boolean;                // 横断・ホスト単位の条件が入力不足で na（診断カバレッジで「一部の条件は入力不足」と示す）
   limited?: boolean;                // 機密でない応答（静的リソースなど）だけで判定した（H-12。項目のすべてがこれなら、カバレッジで「機密応答では判定していない」と示す）
   keyUrl?: string;                  // 対象の URL の突き合わせのキー（engine/targetKey.ts の urlKey。マスクした url ではなく生の URL から作る。例外の「ラベル URL」の照合に使う）
   targetKey?: string;               // 差分・例外の突き合わせに使う。curl はラベル（同じラベルが複数あれば「元のラベル＋URL」）、HAR は「メソッド＋URL（engine/targetKey.ts の urlKey。マスクとは別に作る）」
   evidence: string; recommendation: string; references: string[];
-  score: number;                    // obsId があるルール以外は常に0
   suppressedBy?: Suppression;       // 例外に該当したとき
   originalSeverity?: Severity;      // 組織プロファイルで重要度を変えたときの元の重要度
+  apiInfo?: boolean;                // API の応答なので、HTML 向けの項目の指摘を情報に下げた（組織プロファイルの重要度で上げ直さない）
   dedupedBy?: string;               // 二重計上を防ぐため、別のルールID（例：A-09.2）で数えたとき。status は na になる
 }
 /** 組織プロファイル（profile.json）：組織ごとの重要度、対象外の項目、セッションCookieの指定 */

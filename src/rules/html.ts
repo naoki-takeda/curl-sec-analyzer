@@ -2,7 +2,7 @@
 import type { Finding, Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
-import { NO_BODY_REC, isLabelText, isPlaceholderValue, isPublicClientValue, mk } from './util';
+import { NO_BODY_REC, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
 import { clip } from '../mask';
 
 /** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
@@ -130,7 +130,7 @@ export function tags(html: string, names: string[]): Tag[] {
     const from = i + m[0].length; const end = endOf(from);
     if (end < 0) continue;                           // 閉じていないタグ（ブラウザはタグとして扱わない）
     const attrs = new Map<string, string>();
-    for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) attrs.set(a[1].toLowerCase(), decodeEntities(a[2] ?? a[3] ?? a[4] ?? ''));
+    for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) { const k = a[1].toLowerCase(); if (!attrs.has(k)) attrs.set(k, decodeEntities(a[2] ?? a[3] ?? a[4] ?? '')); }   // 同じ名前の属性は最初の値（HTML の字句解析と同じ。後の値を使うと、2つの action で E-10① の判定が逆になった。第49回）
     const name = m[1].toLowerCase();
     out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i, ...(!outside || i < templateEnd ? { inert: true } : {}) });
     i = end;                                         // 属性の中の < をタグの始まりとして読まない（正規表現の matchAll と同じ）
@@ -192,7 +192,8 @@ function bodyStart(html: string): number {
 export function metaCspFromHtml(html: string): string[] {
   const end = bodyStart(html);
   const head = end >= 0 ? html.slice(0, end) : html;
-  return tags(head, ['meta']).filter(t => t.attrs.get('http-equiv')?.toLowerCase() === 'content-security-policy')
+  // <template>・<noscript>・スクリプトの文字列の中の meta（inert）は、ブラウザが要素として使わないので CSP にしない（H-03①（高）を見逃した。第49回）
+  return tags(head, ['meta']).filter(t => !t.inert && t.attrs.get('http-equiv')?.toLowerCase() === 'content-security-policy')
     .flatMap(t => (t.attrs.get('content') ?? '').split(','))
     .map(p => p.split(';').map(d => d.trim()).filter(d => d && !/^(?:frame-ancestors|report-uri|report-to|sandbox)(?![\w-])/i.test(d)).join('; '))
     .filter(Boolean);
@@ -257,10 +258,12 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
 const ASSIGNED = /(?<![\w-])["']?(api[_-]?key|client[_-]?secret|secret[_-]?key|access[_-]?token|password)["']?\s*[:=]\s*["']([!#-&(-~]{12,})["']/gi;
 /**
  * 秘密ではない値：パス（password:"/users/password/new"）、URL、ドットでつないだ翻訳キー（"auth.password.label"）、テンプレート（{{…}}、${…}）、
- * 英語の画面の文言（A-07 と同じ isLabelText）
+ * 英語の画面の文言（A-07 と同じ isLabelText）、セレクタ・項目の名前・エスケープした日本語の文言（notSecretText。第50回）
  */
 const notSecretValue = (key: string, v: string): boolean =>
-  v.startsWith('/') || /^https?:/i.test(v) || /^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) || /^(?:\{\{|\$\{)/.test(v) || isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v);
+  // パス・URL・翻訳キー・テンプレートは notSecretText と同じ形だけ（大文字を含む /Ab3… で始まる base64 の秘密を除いていた。束のレビュー）
+  isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v)
+  || notSecretFormat(v) || notSecretText(v);
 // Google の API キー（AIza…）は、Maps・Firebase などブラウザから使う前提のキー（HTTP リファラーや API の制限で守る）なので、HTML にあっても①にしない。
 // Stripe の公開キー（pk_live_…）、PaymentIntent の client_secret も同じ（A-07 と同じ isPublicClientValue）
 /** 公開を前提にした JWT（ペイロードの role が anon。Supabase の anon key） */

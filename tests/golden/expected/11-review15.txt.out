@@ -44,7 +44,7 @@ dl | H-13.ok | info | pass | text/html; charset=utf-8
 dl | H-14.1 | low | fail | (ヘッダなし)
 dl | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 dl | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-dl | R-04.ok | info | pass | (ACAOなし)
+dl | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 dl | T-12.ok | info | pass | HTTP/2
 error-* | A-10.na | info | na | 
 error-trace | E-01.2 | medium | fail | at /app/index.js:7:9
@@ -67,7 +67,7 @@ jsonp | H-12.1 | high | fail | (ヘッダなし)
 jsonp | H-13.ok | info | pass | application/javascript
 jsonp | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 jsonp | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-jsonp | R-04.ok | info | pass | (ACAOなし)
+jsonp | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 jsonp | T-12.ok | info | pass | HTTP/2
 login | A-02.ok | info | pass | URL・Location・本文にトークンなし
 login | C-01.1 | high | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
@@ -107,7 +107,7 @@ mypage | H-13.ok | info | pass | text/html; charset=utf-8
 mypage | H-14.1 | low | fail | (ヘッダなし)
 mypage | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 mypage | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-mypage | R-04.ok | info | pass | (ACAOなし)
+mypage | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 mypage | T-12.ok | info | pass | HTTP/2
 open-redirect | T-06.na | info | na | HTTP 302（ログイン画面か同じページへの転送。転送先を検証しているかは分からない）
 pre-login | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -146,7 +146,7 @@ reset | H-13.ok | info | pass | text/html; charset=utf-8
 reset | H-14.1 | low | fail | (ヘッダなし)
 reset | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 reset | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-reset | R-04.ok | info | pass | (ACAOなし)
+reset | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 reset | T-12.ok | info | pass | HTTP/2
 session-sample-* | C-07.na | info | na | 
 unauth-me | A-01.1 | high | fail | 認証なしで HTTP 200
@@ -184,7 +184,7 @@ C-06 | evaluated | fails=2
 C-07 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | evaluated | fails=1
 C-09 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / ログイン後に、ログイン前の JSESSIONID だけを送って認証後のページを取得できないか、手動で確認する
-C-10 | missing-input | fails=0 | 必要なラベル: http
+C-10 | missing-input | fails=0 | 必要なラベル: （一般）, http, pre-login, login, session-sample-*
 C-11 | evaluated | fails=0
 C-12 | evaluated | fails=1
 C-13 | evaluated | fails=0
@@ -193,7 +193,7 @@ C-15 | manual | fails=0
 R-01 | evaluated | fails=1
 R-02 | missing-input | fails=0 | C7 のとおり Origin: null を送って採取する
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | evaluated | fails=0 | 一部のターゲット（4件）は入力不足 / C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | evaluated | fails=1
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

@@ -13,16 +13,17 @@ const ms = (f: () => unknown) => { const t = performance.now(); f(); return perf
 const page = (body: string) => `#TARGET url=https://a.example/ label=top\nHTTP/2 200\ncontent-type: text/html\n\n${body}\n`;
 
 describe('性能（設計書の非機能要件）', () => {
-  it('1MBの通常の出力を解析・判定できる（目標2秒。CIの差を見込んで6秒を上限にする）', () => {
+  // 上限の6秒を測れるよう、テストのタイムアウト（既定5秒）を延ばす
+  it('1MBの通常の出力を解析・判定できる（目標2秒。CIの差を見込んで6秒を上限にする）', { tags: ['perf'], timeout: 15_000 }, () => {
     const one = readFileSync(new URL('./fixtures/generated_local.txt', import.meta.url), 'utf8');
     const big = one.repeat(Math.ceil(1_000_000 / one.length));
     expect(ms(() => runAll(parseInput(big).targets))).toBeLessThan(6000);
-  }, 15_000);   // 上限の6秒を測れるよう、テストのタイムアウト（既定5秒）を延ばす
+  });
 });
 
 describe('悪意のある入力（Q-1・Q-2）', () => {
-  it('例外ファイルの * の多いパターンでも、照合がすぐ終わる（ReDoS）', () => {
-    const f = { ruleId: 'H-01.1', item: 'H-01', title: '', severity: 'high', status: 'fail', target: 'x', url: `https://a.example/${'a'.repeat(2000)}`, evidence: '', recommendation: '', references: [], score: 0 } as never;
+  it('例外ファイルの * の多いパターンでも、照合がすぐ終わる（ReDoS）', { tags: ['perf'] }, () => {
+    const f = { ruleId: 'H-01.1', item: 'H-01', title: '', severity: 'high', status: 'fail', target: 'x', url: `https://a.example/${'a'.repeat(2000)}`, evidence: '', recommendation: '', references: [] } as never;
     const sup = [{ ruleId: 'H-01', target: `${'*a'.repeat(200)}*b`, reason: 'r', approver: '', until: '' }];
     expect(ms(() => applySuppressions([f], sup))).toBeLessThan(500);
     expect(parseSuppressions(JSON.stringify([{ ruleId: 'H-01', target: '*'.repeat(501), reason: 'r' }])).errors[0]).toContain('長すぎ');
@@ -38,7 +39,7 @@ describe('悪意のある入力（Q-1・Q-2）', () => {
       return wildcardMatch(p, s) === re.test(s);
     }), { numRuns: 2000 });
   });
-  it('閉じていないタグが大量にある本文でも、判定がすぐ終わる', () => {
+  it('閉じていないタグが大量にある本文でも、判定がすぐ終わる', { tags: ['perf'] }, () => {
     expect(ms(() => runAll(parseInput(page('<script '.repeat(8000))).targets))).toBeLessThan(1500);
     expect(ms(() => runAll(parseInput(page('<form method="post"><input type=password '.repeat(1500))).targets))).toBeLessThan(1500);
   });

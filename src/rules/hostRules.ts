@@ -1,13 +1,13 @@
 // rules/hostRules.ts：ホスト単位のルール（T-09〜T-11、E-03）。同じホストの全ターゲットをまとめて判定する
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { probePattern } from '../mask';
+import { probePattern } from './probes';
 import { hasCertificate, nameMatches, parseOpenssl, type TlsInfo } from '../parser/openssl';
 import { capturedAt } from '../parser/target';
 import { PROBE_UNREACHED_REC } from './util';
 
 const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
-     target: host, host, evidence, recommendation, references: rule.basis, score: 0 });
+     target: host, host, evidence, recommendation, references: rule.basis });
 
 /**
  * そのホストに TLS で接続できたと分かるか：新しいバージョン（1.2・1.3）か弱くない暗号のプローブで接続できた、curl -v で合意した、
@@ -44,11 +44,12 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
       // OpenSSL は TLS 1.0 を「TLSv1」と出す
       const negotiated = ts.flatMap(t => ownInfo(t, host)).map(l => l.match(/SSL connection using (TLSv1(?:\.\d)?|SSLv3)\b/)?.[1]).filter((v): v is string => !!v);
       if (!probes.length && !negotiated.length) continue;         // TLSの情報がないホストは適用外
+      // 同じバージョンのプローブが2回あっても（サンプルと採取を一緒に入れたとき）、証跡には1回だけ書く（第51回）
       const accepted = probes.filter(p => p.result === 'accepted' && OLD.test(p.version.replace(/\s/g, '')));
       // C4 で旧バージョンを合意した場合も、そのバージョンで接続できたので①にする（②の「TLS 1.3 非対応」だけにしない）
       const oldNegotiated = [...new Set(negotiated.filter(v => OLD.test(v)))];
       if (accepted.length || oldNegotiated.length) out.push(hf(tlsVersion, host, 1, 'high', 'fail',
-        [accepted.length ? `接続できた旧バージョン: ${accepted.map(p => p.version).join(', ')}` : '', oldNegotiated.length ? `合意したバージョン: ${oldNegotiated.join(', ')}` : ''].filter(Boolean).join('、'),
+        [accepted.length ? `接続できた旧バージョン: ${[...new Set(accepted.map(p => p.version))].join(', ')}` : '', oldNegotiated.length ? `合意したバージョン: ${oldNegotiated.join(', ')}` : ''].filter(Boolean).join('、'),
         'TLS 1.2 と 1.3 だけを有効にする'));
       // 旧バージョンの一部が ok=err（手元の OpenSSL が非対応）なら、そのバージョンは試していないので合格にしない（設計書：ok=err は na）。
       // 1つでも拒否されたら合格にすると、tls1=err・tls1_1=0 で TLS 1.0 を確かめずに合格にした
@@ -163,6 +164,8 @@ export const cipherSuites: Rule = { id: 'T-10', title: '暗号スイート・鍵
   } };
 
 const DAY_MS = 86400e3;
+/** #META at の日時の形（2026-11-01、2026-11-01T10:00:00、2026-11-01 10:00、末尾の Z・+09:00） */
+const AT_SHOWN = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?(?=\s|$)/;
 export const certificate: Rule = { id: 'T-11', title: '証明書', appliesTo: 'any', scope: 'host',
   basis: ['Mozilla Server Side TLS', 'CA/Browser Forum Baseline Requirements'],
   runCross(x) {
@@ -176,7 +179,10 @@ export const certificate: Rule = { id: 'T-11', title: '証明書', appliesTo: 'a
       // （応答の Date は使わない。Date は診断対象のサーバが書くので、過去の Date（CDN のキャッシュの古い応答を含む）で、期限の近い・切れた
       // 証明書を合格にできた。Cookie の期限（C-05）とは逆に、過去の基準が甘い向きになる）
       const now = src.meta.at ? capturedAt(src) : Date.now();
-      const asOf = src.meta.at ? `、${src.meta.at} 時点` : '';
+      // 証跡には、読めた日時だけを出す（手で書いた #META at= の値をそのまま出すと、日時のあとに書いた文字（認証情報など）が証跡に出た）
+      // 日時の形の部分だけを、書いてあるとおりに出す（形を変えると、日付だけの値やタイムゾーン付きの値が、見る人の時刻でずれた）
+      const atShown = src.meta.at?.trim().match(AT_SHOWN)?.[0];
+      const asOf = atShown && !Number.isNaN(Date.parse(atShown)) ? `、${atShown} 時点` : '';
       const before = out.length;
       const hostname = host.replace(/:\d+$/, '');
       if (info.notAfter && info.notAfter.getTime() < now) out.push(hf(certificate, host, 1, 'high', 'fail', `期限切れ（notAfter: ${info.notAfter.toISOString().slice(0, 10)}${asOf}）`, '証明書を更新する（自動更新を設定する）'));

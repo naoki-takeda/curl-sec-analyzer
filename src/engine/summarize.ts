@@ -36,7 +36,8 @@ export function mergeNa(fs: Finding[]): (Finding & { items?: string[] })[] {
   const out: (Finding & { items?: string[] })[] = []; const byReason = new Map<string, Finding & { items?: string[] }>();
   for (const f of fs) {
     if (f.status !== 'na') { out.push(f); continue; }
-    const k = JSON.stringify([f.evidence, f.recommendation]); const g = byReason.get(k);
+    // ターゲット（ホスト）が違うものはまとめない（ホスト単位・横断の表で、別のホストの判定不能を1行にした。第51回）
+    const k = JSON.stringify([f.target, f.evidence, f.recommendation]); const g = byReason.get(k);
     if (!g) { const row = { ...f }; byReason.set(k, row); out.push(row); continue; }
     g.items = [...new Set([...(g.items ?? [g.item]), f.item])];
   }

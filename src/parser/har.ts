@@ -4,7 +4,7 @@
 import type { HttpResponse, ParseWarning, Target } from '../model';
 import { autoAuthScheme, cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
 import { allowedForHar } from '../engine/labels';
-import { baseLabel } from './target';
+import { baseLabel, cookieCapWarnings, pushCookies } from './target';
 
 const BODY_LIMIT = 64 * 1024;
 export const HAR_MAX_BYTES = 50 * 1024 * 1024;
@@ -45,7 +45,7 @@ export function normalizeVersion(v?: unknown): string {
 }
 
 function toResponse(e: HarEntry): HttpResponse {
-  const headers = new Map<string, string[]>(); const rawNames: string[] = [];
+  const headers = new Map<string, string[]>(); const rawNames: string[] = []; let dropped = 0;
   // 名前のある要素だけ（headers が配列でない {}・null のエントリが1件あるだけで、HAR の取り込み全体が TypeError で失敗した）
   for (const h of named(e.response.headers)) {
     if (h.name.startsWith(':')) continue;               // HTTP/2 の疑似ヘッダは除外
@@ -54,7 +54,7 @@ function toResponse(e: HarEntry): HttpResponse {
     // 証跡（値は先頭の name=value だけをマスクする）に生の値が出てしまう
     const vals = k === 'set-cookie' ? String(h.value ?? '').split(/\r?\n/).flatMap(splitSetCookie) : [String(h.value ?? '')];
     const list = headers.get(k) ?? headers.set(k, []).get(k)!;
-    for (const x of vals) list.push(x);   // push(...) に広げない（長い Set-Cookie でスタックがあふれる）
+    if (k === 'set-cookie') dropped += pushCookies(list, vals); else for (const x of vals) list.push(x);   // push(...) に広げない（長い Set-Cookie でスタックがあふれる）
   }
   if (e.response.redirectURL && !headers.has('location') && e.response.status >= 300 && e.response.status < 400) headers.set('location', [e.response.redirectURL]);
   let body: string | undefined;
@@ -67,7 +67,7 @@ function toResponse(e: HarEntry): HttpResponse {
   }
   const status = e.response.status;
   return { httpVersion: normalizeVersion(e.response.httpVersion), status, reason: e.response.statusText, headers, rawNames, body,
-           kind: status >= 300 && status < 400 && headers.has('location') ? 'redirect' : 'final' };
+           kind: status >= 300 && status < 400 && headers.has('location') ? 'redirect' : 'final', ...(dropped ? { droppedCookies: dropped } : {}) };
 }
 
 const withoutHash = (u: string) => { const i = u.indexOf('#'); return i >= 0 ? u.slice(0, i) : u; };
@@ -107,17 +107,38 @@ export function importHar(text: string): HarImport {
   // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）。
   // 表のキーも、引くときと同じく URL として読み直した形（new URL().href）にする。書き方の違い（https://a.example:443/、エンコードしていない
   // /日本）で転送先が見つからず、http から https への転送の連なりが切れた
+  // 転送先のエントリを「メソッド URL」から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）。
+  // URL は、引くときと同じく URL として読み直した形（new URL().href）にする（https://a.example:443/、エンコードしていない /日本 で連なりが切れた）。
+  // メソッドもキーに入れる（メソッドの条件で読み飛ばしたエントリが使い済みにならず、転送のたびになめ直して2乗の時間になった。束のレビュー）
+  const methodOf = (x: { request: { method?: unknown } }) => String(x.request.method ?? 'GET').toUpperCase();
   const byUrl = new Map<string, number[]>();
-  entries.forEach((x, k) => { const u = normalizedUrl(x.request.url); (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
-  // URL ごとに、使い済みの先頭を読み飛ばす位置を持つ（同じ URL へ転送する 3xx が多い HAR で、毎回先頭からなめて2乗の時間がかかった）
-  const firstUnused = new Map<string, number>();
-  const nextEntry = (href: string, from: number): number => {
-    const list = byUrl.get(href); if (!list) return -1;
-    let p = firstUnused.get(href) ?? 0;
-    while (p < list.length && used.has(list[p])) p++;
-    firstUnused.set(href, p);
-    for (let q = p; q < list.length; q++) if (list[q] > from && !used.has(list[q])) return list[q];
-    return -1;
+  entries.forEach((x, k) => { const u = `${methodOf(x)} ${normalizedUrl(x.request.url)}`; (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
+  // キーごとの一覧（エントリの番号の昇順）から、from より後の最初の使っていないエントリを引く。from より後の位置は二分探索で求め、使い済みの
+  // エントリは「次の候補の位置」をたどって飛ばす（経路を縮める）。先頭の使い済みだけを飛ばす作りでは、from より前の使っていないエントリを
+  // 毎回なめ直し、同じ URL へ転送する 3xx が多い HAR で2乗の時間がかかった（束のレビュー）。使い済みは増えるだけなので、飛ばしてよい
+  const skip = new Map<string, Int32Array>();
+  const nextOf = (key: string, from: number): number => {
+    const list = byUrl.get(key); if (!list) return -1;
+    let nx = skip.get(key);
+    if (!nx) { nx = Int32Array.from({ length: list.length + 1 }, (_, k) => k); skip.set(key, nx); }
+    let lo = 0, hi = list.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid] > from) hi = mid; else lo = mid + 1; }
+    let r = lo;
+    while (r < list.length) {
+      if (nx[r] !== r) r = nx[r];
+      else if (used.has(list[r])) { nx[r] = r + 1; r++; }
+      else break;
+    }
+    for (let k = lo; k < r && nx[k] !== r;) { const n = nx[k] === k ? k + 1 : nx[k]; nx[k] = r; k = n; }
+    return r < list.length ? list[r] : -1;
+  };
+  /**
+   * 転送先のメソッド（fetch の仕様）：303 は HEAD なら HEAD、ほかは GET。301・302 は POST なら GET、ほかは元と同じ。307・308 は元と同じ。
+   * メソッドを見ずにつなぐと、同じ URL の POST /login を GET /mypage → 302 /login の転送先にして、ログインの候補を消した（第49回）
+   */
+  const nextEntry = (href: string, from: number, status: number, m0: string): number => {
+    const m = status === 303 ? (m0 === 'HEAD' ? 'HEAD' : 'GET') : (status === 301 || status === 302) && m0 === 'POST' ? 'GET' : m0;
+    return nextOf(`${m} ${href}`, from);
   };
   let anyCookie = false;
   entries.forEach((e, i) => {
@@ -125,7 +146,9 @@ export function importHar(text: string): HarImport {
     used.add(i);
     const hops = [e];
     let cur = e, ci = i;
-    while (cur.response.status >= 300 && cur.response.status < 400) {          // Location の先のエントリをつなぐ
+    // Location の先のエントリをつなぐ。ブラウザが転送するのは 301・302・303・307・308 だけ（304 の Location で、あとの 200 を 304 の連なりに
+    // 入れ、その 200 の連なりを消した。束のレビュー）
+    while ([301, 302, 303, 307, 308].includes(cur.response.status)) {
       const loc = cur.response.redirectURL || named(cur.response.headers).find(h => h.name.toLowerCase() === 'location')?.value;
       if (!loc) break;
       let next: URL; try { next = new URL(loc, cur.request.url); } catch { break; }
@@ -134,7 +157,7 @@ export function importHar(text: string): HarImport {
       // 同じホストの http から https への転送はつなぐ
       if (next.hostname !== new URL(cur.request.url).hostname) break;
       const from = ci;
-      const j = nextEntry(next.href, from);
+      const j = nextEntry(next.href, from, cur.response.status, methodOf(cur));
       if (j < 0) break;
       used.add(j); cur = entries[j]; ci = j; hops.push(cur);
     }
@@ -217,6 +240,7 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
   if (imp.internal) warnings.push({ kind: 'har-excluded', detail: `HAR：ブラウザの内部の転送（HSTS などの 307 Internal Redirect）のエントリが${imp.internal}件あり、判定に使いませんでした` });
   if (revalidated) warnings.push({ kind: 'har-excluded', detail: `HAR：304（キャッシュの再検証）のエントリが${revalidated}件あり、判定に使いませんでした。開発者ツールで「キャッシュを無効にする」を選んで記録し直すと判定できます` });
   if (excluded) warnings.push({ kind: 'har-excluded', detail: `HAR：${excluded}件のエントリ（対象外のホスト、または除外したもの）を判定に使いませんでした` });
+  warnings.push(...cookieCapWarnings(targets));
   if (imp.sanitized) warnings.push({ kind: 'har-sanitized', detail: 'HAR：Cookie・Set-Cookie が含まれていません。機密情報を除いた形式で書き出された可能性があります。第2章（Cookie）の項目は判定できません' });
   return { targets, warnings };
 }

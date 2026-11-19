@@ -92,13 +92,23 @@ const THIRD_PARTY = /^(?:_hj|intercom-|AMP_TOKEN$|__stripe_|optimizely|_dd_s$|_u
 // Kubernetes の ingress-nginx のスティッキーセッション（INGRESSCOOKIE）と、Google Cloud の負荷分散（GCLB）も同じ
 // AWSELB で始まっても、ALB の認証（OIDC・Cognito）のセッションCookie（AWSELBAuthSessionCookie-0）は利用者ごとのセッションなので除かない。
 // Azure Front Door（ASLBSA・ASLBSACORS）、Application Gateway（ApplicationGatewayAffinity）、Citrix ADC（NSC_…）、Traefik の既定の名前も負荷分散の印
-const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB(?!Auth)|TS01[0-9a-f]{6}|SERVERID$|ROUTEID$|INGRESSCOOKIE$|GCLB$|ASLBSA|ApplicationGatewayAffinity|NSC_|_TRAEFIK_BACKEND$)/i;
-const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*)$/i;
+const LOAD_BALANCER = /^(?:BIGipServer|ARRAffinity|AWSALB|AWSELB(?!Auth)|TS01[0-9a-f]{6}|SERVERID$|ROUTEID$|INGRESSCOOKIE$|GCLB$|ASLBSA|ApplicationGatewayAffinity|NSC_|_TRAEFIK_BACKEND$|route$)/i;   // route は nginx-sticky-module-ng の既定の名前（第49回）
+// 期限・時刻を表す語（grafana_session_expiry・session_timeout・token_expires_at）も、セッションIDではない（画面の JS が読む期限の Cookie を、
+// HttpOnly がないとして C-02①（高）、C-07①②（高）にした。第51回）
+const NOT_SESSION_WORD = /^(?:lang|language|locale|theme|ga|gid|pref\w*|expiry|expires?|expired|expiration|timeout|ttl|timestamp)$/i;
 // WAF・CDN・ボット対策の Cookie（Cloudflare、Imperva、Akamai）。CDN が発行し、属性（Domain・SameSite・Secure）は運営者が変えられない。
 // 期限がなく値が長いものは、推定ではセッションCookieに見える（Imperva の incap_ses_* で C-01①・C-02①（高）の誤検知になる）
 // Cloudflare は __cf で始まる名前（__cf_bm、__cflb、__cfruid、__cfwaitingroom）と cf_clearance・cf_ob_info・cf_use_ob・cf_chl_…・_cfuvid
 const WAF_CDN = /^(?:__cf|cf_(?:clearance|ob_info|use_ob|chl_)|_cfuvid$|incap_ses_|nlbi_|visid_incap_|ak_bmsc$|bm_sv$|bm_sz$|bm_mi$|_abck$)/i;
-export const notSessionName = (name: string) => NOT_SESSION.test(name) || LOAD_BALANCER.test(name) || WAF_CDN.test(name) || THIRD_PARTY.test(name) || name.split(/[-_.]+/).some(w => NOT_SESSION_WORD.test(w));
+/**
+ * 主のセッションIDらしい名前：sess を含むもの（JSESSIONID・PHPSESSID・laravel_session）と、語として sid で終わるもの（sid・__Host-sid・
+ * Express の connect.sid）。C-09 で「再発行したか」を必ず比べる Cookie（sess だけで見ると、__Host-sid・connect.sid の固定化を合格にした。第51回）
+ */
+/** 名前の語（- _ . とキャメルケースの境目で分ける。sessionExpiry → session・expiry） */
+const wordsOfName = (name: string) => name.replace(/([a-z\d])([A-Z])/g, '$1_$2').split(/[-_.]+/).filter(Boolean);
+const TIME_WORD = /^(?:last|at|time|ts|date|since|until|updated|created|when)$/i;
+export const MAIN_SESSION = /sess|(?:^|[^a-z0-9])sid$/i;
+export const notSessionName = (name: string) => NOT_SESSION.test(name) || LOAD_BALANCER.test(name) || WAF_CDN.test(name) || THIRD_PARTY.test(name) || wordsOfName(name).some(w => NOT_SESSION_WORD.test(w));
 /**
  * 負荷分散・WAF・CDN の Cookie か。AWSALBCORS・ARRAffinitySameSite・__cf_bm は仕組み上 SameSite=None で、__cf_bm などは Domain を親ドメインにする。
  * 運営者が属性を選べないので、C-03③・C-04① にしない
@@ -135,13 +145,25 @@ export const isChunkMarker = (c: SetCookie) => /^chunks-\d+$/.test(c.value);
 export const isChunkPiece = (c: SetCookie) => /^\..*C(?:[2-9]|\d{2,})$/.test(c.name) ? AUTH_COOKIE.test(c.name) : /^_oauth2_proxy_[1-9]\d*$/.test(c.name);
 
 /** now：削除用かどうか（過去の Expires）を判定する時刻。ルールからは採取時刻（RuleContext.now）を渡す */
+/**
+ * 値が URL（https://…、エンコードした https%3A%2F%2F…）か、戻り先らしい名前（url・redirect・return・callback・next・dest・path）の
+ * エンコードした / で始まるパス（returnUrl=%2Fmypage）か。生の「/」と、名前によらない「%2F」で始まる値は、Base64 のセッションID
+ * （/u5G…、Rails の _app_session=%2Fx9Y…（Base64 を URL エンコードしたもの））と見分けられないので含めない
+ */
+const urlValue = (name: string, v: string): boolean => /^"?https?(?::\/\/|%3A%2F%2F)/i.test(v)
+  || (/^"?%2F/i.test(v) && /url|redirect|return|callback|next|dest|path/i.test(name));
 export function looksLikeSession(c: SetCookie, now = Date.now()): boolean {
   if (isDeletion(c, now)) return false;
   if (sessionConfig.names.length) return sessionConfig.names.some(n => n.toLowerCase() === c.name.toLowerCase());   // 指定があれば推定しない
   if (notSessionName(c.name)) return false;
+  // 値が URL・パスのもの（NextAuth の __Secure-next-auth.callback-url=https%3A%2F%2F…、戻り先の returnUrl=%2Fmypage）は、名前に auth・session を
+  // 含んでもセッションIDではない（ログインで同じ値を送り直しただけで C-09①（高）に、サンプルごとに同じ値なので C-07②（高）にした）
+  if (urlValue(c.name, c.value)) return false;
   const persistent = c.attrs.has('expires') || c.attrs.has('max-age');
   // 名前で推定しても、値が真偽値・0・1 のもの（has_session=1、session_active=true）はフラグで、セッションIDではない（ほかの数字の値（SESSIONID=1234）は
   // セッションIDとして C-07 で判定する）
-  if (SESSION_NAME.test(c.name)) return !/^(?:true|false|yes|no|on|off|[01])$/i.test(c.value);
+  // 値が Unix 時刻（2001〜2286年の秒・ミリ秒）で、名前に sess・sid がなく時刻の語（last・at・time など）があるもの（last_login=1731900000）も、
+  // 時刻でセッションIDではない（第51回）。時刻の語のない auth=1000000001 は、連番のトークンとして C-07 で判定する（束のレビュー）
+  if (SESSION_NAME.test(c.name)) return !/^(?:true|false|yes|no|on|off|[01])$/i.test(c.value) && !(/^1\d{9}(?:\d{3})?$/.test(c.value) && !MAIN_SESSION.test(c.name) && wordsOfName(c.name).some(w => TIME_WORD.test(w)));
   return !persistent && c.value.length >= 20;
 }

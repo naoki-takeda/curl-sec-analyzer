@@ -59,13 +59,14 @@ describe('A1 生成スクリプト：login は本文も採取する', () => {
   const loginLine = s.split('\n').find(l => l.includes('--data @login.txt') && !l.includes('s$i.txt'))!;
   it('ヘッダと本文を分けて取り、#BODY の印のあとに本文を出す', () => {
     expect(loginLine).toContain('-D "$hdr" -o "$body"');
-    expect(loginLine).toContain('echo "#BODY run=$RUN"; cat "$body"');
+    expect(loginLine).toContain('echo "#BODY run=$RUN"; head -c 196608 "$body"');
     expect(loginLine).toContain('-c jar.txt -b jar.txt -X POST');
     expect(loginLine).not.toContain('/dev/null');
   });
   it('pre-login は今までどおり -v（送った Cookie の名前を C-09 で使う）', () => {
     const pre = s.split('\n').findIndex(l => l.includes('label=pre-login'));
-    expect(s.split('\n').slice(pre, pre + 3).join('\n')).toMatch(/curl .*-v -o \/dev\/null -c jar\.txt -b jar\.txt/);
+    // -b jar.txt は付けない（スクリプトの初めに jar.txt を消すので、-v の1行目に cookie file の警告を出した。第49回）
+    expect(s.split('\n').slice(pre, pre + 3).join('\n')).toMatch(/curl .*-v -o \/dev\/null -c jar\.txt "\$H"/);
   });
 });
 

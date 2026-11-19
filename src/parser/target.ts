@@ -1,4 +1,5 @@
 import type { HttpResponse, ParseWarning, ResponseKind, Target } from '../model';
+import { looksLikeSessionName } from './setCookie';
 
 /** 付け直したラベル（http#2 など）の元のラベル。ラベル対応表やラベルで判定を変えるルールは、この元のラベルで判定する */
 export const baseLabel = (label: string) => label.replace(/#\d+$/, '');
@@ -50,11 +51,34 @@ const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowe
  * 消しただけのログアウトを合格にした）。http の同じサイトのホップは含める（C-10 が見る）
  */
 export const siteResponses = (t: Target): HttpResponse[] => {
+  // 1xx（103 Early Hints など）とプロキシの応答（CONNECT・407）は除く。ブラウザは 1xx の Set-Cookie・Clear-Site-Data を使わない（103 の Set-Cookie で
+  // C-09 を、103 の削除の Set-Cookie・Clear-Site-Data で C-12②・H-15 を合格にできた。第50回）。プロキシの応答はサイトの応答ではない
+  const rs = t.responses.filter(r => r.kind !== 'informational' && r.kind !== 'connect');
   const host = hostnameOf(t.url);
-  if (!host) return t.responses;
+  if (!host) return rs;
   const site = siteOf(host);
-  return t.responses.filter(r => { const h = hostnameOf(r.url); return !r.url || !h || siteOf(h) === site; });
+  return rs.filter(r => { const h = hostnameOf(r.url); return !r.url || !h || siteOf(h) === site; });
 };
+/**
+ * 1つの応答で読む Set-Cookie の上限。ブラウザも1つのドメインに約180個までしか保存しない。上限がないと、5MB の Set-Cookie の行で
+ * Cookie の項目ごとに数万件の指摘を作り、判定に数十秒かかった（第50回）。超えた分は警告で知らせる
+ */
+export const MAX_SET_COOKIES = 300;
+/**
+ * Set-Cookie の値を一覧に足す。上限を超えたら古いもの（先のもの）を捨てて、後のものを残す（ブラウザも古いものから追い出す。先の300個を
+ * 残すと、301個目の Secure なしのセッションCookie を判定せず、C-01① などを合格にした。束のレビュー）。捨てた数を返す
+ */
+export const pushCookies = (list: string[], vals: string[]): number => {
+  let dropped = 0;
+  for (const x of vals) list.push(x);   // push(...) に広げない（長い Set-Cookie でスタックがあふれる）
+  if (list.length > MAX_SET_COOKIES) { dropped = list.length - MAX_SET_COOKIES; list.splice(0, dropped); }
+  return dropped;
+};
+/** 上限を超えた Set-Cookie のあるターゲットの警告 */
+export const cookieCapWarnings = (targets: Target[]): ParseWarning[] => targets.flatMap(t => {
+  const n = t.responses.reduce((a, r) => a + (r.droppedCookies ?? 0), 0);
+  return n ? [{ kind: 'too-many-cookies' as const, label: t.label, detail: `ターゲット「${t.label}」：1つの応答の Set-Cookie が${MAX_SET_COOKIES}個を超えたので、先の${n}個を判定に使いませんでした（ブラウザも1つのドメインに約180個までしか保存せず、古いものから捨てます）` }] : [];
+});
 /** 登録ドメインの近似（最後の2つのラベル。co.jp・com.au のような2段の国別ドメインは3つ）。IP アドレスはそのまま */
 const siteOf = (h: string): string => {
   if (/^[\d.]+$|:/.test(h)) return h;
@@ -172,4 +196,35 @@ export const firstStatus = (t: Target): number => ownChain(t)[0]?.status ?? 0;
  * ログアウトの応答が失敗（4xx・5xx）しているか。GET の /logout に 405 を返すアプリなどでは、ログアウトしていないので、
  * C-12（ログアウト後の無効化・Cookie の削除）と H-15 を判定しない
  */
-export const logoutFailed = (t: Target): boolean => firstStatus(t) >= 400;
+export const logoutFailed = (t: Target): boolean => {
+  const s = firstStatus(t);
+  return s >= 400 || (s >= 200 && s < 300 && logoutConfirmPage(t));
+};
+/**
+ * ログアウトの確認画面（GET では「ログアウトしますか」のフォームを返すだけで、POST でログアウトする作り。ASP.NET Core Identity の既定の画面、
+ * Spring Security の既定のログアウトの確認画面）。ログアウトしていないのに、C-12①（高）と H-15 を判定した（第48回）。次のすべてに当たるもの：
+ * - セッションCookie らしい名前の Cookie を消しも発行し直しもせず、Clear-Site-Data もない（AWSALB のような毎回の Cookie は見ない）
+ * - 本文に、送信先（action）に logout・signout・logoff の語がある POST のフォームがあり、その中にログアウトのボタンの文言がある
+ *   （action のないフォームや購読のフォームを置くだけで、本物のログアウトの C-12① を na に隠せたので、送信先と文言の両方を見る）
+ * - パスワード欄（ログアウトのあとのログインの画面）と、ASP.NET WebForms の __VIEWSTATE（ページ全体を囲むフォーム）がない
+ * タグは indexOf で切り出して線形の時間で読む（正規表現の先読みで読むと、<form の繰り返しで3乗の時間がかかった）
+ */
+const LOGOUT_WORD = /log[-_ ]?out|sign[-_ ]?out|log[-_ ]?off|ログアウト|サインアウト/i;
+function logoutConfirmPage(t: Target): boolean {
+  const chain = ownChain(t);
+  if (chain.some(r => r.headers.has('clear-site-data') || (r.headers.get('set-cookie') ?? []).some(c => looksLikeSessionName(c.split('=')[0].trim())))) return false;
+  const body = (finalResponse(t)?.body ?? '').slice(0, 65536);
+  if (/type\s*=\s*["']?password/i.test(body) || /__VIEWSTATE/i.test(body)) return false;
+  const low = body.toLowerCase();
+  for (let i = low.indexOf('<form'), n = 0; i >= 0 && n < 50; i = low.indexOf('<form', i + 5), n++) {
+    const end = low.indexOf('>', i); if (end < 0 || end - i > 2000) continue;
+    const tag = low.slice(i, end);
+    const method = tag.match(/\bmethod\s*=\s*["']?(\w+)/)?.[1];
+    const action = tag.match(/\baction\s*=\s*["']?([^"'\s>]*)/)?.[1] ?? '';
+    if (method !== 'post' || !LOGOUT_WORD.test(action)) continue;
+    const close = low.indexOf('</form', end);
+    const inner = body.slice(end + 1, close < 0 ? end + 4000 : Math.min(close, end + 4000));
+    if (LOGOUT_WORD.test(inner.replace(/<[^>]{0,500}>/g, ' ')) || /value\s*=\s*["'][^"']{0,40}(?:log\s*out|sign\s*out|ログアウト)/i.test(inner)) return true;
+  }
+  return false;
+}

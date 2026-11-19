@@ -76,7 +76,7 @@ describe('#META cmd= の実施コマンド（第28回の反例。第31回から�
       ['curl -H Authorization: -X POST https://a.example/', 'curl -H Authorization: -X POST https://a.example/']]) expect(summarizeCommand(s)).toBe(k);
   });
 
-  it('長い入力でも時間が入力の長さの2乗にならない', () => {
+  it('長い入力でも時間が入力の長さの2乗にならない', { tags: ['perf'] }, () => {
     const t = performance.now();
     summarizeCommand(`curl_-d_${'_-HAuthorization:'.repeat(12000)}`);
     summarizeCommand(`curl_-d_x${'_-Hz:a'.repeat(33000)}`);

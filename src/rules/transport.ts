@@ -20,13 +20,13 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     if (first.status >= 400 && first.status < 500) return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', `HTTP ${first.status}（HTTP のリクエストを拒否）`, '')];
     if (first.status >= 500) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `HTTP ${first.status}（サーバエラー）`, '')];
     if (first.status < 300 || first.status >= 400 || !loc)
-      return [mk(httpsRedirect, ctx, 1, 'high', 'fail', `HTTP ${first.status}（転送なし）`, rec, { obsId: 'redirection-missing', score: -20 })];
+      return [mk(httpsRedirect, ctx, 1, 'high', 'fail', `HTTP ${first.status}（転送なし）`, rec)];
     let to: URL;
     try { to = new URL(loc, url); } catch { return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `Location を解釈できない: ${loc}`, '')]; }
     const from = new URL(url);
     const ev = `HTTP ${first.status} → ${to.href}`;
-    if (to.protocol !== 'https:') return [mk(httpsRedirect, ctx, 2, 'medium', 'fail', ev, rec, { obsId: 'redirection-not-to-https', score: -20 })];
-    if (to.hostname !== from.hostname) return [mk(httpsRedirect, ctx, 3, 'low', 'fail', ev, rec, { obsId: 'redirection-off-host-from-http', score: -5 })];
+    if (to.protocol !== 'https:') return [mk(httpsRedirect, ctx, 2, 'medium', 'fail', ev, rec)];
+    if (to.hostname !== from.hostname) return [mk(httpsRedirect, ctx, 3, 'low', 'fail', ev, rec)];
     // 303 See Other も一時的な転送（ブラウザは覚えない）
     if (first.status === 302 || first.status === 303 || first.status === 307) return [mk(httpsRedirect, ctx, 4, 'info', 'fail', ev, '恒久的な転送（301 または 308）にする')];
     return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', ev, '')];

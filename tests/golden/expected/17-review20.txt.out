@@ -10,7 +10,7 @@ hsts-comma | https://www.example.com/hsts | key=hsts-comma | responses=1
 cors-partial | https://www.example.com/api/me | key=cors-partial | responses=1
 
 ## warnings
-tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（判定不能）
+tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（tls1。判定不能）
 
 ## findings
 cors-null | R-01.na | info | na | Origin: null を送った応答（R-02 で判定する）
@@ -57,7 +57,7 @@ hsts-comma | H-13.ok | info | pass | text/html; charset=utf-8
 hsts-comma | H-14.1 | low | fail | (ヘッダなし)
 hsts-comma | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 hsts-comma | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-hsts-comma | R-04.ok | info | pass | (ACAOなし)
+hsts-comma | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 hsts-comma | T-12.ok | info | pass | HTTP/2
 logout/after-logout | C-12.na | info | na | 
 mypage | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -93,7 +93,7 @@ mypage | H-13.ok | info | pass | text/html; charset=utf-8
 mypage | H-14.1 | low | fail | (ヘッダなし)
 mypage | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 mypage | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-mypage | R-04.ok | info | pass | (ACAOなし)
+mypage | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 mypage | T-12.ok | info | pass | HTTP/2
 page | A-02.ok | info | pass | URL・Location・本文にトークンなし
 page | E-01.ok | info | pass | エラーの詳細らしき記述なし
@@ -117,7 +117,7 @@ page | H-13.ok | info | pass | text/html; charset=utf-8
 page | H-14.1 | low | fail | (ヘッダなし)
 page | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 page | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-page | R-04.ok | info | pass | (ACAOなし)
+page | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 page | T-05.ok | info | pass | 1回の転送
 page | T-12.ok | info | pass | HTTP/2
 pre-login/login | C-09.na | info | na | 
@@ -131,7 +131,7 @@ security-txt | H-12.3 | info | fail | (ヘッダなし)
 security-txt | H-13.ok | info | pass | text/plain
 security-txt | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 security-txt | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-security-txt | R-04.ok | info | pass | (ACAOなし)
+security-txt | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 security-txt | T-12.ok | info | pass | HTTP/2
 session-sample-* | C-07.na | info | na | 
 unauth-api | A-01.na | info | na | HTTP 200（データのない JSON。保護データを返したかは分からない）
@@ -143,7 +143,7 @@ www.example.com | T-10.3 | medium | fail | TLS 1.2で接続できたCBC・静的
 
 ## coverage
 H-01 | evaluated | fails=4
-H-02 | missing-input | fails=0 | HSTSがない（H-01で判定） / max-age=63072000, includeSubDomains, preload（HSTSの構文の誤り。H-01③で判定）
+H-02 | missing-input | fails=0 | HSTSがない（H-01で判定） / HSTS の構文を直す（H-01③）
 H-03 | evaluated | fails=2 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定） / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
@@ -168,7 +168,7 @@ C-06 | evaluated | fails=1
 C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | evaluated | fails=0
 C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
-C-10 | missing-input | fails=0 | 必要なラベル: http
+C-10 | missing-input | fails=0 | 必要なラベル: （一般）, http, pre-login, login, session-sample-*
 C-11 | evaluated | fails=0
 C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
 C-13 | evaluated | fails=0
@@ -177,7 +177,7 @@ C-15 | manual | fails=0
 R-01 | evaluated | fails=0 | 一部のターゲット（2件）は入力不足 / C6 のとおり許可外の Origin（https://evil.example）で採取する / 送信したOriginが分からない。-v 付きで再取得する
 R-02 | evaluated | fails=1 | 一部のターゲット（2件）は入力不足 / C7 のとおり Origin: null を送って採取する
 R-03 | evaluated | fails=1
-R-04 | evaluated | fails=0
+R-04 | evaluated | fails=0 | 一部のターゲット（4件）は入力不足 / C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | evaluated | fails=2 | 一部のターゲット（1件）は入力不足 / -v を付けて、Origin を送って採取し直す
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

@@ -119,3 +119,240 @@ describe('冪等', () => {
     expect(allowText(m)).toBe(m);
   });
 });
+
+// 第48回のレビュー（マスキング・エクスポート）で見つかった漏れ
+describe('第48回：URL・番号・決まった文言の伏せ方', () => {
+  const AT48 = '#META at=2026-11-01T10:00:00';
+  it('URL のユーザー情報に引用符があっても、パスワードを伏せる', () => {
+    for (const u of ["https://alice:Summer'2024@www.example.com/", 'https://al\'ice:Summer2024@www.example.com/', 'http://admin:Tr0ub4dor"3@10.0.0.5/']) {
+      expect(showText(u), u).not.toMatch(/Summer|Tr0ub4dor|2024@/);
+      expect(showText(u), u).toContain(':****@');
+    }
+    const r = evaluate(`#TARGET url=https://alice:Summer'2024@www.example.com/ label=top\n${AT48}\nHTTP/2 302\nlocation: https://www.example.com/x\n\n`);
+    expect(JSON.stringify(r.findings.map(f => f.url))).not.toContain('Summer');
+  });
+  it('区切りをパーセントエンコードしたカード番号・社会保障番号・12桁の番号を伏せる', () => {
+    for (const s of ['?card=4111%201111%201111%201111', '?card=4111%2D1111%2D1111%2D1111', '?id=123%2D45%2D6789', '?mn=1234%205678%209012',
+      '?card=%34%31%31%31%20%31%31%31%31%20%31%31%31%31%20%31%31%31%31']) {
+      expect(showText(`https://www.example.com/pay${s}`), s).not.toMatch(/4111|6789|9012|%31%31%31%31%20/);
+    }
+    // 番号でないもの（エンコードした空白でつないだ語、Luhn に通らない番号）は残す
+    expect(showText('https://www.example.com/search?q=hello%20world')).toContain('hello%20world');
+  });
+  it('パラメータの値に入れた、エンコードした URL のユーザー情報を伏せる', () => {
+    for (const s of ['?r=https%3A//alice:Summer2024@idp.example.com/', '?r=%2F%2Falice%3ASummer2024%40idp.example.com',
+      '?r=https%253A%252F%252Falice%253ASummer2024%2540idp.example.com', '?r=https%3A%2F%2Falice%3ASummer%2F2024%40idp.example.com']) {
+      expect(showText(`https://www.example.com/sso${s}`), s).not.toContain('Summer');
+    }
+  });
+  it('パスに置いた、区切りのある招待・再設定の番号を伏せる（読める語の並びは残す）', () => {
+    for (const p of ['/invite/QWER-TYUI-ZXCV-ASDF', '/magic/K7QX-9MZP-A2B4-C6D8', '/reset/a1b2-c3d4-e5f6-g7h8']) {
+      expect(showText(`https://www.example.com${p}`), p).not.toMatch(/ZXCV|K7QX|a1b2/);
+    }
+    for (const keep of ['DES-CBC3-SHA', 'max-age=31536000', 'GET-POST-PUT', '2026-11-18']) expect(showText(keep), keep).toBe(keep);
+  });
+  it('ユーザー名と組の p= の値を伏せる（ページ番号の p= は残す）', () => {
+    expect(showText('https://www.example.com/rest/ping?u=alice&p=Summer2024&v=1.16')).not.toContain('Summer2024');
+    expect(showText('https://www.example.com/list?p=2&sort=asc')).toContain('p=2');
+  });
+  it('推奨対応の決まった文言の nonce を化けさせない', () => {
+    expect(showText("script-src 'nonce-…' 'strict-dynamic'")).toBe("script-src 'nonce-…' 'strict-dynamic'");
+  });
+  it('T-11 の証跡に、手で書いた #META at= の値をそのまま出さない', () => {
+    const tls = [`#TARGET url=https://www.example.com/ label=tls`, '#META at="2026-11-20 10:00 alice:Summer2024"', 'CONNECTED(00000003)',
+      'New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384', 'Verify return code: 0 (ok)', 'notAfter=Dec  1 00:00:00 2026 GMT', ''].join('\n');
+    expect(JSON.stringify(evaluate(tls).findings.filter(f => f.item === 'T-11'))).not.toContain('Summer');
+  });
+});
+
+// 第48回の束1の修正のレビューで見つかったもの（修正で新しく出た問題と、修正の足りなかった形）
+describe('第48回（束1のレビュー）：冪等性・伏せすぎ・残った形', () => {
+  const twice = (s: string) => showText(showText(s));
+  it('ユーザー名と組の p= を伏せた結果は、何度かけても変わらない', () => {
+    for (const s of ['https://www.example.com/rest/ping?u=alice&p=Summer2024&v=1.16', '?login=alice&p=enc:abc', '?user=bob&P=3', '?u=alice&amp;p=Summer2024', '?r=%3Fu%3Dalice%26p%3DSummer2024']) {
+      expect(twice(s), s).toBe(showText(s));
+      expect(showText(s), s).not.toContain('Summer2024');
+      expect(showText(s), s).not.toContain('chars) chars)');
+    }
+  });
+  it('URL の後ろの JSON・属性に置いたトークンを、ホスト名として残さない', () => {
+    for (const s of ['{"site":"https://a.example","id":"x@xoxb-123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx"}', '{"site":"https://a.example","ref":"bob@AKIAIOSFODNN7EXAMPLE"}',
+      "?r=https://a.example'@AKIAIOSFODNN7EXAMPLE"]) {
+      expect(showText(s), s).not.toMatch(/AbCdEfGhIjKl|AKIAIOSFODNN7/);
+    }
+  });
+  it('JSON・HTML のメールアドレスと URL を伏せすぎない', () => {
+    expect(showText('{"site":"https://a.example","email":"bob@example.com"}')).toContain('"email":"bob@example.com"');
+    expect(showText('<a href="https://x.example" title="mailto:me@x.example">')).toContain('mailto:me@x.example');
+  });
+  it('暗号の名前・型番を、区切りのある番号として伏せない', () => {
+    for (const c of ['ECDHE-RSA-RC4-SHA', 'EXP-RC4-MD5', 'ADH-RC4-MD5', 'DHE-DSS-RC4-SHA', 'IDEA-CBC-MD5', 'ECDH-RSA-RC4-SHA', 'ECDHE-ECDSA-RC4-SHA', 'EXP-RC2-CBC-MD5',
+      'ADH-DES-CBC3-SHA', 'SRP-3DES-EDE-CBC-SHA', 'AES-128-GCM', 'AES-256-CBC', 'node-v18-x64', 'win-x64-msvc', '?q=XSS%20CSRF%20SQLI', '?q=AES%20GCM%20CBC', '?s=MD5%20SHA1%20RC4']) {
+      expect(showText(c), c).toBe(c);
+    }
+    const r = evaluate(`#TARGET url=https://www.example.com/ label=tls\n#CIPHERPROBE c=ECDHE-RSA-RC4-SHA ok=1\n#CIPHERPROBE c=DES-CBC3-SHA ok=1\n`);
+    expect(r.findings.filter(f => f.item === 'T-10').map(f => f.evidence).join(' ')).toContain('ECDHE-RSA-RC4-SHA');
+  });
+  it('語のあとの、エンコードした区切り・+ の番号を伏せる', () => {
+    for (const s of ['?q=card%204111%201111%201111%201111', '?q=card%3D4111%201111%201111%201111', '?q=ssn%20123-45-6789', '?q=SSN%20123%2D45%2D6789',
+      '?q=card+4111+1111+1111+1111', '?mn=1234%2E5678%2E9012']) {
+      expect(showText(s), s).not.toMatch(/4111|6789|9012/);
+    }
+  });
+  it('エンコードした URL のユーザー情報の近い形を伏せ、ポートのあとのパスは伏せない', () => {
+    for (const s of ['?r=%22https%3A%2F%2Falice%3ASummer2024%40idp.example.com%22', '?next=%2Flogin%3Fr%3Dhttps%3A%2F%2Falice%3ASummer2024%40idp.example.com',
+      '?r=https:%2F%2Falice:Summer2024@idp.example.com', '?r=https%3A%2F%2Fbob%40corp.example%3ASummer2024%40idp.example.com', '?r=https%3A//alice%3ASummer2024%40idp.example.com',
+      '?r=https%3A%2F%2Falice%3ASum%3Fmer2024%40idp.example.com', '?r=https%25253A%25252F%25252Falice%25253ASummer2024%252540idp.example.com']) {
+      expect(showText(s), s).not.toMatch(/Summer2024|mer2024/);
+    }
+    expect(showText('?r=https%3A%2F%2Fapi.example.com%3A8443%2Fusers%2Fbob%40example.com')).toContain('8443%2Fusers%2Fbob%40example.com');
+  });
+  it('T-11 の時点は、書いてある日時の形のまま出す（タイムゾーンでずらさない）', () => {
+    const tls = (at: string) => evaluate([`#TARGET url=https://www.example.com/ label=tls`, `#META at=${at}`, 'CONNECTED(00000003)', 'New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384',
+      'Verify return code: 0 (ok)', 'notAfter=Dec  1 00:00:00 2026 GMT', ''].join('\n')).findings.filter(f => f.item === 'T-11').map(f => f.evidence).join(' ');
+    expect(tls('2026-11-20')).toContain('2026-11-20 時点');
+    expect(tls('2026-11-20T10:00:00+09:00')).toContain('2026-11-20T10:00:00+09:00 時点');
+  });
+});
+
+// 第48回の束1の修正の、第2回のレビューで見つかったもの
+describe('第48回（束1の第2回のレビュー）', () => {
+  it('パスワードの中の二重エンコードした @（%2540）のあとも伏せる', () => {
+    for (const s of ['?r=https%3A%2F%2Falice%3AP%2540summer2024%40idp.example', '?r=https%3A%2F%2Falice%3AWinter%2540Tokyo%40idp.example']) {
+      expect(showText(s), s).not.toMatch(/summer2024|Tokyo/);
+      expect(showText(s), s).toContain('idp.example');
+    }
+  });
+  it('ユーザー名と p= の組は同じクエリの中だけで見る（別の URL・ユーザー名のないクエリの p= は残す）', () => {
+    expect(showText('https://a.example/list?p=3 and https://b.example/?user=x')).toContain('p=3');
+    expect(showText('https://a.example/?u=alice&p=Summer2024')).not.toContain('Summer2024');
+  });
+  it('日付を含むファイル名・3文字の略語の並び・暗号の名前を、番号として伏せない', () => {
+    for (const s of ['db-backup-20261118-0300-01.sql', 'cdn-img-001', 'pdf-doc-xls', 'MIT-BSD-GPL', '?q=MIT%20BSD%20GPL', 'SM4-GCM-SM3']) expect(showText(s), s).toBe(s);
+    expect(showText('/invite/QWER-TYUI-ZXCV-ASDF')).not.toContain('ZXCV');
+  });
+});
+
+// 第49回のレビュー（マスキング・エクスポート）
+describe('第49回：URL のユーザー情報・p=・名前・伏せすぎ', () => {
+  it('パスワードの末尾・前後の引用符でも、パスワードを伏せる', () => {
+    for (const s of ["https://alice:Summer2024'@stg.example/", 'https://alice:"Summer2024"@host.example/', 'https://alice:Summer2024"@host.example/']) {
+      expect(showText(s), s).not.toContain('Summer2024');
+      expect(showText(s), s).toContain('stg.example'.includes('stg') && s.includes('stg') ? 'stg.example' : 'host.example');
+    }
+    // JSON の "," の後ろはユーザー情報にしない（第48回のまま）
+    expect(showText('{"site":"https://a.example","email":"bob@example.com"}')).toContain('"email":"bob@example.com"');
+  });
+  it('// の数が標準でない特別なスキームの URL のユーザー情報も伏せる', () => {
+    for (const s of ['<script src="https:///dave:Kirin2024@cdn3.other.example/b.js">', 'https:\\dave:Kirin2024@h.example/', 'http:/dave:Kirin2024@h.example/', 'https:dave:Kirin2024@h.example/']) {
+      expect(showText(s), s).not.toContain('Kirin2024');
+    }
+  });
+  it('mail・user_name・login_id と組の p=、フラグメントの p= を伏せる', () => {
+    for (const s of ['https://a.example/rest/ping?mail=alice@example.com&p=Kirin2024', '?user_name=alice&p=Kirin2024', '?login_id=alice&p=Kirin2024', 'https://a.example/app#u=alice&p=Kirin2024']) {
+      expect(showText(s), s).not.toContain('Kirin2024');
+    }
+  });
+  it('日本語・外国語のパスワードの名前の値を伏せる', () => {
+    for (const s of ['https://a.example/?パスワード=Kirin2024', `https://a.example/?${encodeURIComponent('パスワード')}=Kirin2024`, '{"暗証番号":"4821"}', '{"暗証番号":4821}', '?senha=Kirin2024', '?wachtwoord=Kirin2024']) {
+      expect(showText(s), s).not.toMatch(/Kirin2024|4821/);
+    }
+  });
+  it('製品名・ヘッダ名・暗号の名前を伏せすぎない', () => {
+    for (const s of ['CherryPy/18.9.0', 'WebSEAL/10.0.6.0', 'Proxy-Authorization', 'Proxy-Authenticate', 'X-Proxy-Cache', 'Zyxel', 'DHE-RSA-CAMELLIA256-SHA', 'CAMELLIA256-SHA', 'X25519MLKEM768']) {
+      expect(showText(s), s).toBe(s);
+    }
+  });
+});
+
+describe('第49回：Markdown の自動リンク', () => {
+  it('_ の直後の URL・www. もリンクにしない', async () => {
+    const { toMarkdown } = await import('../src/export/markdown');
+    const { coverage } = await import('../src/engine/coverage');
+    const { IMPLEMENTED } = await import('../src/rules/ruleset');
+    const fs = evaluate('#TARGET url=https://www.example.com/ label=page\n#META at=2026-11-01T10:00:00\nHTTP/2 200\ncontent-type: text/html\n\n<script src="https://cdn.other.example/lib_https://evil.example/x.js"></script>\n').findings;
+    const md = toMarkdown(fs, coverage(fs, IMPLEMENTED), []);
+    expect(md).not.toMatch(/_https:\/\//);
+  });
+});
+
+describe('第50回：pass で終わる名前・長い名前・値の中の ;・配列の値・Cookie の名前', () => {
+  it('pass で終わる名前の値を伏せる（bypass・compass は伏せない）', () => {
+    expect(showText('https://a.example/login?username=bob&userpass=Winter2024')).not.toContain('Winter2024');
+    expect(showText('{"newpass":"Winter2024","oldpass":"Autumn2023"}')).not.toMatch(/Winter2024|Autumn2023/);
+    expect(showText('dbpass=Winter2024')).not.toContain('Winter2024');
+    expect(showText('?pword=Winter2024&pswrd=Spring2025')).not.toMatch(/Winter2024|Spring2025/);
+    expect(showText('?bypass=1&compass=north')).toBe('?bypass=1&compass=north');
+  });
+  it('100文字を超える名前（Rails の入れ子のフォームをエンコードしたもの）の値も伏せる', () => {
+    expect(showText('?registration%5Buser_attributes%5D%5Baccount_attributes%5D%5Bsecurity_settings%5D%5Bcredentials%5D%5Bpassword%5D=Winter2024')).not.toContain('Winter2024');
+  });
+  it('値の中の生の ; も値として伏せる（; のあとが名前= のときは区切り）', () => {
+    expect(showText('?username=bob&password=Summer;2024')).not.toContain('2024');
+    expect(showText('a=1;jsessionid=ABCDEF0123456789ABCD;b=2')).toMatch(/;b=2$/);
+    expect(showText('token=abc; Path=/')).toMatch(/; Path=\/$/);
+  });
+  it('配列の値（"password":["…"]）の中身を伏せる', () => {
+    expect(showText('?q={"password":["Winter2024"]}')).not.toContain('Winter2024');
+  });
+  it('よくあるセッション Cookie の名前は伏せない', () => {
+    for (const n of ['AWSELBAuthSessionCookie-0', 'ObSSOCookie', 'JSESSIONIDSSO', '.ASPXFORMSAUTH', 'AUTHSESSIONID', 'CFAUTHORIZATION'])
+      expect(showText(`${n}=x; Secure`), n).toContain(n);
+  });
+});
+
+describe('第50回（束のレビュー）：括弧で始まる値・pass で終わる語・配列・; の続き', () => {
+  it('括弧で始まる引用符のない値も伏せる', () => {
+    for (const x of ['password: [Winter2024]', 'password={Winter2024}', 'api_key=[Spring2025]', 'secret: {Spring2025}'])
+      expect(showText(x), x).not.toMatch(/Winter2024|Spring2025/);
+  });
+  it('pass で終わる語は、数字・区切り・入れ子の名前でも伏せる', () => {
+    for (const x of ['?newpass1=Winter2024', '?newpass_confirm=Winter2024', '?user[newpass]=Winter2024', '?user%5Bnewpass%5D=Winter2024', '?dbpass.value=Winter2024', '{"newpass1":"Winter2024"}'])
+      expect(showText(x), x).not.toContain('Winter2024');
+  });
+  it('配列のすべての要素・入れ子・JSON の名前・エスケープ・URL エンコードの形を伏せ、ほかのキーの配列は残す', () => {
+    for (const x of ['{"password":["Winter2024","Spring2025"]}', '{"password":[["Winter2024"]]}', '{"userPassword":["Winter2024"]}', '{\\"password\\":[\\"Winter2024\\"]}',
+      '?q=%7B%22password%22%3A%5B%22Winter2024%22%5D%7D', "password: ['Winter2024', 'Spring2025']"])
+      expect(showText(x), x).not.toMatch(/Winter2024|Spring2025/);
+    expect(showText('{"password":["Winter2024"],"x":["keepme"]}')).toContain('keepme');
+  });
+  it('自由文の ; の続きも伏せ、Cookie の属性・接続文字列の設定の前では切る', () => {
+    expect(showText('password=Summer;2024')).not.toContain('2024');
+    expect(showText('x=1;session=abc;Secure;HttpOnly')).toMatch(/;Secure;HttpOnly$/);
+    expect(showText('Server=db;Password=Winter2024;Max Pool Size=100')).toMatch(/;Max Pool Size=100$/);
+  });
+  it('（2回目の束のレビュー）改行を含む配列・括弧のあとの空白・引用符のない要素・=>・数字の付く名前・配列の中のキー', () => {
+    for (const x of ['{"password":[\n  "Winter2024",\n  "Summer2025"\n]}', 'password: [ Winter2024 ]', 'password = { Winter2024 }', 'password: [[Winter2024]]',
+      'password: [Winter2024, Summer2025]', "'password' => ['Winter2024','Summer2025']", 'newpass1=Winter2024', 'password1: Winter2024', 'db_pass1: Winter2024'])
+      expect(showText(x), x).not.toMatch(/Winter2024|Summer2025/);
+    expect(showText('{"password":[{"v":"Winter2024"}]}')).toBe('{"password":[{"v":"Wi…(10 chars)"}]}');
+    expect(showText('a;jsessionid=ABCDEF0123456789;foo/bar.jsp')).toMatch(/;foo\/bar\.jsp$/);
+  });
+});
+
+describe('第51回：配列の空の要素・CSP の ;・エスケープした // のユーザー情報・オブジェクトの値', () => {
+  it('配列に空の文字列の要素があっても、後ろの要素を伏せる', () => {
+    for (const x of ['"password":["","Hunter2Spring"]', '{"password":["a","","Hunter2Spring"]}', '{\\"password\\":[\\"\\",\\"Hunter2Spring\\"]}',
+      'https://a.example/graphql?variables=%7B%22password%22%3A%5B%22%22%2C%22Hunter2Spring%22%5D%7D', "password: ['', 'Hunter2Spring']", 'password => ["", "Hunter2Spring"]'])
+      expect(showText(x), x).not.toContain('Hunter2Spring');
+  });
+  it('値の中の ; の続きは、CSP のディレクティブの前で切る', () => {
+    expect(showText("default-src 'self';report-uri https://o1.ingest.sentry.io/api/4/security/?sentry_key=abc123;script-src 'self' 'unsafe-inline'")).toContain(";script-src 'self' 'unsafe-inline'");
+  });
+  it('JSON でエスケープした // の、特別でないスキームのユーザー情報を伏せる', () => {
+    for (const x of ['postgres:\\/\\/alice:Hunter2Spring@db.example\\/x', 'redis:\\/\\/:Hunter2Spring@cache'])
+      expect(showText(x), x).not.toContain('Hunter2Spring');
+  });
+  it('値がオブジェクトのときも、中の値を伏せる（キーは残す）', () => {
+    expect(showText('"password":{"value":"Hunter2Spring"}')).toMatch(/"value":"Hu…\(13 chars\)"/);
+    expect(showText('password: {value: Hunter2Spring}')).toMatch(/\{value: Hu…\(13 chars\)\}/);
+  });
+  it('（束のレビュー）入れ子のオブジェクト・配列の中の秘密の名前、バックスラッシュを含むユーザー情報、CSP の名前の一覧、引用符のあるオブジェクトのキー', () => {
+    for (const x of ['{"user":{"password":{"value":"Hunter2Spring"}}}', '{"user":{"name":"bob","password":{"value":"Hunter2Spring"}}}', '{"items":[{"password":["Hunter2Spring"]}]}',
+      'smb://CORP\\alice:Hunter2Spring@fileserver/share', '"dsn":"postgres://alice:Hunter2\\\\Spring@db"', '?password=Hunter2Spring;correct-horse-battery',
+      "password: {value: 'Hunter2Spring'}", 'password: {"value": Hunter2Spring}', 'password = {"value": "Hunter2Spring"}', 'password => {"value" => "Hunter2Spring"}',
+      "{'password': {'value': 'Hunter2Spring'}}", '%22password%22%3A%7B%22value%22%3A%22Hunter2Spring%22%7D'])
+      expect(showText(x), x).not.toContain('Spring');
+    expect(showText("password: {value: 'Hunter2Spring'}")).toContain('{value: ');
+  });
+});

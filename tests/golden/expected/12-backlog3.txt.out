@@ -34,7 +34,7 @@ docs | H-13.ok | info | pass | text/html; charset=utf-8
 docs | H-14.1 | low | fail | (ヘッダなし)
 docs | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 docs | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-docs | R-04.ok | info | pass | (ACAOなし)
+docs | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 docs | T-12.ok | info | pass | HTTP/2
 error-* | A-10.na | info | na | 
 logout | C-12.na | info | na | laravel_session を削除せずに発行し直した（新しい値かは分からない）
@@ -51,7 +51,7 @@ sec | H-12.3 | info | fail | (ヘッダなし)
 sec | H-13.ok | info | pass | text/plain
 sec | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 sec | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-sec | R-04.ok | info | pass | (ACAOなし)
+sec | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 sec | T-12.ok | info | pass | HTTP/2
 session-sample-* | C-07.na | info | na | 
 top | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -77,7 +77,7 @@ top | H-13.ok | info | pass | text/html; charset=utf-8
 top | H-14.1 | low | fail | (ヘッダなし)
 top | H-16.1 | low | fail | via: 1.1 varnish (Varnish/7.4)
 top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
-top | R-04.ok | info | pass | (ACAOなし)
+top | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 top | T-12.1 | info | fail | HTTP/1.1
 www.example.com | T-10.2 | high | fail | 署名アルゴリズム: ecdsa-with-SHA1
 www.example.com | T-11.ok | info | pass | notAfter: 2027-10-01 / SAN: 不明
@@ -109,7 +109,7 @@ C-06 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, lo
 C-07 | missing-input | fails=0 | 必要なラベル: session-sample-1, session-sample-2（2つ以上）
 C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-09 | missing-input | fails=0 | 必要なラベル: pre-login, login
-C-10 | missing-input | fails=0 | 必要なラベル: http
+C-10 | missing-input | fails=0 | 必要なラベル: （一般）, http, pre-login, login, session-sample-*
 C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-12 | missing-input | fails=0 | after-logout を採取し、古いセッションCookieが使えないかを C-12① で確かめる / 必要なラベル: logout, after-logout
 C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
@@ -118,7 +118,7 @@ C-15 | manual | fails=0
 R-01 | missing-input | fails=0 | 必要なラベル: cors-*
 R-02 | missing-input | fails=0 | 必要なラベル: cors-*
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
-R-04 | evaluated | fails=0
+R-04 | missing-input | fails=0 | C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す
 R-05 | missing-input | fails=0 | 必要なラベル: cors-*
 R-06 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*
 R-07 | missing-input | fails=0 | 必要なラベル: （一般）, cors-*

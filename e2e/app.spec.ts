@@ -132,12 +132,17 @@ test('画面の改善：最初の手順の案内、入力欄を隠す、「情�
 test('HAR の Worker も含め、ページから作る Worker は外部へ通信できない（blob: Worker はページの CSP を引き継ぐ）', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute('content', /worker-src blob:/);
+  // no-cors にする（CORS の失敗でも reject されるので、CSP が効いていなくても 'blocked' になり、何も確かめていなかった。第49回）。
+  // 送られたリクエストも見る
+  const sent: string[] = [];
+  page.on('request', r => { if (r.url().startsWith('https://example.com/')) sent.push(r.url()); });
   const result = await page.evaluate(() => new Promise<string>(resolve => {
-    const src = "fetch('https://example.com/').then(() => postMessage('sent'), () => postMessage('blocked'))";
+    const src = "fetch('https://example.com/', { mode: 'no-cors' }).then(() => postMessage('sent'), () => postMessage('blocked'))";
     const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
     w.onmessage = e => resolve(String(e.data)); w.onerror = () => resolve('error');
   }));
   expect(result).toBe('blocked');
+  expect(sent).toEqual([]);
 });
 
 test('?lang= に ja・en 以外を指定しても判定できる（en-US は英語）', async ({ page }) => {
@@ -247,4 +252,75 @@ test('件数以外の状態のメッセージも、言語を切り替えると�
   await expect(page.getByRole('status')).toHaveText('Paste curl output, then select Analyze.');
   await page.getByRole('button', { name: '日本語' }).click();
   await expect(page.getByRole('status')).toHaveText('curlの出力を貼り付けてから「判定する」を押してください。');
+});
+
+test('第50回：URL 欄にスキームのない URL を入れると警告する', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill('HTTP/2 200\ncontent-type: text/html\nset-cookie: SESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/\n\n<html></html>\n');
+  await page.getByLabel('#TARGET がない入力のURL（任意）').fill('www.example.com');
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(page.getByText(/URL 欄の値を URL として読めません/)).toBeVisible();
+});
+
+test('第50回：言語を切り替えても、コマンド生成器の入力と生成したスクリプトを残す', async ({ page }) => {
+  await page.goto('/');
+  await page.getByText('コマンドを作る（推奨コマンド C1〜C26）').click();
+  await page.getByLabel('ホスト名').fill('www.example.com');
+  await page.getByRole('button', { name: 'コマンドを作る', exact: true }).click();
+  await page.getByRole('button', { name: 'English' }).click();
+  await expect(page.locator('#gen-host')).toHaveValue('www.example.com');
+  await expect(page.locator('textarea[readonly]').first()).toHaveValue(/label=pre-login/);
+});
+
+test('第50回：章の絞り込みを変えてもフォーカスを失わず、例外の理由のエラーを読み上げる', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  const sel = page.locator('select[data-focus="chapter"]');
+  await sel.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('select[data-focus="chapter"]')).toBeFocused();
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByRole('button', { name: '登録する' }).click();
+  await expect(page.getByRole('alert')).toHaveText(/理由/);
+});
+
+test('第50回：形式の違うファイルを例外ファイルとして読んでも、登録済みの例外を消さない', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByLabel('理由（必須）').fill('検証環境のため');
+  await page.getByRole('button', { name: '登録する' }).click();
+  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await page.getByText('設定ファイル').click();
+  await expect(page.getByText(/例外 1件（有効 1件/)).toBeVisible();
+});
+
+test('第51回：HAR の一覧で操作してもフォーカスを失わず、ホスト単位の表に対象を出す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  const sel = page.locator('select[data-focus^="har-label-"]').first();
+  await expect(sel).toBeVisible();
+  await sel.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeFocused();
+});
+
+test('第51回：ホストが2つあるとき、ホスト単位の表に対象の列を出す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill(['#TARGET url=https://www.example.com/ label=tls', '#TLSPROBE v=tls1 ok=1', '#TARGET url=https://api.example.com/ label=tls2', '#TLSPROBE v=tls1 ok=1', ''].join('\n'));
+  await page.getByRole('button', { name: '判定する' }).click();
+  const cross = page.getByRole('region', { name: 'ホスト単位・ターゲット横断の判定' });
+  await expect(cross.getByRole('columnheader', { name: 'ターゲット' })).toBeVisible();
+  await expect(cross.getByText('www.example.com', { exact: false }).first()).toBeVisible();
+});
+
+test('第51回（束のレビュー）：HAR のラベルを矢印で見て回っても、ほかのエントリの予約ラベルを失わない', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  const labels = async () => page.locator('select[data-focus^="har-label-"]').evaluateAll(els => els.map(e => (e as HTMLSelectElement).value));
+  await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeVisible();
+  const before = await labels();
+  await page.locator('select[data-focus^="har-label-"]').first().focus();
+  for (const k of ['ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp']) await page.keyboard.press(k);
+  expect(await labels()).toEqual(before);
 });

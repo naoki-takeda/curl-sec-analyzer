@@ -24,7 +24,7 @@ function validFinding(x: unknown): Finding | undefined {
   // 長さは切らない（証跡を切ると、大きな CSP の証跡の後ろのホスト名が前回のキーからだけ落ち、同じ結果どうしの差分が新規と解消になった）
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
   return { ruleId: f.ruleId!, item: m[1], condition, title: str(f.title), severity: f.severity!, status: f.status!, target: str(f.target),
-           targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined, evidence: str(f.evidence), recommendation: '', references: [], score: 0 };
+           targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined, evidence: str(f.evidence), recommendation: '', references: [] };
 }
 
 export function parseBaseline(text: string): { baseline?: Baseline; error?: string; skipped: number } {
@@ -64,6 +64,12 @@ const evidenceKey = (e: unknown): string => {
   return [...hosts].sort().join(',');
 };
 const key = (f: Finding) => `${f.ruleId}\u0000${tkey(f)}\u0000${evidenceKey(f.evidence)}`;
+/** HAR のターゲット（ラベル har-4 は記録し直すと別の応答を指すので、ラベルでは突き合わせない） */
+const isHar = (f: Finding) => tkey(f).startsWith('HAR ');
+/** キーがラベルだけ（top、以前の版の top#2）。同じラベルが複数あるときの「ラベル＋URL」（top https://…）は末尾が URL（ラベルは空白を含みうるので、空白の有無では見ない） */
+const labelOnly = (f: Finding) => !isHar(f) && !/ (?:[a-z][\w+.-]*:\/\/|\/)\S*(?: #\d+)?$/i.test(tkey(f));
+/** 「ラベル＋URL」の形のキー（同じラベルが複数あったときのキー。今回はラベルだけのキーになったものを、前回と URL で突き合わせる） */
+const altKey = (f: Finding): string | undefined => (!isHar(f) && f.keyUrl && labelOnly(f) ? `${f.target.replace(/#\d+$/, '')} ${f.keyUrl}` : undefined);
 /** 指摘として残っているもの。例外を適用した指摘（suppressed）も、直ってはいないので含める */
 const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
 
@@ -76,19 +82,35 @@ const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
 export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   const prev = new Map(before.filter(isOpen).map(f => [key(f), f]));
   const now = new Map(after.filter(isOpen).map(f => [key(f), f]));
-  const evaluatedNow = new Set(after.filter(f => f.status !== 'na' || f.dedupedBy).flatMap(f => [`${f.item}\u0000${tkey(f)}`, ...(tkey(f).startsWith('HAR ') ? [] : [`${f.item}\u0000${f.target}`])]));
+  // 判定済みの項目×ターゲット。同じ項目・ターゲットに na（入力不足の条件。横断・ホスト単位の条件を含む）があれば、確かめていない条件があるので
+  // 判定済みにしない（T-09② だけを判定し、①を確かめていないのに、前回の①（高）を「解消」とした。第48回）
+  const ids = (f: Finding) => [`${f.item}\u0000${tkey(f)}`, ...(isHar(f) ? [] : [`${f.item}\u0000${f.target}`]), ...(altKey(f) ? [`${f.item}\u0000${altKey(f)}`] : [])];
+  const naNow = new Set(after.filter(f => f.status === 'na' && !f.dedupedBy).flatMap(ids));
+  // 機密でない応答だけで判定した合格（H-12 の limited）は、機密応答の条件（①）を確かめていないので判定済みに数えない。同じ項目・ターゲットに
+  // 今回の fail があれば、途中で返すルール（H-01 は②で返し④を見ない）が前回の条件を確かめていないことがあるので、前回の別の条件を「解消」にしない（第49回）
+  const failNow = new Map<string, Set<string>>();
+  for (const f of after.filter(isOpen)) for (const k of ids(f)) (failNow.get(k) ?? failNow.set(k, new Set()).get(k)!).add(f.ruleId);
+  const evaluatedNow = new Set(after.filter(f => (f.status !== 'na' || f.dedupedBy) && !f.limited).flatMap(ids).filter(k => !naNow.has(k)));
+  /** 同じ項目・ターゲットに、前回と別の条件の今回の fail があるか（同じ条件の別の配信元 cdn-a → cdn-b は、条件を確かめているので「解消」でよい） */
+  const condOf = (r: string) => Number(r.split('.').pop()) || 0;
+  const otherCondFail = (f: Finding) => ids(f).some(k => [...(failNow.get(k) ?? [])].some(r => r !== f.ruleId && condOf(r) > 0 && condOf(r) < condOf(f.ruleId)));
   const rows: DiffRow[] = [];
   const row = (kind: DiffKind, f: Finding, before?: Severity): DiffRow => ({ kind, ruleId: f.ruleId, item: f.item, condition: f.condition, title: f.title, target: f.target, severity: f.severity, before });
   // 1回目はキーで突き合わせる。2回目に、残ったものをラベルで突き合わせる：同じラベルの2つ目を足すと、1つ目のキーが「top」から
   // 「top https://…」に変わる。v0.4.27 以前の結果（キーは top・top#2）とも、ラベルで突き合う
   const pairs = new Map<string, Finding | undefined>();
   const used = new Set<string>();
-  for (const k of now.keys()) if (prev.has(k)) { pairs.set(k, prev.get(k)); used.add(k); }
-  // HAR のラベル（har-4）は記録し直すと別の応答を指すので、ラベルでは突き合わせない
-  const isHar = (f: Finding) => tkey(f).startsWith('HAR ');
+  for (const [k, f] of now) {
+    if (prev.has(k)) { pairs.set(k, prev.get(k)); used.add(k); continue; }
+    // 同じラベルのターゲットが減って、今回のキーがラベルだけ（top）になったもの：前回の「ラベル＋URL」（top https://a.example/）と URL で突き合わせる
+    const a = altKey(f) ? `${f.ruleId}\u0000${altKey(f)}\u0000${evidenceKey(f.evidence)}` : undefined;
+    if (a && prev.has(a) && !used.has(a)) { pairs.set(k, prev.get(a)); used.add(a); }
+  }
   const byLabel = new Map<string, string>();
   const labelKey = (f: Finding) => `${f.ruleId}\u0000${f.target}\u0000${evidenceKey(f.evidence)}`;
-  for (const [k, f] of prev) if (!used.has(k) && !isHar(f)) { const l = labelKey(f); if (!byLabel.has(l)) byLabel.set(l, k); }
+  // ラベルで突き合わせるのは、前回のキーがラベルだけ（top・以前の版の top#2）のものだけ。前回が「ラベル＋URL」なら、URL の違う今回の同じラベルの
+  // ターゲットと組にしない（a.example の前回の指摘を、b.example の今回の指摘と「継続」にした）
+  for (const [k, f] of prev) if (!used.has(k) && !isHar(f) && labelOnly(f)) { const l = labelKey(f); if (!byLabel.has(l)) byLabel.set(l, k); }
   for (const [k, f] of now) {
     if (pairs.has(k)) continue;
     const pk = isHar(f) ? undefined : byLabel.get(labelKey(f));
@@ -99,7 +121,9 @@ export function diff(before: Finding[], after: Finding[]): DiffRow[] {
     if (f.status === 'suppressed') { if (p?.status !== 'suppressed') rows.push(row('suppressed', f)); continue; }
     rows.push(!p ? row('new', f) : p.severity !== f.severity ? row('severity-changed', f, p.severity) : row('continuing', f));
   }
-  for (const [k, f] of prev) if (!used.has(k)) rows.push(row(evaluatedNow.has(`${f.item}\u0000${tkey(f)}`) || evaluatedNow.has(`${f.item}\u0000${f.target}`) ? 'resolved' : 'not-rechecked', f));
+  // ラベルだけでの判定済みの照合も、前回のキーがラベルだけのものに限る（前回が top https://a.example/ で、今回は b.example の top だけを判定したのに
+  // 「解消」とした）
+  for (const [k, f] of prev) if (!used.has(k)) rows.push(row(!otherCondFail(f) && (evaluatedNow.has(`${f.item}\u0000${tkey(f)}`) || (labelOnly(f) && evaluatedNow.has(`${f.item}\u0000${f.target}`))) ? 'resolved' : 'not-rechecked', f));
   const order: DiffKind[] = ['new', 'severity-changed', 'suppressed', 'resolved', 'not-rechecked', 'continuing'];
   return rows.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || a.ruleId.localeCompare(b.ruleId));
 }
@@ -112,6 +136,7 @@ export function diffSummary(rows: DiffRow[]): Record<DiffKind, number> {
 
 /** 前回と今回でプロファイル（重要度・対象外の項目）が違うか。違えば「重要度の変化」に設定の違いが混ざる */
 export function profileDiffers(before?: Profile, now?: Profile): boolean {
-  const norm = (p?: Profile) => JSON.stringify({ severity: p?.severity ?? {}, exclude: [...(p?.exclude ?? [])].sort(), names: [...(p?.sessionCookieNames ?? [])].sort(), hours: p?.sessionMaxAgeHours ?? 24, origins: [...(p?.trustedScriptOrigins ?? [])].sort() });
+  // 重要度はキーの順番をそろえる（同じ設定でキーの順番だけが違うと「プロファイルが違う」と警告した。第50回）
+  const norm = (p?: Profile) => JSON.stringify({ severity: Object.entries(p?.severity ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)), exclude: [...(p?.exclude ?? [])].sort(), names: [...(p?.sessionCookieNames ?? [])].sort(), hours: p?.sessionMaxAgeHours ?? 24, origins: [...(p?.trustedScriptOrigins ?? [])].sort() });
   return norm(before) !== norm(now);
 }

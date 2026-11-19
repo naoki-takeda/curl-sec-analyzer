@@ -1,7 +1,7 @@
 {
   "name": "curl-sec-analyzer",
   "private": true,
-  "version": "0.4.57",
+  "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"
@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run --tagsFilter=!perf && vitest run --tagsFilter=perf --no-file-parallelism",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "lint": "tsc --noEmit && eslint .",

@@ -15,7 +15,7 @@ Node.js は `.nvmrc` の版を使います（`engines` の下限は 22.12）。
 ```sh
 npm ci
 npm run lint         # 型チェックと ESLint
-npm test             # 単体テスト（変更を監視するときは npm run test:watch）
+npm test             # 単体テスト（時間を測るテストは最後に別に流す。変更を監視するときは npm run test:watch）
 npm run audit        # 依存の署名の検証と、公開物に含まれる依存の既知の脆弱性の検査
 npm run build
 npx playwright install chromium firefox webkit
@@ -37,6 +37,12 @@ npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build �
 - 実在のシステムから採取した値は使いません。ホスト名は `example.com` などに、Cookie・トークンはダミーの値に置き換えます。
 - `tests/fixtures/*.txt` は、採取したままの改行（サーバの応答ヘッダは CRLF、curl 自身の行は LF）を保ちます。`.gitattributes` で改行を変換しない設定にしています。エディタで保存し直して改行を変えないでください。
 - テスト用の HAR は `tests/fixtures/` か `tests/golden/cases/` に置きます。ほかの場所の `*.har` は `.gitignore` で除外しています。
+
+## テストの置き場所
+
+- 新しいテストは、`tests/` の直下の領域ごとのファイル（`tests/masking.test.ts`、`tests/body-missing.test.ts` など）に書きます。合うファイルがなければ、領域の名前でファイルを作ります。レビューの回の名前のファイルは作りません。
+- `tests/regression/` は、第2回〜第26回のレビューと積み残しへの対応、MVP〜v0.4 の段階ごとに書いた回帰テストです。中身はそのまま残し、新しいテストは足しません（経緯の記録は `docs/history.md`）。
+- 時間の上限を確かめるテストには `{ tags: ['perf'] }` を付けます（describe に付けると、その中がすべて対象になります）。`npm test` は、ほかのテストが終わってから、perf のテストをファイルを並べずに流します。並べて流すと CPU を取り合い、上限を超えることがあるためです。
 
 ## 回帰テスト（ゴールデン・同値性）
 
@@ -62,6 +68,7 @@ git diff tests/golden/expected           # 変わった行が、直したもの�
 
 - 仕様（項目・条件・重要度・ラベル・入力の形式）を変えるときは、実装と同じプルリクエストで `docs/design.md` も更新します。
 - 設計書のレビューの指摘と対応は `docs/history.md` に記録します。
+- 版を上げたら、`CHANGELOG.md` にその版の変更（利用者から見た変化と既知の限界）を書きます。版の付け方（メジャー・マイナー・パッチ）は設計書の「版の付け方」にあります。
 - 画面を変えたら、リリースの前に `npm run screenshot` で README の画像と共有用の画像を撮り直します。
 
 ## コミットとプルリクエスト

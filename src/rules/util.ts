@@ -1,10 +1,11 @@
 import type { Finding, Rule, RuleContext, Severity, Status } from '../model';
+import { wordLike } from '../tokenShape';
 
 export function mk(rule: Rule, ctx: RuleContext, cond: number | 'ok' | 'na', severity: Severity, status: Status,
                    evidence: string, recommendation: string, extra: Partial<Finding> = {}): Finding {
   return { ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined,
            title: rule.title, severity, status, target: ctx.target.label, evidence, recommendation,
-           references: rule.basis, score: 0, ...extra };
+           references: rule.basis, ...extra };
 }
 
 export const header = (ctx: RuleContext, name: string): string[] => ctx.final?.headers.get(name) ?? [];
@@ -115,14 +116,26 @@ export const PROBE_UNREACHED_REC = 'ネットワークの状態を確かめて C
  * 保護データを返していないので、A-01①・C-12①（高）にしない
  */
 const AUTH_FLAG = /^(?:is_?)?(?:authenticated|authorized|logged_?in|signed_?in|auth|ok|success|valid)$/i;
-export const noDataJson = (body: string | undefined): boolean => {
+// false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
+const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
+  || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+const parseJson = (body: string | undefined): unknown => {
   const b = (body ?? '').trim();
-  if (!/^[{[]|^null$/.test(b)) return false;
-  let j: unknown; try { j = JSON.parse(b); } catch { return false; }
-  // false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
-  const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
-    || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+  if (!/^[{[]|^null$/.test(b)) return undefined;
+  try { return JSON.parse(b); } catch { return undefined; }
+};
+export const noDataJson = (body: string | undefined): boolean => {
+  const j = parseJson(body);
+  if (j === undefined) return false;
   return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && (Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)) || errorEnvelope(j as Record<string, unknown>, blank)));
+};
+/**
+ * エラーだけを返した JSON か（errorEnvelope。{"success":false,"error":"invalid_credentials"}）。空の {} や値がすべて空のものは含めない
+ * （ログインの成功でも {} を返すアプリがある）。C-09 で、200 の JSON で返したログインの失敗を見分けるのに使う
+ */
+export const errorJson = (body: string | undefined): boolean => {
+  const j = parseJson(body);
+  return typeof j === 'object' && j !== null && !Array.isArray(j) && errorEnvelope(j as Record<string, unknown>, blank);
 };
 /**
  * エラーだけを返した JSON（200 で {"success":false,"error":"Unauthorized","message":"Please log in"}）。エラーの項目（error・errors など）か
@@ -134,9 +147,11 @@ const ENVELOPE_KEYS = /^(?:message|msg|status|status_?code|statuscode|code|succe
 const errorEnvelope = (j: Record<string, unknown>, blank: (v: unknown, k?: string) => boolean): boolean => {
   const entries = Object.entries(j);
   // 状態の番号だけのエラー（{"status":401,"message":"Unauthorized"}・{"code":401,"msg":"not logged in"}・{"status":"fail"}）も含める
-  const failed = entries.some(([k, v]) => (ERROR_KEYS.test(k) && !blank(v)) || (/^(?:success|ok)$/i.test(k) && v === false)
+  // ログインの状態を表す名前（authenticated・loggedIn）が false のものも失敗の印（{"authenticated":false,"message":"Not logged in"} を
+  // データとみなし、C-12①・A-01①（高）にした。第49回）
+  const failed = entries.some(([k, v]) => (ERROR_KEYS.test(k) && !blank(v)) || ((/^(?:success|ok)$/i.test(k) || AUTH_FLAG.test(k)) && v === false)
     || (/^(?:status|status_?code|statuscode|code)$/i.test(k) && ((typeof v === 'number' && v >= 400 && v < 600) || (typeof v === 'string' && /^(?:[45]\d\d|fail(?:ed|ure)?|error|unauthori[sz]ed|forbidden|denied)$/i.test(v)))));
-  return failed && entries.every(([k, v]) => ERROR_KEYS.test(k)
+  return failed && entries.every(([k, v]) => ERROR_KEYS.test(k) || (AUTH_FLAG.test(k) && v === false)
     || (/^(?:data|result)$/i.test(k) && blank(v))
     || (ENVELOPE_KEYS.test(k) && (v === null || ['string', 'number', 'boolean'].includes(typeof v))));
 };
@@ -169,9 +184,53 @@ export const isLabelText = (key: string, v: string): boolean => {
  * Stripe の公開キー（pk_live_・pk_test_）、Firebase の設定の Google API キー（AIza…。権限はセキュリティルールで絞る）。A-07①（高）にしない
  */
 export const isPublicClientValue = (v: string): boolean =>
-  /^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(v) || /^pk_(?:live|test)_[A-Za-z0-9]+$/.test(v) || /^AIza[0-9A-Za-z_-]{35}$/.test(v);
+  /^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(v) || /^pk_(?:live|test)_[A-Za-z0-9]+$/.test(v) || /^AIza[0-9A-Za-z_-]{35}$/.test(v)
+  || /^phc_[A-Za-z0-9]{20,}$/.test(v);   // PostHog のプロジェクトのキー（ブラウザから送る公開のキー。第51回）
 /**
  * 伏せ字の値（"********"、"***"、"•••"、"[REDACTED]"、Rails の "[FILTERED]"、"<hidden>"）。値を出していないので、秘密情報の露出（A-07①・E-09①）にしない
  */
 export const isPlaceholderValue = (v: string): boolean =>
-  /^(?:([*•●xX#.\-_])\1{2,}|[[(<{]?\s*(?:redacted|filtered|hidden|masked|protected|removed|omitted)\s*[\])>}]?)$/i.test(v.trim());
+  /^(?:([*•●xX#.\-_])\1{2,}|[[(<{]?\s*(?:redacted|filtered|hidden|masked|protected|removed|omitted)\s*[\])>}]?)$/i.test(v.trim())
+  // 文書・設定例の仮の値（YOUR_API_KEY_HERE・<your-client-secret>・your-secret-key・INSERT_TOKEN_HERE。開発者向けの文書のページで E-09①（高）にした。第51回）
+  || /^<[^<>]{1,64}>$/.test(v.trim()) || (/^[A-Za-z]+(?:[_-][A-Za-z]+)*$/.test(v) && /(?:^|[_-])(?:your|here|insert|replace|placeholder)(?=[_-]|$)/i.test(v));   // example・sample・dummy は本物のパスワードにも使う（my_example_password。束のレビュー）
+
+/**
+ * 入力の検証の規則（Laravel・VeeValidate の required|min:8|max:64）。| でつないだ、英字の規則名（引数は数字・英字）だけのもの。
+ * ログイン・登録の画面の password:"required|min:8" を、秘密の値の代入（E-09①（高））とした（第48回）
+ */
+export const VALIDATION_RULE = /^[a-z_]+(?::[\w,.-]{1,20})?(?:\|[a-z_]+(?::[\w,.-]{1,20})?)+$/i;
+/** HTML の autocomplete の値（current-password・new-password・one-time-code など）。正規表現（^…$）も秘密の値ではない */
+export const AUTOCOMPLETE = /^(?:current-password|new-password|one-time-code|username|email|off|on)$/i;
+/** 秘密の値ではない形（入力の検証の規則・正規表現 ^…$・autocomplete の値）。E-09 と A-07 で共有する（A-07 だけ除いておらず、API の検証の規則を
+ * パスワードの露出（高）とした。第49回） */
+export const notSecretFormat = (v: string): boolean => VALIDATION_RULE.test(v) || /^\^.*\$$/.test(v) || AUTOCOMPLETE.test(v);
+
+/** 秘密の値の名前の語（項目の名前・セレクタに含まれていれば、その値は秘密ではなく画面の部品・項目を指す） */
+const SECRET_WORD = /^(?:password|passwd|pass|pwd|secret|token|key|credentials?|passphrase)$/;
+const wordsOf = (v: string) => v.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[^a-z\d]+/).filter(Boolean);
+/** 項目の名前の部品の語（user_password・loginPassword・password_confirmation の、秘密の語以外の語） */
+const FIELD_WORD = /^(?:user|users|login|new|current|old|confirm|confirmation|confirmed|input|field|repeat|retype|form|account|reset|verify|verification|enter|your|my|label|placeholder|hint|name|id)$/;
+/** JSON でエスケープした ASCII 以外の文字（パ） */
+const ESCAPED_NON_ASCII = /\\u(?!00[0-7])[0-9a-fA-F]{4}/g;
+/**
+ * 画面の部品・項目の名前などで、秘密の値ではない形（E-09 と A-07 で共有する。第50回）：
+ * - パス（/settings/password・/Account/ForgotPassword）と翻訳キー（auth.password.label・user.newPassword）：かけらが語として読め、秘密の語を含むもの
+ * - ユーザー情報のない URL と、テンプレート（{{…}}・${…}）
+ * - 秘密の語を含む、小文字の CSS のセレクタ（#password-input・.js-password・input[name=password]。値の全体がセレクタの形のもの）
+ * - 項目の名前（user_password・loginPassword・password_confirmation）：英字と _ - だけで、語が秘密の語と項目の部品の語（user・login・new・
+ *   confirm など）だけのもの（super-secret-key・admin_pass・changeme_password は、ほかの語を含むので秘密の値として扱う。束のレビュー）
+ * - JSON でエスケープした ASCII 以外の文字（PHP の json_encode・Laravel の @json の "パス…"）が2つ以上で、値の半分以上を占めるもの
+ * 語として読めないかけらのパス・ドットの形は除かない（base64 の秘密は / で始まることがあり、JWT はドットでつなぐ）
+ */
+export const notSecretText = (v: string): boolean => {
+  const words = wordsOf(v);
+  // パス（/Account/ForgotPassword・/users/password/new?locale=ja）と翻訳キー（auth.passwordLabel）は、かけらがすべて語として読め、秘密の語を
+  // 含むものだけ（base64 の /Ab3… や、合言葉の correct.horse.battery を除かないため。束のレビュー）。URL はユーザー情報（u:pw@）のないものだけ
+  const wordy = (s: string) => s.split(/[/._-]+/).filter(Boolean).every(wordLike) && words.some(w => SECRET_WORD.test(w));
+  if ((/^\/[\w\-./]*(?:\?[\w=&.-]*)?$/.test(v) && wordy(v.split('?')[0])) || (/^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) && wordy(v))) return true;
+  if (/^https?:\/\/[^/@\s]+(?:[/?#]|$)/i.test(v) || /^(?:\{\{|\$\{)/.test(v)) return true;
+  if ((/^[#.][a-z][a-z0-9_-]*$/.test(v) || /^[a-z]*(?:\[[a-z_-]+(?:[~|^$*]?=["']?[a-z0-9_-]*["']?)?\])+$/.test(v)) && words.some(w => SECRET_WORD.test(w))) return true;
+  if (v.length <= 64 && /^[A-Za-z]+(?:[_-][A-Za-z]+)*$/.test(v) && words.length >= 2 && words.some(w => SECRET_WORD.test(w)) && words.every(w => SECRET_WORD.test(w) || FIELD_WORD.test(w))) return true;
+  const esc = v.match(ESCAPED_NON_ASCII)?.length ?? 0;
+  return esc >= 2 && esc * 6 * 2 >= v.length;
+};

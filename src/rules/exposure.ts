@@ -1,6 +1,7 @@
 // rules/exposure.ts：第5章 エラー・情報露出（E-01、E-02、E-04〜E-06、E-11、E-13）
 import type { HttpResponse, Rule, RuleContext } from '../model';
-import { clip, probePattern } from '../mask';
+import { clip } from '../mask';
+import { probePattern } from './probes';
 import { NO_BODY_REC, PROBE_UNREACHED_REC, bodyTruncated, header, isStaticResource, mk } from './util';
 import { ownChain } from '../parser/target';
 import { allowedItems } from '../engine/labels';
@@ -206,6 +207,8 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     }
     // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、拒否されたかどうかも分からない
     if (!f.status) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
+    // 5xx は、公開していないとは言えない（認証の前に落ちた・一時的な障害の可能性。A-01 の 5xx と同じく na。合格にした。第50回）
+    if (f.status >= 500) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。サーバのエラーで、公開しているかは分からない）`, '時間をおいて採取し直す')];
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     // ①②は「未認証で使える・公開されている」。Cookie・Authorization を送った応答の 200 では、未認証で使えるかは分からない
     if (ctx.target.sentAuth) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。Cookie・Authorization を送った応答で、未認証で使えるかは分からない）`, 'Cookie・Authorization を付けずに採取し直す')];
@@ -216,11 +219,15 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     // <redoc>、<rapi-doc>、@scalar/api-reference）。本文の「Swagger UI」の語だけで見ると、どのパスにも同じ画面を返す SPA の文中の語で②にした
     const ui = /<title>[^<]{0,100}(?:swagger[- ]ui|redoc|rapidoc|scalar)|\bid\s*=\s*["']?(?:swagger-ui|api-reference)\b|swagger-ui(?:-bundle|-standalone-preset)?(?:\.min)?\.(?:js|css)\b|SwaggerUIBundle|<redoc\b|redoc\.standalone|<rapi-doc\b|@scalar\/api-reference/i.test(b);
     if (isHtml && !(docSegment(p) !== 'actuator' && ui))
-      return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? '' : NO_BODY_REC)];
+      return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? `${p} がその機能の画面かを、ブラウザで開いて確かめる` : NO_BODY_REC)];
     // /actuator/health・/actuator/info で、本文が状態だけ（components・details のない {"status":"UP"}、空の {}）のものは、Spring Boot が既定で公開する
     // 死活監視の応答なので対象外（Kubernetes・負荷分散装置が使う。ほぼすべての Spring Boot の製品で高を出していた）
     if (docSegment(p) === 'actuator' && actuatorDefault(p, b))
       return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `${p}（HTTP ${f.status}、既定で公開される死活監視の応答・一覧）`, '')];
+    // 既定で公開される /actuator/health・info・一覧で本文を採取していない（-D - -o /dev/null・-I・HAR の本文なし）と、状態だけの応答かが分からない
+    // （①（高）にした。第48回）。/actuator/env などは、取得できたこと自体が①
+    if (docSegment(p) === 'actuator' && !b.trim() && /\/actuator(?:\/(?:health(?:\/[\w-]+)?|info))?\/?$/i.test(p))
+      return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。本文を採取していないので、既定で公開される状態だけの応答かは分からない）`, NO_BODY_REC)];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
     return [mk(apiDocsAdmin, ctx, 2, 'medium', 'fail', `${p}（HTTP ${f.status}）`, 'API仕様は本番で無効にするか、認証の内側に置く')];
   } };
