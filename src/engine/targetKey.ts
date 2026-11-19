@@ -6,7 +6,7 @@
 // - 入力の順番で変わらない（クエリのパラメータの順番、同じ名前の値の順番、貼り付けたターゲットの順番）
 import type { Target } from '../model';
 import { baseLabel } from '../parser/target';
-import { codeGroups, digitRun, lowerToken, wordLike } from '../tokenShape';
+import { codeGroups, digitRun, lowerToken, phoneRun, wordLike } from '../tokenShape';
 
 /**
  * 例外と前回の結果の突き合わせに使う URL（HAR と、同じラベルが複数ある curl の targetKey、Finding.keyUrl、CSV の実施コマンドの URL）。URL の形だけで作る：
@@ -67,13 +67,16 @@ const keyPiece = (p: string): boolean => {
   return (p.match(/[a-z]+|[A-Z]+/g) ?? []).length <= 4;
 };
 /**
- * かけらを1つずつ見ると残る、区切った番号とコード（カード番号・電話番号・米国の社会保障番号の形、招待のコード QWER-TYUI-ZXCV-ASDF）は、部分ごと
- * * にする（画面の許可リスト（shownText.ts の allowRun）と同じ形。キーが CSV の実施コマンドと JSON の keyUrl に入るため）。社会保障番号の形は、拡張子が付いても（123-45-6789.pdf）見る
+ * かけらを1つずつ見ると残る、区切った番号とコード（カード番号・電話番号・米国の社会保障番号の形、招待のコード QWER-TYUI-ZXCV-ASDF・7Gk-p2Q-xZ81-m）は、
+ * 部分ごと * にする（画面の許可リスト（shownText.ts の allowRun）と同じ形。キーが CSV の実施コマンドと JSON の keyUrl に入るため）。10〜11桁の
+ * 電話番号（phoneRun）はキーだけで伏せる（画面は残す）。拡張子が付いても（123-45-6789.pdf・090-1234-5678.vcf）見る
  */
 const keySegment = (s: string): string => {
-  // 番号の数字の並びは . で区切らない（画面と同じ。版 10.0.19045.3803 や IP アドレスを番号にしない）
-  const pieces = s.split(/[-_~]/);
-  if (digitRun(pieces) || /(?:^|[-_.~])\d{3}-\d{2}-\d{4}(?=$|[-_.~])/.test(s) || codeGroups(pieces)) return '*';
+  // カード番号の数字の並びは . で区切らない（画面と同じ。版 10.0.19045.3803 や IP アドレスを番号にしない）。末尾の拡張子は除いて見る。
+  // 電話番号とコードは . で区切ったもの（090.1234.5678・AB12.CD34.EF56・090-1234-5678.vcf.gz）も見る（IPv4 は合わせて12桁までの4つなので、
+  // 電話番号の形（3つ以上で10〜11桁。0 で始まらないものは3つだけ）に当たらない）
+  const pieces = s.replace(/\.[A-Za-z][A-Za-z0-9]{0,9}$/, '').split(/[-_~]/), dotted = s.split(/[-_.~]/);
+  if (digitRun(pieces) || phoneRun(dotted) || /(?:^|[-_.~])\d{3}-\d{2}-\d{4}(?=$|[-_.~])/.test(s) || codeGroups(pieces) || codeGroups(dotted)) return '*';
   return s.replace(/[^-_.~]+/g, piece => (keyPiece(piece) ? piece : '*')).replace(/\*(?:[-_.~]\*)+/g, '*');
 };
 /** キーに値を残すパラメータの名前（秘密や個人情報を入れない決まった名前だけ）。数字の値（ページ送り）と英字の語の値（並べ替え・表示の切り替え） */

@@ -495,3 +495,32 @@ describe('~ でつないだ番号とコード', () => {
     expect(showText('QWER~TYUI~ZXCV~ASDF')).not.toContain('ZXCV');
   });
 });
+
+describe('. : で区切ったコード・長さのそろわないコード', () => {
+  it('電話番号・日付に番号を付けたもの・略語の並びは、画面では残す（電話番号を伏せるのは突き合わせのキーだけ）', () => {
+    for (const s of ['tel 090-1234-5678', '0120-123-456', '2026-11-19-01', 'Date: 2026-11-20', '1920-1080', '?q=XSS%20CSRF%20SQLI']) expect(showText(s), s).toBe(s);
+  });
+  it('. や : で区切ったコードと、長さのそろわない乱数のかけらのコードは伏せる', () => {
+    for (const s of ['code K7QX.9MZP.A2B4.C6D8', 'K7QX:9MZP:A2B4:C6D8', '/magic/K7QX.9MZP', '/invite/7Gk-p2Q-xZ81-m', '7Gk.p2Q.xZ81.m'])
+      expect(showText(s), s).not.toMatch(/K7QX|9MZP|xZ81/);
+  });
+  it('版・ファイル名・ホスト名・IPv6 と MAC アドレス・時刻・暗号の名前は残す', () => {
+    for (const s of ['nginx/1.25.3', 'TLSv1.3', 'ASP.NET', 'Apache/2.4.41 (Ubuntu)', 'ECDHE-RSA-AES128-GCM-SHA256', 's3-ap-northeast-1', 'win10-x64-v2',
+      'k8s-1-28', 'i18n.js', 'jquery-3.6.0.min.js', '10:30:00', 'https://a1b2.c3d4.example/', 'x86.x64', 'md5:sha1', '1.0.0a1', 'fe80::1',
+      '2001:db8:85a3:8d3:1319:8a2e:370:7348', '00:1A:2B:3C:4D:5E', 'cdn.k7qx.example'])
+      expect(showText(s), s).toBe(s);
+  });
+});
+
+describe('. : で区切ったコードの前後と、英字と数字の語の並び', () => {
+  it('- _ が前後に付いた . : のコードも伏せる', () => {
+    for (const s of ['code-K7QX.9MZP.A2B4.C6D8', 'invite_K7QX.9MZP.A2B4.C6D8', 'K7QX.9MZP.A2B4.C6D8-x', 'K7QX.9MZP%2Dfoo', 'K7QX.9MZP-Q2Z4.C6D8', '%2FK7QX.9MZP'])
+      expect(showText(s), s).not.toMatch(/K7QX|9MZP|C6D8/);
+  });
+  it('小文字だけ・大文字だけの英字と数字の語の並び（ファイル名・略語・ビルドの名前・時刻・曲線）は伏せない', () => {
+    for (const s of ['icon-16x16-2x.png', '/docs/i18n-l10n-guide', '/blog/p2p-e2e-tips', 'ec2-s3-iam', 'e2e-k8s-1-28',
+      '4xx-5xx-errors', 'W3C.WAI.a11y', '4k.8k.hdr', '(Linux; Android 13; Build/TQ3A.230901.001.C2; wv)', 'T10:30:00Z', '1.0.0a1.dev2',
+      'X25519:P256:P384', 'db1.k8s.lan'])
+      expect(showText(s), s).toBe(s);
+  });
+});

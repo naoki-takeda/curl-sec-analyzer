@@ -19,11 +19,40 @@ export function lowerToken(x: string): boolean {
 // ---- 区切った番号・コードの形。画面の許可リスト（shownText.ts の allowRun）と突き合わせのキー（engine/targetKey.ts の keySegment）で共有する ----
 /**
  * 6桁までの数字だけのかけらが3つ以上続き、合わせて12桁以上になる部分があるか（カード番号 4111-1111-1111-1111 など。10〜11桁の電話番号は
- * 含まない。日付の 20261118 のような8桁を含む並び（db-backup-20261118-0300-01）は番号としない）
+ * 含まない（画面は電話番号を残す。キーは phoneRun も見る）。日付の 20261118 のような8桁を含む並び（db-backup-20261118-0300-01）は番号としない）
  */
 export const digitRun = (pieces: string[]): boolean => {
   let n = 0, len = 0;
   for (const p of pieces) { if (/^\d{1,6}$/.test(p)) { n++; len += p.length; if (n >= 3 && len >= 12) return true; } else { n = 0; len = 0; } }
+  return false;
+};
+/**
+ * 電話番号の形の部分があるか。数字のかけらが3つ以上続き、合わせて10〜11桁で、次のどちらか（突き合わせのキーだけが使う）：
+ * - 先頭のかけらが 0 で始まる2桁以上（090-1234-5678・03-1234-5678・0312-34-5678・01267-2-3456・0120-123-456・01-23-45-67-89）
+ * - 2〜4桁・3〜4桁・3〜4桁の3つ（555-123-4567）
+ * 先頭のかけらには数字でない文字が前に付いてよく（tel090-…・tel:090-…・(090)-…・+1-555-…）、最後のかけらには英字が3文字まで付いてよい
+ * （内線の 5678x）。国番号のあとの番号は、市外局番の先頭の 0 を落としたものとして数える（+81-3-1234-5678・81-90-1234-5678・+33-1-23-45-67-89）。
+ * 月・日の2桁が続く日付（2026-11-19-01）は当たらない
+ */
+export const phoneRun = (pieces: string[]): boolean => {
+  for (let i = 0; i < pieces.length; i++) {
+    const m = pieces[i].match(/^\D*(\d{1,5})\)?$/); if (!m) continue;
+    // 国番号：+ の付いた1〜3桁のあとの4桁までか、+ のない1〜3桁のあとの1〜2桁（IPv4 の 192.168.100.200 を国番号のある番号と読まない。
+    // IPv4 のかけらは3桁までなので、0 を足した1〜2桁と2つのかけらで9桁までにしかならない）
+    const prev = i > 0 ? pieces[i - 1] : '';
+    const cc = !m[1].startsWith('0') && ((/^\D*\+\d{1,3}$/.test(prev) && m[1].length <= 4) || (/^\d{1,3}$/.test(prev) && m[1].length <= 2));
+    const head = cc ? `0${m[1]}` : m[1];
+    let n = 1, len = head.length;
+    // 12桁を超えたら打ち切る（かけらは1桁以上なので、1つの始まりから見るのは12個まで。線形時間）
+    for (let j = i + 1; j < pieces.length && len <= 11; j++) {
+      const d = pieces[j].match(/^(\d{1,5})([A-Za-z]{0,3})$/); if (!d) break;
+      n++; len += d[1].length;
+      // 0 で始まるのは2桁以上の市外局番だけ（版 10.0.19045.3803 の「0」から数えない）
+      if (n >= 3 && len >= 10 && len <= 11 && (/^0\d/.test(head)
+        || (n === 3 && /^\d{2,4}$/.test(head) && /^\d{3,4}$/.test(pieces[j - 1]) && /^\d{3,4}$/.test(d[1])))) return true;
+      if (d[2]) break;   // 英字の付いたかけらで、番号は終わる
+    }
+  }
   return false;
 };
 /** 英字に数字を付けた語のうち、残してよい英字の部分（暗号・プロトコル・文字コード・版の名前）。小文字で照合する */
@@ -42,12 +71,19 @@ const stemmedWord = (p: string) => { const m = p.match(STEM_DIGITS); return !!m 
 export const randomPiece = (p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !stemmedWord(p)
   : /^[A-Za-z]{4,}$/.test(p) && rareBigrams(p.toLowerCase()) >= 0.5);
 /**
- * 同じ長さ（3〜5文字）の英数字のかけらをつないだコード（招待・パスワードの再設定の QWER-TYUI-ZXCV-ASDF・K7QX-9MZP）か。3つ以上なら半分以上、
- * 2つなら両方が乱数のかけら（randomPiece）。数字だけのものは digitRun で見る。長さのそろわない暗号の名前（ECDHE-RSA-RC4-SHA）は対象外
+ * 英数字のかけらをつないだコード（招待・パスワードの再設定の QWER-TYUI-ZXCV-ASDF・K7QX-9MZP・7Gk-p2Q-xZ81-m）か。次のどちらか：
+ * - 同じ長さ（3〜5文字）のかけら：3つ以上なら半分以上、2つなら両方が乱数のかけら（randomPiece）。数字だけのものは digitRun で見る
+ * - 6文字までのかけらで、乱数のかけらが半分以上、うち大文字・小文字・数字の混ざるもの（7Gk・p2Q・xZ81）が2つ以上（長さのそろわないコード）。
+ *   大文字と小文字の両方を求めるのは、小文字だけ・大文字だけの英字と数字の語（i18n・a11y・16x16・1080p・ec2・T10・TQ3A・X25519・00Z）は
+ *   略語・単位・版・ビルドの名前に多いため（伏せると、ファイル名や User-Agent が読めない）
  */
-export const codeGroups = (pieces: string[]): boolean =>
-  pieces.length >= 2 && pieces.every(p => /^[A-Za-z0-9]{3,5}$/.test(p) && p.length === pieces[0].length) && !pieces.every(p => /^\d+$/.test(p))
-  && (pieces.length >= 3 ? pieces.filter(randomPiece).length * 2 >= pieces.length : pieces.every(randomPiece));
+export const codeGroups = (pieces: string[]): boolean => {
+  if (pieces.length < 2 || !pieces.every(p => /^[A-Za-z0-9]{1,6}$/.test(p))) return false;
+  const random = pieces.filter(randomPiece);
+  if (pieces.every(p => /^[A-Za-z0-9]{3,5}$/.test(p) && p.length === pieces[0].length) && !pieces.every(p => /^\d+$/.test(p))
+    && (pieces.length >= 3 ? random.length * 2 >= pieces.length : random.length === pieces.length)) return true;
+  return random.length * 2 >= pieces.length && random.filter(p => /\d/.test(p) && /[A-Z]/.test(p) && /[a-z]/.test(p)).length >= 2;
+};
 
 /** 英小文字の並びのうち、よく現れる2文字の並びにないものの割合（2文字未満は0）。画面の許可リスト（shownText.ts）も使う */
 export function rareBigrams(x: string): number {

@@ -101,6 +101,21 @@ const maskMixedDigits = (s: string): string => s.replace(MIXED_DIGITS, m => {
   if (d.includes('%')) return `…(${m.length} chars)`;
   return maskText(d) !== d || allowText(d) !== d ? `…(${m.length} chars)` : m;
 });
+// DOTTED：. か : でつないだ6文字までのかけらの並び（K7QX.9MZP.A2B4.C6D8・K7QX:9MZP）。かけらは4文字までなら1つずつ残るので、並びとして
+// コードの形（codeGroups）かを、語の並び（WORDS）より先に見る（前後に - _ が付いても（code-K7QX.9MZP…・K7QX.9MZP-A2B4.C6D8）、. : のあいだだけを見る）。
+// 始まりは語の文字・. :・% と、パーセントエンコードの途中（%2 のあと）でない位置か、パーセントエンコードした文字（%2F）の直後だけ
+// （並びの途中から試し直さないので線形時間）
+const DOTTED = new RegExp(String.raw`(?:(?<![A-Za-z0-9.:%])(?<!%[0-9A-Fa-f])|(?<=%[0-9A-Fa-f]{2}))[A-Za-z0-9]{1,6}(?:[.:][A-Za-z0-9]{1,6})+(?![A-Za-z0-9]|[.:][A-Za-z0-9])`, 'g');
+const TLDS = new Set(TLD.split('|'));
+/**
+ * . : でつないだ並びのうち、コードの形のものを伏せる。次のものはコードとしない：英小文字だけのもの（ホスト名 db1.k8s.lan・ファイル名）、最上位ドメインで
+ * 終わるもの（a1b2.c3d4.example）、: でつないだ16進数だけのもの（IPv6・MAC アドレス）
+ */
+const maskDottedCodes = (s: string): string => s.replace(DOTTED, run => {
+  const pieces = run.split(/[.:]/);
+  const host = !/[A-Z]/.test(run) || TLDS.has(pieces[pieces.length - 1].toLowerCase()), hex = run.includes(':') && pieces.every(p => /^[0-9A-Fa-f]+$/.test(p));
+  return !host && !hex && codeGroups(pieces) ? `…(${run.length} chars)` : run;
+});
 const WORDS = new RegExp(`(${ESCAPES})|(${KEEP})|[A-Za-z0-9]+(?:${JOIN}[A-Za-z0-9]+)*`, 'g');
 const JOIN_SPLIT = new RegExp(`(${JOIN})`);
 /**
@@ -130,7 +145,7 @@ function allowRun(run: string): string {
 }
 
 /** 残してよい形の語だけを残す（それ以外は「…(N chars)」） */
-export const allowText = (s: string): string => maskMixedDigits(s).replace(WORDS, (w: string, esc: string | undefined, keep: string | undefined) => (esc ? escapeRun(esc) : keep ? w : allowRun(w)));
+export const allowText = (s: string): string => maskDottedCodes(maskMixedDigits(s)).replace(WORDS, (w: string, esc: string | undefined, keep: string | undefined) => (esc ? escapeRun(esc) : keep ? w : allowRun(w)));
 
 /**
  * パーセントエンコードした文字の並び。3つまで（区切りの %2F・%3D、1文字の日本語）はそのまま残す。4つ以上は戻して見て、読める文字
