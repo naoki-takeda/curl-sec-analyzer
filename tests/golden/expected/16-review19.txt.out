@@ -148,7 +148,7 @@ top | E-09.2 | low | fail | 開発用コメント（「pass」を含む。中身
 top | H-01.4 | low | fail | max-age=31536000
 top | H-02.2 | info | fail | max-age=31536000
 top | H-03.ok | info | pass | default-src 'self'; frame-ancestors 'none'
-top | H-04.ok | info | pass | script-src 'self'
+top | H-04.ok | info | pass | default-src 'self'
 top | H-05.2 | medium | fail | base-uri がない（default-src にはフォールバックしない）
 top | H-06.ok | info | pass | frame-ancestors 'none'
 top | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし

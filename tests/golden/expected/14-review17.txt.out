@@ -77,7 +77,7 @@ page | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
 page | H-01.1 | high | fail | (ヘッダなし)
 page | H-02.na | info | na | HSTSがない（H-01で判定）
 page | H-03.ok | info | pass | default-src 'self'; object-src 'none'; base-uri 'none'; fenced-frame-src 'none' / script-src 'self' 'unsafe-inline' https:
-page | H-04.ok | info | pass | script-src 'self' / script-src 'self' 'unsafe-inline' https:
+page | H-04.ok | info | pass | default-src 'self' / script-src 'self' 'unsafe-inline' https:
 page | H-05.ok | info | pass | object-src・base-uri あり
 page | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
 page | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし

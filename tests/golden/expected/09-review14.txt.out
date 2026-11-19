@@ -114,7 +114,7 @@ spa-actuator | E-09.ok | info | pass | 秘密情報・内部情報らしき記�
 spa-actuator | H-01.4 | low | fail | max-age=63072000
 spa-actuator | H-02.2 | info | fail | max-age=63072000
 spa-actuator | H-03.ok | info | pass | <meta http-equiv> の CSP: default-src 'self'（frame-ancestors・report-uri・sandbox は meta では効かない）
-spa-actuator | H-04.ok | info | pass | script-src 'self'
+spa-actuator | H-04.ok | info | pass | default-src 'self'
 spa-actuator | H-05.2 | medium | fail | base-uri がない（default-src にはフォールバックしない）
 spa-actuator | H-06.1 | medium | fail | (frame-ancestors も X-Frame-Options もない)
 spa-actuator | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし

@@ -290,3 +290,43 @@ describe('第52回：重要度「高」の条件の見逃し', () => {
     expect(ids(target('https://a.example/', 'HTTP/2 200\n\n{"a":1}'))).not.toContain('H-03.1');
   });
 });
+
+describe('ヘッダ・Cookie・CORS・転送の判定の細部', () => {
+  const only = (r: string[], item: string) => r.filter(x => x.startsWith(`${item}.`));
+  it('H-09：meta だけの古い値（always・never）はヘッダでは読み替えない', () => {
+    const page = (head: string, meta: string) => target('https://a.example/', `${HTML}${head}\n\n<html><head><meta name="referrer" content="${meta}"></head></html>`);
+    // ヘッダの always はブラウザが無視する値なので、meta の no-referrer だけで判定する
+    expect(only(ids(page('referrer-policy: always', 'no-referrer')), 'H-09')).toEqual(['H-09.ok']);
+    // meta の always は unsafe-url と読む
+    expect(only(ids(page('referrer-policy: no-referrer', 'always')), 'H-09')).toEqual(['H-09.1']);
+  });
+  it('H-02：スキームが分からないときは、H-01 と同じく na', () => {
+    const r = evaluate(`#TARGET label=t\n${HTML}strict-transport-security: max-age=31536000\n`);
+    expect(only(r.ids('t'), 'H-02')).toEqual(['H-02.na']);
+    expect(r.findings.find(f => f.ruleId === 'H-02.na')?.evidence).toBe('HTTPSかどうか判定できない');
+  });
+  it('H-04：default-src だけのポリシーの合格の証跡は default-src と書く', () => {
+    const f = evaluate(target('https://a.example/', `${HTML}content-security-policy: default-src 'self'; object-src 'none'; base-uri 'none'`)).findings.find(x => x.ruleId === 'H-04.ok');
+    expect(f?.evidence).toBe("default-src 'self'");
+  });
+  it('T-05②・H-16④：内部のホストは、プライベート・ループバックのアドレス全体と localhost・内部の名前だけ', () => {
+    const hop = (loc: string) => ids(target('https://a.example/', `HTTP/2 302\nlocation: ${loc}\n\nHTTP/2 200\ncontent-type: text/html`));
+    expect(only(hop('https://10.cdn.example.com/x'), 'T-05')).toEqual(['T-05.ok']);   // 数字で始まる公開のホスト名
+    expect(only(hop('https://127.example.net/x'), 'T-05')).toEqual(['T-05.ok']);
+    for (const loc of ['http://10.0.0.5/', 'http://127.0.0.2/', 'http://localhost/', 'http://app.internal/']) expect(only(hop(loc), 'T-05'), loc).toContain('T-05.2');
+    const h = (v: string) => only(ids(target('https://a.example/', `${HTML}${v}`)), 'H-16');
+    for (const v of ['x-backend-server: 127.0.0.2:8080', 'x-served-by: 10.1.2.3', 'x-host: localhost', 'via: 1.1 app01.corp']) expect(h(v), v).toContain('H-16.4');
+    for (const v of ['x-backend-server: 10.cdn.example.com', 'x-host: localhost.example.com', 'x-served-by: edge01.local.example-cdn.net', 'x-backend-server: 10.0.0.1.example.com']) expect(h(v), v).not.toContain('H-16.4');
+  });
+  it('C-04①：親ドメインへの拡大だけ。ホストのサブドメインの Domain は、ブラウザが拒否するので指摘しない', () => {
+    const c = (url: string, dom: string) => only(ids(target(url, `${HTML}set-cookie: pref=1; Domain=${dom}; Secure`)), 'C-04');
+    expect(c('https://www.example.com/', 'example.com')).toEqual(['C-04.1']);
+    expect(c('https://example.com/', 'www.example.com')).toEqual(['C-04.ok']);
+    expect(c('https://example.com/', 'other.example')).toEqual(['C-04.ok']);
+  });
+  it('R-07②：ACAC: true のときの Access-Control-Expose-Headers: * は「*」という名前のヘッダ', () => {
+    const r = (extra: string) => only(ids(target('https://a.example/api', `HTTP/2 200\ncontent-type: application/json\naccess-control-expose-headers: *${extra}`)), 'R-07');
+    expect(r('')).toEqual(['R-07.2']);
+    expect(r('\naccess-control-allow-credentials: true')).toEqual(['R-07.ok']);
+  });
+});

@@ -1,35 +1,40 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
-import type { Rule, RuleContext } from '../model';
-import { LOGOUT_FAILED_REC, NO_BODY_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, parseHsts, sensitiveUnlessStatic, splitPolicies } from './util';
+import type { Rule, RuleContext, Target } from '../model';
+import { INTERNAL_HOST_IN_TEXT, LOGOUT_FAILED_REC, NO_BODY_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, parseHsts, sensitiveUnlessStatic } from './util';
 import { clip, maskValue } from '../mask';
-import { baseLabel, chainOf, firstStatus, logoutFailed, siteResponses } from '../parser/target';
+import { baseLabel, chainOf, firstStatus, hostnameOf, isRedirectWithLocation, logoutFailed, siteResponses } from '../parser/target';
 import { htmlBody, metaCspPolicies, mixedContent, tags } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
 /**
- * 判定に使う HSTS ヘッダ。apex は、apex 自身の応答（転送の最初のホップ）で見る。
- * -L や HAR で www への転送をたどった最後の応答は www のもの（H-02「apex自身もHSTSを返す」）
- */
-const hstsOf = (ctx: RuleContext) => (baseLabel(ctx.target.label) === 'apex' ? apexHop(ctx) : ctx.final)?.headers.get('strict-transport-security')?.[0];
-/**
  * apex 自身の https の応答（ホストが apex のホップ）。http で採取して -L で www へ転送したとき、ownChain の最初は www の応答なので、
  * ホストで探す（www の HSTS で apex の H-01・H-02 を合格にせず、横断の H-02③ と食い違わない）
  */
-const apexHop = (ctx: RuleContext) => {
-  let host: string | undefined; try { host = new URL(ctx.target.url ?? '').hostname; } catch { return undefined; }
-  return chainOf(ctx.target).find(r => { try { return /^https:/i.test(r.url ?? '') && new URL(r.url!).hostname === host; } catch { return false; } });
+export const apexHop = (t: Target) => {
+  const host = hostnameOf(t.url);
+  return host ? chainOf(t).find(r => /^https:/i.test(r.url ?? '') && hostnameOf(r.url) === host) : undefined;
 };
-/** apex で、apex 自身の https の応答がないときの na（H-01・H-02） */
-const noApexHttps = (rule: Rule, ctx: RuleContext) => (baseLabel(ctx.target.label) === 'apex' && !apexHop(ctx)
-  ? [mk(rule, ctx, 'na', 'info', 'na', 'apex 自身の https の応答がない（転送先の www の HSTS は apex のものではない）', 'https://apex/ を label=apex で採取する')] : undefined);
+/**
+ * 判定に使う HSTS ヘッダ（H-01・H-02）。apex は、apex 自身の応答（apexHop）で見る（-L や HAR で www への転送をたどった最後の応答は
+ * www のもの）。noApex は、apex で apex 自身の https の応答がないこと
+ */
+const hstsOf = (ctx: RuleContext): { noApex: boolean; v?: string } => {
+  const apex = baseLabel(ctx.target.label) === 'apex';
+  const r = apex ? apexHop(ctx.target) : ctx.final;
+  return { noApex: apex && !r, v: r?.headers.get('strict-transport-security')?.[0] };
+};
+const noApexHttps = (rule: Rule, ctx: RuleContext) =>
+  [mk(rule, ctx, 'na', 'info', 'na', 'apex 自身の https の応答がない（転送先の www の HSTS は apex のものではない）', 'https://apex/ を label=apex で採取する')];
+/** スキームが分からないときの na の証跡と推奨（H-01・H-02） */
+const UNKNOWN_SCHEME = ['HTTPSかどうか判定できない', '#TARGET に url= を付ける'] as const;
 
 export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS', 'MDN HTTP Observatory'],
   run(ctx) {
     if (ctx.isHttps === false) return [];               // http のターゲットは適用外（T-04 で評価）
-    if (ctx.isHttps === undefined || !ctx.final) return [mk(hsts, ctx, 'na', 'info', 'na', 'HTTPSかどうか判定できない', '#TARGET に url= を付ける')];
-    const apexNa = noApexHttps(hsts, ctx); if (apexNa) return apexNa;
-    const v = hstsOf(ctx);
+    if (ctx.isHttps === undefined || !ctx.final) return [mk(hsts, ctx, 'na', 'info', 'na', ...UNKNOWN_SCHEME)];
+    const { noApex, v } = hstsOf(ctx);
+    if (noApex) return noApexHttps(hsts, ctx);
     const rec = 'Strict-Transport-Security: max-age=63072000; includeSubDomains';
     if (!v) return [mk(hsts, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
     const parsed = parseHsts(v); const age = parsed.maxAge;
@@ -52,7 +57,7 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
     const rec = "Content-Security-Policy: default-src 'self'; script-src 'nonce-…' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
     // ヘッダがなくても <meta http-equiv> の CSP があれば、ブラウザは強制するので①②にしない（frame-ancestors などは meta では効かないことを証跡に書く）
     // ヘッダがあっても、どのポリシーにもディレクティブがない（空の Content-Security-Policy: ）なら、効くのは meta の CSP だけ（③にしない）
-    const headerEffective = rawEnforce.some(v => splitPolicies([v]).some(p => parseCsp(p).size > 0));
+    const headerEffective = enforce.length > 0;
     const meta = headerEffective ? [] : metaCspPolicies(ctx);
     if (meta.length) return [mk(cspPresence, ctx, 'ok', 'info', 'pass', `<meta http-equiv> の CSP: ${meta.join(' / ')}（frame-ancestors・report-uri・sandbox は meta では効かない）`, '')];
     // ヘッダがなく本文も採取していない（-D - -o /dev/null、-v）なら、<meta> の CSP があるかが分からないので①にしない（採取の方法で結果を変えない）。
@@ -60,9 +65,7 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
     if (!rawEnforce.length && !ro.length && ctx.responseKind === 'html' && !htmlBody(ctx)) return [mk(cspPresence, ctx, 'na', 'info', 'na', 'CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）', NO_BODY_REC)];
     if (!rawEnforce.length && !ro.length) return [mk(cspPresence, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
     if (!rawEnforce.length) return [mk(cspPresence, ctx, 2, 'medium', 'fail', `Report-Onlyのみ: ${ro[0]}`, '確認できたら強制モードの Content-Security-Policy に切り替える')];
-    // ③は、ヘッダ値のどのポリシーにもディレクティブがないとき。カンマのあとのかけら（report-uri の URL の中のカンマなど）だけが
-    // 読めなくても、前のポリシーは効いているので③にしない（構文の誤りは H-07④）。空のヘッダが1つあっても、ほかのヘッダのポリシーが
-    // 効いていれば③にしない（ブラウザは空のポリシーを無視し、すべての強制ポリシーを適用する。CSP3）
+    // ③は、どのポリシーにもディレクティブがないとき（ブラウザは空のポリシーを無視し、ほかのすべての強制ポリシーを適用する。CSP3）
     if (!headerEffective) return [mk(cspPresence, ctx, 3, 'high', 'fail', rawEnforce.join(' / '), rec)];
     return [mk(cspPresence, ctx, 'ok', 'info', 'pass', enforce.join(' / '), '')];
   } };
@@ -76,7 +79,7 @@ export const clickjacking: Rule = { id: 'H-06', title: 'クリックジャッキ
     const fas = cspPolicies(ctx).map(parseCsp).filter(m => m.has('frame-ancestors')).map(m => m.get('frame-ancestors')!);
     // frame-ancestors は X-Frame-Options より優先されるので、広い指定（*、https: などのスキームだけ、*.example.com）は④にする
     // ホストが * だけのもの（https://*、*:443、https://*:*）も、どのサイトにも埋め込みを許すので広い指定とする
-    const isBroad = (fa: string[]) => fa.some(s => s === '*' || /^[a-z][\w+.-]*:$/i.test(s) || /^(?:[a-z][\w+.-]*:\/\/)?\*(?:\.|:(?:\d+|\*)\/?$|\/?$)/i.test(s));
+    const isBroad = (fa: string[]) => fa.some(s => /^[a-z][\w+.-]*:$/i.test(s) || /^(?:[a-z][\w+.-]*:\/\/)?\*(?:\.|:(?:\d+|\*)\/?$|\/?$)/i.test(s));
     const strict = fas.find(fa => !isBroad(fa));
     if (fas.length && !strict) return [mk(clickjacking, ctx, 4, 'medium', 'fail', fas.map(fa => `frame-ancestors ${fa.join(' ')}`).join(' / '), "frame-ancestors は 'none' か 'self'（埋め込みを許す相手は個別のオリジン）にする")];
     if (strict) return [mk(clickjacking, ctx, 'ok', 'info', 'pass', `frame-ancestors ${strict.join(' ')}`, '')];
@@ -104,7 +107,7 @@ export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appl
   run(ctx) {
     if (!ctx.final) return [mk(nosniff, ctx, 'na', 'info', 'na', '応答がない', '')];
     // 本文のない転送（Location のある 3xx）と Content-Length: 0 の応答も、スニッフィングする本文がない（ブラウザは 3xx の本文を表示しない）
-    const empty = NO_CONTENT(ctx) || (ctx.final.status >= 300 && ctx.final.status < 400 && ctx.final.headers.has('location')) || header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
+    const empty = NO_CONTENT(ctx) || isRedirectWithLocation(ctx.final) || header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
     if (empty) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const v = header(ctx, 'x-content-type-options').join(', ');
     if (isNosniff(ctx)) return [mk(nosniff, ctx, 'ok', 'info', 'pass', v, '')];
@@ -130,27 +133,19 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
     // （max-age・s-maxage・public・Expires）がなければキャッシュに保存されない（RFC 9111 4.2.2）。ログイン後の 302 を指摘しない。
     // private も保存を許す指定（私的キャッシュは private があれば 201・403 も保存できる）。ただし Location のある 3xx では private を
     // 数えない（ASP.NET は既定ですべての応答に private を付けるので、転送のたびに②にしない）
-    const redirect = ctx.final.status >= 300 && ctx.final.status < 400 && ctx.final.headers.has('location');
+    const redirect = isRedirectWithLocation(ctx.final);
     if (!HEURISTIC_CACHEABLE.has(ctx.final.status) && !['max-age', 's-maxage', 'public', ...(redirect ? [] : ['private'])].some(d => dirs.has(d)) && !header(ctx, 'expires').length)
       return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（鮮度の指定がなく、キャッシュされない応答）`, '機密データを返す 200 の応答（認証後ページなど）で採取する')];
-    const limited = (f: ReturnType<typeof mk>) => ({ ...f, limited: true });
-    // 静的リソース・公開ファイルは、sensitive=1 を明示したときだけ機密応答として扱う（rules/util.ts の sensitiveUnlessStatic）
+    // 静的リソース・公開ファイルは、sensitive=1 を明示したときだけ機密応答として扱う（rules/util.ts の sensitiveUnlessStatic。静的リソースでは
+    // undefined にならない）。機密でない応答だけでの判定は limited にする
     const sensitive = sensitiveUnlessStatic(ctx);
-    if (sensitive === undefined) {
-      if (isStatic && !cc) return [limited(mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する'))];
-      if (isStatic) return [limited(mk(cacheControl, ctx, 'ok', 'info', 'pass', ev, ''))];
-      return [mk(cacheControl, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（${ev}）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
-    }
-    if (!sensitive) {
-      if (isStatic && !cc) return [limited(mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する'))];
-      return [limited(mk(cacheControl, ctx, 'ok', 'info', 'pass', ev || '(機密でない応答)', ''))];
-    }
+    if (sensitive === undefined) return [mk(cacheControl, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（${ev}）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
+    if (!sensitive) return [isStatic && !cc
+      ? mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する', { limited: true })
+      : mk(cacheControl, ctx, 'ok', 'info', 'pass', ev, '', { limited: true })];
     if (dirs.has('private') && !dirs.has('public')) return [mk(cacheControl, ctx, 2, 'medium', 'fail', qualifiedPrivate ? `${ev}（値のある private は、仕様では本文を共有キャッシュに保存してよい）` : ev, 'Cache-Control: no-store')];
     return [mk(cacheControl, ctx, 1, 'high', 'fail', ev, 'Cache-Control: no-store')];
   } };
-
-// ヘッダの CSP と、HTML の <meta> の CSP（ブラウザは両方を強制する）。H-06 の frame-ancestors はヘッダだけ（cspPolicies）で見る
-const enforcedPolicies = (ctx: RuleContext) => [...cspPolicies(ctx), ...metaCspPolicies(ctx)].map(parseCsp).filter(p => p.size > 0);
 
 /** H-02 の na の推奨対応（英語の画面のカバレッジの理由が日本語の証跡にならないよう付ける） */
 const HSTS_SYNTAX_REC = 'HSTS の構文を直す（H-01③）';
@@ -158,13 +153,14 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
   basis: ['hstspreload.org', 'MDN'],
   run(ctx) {
     if (ctx.isHttps === false) return [];
-    const apexNa = noApexHttps(hstsPreload, ctx); if (apexNa) return apexNa;
-    const v = hstsOf(ctx);
+    if (ctx.isHttps === undefined) return [mk(hstsPreload, ctx, 'na', 'info', 'na', ...UNKNOWN_SCHEME)];
+    const { noApex, v } = hstsOf(ctx);
+    if (noApex) return noApexHttps(hstsPreload, ctx);
     if (!ctx.final || !v) return [mk(hstsPreload, ctx, 'na', 'info', 'na', 'HSTSがない（H-01で判定）', '')];
     // 構文の誤ったヘッダ（カンマ区切りの max-age=…, includeSubDomains, preload など）はブラウザが無視する。H-01③ で指摘するので、
     // ここで「preload なし」とは言わない
-    if (!parseHsts(v).valid) return [mk(hstsPreload, ctx, 'na', 'info', 'na', `${v}（HSTSの構文の誤り。H-01③で判定）`, HSTS_SYNTAX_REC)];
-    const age = parseHsts(v).maxAge;
+    const { valid, maxAge: age } = parseHsts(v);
+    if (!valid) return [mk(hstsPreload, ctx, 'na', 'info', 'na', `${v}（HSTSの構文の誤り。H-01③で判定）`, HSTS_SYNTAX_REC)];
     if (!hstsDirective(v, 'preload')) return [mk(hstsPreload, ctx, 2, 'info', 'fail', v, 'preload リストへの登録を検討する（max-age 31536000 以上＋includeSubDomains＋preload）')];
     if (age < 31536000 || !hstsDirective(v, 'includesubdomains')) return [mk(hstsPreload, ctx, 1, 'low', 'fail', v, 'preload には max-age 31536000 以上と includeSubDomains が必要')];
     return [mk(hstsPreload, ctx, 'ok', 'info', 'pass', v, '')];
@@ -181,18 +177,29 @@ interface Policy { dirs: Map<string, string[]>; issues: CspIssue[]; }
  */
 function coveredByOther(i: CspIssue, others: Policy[]): boolean {
   if (i.item !== 'H-04' && i.type !== 'MISSING_DIRECTIVES' && i.directive !== 'default-src') return false;
-  const d = i.item === 'H-04' ? 'script-src' : i.item === 'H-05' ? (i.condition === 1 ? 'object-src' : 'base-uri') : undefined;
-  return !!d && others.some(p => (p.dirs.has(d) || (d !== 'base-uri' && p.dirs.has('default-src')))
+  const d = i.item === 'H-04' ? 'script-src' : i.item === 'H-05' ? 'object-src' : undefined;   // H-05 に振り分けるのは①（object-src）だけ
+  return !!d && others.some(p => (p.dirs.has(d) || p.dirs.has('default-src'))
     && !p.issues.some(x => (x.item === i.item && x.condition === i.condition) || x.type === EVALUATOR_ERROR));
 }
 
-/** 強制モードの各ポリシー（ヘッダと <meta> の CSP。enforcedPolicies と同じ）を csp_evaluator で評価する（ポリシーごとのディレクティブと指摘） */
-const policiesOf = (ctx: RuleContext): Policy[] => [...cspPolicies(ctx), ...metaCspPolicies(ctx)].map(v => ({ dirs: parseCsp(v), issues: evaluateCsp(v) })).filter(p => p.dirs.size > 0);
+/**
+ * 強制モードの各ポリシー（ヘッダの CSP と HTML の <meta> の CSP。ブラウザは両方を強制する）を csp_evaluator で評価する（ポリシーごとの
+ * ディレクティブと指摘）。H-04・H-05・H-07 で同じものを使うので、ターゲットの文脈ごとに一度だけ作る。H-06 の frame-ancestors はヘッダだけ（cspPolicies）で見る
+ */
+const POLICIES = new WeakMap<RuleContext, Policy[]>();
+const policiesOf = (ctx: RuleContext): Policy[] => {
+  let ps = POLICIES.get(ctx);
+  if (!ps) {
+    ps = [...cspPolicies(ctx), ...metaCspPolicies(ctx)].map(v => ({ dirs: parseCsp(v), issues: evaluateCsp(v) })).filter(p => p.dirs.size > 0);
+    POLICIES.set(ctx, ps);
+  }
+  return ps;
+};
+const enforcedPolicies = (ctx: RuleContext) => policiesOf(ctx).map(p => p.dirs);
 
 /** 指定した項目の指摘だけを返す（同じ条件・ディレクティブ・値は1件にまとめる） */
-function cspIssues(ctx: RuleContext, item: CspIssue['item']): CspIssue[] {
+function cspIssues(ps: Policy[], item: CspIssue['item']): CspIssue[] {
   const seen = new Set<string>(); const out: CspIssue[] = [];
-  const ps = policiesOf(ctx);
   ps.forEach((p, n) => {
     const others = ps.filter((_, m) => m !== n);
     for (const i of p.issues) {
@@ -203,22 +210,24 @@ function cspIssues(ctx: RuleContext, item: CspIssue['item']): CspIssue[] {
   return out;
 }
 /** csp_evaluator で評価できなかったポリシーがあるか（H-04 を合格にしない） */
-const unevaluated = (ctx: RuleContext) => policiesOf(ctx).some(p => p.issues.some(i => i.type === EVALUATOR_ERROR));
+const unevaluated = (ps: Policy[]) => ps.some(p => p.issues.some(i => i.type === EVALUATOR_ERROR));
 const CSP_REC: Record<number, string> = {
   1: "'unsafe-inline' をやめ、nonce か hash を使う",
   2: "* や https: などの広い指定をやめ、nonce＋'strict-dynamic' にする",
   3: "'unsafe-eval' を使わないようにする",
   4: 'JSONPを提供するホストを許可リストから外すか、nonce＋strict-dynamic にする',
-  6: 'csp_evaluator の指摘に従って修正する（nonce は十分な長さの乱数にする、IPアドレスでの許可や unsafe-hashes を使わない など）',
+  6: 'csp_evaluator の指摘に従って修正する（nonce は十分な長さの乱数にする、IPアドレスでの許可を使わない など）',
 };
 
 export const cspScript: Rule = { id: 'H-04', title: 'CSP：script-src', appliesTo: 'html', scope: 'target',
   basis: ['Google csp_evaluator', 'OWASP CSP CS'],
   run(ctx) {
-    if (!enforcedPolicies(ctx).length) return [mk(cspScript, ctx, 'na', 'info', 'na', '強制モードのCSPがない（H-03で判定）', '')];
-    const issues = cspIssues(ctx, 'H-04');
-    if (!issues.length && unevaluated(ctx)) return [mk(cspScript, ctx, 'na', 'info', 'na', 'csp_evaluator で解析できないポリシーがある（H-07④）', '')];
-    if (!issues.length) return [mk(cspScript, ctx, 'ok', 'info', 'pass', enforcedPolicies(ctx).filter(p => p.has('script-src') || p.has('default-src')).map(p => `script-src ${(p.get('script-src') ?? p.get('default-src') ?? []).join(' ')}`).join(' / '), '')];
+    const ps = policiesOf(ctx);
+    if (!ps.length) return [mk(cspScript, ctx, 'na', 'info', 'na', '強制モードのCSPがない（H-03で判定）', '')];
+    const issues = cspIssues(ps, 'H-04');
+    if (!issues.length && unevaluated(ps)) return [mk(cspScript, ctx, 'na', 'info', 'na', 'csp_evaluator で解析できないポリシーがある（H-07④）', '')];
+    if (!issues.length) return [mk(cspScript, ctx, 'ok', 'info', 'pass', ps.map(p => p.dirs).filter(p => p.has('script-src') || p.has('default-src'))
+      .map(p => `${p.has('script-src') ? 'script-src' : 'default-src'} ${(p.get('script-src') ?? p.get('default-src')!).join(' ')}`).join(' / '), '')];
     return issues.map(i => mk(cspScript, ctx, i.condition, i.severity, 'fail', issueEvidence(i), CSP_REC[i.condition]));
   } };
 
@@ -230,22 +239,21 @@ export const cspObjectBase: Rule = { id: 'H-05', title: 'CSP：object-src・base
   run(ctx) {
     const ps = enforcedPolicies(ctx);
     if (!ps.length) return [mk(cspObjectBase, ctx, 'na', 'info', 'na', '強制モードのCSPがない（H-03で判定）', '')];
-    const ev = cspIssues(ctx, 'H-05');
+    const ev = cspIssues(policiesOf(ctx), 'H-05');
     const out = [];
     // ①：object-src も default-src もない（自前の判定）、または csp_evaluator が object-src の問題を指摘
     const obj = ev.find(i => i.condition === 1);
     if (!ps.some(p => p.has('object-src') || p.has('default-src'))) out.push(mk(cspObjectBase, ctx, 1, 'medium', 'fail', 'object-src も default-src もない', "object-src 'none'"));
     else if (obj) out.push(mk(cspObjectBase, ctx, 1, 'medium', 'fail', issueEvidence(obj), "object-src 'none'"));
-    // ②：base-uri は default-src にフォールバックしないため、常に確認する
-    // * とスキームだけの指定（https:・data:）は、どの <base> も止めないので、ないのと同じ（振り分け（rules/csp.ts）は object-src と
-    // スクリプトのディレクティブの指摘だけを見るので、ここで見る）。ポリシーは重ねて効くので、制限する base-uri のあるポリシーが1つでもあれば満たす
+    // ②は csp_evaluator の指摘を使わず、ここで判定する。base-uri は default-src にフォールバックしないため、常に確認する。
+    // * とスキームだけの指定（https:・data:）は、どの <base> も止めないので、ないのと同じ。ポリシーは重ねて効くので、制限する base-uri のあるポリシーが1つでもあれば満たす
     const bases = ps.filter(p => p.has('base-uri'));
     if (!bases.length) out.push(mk(cspObjectBase, ctx, 2, 'medium', 'fail', 'base-uri がない（default-src にはフォールバックしない）', "base-uri 'none'（または 'self'）"));
     else if (bases.every(p => looseBaseUri(p))) out.push(mk(cspObjectBase, ctx, 2, 'medium', 'fail', bases.map(p => `base-uri ${p.get('base-uri')!.join(' ')}`).join(' / '), "base-uri 'none'（または 'self'）"));
     // csp_evaluator が解析できなかったポリシーがあれば、object-src の問題を見逃しているかもしれないので合格にしない（H-04 と同じ）
     // ただし object-src 'none' と base-uri のあるポリシーが1つでもあれば、ほかのポリシーによらず満たしている（ポリシーは重ねて効く）
     const solid = ps.some(p => p.get('object-src')?.join(' ') === "'none'" && p.has('base-uri') && !looseBaseUri(p));
-    if (!out.length && !solid && unevaluated(ctx)) return [mk(cspObjectBase, ctx, 'na', 'info', 'na', 'csp_evaluator で解析できないポリシーがある（H-07④）', '')];
+    if (!out.length && !solid && unevaluated(policiesOf(ctx))) return [mk(cspObjectBase, ctx, 'na', 'info', 'na', 'csp_evaluator で解析できないポリシーがある（H-07④）', '')];
     return out.length ? out : [mk(cspObjectBase, ctx, 'ok', 'info', 'pass', 'object-src・base-uri あり', '')];
   } };
 
@@ -255,7 +263,7 @@ export const cspDeprecated: Rule = { id: 'H-07', title: 'CSP：非推奨ディ�
     const ps = enforcedPolicies(ctx);
     if (!ps.length) return [mk(cspDeprecated, ctx, 'na', 'info', 'na', '強制モードのCSPがない（H-03で判定）', '')];
     const out = [];
-    const ev = cspIssues(ctx, 'H-07');
+    const ev = cspIssues(policiesOf(ctx), 'H-07');
     const old = [...new Set([...['block-all-mixed-content', 'referrer', 'plugin-types'].filter(d => ps.some(p => p.has(d))), ...ev.filter(i => i.condition === 1).map(i => i.directive)])];
     if (old.length) out.push(mk(cspDeprecated, ctx, 1, 'low', 'fail', old.join(', '), '非推奨のディレクティブを削除する'));
     if (ps.some(p => p.has('report-uri')) && !ps.some(p => p.has('report-to'))) out.push(mk(cspDeprecated, ctx, 2, 'info', 'fail', 'report-uri のみ', 'report-to（Reporting API）を併記する'));
@@ -277,7 +285,8 @@ export const referrerPolicy: Rule = { id: 'H-09', title: 'Referrer-Policy', appl
     if (!ctx.final) return [mk(referrerPolicy, ctx, 'na', 'info', 'na', '応答がない', '')];
     // <meta name="referrer"> は、文書の方針をその位置から上書きする（ヘッダが no-referrer でも meta の unsafe-url が効く。meta より前に読み込んだ
     // 画像・スクリプトにはヘッダや前の meta の方針が効く）。ヘッダと、<script> などの中身・<template> の中でない meta のうち、最も弱いもので
-    // 判定する（最後の meta だけでは判定しない）。古い値（never・always・default・origin-when-crossorigin）は HTML の仕様どおりに読み替える
+    // 判定する（最後の meta だけでは判定しない）。meta の古い値（never・always・default・origin-when-crossorigin）は HTML の仕様どおりに
+    // 読み替える。これは meta だけの読み替えで、ヘッダの古い値はブラウザが認識できない値として無視する
     const LEGACY: Record<string, string> = { never: 'no-referrer', always: 'unsafe-url', default: 'strict-origin-when-cross-origin', 'origin-when-crossorigin': 'origin-when-cross-origin' };
     const known = [...RP_GOOD, ...RP_WEAK, 'unsafe-url'];
     const lastKnown = (v: string) => v.toLowerCase().split(',').map(s => s.trim()).map(s => LEGACY[s] ?? s).filter(s => known.includes(s)).at(-1);
@@ -285,8 +294,9 @@ export const referrerPolicy: Rule = { id: 'H-09', title: 'Referrer-Policy', appl
     const metas = html ? tags(html, ['meta']).filter(t => !t.inert && t.attrs.get('name')?.toLowerCase() === 'referrer')
       .map(t => lastKnown(t.attrs.get('content') ?? '')).filter((v): v is string => !!v) : [];
     const raw = header(ctx, 'referrer-policy').join(',');
+    const eff = raw.toLowerCase().split(',').map(s => s.trim()).filter(t => known.includes(t)).at(-1);   // 認識できる最後の値が有効
     if (metas.length) {
-      const all = [...(lastKnown(raw) ? [lastKnown(raw)!] : []), ...metas];
+      const all = [...(eff ? [eff] : []), ...metas];
       const worst = all.includes('unsafe-url') ? 'unsafe-url' : all.find(v => RP_WEAK.includes(v)) ?? metas[0];
       const ev = `${metas.map(v => `<meta name="referrer" content="${v}">`).join(' ')}${raw ? `（ヘッダ: ${raw}）` : ''}`;
       if (worst === 'unsafe-url') return [mk(referrerPolicy, ctx, 1, 'medium', 'fail', ev, '<meta name="referrer"> を削除するか strict-origin-when-cross-origin にする')];
@@ -294,8 +304,6 @@ export const referrerPolicy: Rule = { id: 'H-09', title: 'Referrer-Policy', appl
       return [mk(referrerPolicy, ctx, 'ok', 'info', 'pass', ev, '')];
     }
     if (!raw) return [mk(referrerPolicy, ctx, 3, 'info', 'fail', '(ヘッダなし。ブラウザの既定は strict-origin-when-cross-origin)', 'Referrer-Policy: strict-origin-when-cross-origin')];
-    const toks = raw.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
-    const eff = toks.filter(t => known.includes(t)).at(-1);         // 認識できる最後の値が有効
     if (!eff) return [mk(referrerPolicy, ctx, 4, 'low', 'fail', raw, 'Referrer-Policy: strict-origin-when-cross-origin')];
     if (eff === 'unsafe-url') return [mk(referrerPolicy, ctx, 1, 'medium', 'fail', raw, 'Referrer-Policy: strict-origin-when-cross-origin')];
     if (RP_WEAK.includes(eff)) return [mk(referrerPolicy, ctx, 2, 'low', 'fail', raw, 'Referrer-Policy: strict-origin-when-cross-origin')];
@@ -360,9 +368,9 @@ export const contentType: Rule = { id: 'H-13', title: 'Content-Typeとcharset', 
     if (!f) return [mk(contentType, ctx, 'na', 'info', 'na', '応答がない', '')];
     // 別のサイトへの転送で終わったターゲット（-L で転送先を採取していても、転送先は対象の応答として判定しない）は、ヘッダの項目を
     // 判定できないことを na で示す（黙って消さない）
-    if (f.status >= 300 && f.status < 400 && ctx.target.responses.filter(r => r.kind === 'redirect' || r.kind === 'final').at(-1) !== f)
+    if (f.status >= 300 && f.status < 400 && ctx.chain.at(-1) !== f)
       return [mk(contentType, ctx, 'na', 'info', 'na', `HTTP ${f.status}（別のサイトへの転送で終わる。転送先の応答は判定しない）`, '転送先の URL を別のターゲットとして採取する')];
-    if (f.status === 204 || f.status === 304 || (f.status >= 300 && f.status < 400)) return [];   // 本文のない応答は適用外
+    if (f.status === 204 || (f.status >= 300 && f.status < 400)) return [];   // 本文のない応答は適用外
     const ct = header(ctx, 'content-type')[0];
     // 本文が空の応答（Content-Length: 0 の 401・201 など。Spring Security の API の 401）は、型を示す本文がないので①の対象外
     // HTTP/2 は Content-Length を付けないことがあるので、本文がない（空・採取していない）201・202・401・403 も対象外にする（本文のない
@@ -402,8 +410,6 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
 const PRODUCT_HEADERS = ['server', 'x-powered-by', 'x-aspnet-version', 'x-aspnetmvc-version', 'x-generator'];
 // プロトコルの名前（HTTP・HTTPS・SPDY・S-HTTP）と版は製品の版ではない
 const VIA_PRODUCT = /(?<![\w.-])(?!(?:HTTPS?|SPDY|SHTTP)\/)[A-Za-z][\w.-]*\/\d+\.\d+/i;
-// 内部のホスト名は、ホスト名の最後が internal・local などのもの（edge01.local.example-cdn.net の .local. は公開のホスト名）
-const INTERNAL = /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|127\.0\.0\.1|localhost)\b|\b[\w-]+\.(?:internal|local|lan|corp|intra)(?![\w.-])/i;
 // CDN が付ける Server-Timing の項目（Cloudflare の cfL4・cfExtPri、CloudFront の cdn-*、Akamai の edge・origin・ak_p、Fastly）。アプリの内部処理ではない
 const CDN_TIMING = /^(?:cf[A-Z]\w*|cdn-[\w-]+|cdn|edge|origin|ak_p|fastly[\w-]*|x-cache|cache)$/;
 /**
@@ -437,7 +443,7 @@ export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン�
     // 製品名だけ（1.1 vegur、(CloudFront)）は②にしない（ほとんどの CDN・プロキシが付けるので、指摘しても対処できない）
     for (const v of header(ctx, 'via')) if (VIA_PRODUCT.test(v)) out.push(mk(productInfo, ctx, 1, 'low', 'fail', `via: ${v}`, 'バージョン番号を出さない（可能ならヘッダごと削除）'));
     for (const h of ['via', 'x-backend-server', 'x-served-by', 'x-host']) for (const v of header(ctx, h))
-      if (INTERNAL.test(v)) out.push(mk(productInfo, ctx, 4, 'low', 'fail', `${h}: ${v}`, '内部ホスト名・IPアドレスを出さない'));
+      if (INTERNAL_HOST_IN_TEXT.test(v)) out.push(mk(productInfo, ctx, 4, 'low', 'fail', `${h}: ${v}`, '内部ホスト名・IPアドレスを出さない'));
     // Server-Timing の証跡は項目の名前だけにする（desc に SQL・メールアドレス・キーを入れる実装がある）
     for (const v of header(ctx, 'server-timing')) { const names = appTimings(v);
       if (names.length) out.push(mk(productInfo, ctx, 5, 'low', 'fail', `server-timing: ${names.map(n => clip(n, 40)).join(', ')}（desc・dur の値は表示しない）`, '本番では内部処理の名前や時間を外部に返さない')); }

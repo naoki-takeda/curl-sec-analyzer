@@ -1,7 +1,7 @@
 // rules/transport.ts：第4章 メソッド・転送・ヘッダインジェクション（T-01、T-04〜T-08、T-12。TLSは rules/hostRules.ts）
 import type { HttpResponse, Rule } from '../model';
-import { NO_BODY_REC, mk } from './util';
-import { baseLabel, sameDocument } from '../parser/target';
+import { INTERNAL_HOST, NO_BODY_REC, mk } from './util';
+import { baseLabel, isRedirectWithLocation, sameDocument, trimPath } from '../parser/target';
 import { LOGIN_PATH } from './html';
 
 export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイレクト', appliesTo: 'any', scope: 'target',
@@ -19,7 +19,7 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     // 5xx はサーバの不調で、HTTP をどう扱う設定かが分からない
     if (first.status >= 400 && first.status < 500) return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', `HTTP ${first.status}（HTTP のリクエストを拒否）`, '')];
     if (first.status >= 500) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `HTTP ${first.status}（サーバエラー）`, '')];
-    if (first.status < 300 || first.status >= 400 || !loc)
+    if (first.status < 300 || !loc)
       return [mk(httpsRedirect, ctx, 1, 'high', 'fail', `HTTP ${first.status}（転送なし）`, rec)];
     let to: URL;
     try { to = new URL(loc, url); } catch { return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `Location を解釈できない: ${loc}`, '')]; }
@@ -32,7 +32,6 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', ev, '')];
   } };
 
-const INTERNAL_HOST = /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost$)|\.(?:internal|local|lan|corp|intra)$/i;
 export const redirectChain: Rule = { id: 'T-05', title: 'リダイレクトチェーン', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG'],
   run(ctx) {
@@ -139,7 +138,7 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
       // /home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、転送先を検証して止めたので合格
       const loc = r.headers.get('location')?.[0] ?? '';
       let path = ''; try { path = new URL(loc, r.url ?? base).pathname; } catch { /* 解釈できない */ }
-      return !LOGIN_PATH.test(path.length > 1 ? path.replace(/\/+$/, '') : path) && !sameDocument(r, ctx.target.url) && !passedOn(r);
+      return !LOGIN_PATH.test(trimPath(path)) && !sameDocument(r, ctx.target.url) && !passedOn(r);
     };
     // テスト値を持ったまま、同じ入口（パスの最後の部分が同じ。/redirect → www の /redirect・/en/redirect）へ転送した。転送先の検証はその先で行う
     const lastSegment = (u: string, b: string) => { try { return new URL(u, b).pathname.replace(/\/+$/, '').split('/').pop() ?? ''; } catch { return undefined; } };
@@ -152,7 +151,7 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
       const to = refreshTarget(v); if (!to) return false;
       try { const a = new URL(to, r.url ?? base), b = new URL(r.url ?? base); a.hash = ''; b.hash = ''; return a.href !== b.href; } catch { return false; }
     });
-    const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location') && tested(r)) || refreshes(r));
+    const redirected = ctx.target.responses.some(r => (isRedirectWithLocation(r) && tested(r)) || refreshes(r));
     const carried = ctx.target.responses.some(r => r.status >= 300 && r.status < 400 && passedOn(r));
     return redirected ? [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')]
       : [mk(openRedirect, ctx, 'na', 'info', 'na', carried

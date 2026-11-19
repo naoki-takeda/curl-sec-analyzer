@@ -25,7 +25,7 @@ export const EXACT: Record<string, string> = {
   'JSONPを提供するホストを許可リストから外すか、nonce＋strict-dynamic にする': "Remove hosts that serve JSONP from the allowlist, or use a nonce and 'strict-dynamic'",
   "base-uri 'none'（または 'self'）": "base-uri 'none' (or 'self')",
   '非推奨のディレクティブを削除する': 'Remove deprecated directives',
-  'csp_evaluator の指摘に従って修正する（nonce は十分な長さの乱数にする、IPアドレスでの許可や unsafe-hashes を使わない など）': 'Fix the issue reported by csp_evaluator (use a sufficiently long random nonce, avoid IP address sources and unsafe-hashes, etc.)',
+  'csp_evaluator の指摘に従って修正する（nonce は十分な長さの乱数にする、IPアドレスでの許可を使わない など）': 'Fix the issue reported by csp_evaluator (use a sufficiently long random nonce, avoid IP address sources, etc.)',
   'CSPの構文の誤り（不明なディレクティブ、キーワードの引用符、セミコロン、nonceの文字種）を直す。誤った指定はブラウザに無視される': 'Fix CSP syntax errors (unknown directives, unquoted keywords, missing semicolons, invalid nonce characters). Browsers ignore invalid parts',
   'report-to（Reporting API）を併記する': 'Add report-to (Reporting API) as well',
   'http:// の資源を直すまで upgrade-insecure-requests を付ける': 'Add upgrade-insecure-requests until all http:// resources are fixed',

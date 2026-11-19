@@ -1,5 +1,6 @@
 import type { Finding, Rule, RuleContext, Severity, Status } from '../model';
 import { wordLike } from '../tokenShape';
+import { BODY_LIMIT } from '../parser/target';
 
 export function mk(rule: Rule, ctx: RuleContext, cond: number | 'ok' | 'na', severity: Severity, status: Status,
                    evidence: string, recommendation: string, extra: Partial<Finding> = {}): Finding {
@@ -18,7 +19,7 @@ export const header = (ctx: RuleContext, name: string): string[] => ctx.final?.h
 export const splitPolicies = (values: string[]): string[] => values.flatMap(v => v.split(',')).map(s => s.trim()).filter(Boolean);
 /**
  * 強制モードの CSP（ポリシーごと）。ディレクティブが1つもないかけら（report-uri の URL の中のカンマのあとの「2」、
- * 「img-src 'self', data:」の「data:」）は、ブラウザも何も制限しないポリシーとして扱うので除く（H-03③ は rules/headers.ts でヘッダ値ごとに見る）
+ * 「img-src 'self', data:」の「data:」）は、ブラウザも何も制限しないポリシーとして扱うので除く（H-03③ は rules/headers.ts で見る）
  */
 export const cspPolicies = (ctx: RuleContext): string[] => splitPolicies(header(ctx, 'content-security-policy')).filter(p => parseCsp(p).size > 0);
 /**
@@ -126,7 +127,7 @@ const parseJson = (body: string | undefined): unknown => {
 export const noDataJson = (body: string | undefined): boolean => {
   const j = parseJson(body);
   if (j === undefined) return false;
-  return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && (Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)) || errorEnvelope(j as Record<string, unknown>, blank)));
+  return blank(j) || (typeof j === 'object' && j !== null && !Array.isArray(j) && (Object.entries(j as Record<string, unknown>).every(([k, v]) => blank(v, k)) || errorEnvelope(j as Record<string, unknown>)));
 };
 /**
  * エラーだけを返した JSON か（errorEnvelope。{"success":false,"error":"invalid_credentials"}）。空の {} や値がすべて空のものは含めない
@@ -134,7 +135,7 @@ export const noDataJson = (body: string | undefined): boolean => {
  */
 export const errorJson = (body: string | undefined): boolean => {
   const j = parseJson(body);
-  return typeof j === 'object' && j !== null && !Array.isArray(j) && errorEnvelope(j as Record<string, unknown>, blank);
+  return typeof j === 'object' && j !== null && !Array.isArray(j) && errorEnvelope(j as Record<string, unknown>);
 };
 /**
  * エラーだけを返した JSON（200 で {"success":false,"error":"Unauthorized","message":"Please log in"}）。エラーの項目（error・errors など）か
@@ -143,7 +144,7 @@ export const errorJson = (body: string | undefined): boolean => {
  */
 const ERROR_KEYS = /^(?:error|errors|err|fault|error_?(?:code|message|description|type)|errorcode|errormessage)$/i;
 const ENVELOPE_KEYS = /^(?:message|msg|status|status_?code|statuscode|code|success|ok|timestamp|time|path|request_?id|trace_?id|correlation_?id|detail|title|type|instance)$/i;
-const errorEnvelope = (j: Record<string, unknown>, blank: (v: unknown, k?: string) => boolean): boolean => {
+const errorEnvelope = (j: Record<string, unknown>): boolean => {
   const entries = Object.entries(j);
   // 状態の番号だけのエラー（{"status":401,"message":"Unauthorized"}・{"code":401,"msg":"not logged in"}・{"status":"fail"}）も含める。
   // ログインの状態を表す名前（authenticated・loggedIn）が false のもの（{"authenticated":false,"message":"Not logged in"}）も失敗の印
@@ -160,15 +161,23 @@ const errorEnvelope = (j: Record<string, unknown>, blank: (v: unknown, k?: strin
 export const graphqlError = (body: string | undefined): 'denied' | 'error' | undefined => {
   const b = body ?? '';
   if (!/^\s*\{/.test(b) || !/"errors"\s*:/.test(b)) return undefined;
-  let j: { errors?: unknown; data?: unknown };
-  try { j = JSON.parse(b) as typeof j; } catch { return undefined; }
-  if (!Array.isArray(j.errors) || !j.errors.length) return undefined;
+  const j = parseJson(b) as { errors?: unknown; data?: unknown } | undefined;
+  if (!j || !Array.isArray(j.errors) || !j.errors.length) return undefined;
   const d = j.data;
   if (!(d === null || d === undefined || (typeof d === 'object' && Object.values(d as Record<string, unknown>).every(v => v === null)))) return undefined;
   return /UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|not authenticated|unauthori[sz]ed|authentication required|access denied|not logged in|login required/i.test(JSON.stringify(j.errors)) ? 'denied' : 'error';
 };
 /** 本文の上限（パーサが残す先頭64KB）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
-export const bodyTruncated = (ctx: RuleContext) => (ctx.final?.body?.length ?? 0) >= 64 * 1024;
+export const bodyTruncated = (ctx: RuleContext) => (ctx.final?.body?.length ?? 0) >= BODY_LIMIT;
+
+// 内部のホスト：プライベート・ループバックの IPv4 アドレスと localhost、最後のラベルが internal・local などのホスト名
+// （edge01.local.example-cdn.net の .local. は公開のホスト名）
+const INTERNAL_ADDR = String.raw`10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2}|127(?:\.\d{1,3}){3}|localhost`;
+const INTERNAL_SUFFIX = String.raw`\.(?:internal|local|lan|corp|intra)`;
+/** URL のホスト名（new URL().hostname）が内部のホストか（T-05②）。10.cdn.example.com のような、数字で始まる公開のホスト名は含めない */
+export const INTERNAL_HOST = new RegExp(String.raw`^(?:${INTERNAL_ADDR})$|${INTERNAL_SUFFIX}$`, 'i');
+/** ヘッダの値（Via・X-Backend-Server など）の中の内部のホスト（H-16④）。前後が名前の続き（10.0.0.1.example.com・localhost.example.com）のものは含めない */
+export const INTERNAL_HOST_IN_TEXT = new RegExp(String.raw`(?<![\w.])(?:${INTERNAL_ADDR})(?!\w|\.\w)|[\w-]${INTERNAL_SUFFIX}(?![\w.-])`, 'i');
 
 /**
  * 英語の画面の文言らしい値（{"password":"Password"}、{"apiKey":"ApiKey"}、{"secret":"Secret"}）。値がキーの名前と同じ語か、
@@ -198,9 +207,9 @@ export const isPlaceholderValue = (v: string): boolean =>
  * 入力の検証の規則（Laravel・VeeValidate の required|min:8|max:64）。| でつないだ、英字の規則名（引数は数字・英字）だけのもの。
  * ログイン・登録の画面の password:"required|min:8" を、秘密の値の代入（E-09①（高））にしない
  */
-export const VALIDATION_RULE = /^[a-z_]+(?::[\w,.-]{1,20})?(?:\|[a-z_]+(?::[\w,.-]{1,20})?)+$/i;
+const VALIDATION_RULE = /^[a-z_]+(?::[\w,.-]{1,20})?(?:\|[a-z_]+(?::[\w,.-]{1,20})?)+$/i;
 /** HTML の autocomplete の値（current-password・new-password・one-time-code など）。正規表現（^…$）も秘密の値ではない */
-export const AUTOCOMPLETE = /^(?:current-password|new-password|one-time-code|username|email|off|on)$/i;
+const AUTOCOMPLETE = /^(?:current-password|new-password|one-time-code|username|email|off|on)$/i;
 /** 秘密の値ではない形（入力の検証の規則・正規表現 ^…$・autocomplete の値）。E-09 と A-07 で共有する（同じ値を片方だけで指摘しない） */
 export const notSecretFormat = (v: string): boolean => VALIDATION_RULE.test(v) || /^\^.*\$$/.test(v) || AUTOCOMPLETE.test(v);
 
@@ -223,8 +232,7 @@ const ESCAPED_NON_ASCII = /\\u(?!00[0-7])[0-9a-fA-F]{4}/g;
  */
 export const notSecretText = (v: string): boolean => {
   const words = wordsOf(v);
-  // パス（/Account/ForgotPassword・/users/password/new?locale=ja）と翻訳キー（auth.passwordLabel）は、かけらがすべて語として読め、秘密の語を
-  // 含むものだけ（base64 の /Ab3… や、合言葉の correct.horse.battery を除かないため）。URL はユーザー情報（u:pw@）のないものだけ
+  // base64 の /Ab3… や合言葉の correct.horse.battery を除かないため
   const wordy = (s: string) => s.split(/[/._-]+/).filter(Boolean).every(wordLike) && words.some(w => SECRET_WORD.test(w));
   if ((/^\/[\w\-./]*(?:\?[\w=&.-]*)?$/.test(v) && wordy(v.split('?')[0])) || (/^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) && wordy(v))) return true;
   if (/^https?:\/\/[^/@\s]+(?:[/?#]|$)/i.test(v) || /^(?:\{\{|\$\{)/.test(v)) return true;
