@@ -55,12 +55,29 @@ export function isDeletion(c: SetCookie, now = Date.now()): boolean {
 }
 
 /**
- * Cookie の Expires の日時（読めなければ NaN）。2桁の年は RFC 6265 5.1.1 のとおり、70〜99 を 19xx、0〜69 を 20xx にする
- * （Date.parse は 50〜69 を 19xx と読み、Expires=Wed, 01-Oct-69 … の生きている Cookie を削除とみなした）
+ * Cookie の Expires の日時（読めなければ NaN）。RFC 6265 5.1.1 の手順で読む：区切りで語に分け、時刻（hh:mm:ss）・日・月の名前・年を
+ * 順に探し、どれかが欠けるか範囲の外なら読めない（ブラウザは Expires を無視し、セッションCookieとして扱う）。2桁の年は 70〜99 を 19xx、
+ * 0〜69 を 20xx にする。
+ * Date.parse で読むと、Expires=0・-1（2000年・2001年と読む）を過去の日時とみなし、生きているセッションCookieを削除とみなして C-01①・C-02①（高）を
+ * 出さず、logout の Expires=0 で C-12 を合格にした（第52回）。Expires=2099 のような年だけの値も読んでいた
  */
+const COOKIE_DELIM = /[\t\x20-\x2f\x3b-\x40\x5b-\x60\x7b-\x7e]+/;
+const COOKIE_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 export function cookieDate(s: string): number {
-  const v = s.replace(/(\b\d{1,2}[-\s]+[A-Za-z]{3,9}[-\s]+)(\d{2})(?!\d)/, (_, pre: string, yy: string) => `${pre}${Number(yy) >= 70 ? 1900 + Number(yy) : 2000 + Number(yy)}`);
-  return Date.parse(v);
+  let time: number[] | undefined, day: number | undefined, month: number | undefined, year: number | undefined;
+  for (const tok of s.split(COOKIE_DELIM)) {
+    if (!tok) continue;
+    let m: RegExpMatchArray | null;
+    if (!time && (m = tok.match(/^(\d{1,2}):(\d{1,2}):(\d{1,2})(?:\D|$)/))) time = [Number(m[1]), Number(m[2]), Number(m[3])];
+    else if (day === undefined && (m = tok.match(/^(\d{1,2})(?:\D|$)/))) day = Number(m[1]);
+    else if (month === undefined && COOKIE_MONTHS.includes(tok.slice(0, 3).toLowerCase())) month = COOKIE_MONTHS.indexOf(tok.slice(0, 3).toLowerCase());
+    else if (year === undefined && (m = tok.match(/^(\d{2,4})(?:\D|$)/))) year = Number(m[1]);
+  }
+  if (!time || day === undefined || month === undefined || year === undefined) return NaN;
+  if (year >= 70 && year <= 99) year += 1900; else if (year >= 0 && year <= 69) year += 2000;
+  if (day < 1 || day > 31 || year < 1601 || time[0] > 23 || time[1] > 59 || time[2] > 59) return NaN;
+  const d = new Date(Date.UTC(year, month, day, time[0], time[1], time[2]));
+  return d.getUTCDate() === day ? d.getTime() : NaN;   // 2月30日のような実在しない日は読めない
 }
 
 // 設計書：セッションCookieは、名前のパターンと期限がないことで推定する。

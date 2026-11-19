@@ -256,6 +256,11 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
 // キー・シークレットの代入。値は ASCII の記号・英数字だけ（日本語の文言「パスワードは8文字以上…」は空白がなくても秘密情報ではない）。
 // 名前の前は語の境目（forgot_password: の password には一致させない）
 const ASSIGNED = /(?<![\w-])["']?(api[_-]?key|client[_-]?secret|secret[_-]?key|access[_-]?token|password)["']?\s*[:=]\s*["']([!#-&(-~]{12,})["']/gi;
+/** エスケープした引用符（HTML の文字参照、JS のエスケープ）。E-09 のキーの代入は、戻してからも見る */
+const ESCAPED_QUOTE = /&(?:quot|apos|#0*3[49]|#x0*2[27]);|\\(?:u002[27]|x2[27]|["'])/i;
+const unescapeQuotes = (s: string) => s
+  .replace(/&(?:quot|#0*34|#x0*22);|\\u0022|\\x22|\\"/gi, '"')
+  .replace(/&(?:apos|#0*39|#x0*27);|\\u0027|\\x27|\\'/gi, "'");
 /**
  * 秘密ではない値：パス（password:"/users/password/new"）、URL、ドットでつないだ翻訳キー（"auth.password.label"）、テンプレート（{{…}}、${…}）、
  * 英語の画面の文言（A-07 と同じ isLabelText）、セレクタ・項目の名前・エスケープした日本語の文言（notSecretText。第50回）
@@ -282,7 +287,9 @@ const SECRETS: [string, { test(s: string): boolean }][] = [
   // ブラウザに渡す前提の JWT（Supabase の anon key。ペイロードの role が anon）は除く（行レベルのセキュリティで守る公開のキー）
   ['JWT', { test: (s: string) => [...s.matchAll(/\beyJ[\w-]{10,}\.(eyJ[\w-]{10,})\.[\w-]{10,}/g)].some(m => !publicJwt(m[1])) }],
   // ブラウザで使う前提の SDK の呼び出しの中の apiKey（Algolia の docsearch・algoliasearch の検索専用のキー、Bugsnag・Sentry などの通知用のキー）は除く
-  ['キー・シークレットの代入', { test: (s: string) => [...s.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2]) && !PUBLIC_SDK.test(s.slice(Math.max(0, (m.index ?? 0) - 300), m.index))) }],
+  // 属性の中の JSON（Inertia の data-page="{&quot;api_key&quot;:…}"）と、JS の文字列の中の JSON（JSON.parse("{\"api_key\":…}")）は、
+  // 引用符を戻してからも見る（生の引用符だけを見ると、どちらも見逃した。第52回）
+  ['キー・シークレットの代入', { test: (s: string) => [s, ...(ESCAPED_QUOTE.test(s) ? [unescapeQuotes(s)] : [])].some(x => [...x.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2]) && !PUBLIC_SDK.test(x.slice(Math.max(0, (m.index ?? 0) - 300), m.index)))) }],
 ];
 // ホスト名の最後で区切る（edge01.local.example-cdn.net の .local. には一致させない）。複数のラベルのホスト名（db.prod.internal）も含める
 const INTERNAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|(?:[\w-]+\.)+(?:internal|local|lan|corp|intra))(?![\w.-])[^\s"'<>]*/gi;

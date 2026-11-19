@@ -114,6 +114,7 @@ pre-login | C-13.ok | info | pass | 共有キャッシュの指定なし
 pre-login | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
 pre-login/login | C-09.ok | info | pass | ログイン時にセッションIDを再発行している
 robots | A-02.ok | info | pass | URL・Location・本文にトークンなし
+robots | E-01.ok | info | pass | エラーの詳細らしき記述なし
 robots | E-02.ok | info | pass | 一覧表示なし
 robots | E-04.ok | info | pass | robots.txt なし（HTTP 200、HTML の画面。SPA の可能性）
 robots | E-07.ok | info | pass | http:// の資源なし

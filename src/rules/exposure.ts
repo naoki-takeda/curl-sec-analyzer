@@ -31,6 +31,8 @@ const CREDENTIALS: RegExp[] = [
 // AWS のアクセスキー。HTML の応答では E-09①（HTML本文の秘密情報）が同じ値を数えるので、E-01① では見ない（第0章 0.2「同じ事象は1つの項目でだけ減点」）
 const AWS_KEY = /\bAKIA[0-9A-Z]{16}\b/;
 const path = (ctx: RuleContext) => { try { return new URL(ctx.target.url ?? '').pathname; } catch { return ''; } };
+/** 画面・データの形の Content-Type（HTML・XHTML・JSON・問題の詳細）。静的リソースの拡張子の URL でも、E-01 はこれなら本文を見る */
+const DOC_CT = /^\s*(?:text\/html|application\/(?:xhtml\+xml|(?:problem\+)?json)|[\w.-]+\/[\w.-]+\+json)\b/i;
 
 // E-01② のスタックトレース・SQL・絶対パスなど（下の errorDetail の注記を参照）
 const TRACE = /\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?<=(?:^|[\r\n>]|\\n|<br\s*\/?>|[[,]\s*"|"(?:stack|trace|stacktrace|stack_trace|error|err|exception)"\s*:\s*")(?:[ \t]|&nbsp;){0,20}|(?:[Ee]rror|[Ee]xception)\b[^\n"<]{0,200}\s)at (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|\.php<\/b> on line <b>\d+|Stack trace:\s*#0 |(?:(?<=^|[\r\n]|\\n)[ \t]{1,20})at [A-Z]\w*(?:\.[\w<>`|$]+){2,}\(|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/;
@@ -39,7 +41,10 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
   basis: ['ISOG-J', 'OWASP Error Handling CS'],
   run(ctx) {
     // JS・CSS などの静的リソースは、エラーの応答ではない（圧縮した JS の文字列に ORA- や例外の名前が含まれていても、エラーの詳細ではない）
-    const b = isStaticResource(ctx) ? undefined : body(ctx);
+    // 拡張子が静的リソースでも、エラーの応答（4xx・5xx）と、HTML・JSON の画面・データを返したもの（/img/missing.png の 500 のエラーページ）は見る
+    // （URL のパスだけで除くと、静的ファイルの URL のエラーページのスタックトレース・接続文字列（①（高））を見逃した。第52回）
+    const doc = (ctx.final?.status ?? 0) >= 400 || DOC_CT.test(header(ctx, 'content-type')[0] ?? '');
+    const b = isStaticResource(ctx) && !doc ? undefined : body(ctx);
     if (!b) return [];
     const out = [];
     // E-09 に任せるのは、そのラベルで E-09 を判定するときだけ（error-* のラベルは E-01 と A-10 だけを判定するので、任せると見逃した）

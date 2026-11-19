@@ -232,3 +232,62 @@ describe('第51回：文書の仮の値・公開のクライアントのキー�
     expect(ids(page('var c={password:"my_example_password"}')).filter(i => i === 'E-09.1')).toEqual(['E-09.1']);
   });
 });
+
+describe('第52回：重要度「高」の条件の見逃し', () => {
+  const SESSION = 'set-cookie: sessionid=Zx9k2LmQ8vT4pR7wN1yB6cH3; Path=/';
+  it('C-01①・C-02①：数字だけの Expires（0・-1）はブラウザが無視するので、セッションCookieのまま判定する', () => {
+    for (const exp of ['; Expires=0', '; Expires=-1', '; expires=2099']) {
+      const r = ids(target('https://a.example/', `${HTML}${SESSION}${exp}`));
+      expect(r, exp).toContain('C-01.1');
+      expect(r, exp).toContain('C-02.1');
+    }
+  });
+  it('C-12：logout の Expires=0 は削除ではない（Cookie は残る）', () => {
+    const r = evaluate(['#TARGET url=https://a.example/logout label=logout', 'HTTP/2 302', 'location: /', `${SESSION}; Secure; HttpOnly; Expires=0`, '', ''].join('\n'));
+    expect(r.ids('logout')).not.toContain('C-12.ok');
+  });
+  it('Cookie の日付：RFC 6265 5.1.1 の形は読み、2桁の年と範囲の外を扱う', async () => {
+    const { cookieDate } = await import('../src/parser/setCookie');
+    expect(cookieDate('Wed, 21 Oct 2026 07:28:00 GMT')).toBe(Date.UTC(2026, 9, 21, 7, 28, 0));
+    expect(cookieDate('Wednesday, 21-Oct-26 07:28:00 GMT')).toBe(Date.UTC(2026, 9, 21, 7, 28, 0));
+    expect(cookieDate('Wed, 01-Oct-69 00:00:00 GMT')).toBe(Date.UTC(2069, 9, 1));
+    expect(cookieDate('Thu, 01 Jan 1970 00:00:00 GMT')).toBe(0);
+    for (const bad of ['0', '-1', '2099', 'Wed, 30 Feb 2026 00:00:00 GMT', 'Wed, 21 Oct 2026', '2026-10-21T07:28:00Z', 'Wed, 21 Oct 2026 24:00:00 GMT'])
+      expect(cookieDate(bad), bad).toBeNaN();
+  });
+  it('A-07①：先頭が大文字の略語のキー（DBPassword・SMTPPassword・AWSSecretKey）も分けて見る', () => {
+    const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/me label=api sensitive=1\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('api');
+    for (const k of ['DBPassword', 'SMTPPassword', 'AWSSecretKey'])
+      expect(api(`{"config":{"${k}":"hunter2xyz9Q"}}`), k).toContain('A-07.1');
+    expect(api('{"config":{"DBHost":"db.internal"}}')).not.toContain('A-07.1');
+  });
+  it('E-01：静的ファイルの URL でも、エラーの応答と HTML の画面は見る（JS の本文は見ない）', () => {
+    const err = (path: string, status: string, ct: string) => evaluate(`#TARGET url=https://www.example.com${path} label=error-img\nHTTP/1.1 ${status}\ncontent-type: ${ct}\n\n<html><pre>Traceback (most recent call last):\n  File "/srv/app/main.py", line 3\nmongodb://admin:S3cretPw9@db.internal:27017/app</pre></html>\n`).ids('error-img');
+    expect(err('/img/missing.png', '500 Internal Server Error', 'text/html')).toEqual(expect.arrayContaining(['E-01.1', 'E-01.2']));
+    expect(err('/img/missing.png', '404 Not Found', 'text/plain')).toContain('E-01.2');
+    expect(err('/assets/app.js', '200 OK', 'application/javascript').filter(i => i.startsWith('E-01'))).toEqual([]);
+  });
+  it('E-09①：属性の中の文字参照の JSON と、JS の文字列の中のエスケープした JSON の秘密も見る', () => {
+    const secrets = { config: { api_key: 'Zx9QwErT77LmNb3k', password: 'Hunter2-Secret!x' } };
+    const json = JSON.stringify({ props: secrets });
+    const attr = `<div id="app" data-page="${json.replace(/"/g, '&quot;')}"></div>`;
+    const script = `<script>window.__S__ = JSON.parse(${JSON.stringify(json)})</script>`;
+    for (const b of [attr, script]) expect(ids(`#TARGET url=https://www.example.com/ label=t\n${HTML}\n<html>${b}</html>\n`), b).toContain('E-09.1');
+    // 文言・パスは、戻しても秘密としない
+    const label = `<div data-page="${JSON.stringify({ password: '/users/password/new' }).replace(/"/g, '&quot;')}"></div>`;
+    expect(ids(`#TARGET url=https://www.example.com/ label=t\n${HTML}\n<html>${label}</html>\n`)).not.toContain('E-09.1');
+  });
+  it('C-10①：csp-sample-* も一般のターゲットと同じ項目を判定する', () => {
+    expect(withLabel('csp-sample-1', 'http://www.example.com/', `${HTML}${SESSION}; HttpOnly`)).toContain('C-10.1');
+  });
+  it('XHTML と Content-Type のない HTML の本文も HTML の画面として判定する', () => {
+    const page = '<!doctype html><html><body>x</body></html>';
+    for (const head of ['HTTP/2 200\ncontent-type: application/xhtml+xml; charset=utf-8\n', 'HTTP/2 200\n']) {
+      const r = ids(target('https://a.example/', `${head}\n${page}`));
+      expect(r, head).toContain('H-03.1');
+      expect(r, head).toContain('H-06.1');
+    }
+    // 本文が HTML でない、Content-Type のない応答は、これまでどおり HTML の項目を判定しない
+    expect(ids(target('https://a.example/', 'HTTP/2 200\n\n{"a":1}'))).not.toContain('H-03.1');
+  });
+});

@@ -159,7 +159,10 @@ export function responseKind(t: Target, r?: HttpResponse): ResponseKind {
   if (t.kind !== 'auto') return t.kind;
   const ct = r?.headers.get('content-type')?.[0]?.toLowerCase() ?? '';
   if (/^application\/(?:[\w.-]+\+)?json\b/.test(ct)) return 'api';
-  if (ct.startsWith('text/html')) return 'html';
+  // XHTML（application/xhtml+xml）もブラウザが描画する HTML の画面。Content-Type のない応答は、ブラウザが本文から HTML と推測するので、
+  // 本文が HTML の始まりのものは HTML とする（どちらも other にして、H-03①（高）・H-06 などの HTML の項目を na も出さずに飛ばした。第52回）
+  if (ct.startsWith('text/html') || /^application\/xhtml\+xml\b/.test(ct)) return 'html';
+  if (!ct && /^\s*(?:<!doctype html|<html)\b/i.test(r?.body ?? '')) return 'html';
   return 'other';
 }
 

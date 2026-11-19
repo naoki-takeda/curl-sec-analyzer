@@ -263,7 +263,8 @@ const PUBLIC_KEY_WORD = new Set(['public', 'publishable', 'anon', 'browser']);
 const SEARCH_ONLY_KEY = /^(?:algolia_|typesense_|meili(?:search)?_)?search(?:_only)?_api_?key$/;
 const SECRET_KEY = { test: (path: string): boolean => {
   const last = path.split(/[.[\]]+/).filter(Boolean).pop() ?? '';   // キーの区切りは . と []（_ はキーの中の語の区切り）
-  const words = last.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[_-]+/).filter(Boolean);
+  // 大文字の略語の並びも、続く語との境目で分ける（DBPassword・SMTPPassword・AWSSecretKey を1語の dbpassword などと読み、①（高）を見逃した。第52回）
+  const words = last.replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2').replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase().split(/[_-]+/).filter(Boolean);
   if (!words.length || NOT_SECRET_LAST.has(words[words.length - 1]) || words[0] === 'has' || words[0] === 'is') return false;
   const j = words.join('_');
   if (words.length === 2 && PASSWORD_ACTION.has(words[0]) && /^pass(?:word|wd|phrase)$/.test(words[1])) return false;
