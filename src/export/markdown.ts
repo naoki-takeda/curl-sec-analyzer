@@ -1,7 +1,7 @@
 // export/markdown.ts：重要度順の表。常にマスク済みの値だけを出す。見出しと項目名は画面の言語に合わせる
 import type { Coverage, Finding, Profile, Suppression } from '../model';
 import { coverageRate } from '../engine/coverage';
-import { circled, countBySeverity, overall } from '../engine/summarize';
+import { SEVERITIES, circled, countBySeverity, overall } from '../engine/summarize';
 import { type DiffRow, diffSummary } from '../engine/diff';
 import { RULESET_VERSION, TOOL_VERSION } from '../rules/ruleset';
 import { API_TOP10 } from '../rules/api';
@@ -16,7 +16,6 @@ import { recommendationEn } from '../recommendationsEn';
 // ゼロ幅の空白（&#8203;）を挟んで自動リンクにしない（表示は変わらない）
 const noAutolink = (s: string) => s.replace(/(?<![A-Za-z0-9])(https?|ftp)(?=:\/\/)/gi, '$1&#8203;').replace(/(?<![A-Za-z0-9])(www)(?=\.)/gi, '$1&#8203;').replace(/@/g, '&#8203;@');
 const cell = (v: unknown) => noAutolink(String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[|[\]!`\\]/g, '\\$&').replace(/\r\n?|\n/g, ' '));
-const ORDER = ['high', 'medium', 'low', 'info'];
 
 export interface ReportExtras { profile?: Profile; diff?: { rows: DiffRow[]; baselineAt: string; rulesetWarning?: string; profileWarning?: string }; }
 
@@ -46,7 +45,7 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
     L.push('');
   }
   L.push(en ? '## Findings' : '## 指摘', '', `| ${en ? 'Severity' : '重要度'} | ${en ? 'Check' : '項目'} | ${en ? 'Target' : '対象'} | ${en ? 'Evidence (masked)' : '証跡（マスク済み）'} | ${en ? 'Recommendation' : '推奨対応'} |`, '| --- | --- | --- | --- | --- |');
-  for (const f of fs.filter(x => x.status === 'fail').sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity)))
+  for (const f of fs.filter(x => x.status === 'fail').sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity)))
     L.push(`| ${sevLabel(f.severity)}${f.originalSeverity ? `*` : ''} | ${f.item}${circled(f.condition)} ${cell(itemTitle(f.item, f.title))}${API_TOP10[f.item] ? par(`OWASP ${en ? API_TOP10[f.item].replace(/・/g, ', ') : API_TOP10[f.item]}`) : ''}${standardsShort(f.item) ? std(cell(standardsShort(f.item))) : ''} | ${cell(f.target)}${f.url ? par(cell(f.url)) : ''} | ${cell(f.evidence)} | ${cell(en ? recommendationEn(f.recommendation) : f.recommendation)} |`);
   if (fs.some(f => f.originalSeverity)) L.push('', en ? '\\* Severity changed by the organization profile.' : '\\* 組織プロファイルで重要度を変えた指摘。');
   const sup = fs.filter(f => f.status === 'suppressed');

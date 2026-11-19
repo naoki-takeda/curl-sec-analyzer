@@ -70,6 +70,7 @@ const OPENSSL_LONG = longTable(`
   checkend verify host port timeout`, `
   showcerts tls1 tls1_1 tls1_2 tls1_3 no_tls1 no_tls1_1 no_tls1_2 no_tls1_3 noout subject issuer dates text brief status verify_return_error crlf ign_eof quiet
   fingerprint sha256 sha1 pubkey serial enddate startdate purpose email hash modulus noverify legacy_renegotiation ct msg state debug prexit reconnect ocsp_uri`);
+const LONG: Partial<Record<Family, Map<string, boolean>>> = { curl: CURL_LONG, wget: WGET_LONG, httpie: HTTPIE_LONG, ps: PS_LONG, openssl: OPENSSL_LONG };
 /**
  * 短いオプション：[値を取らない文字, 値を取る文字]。まとめ書きは、値を取らない文字だけを4文字まで（同じ文字を2回使わない）並べ、最後に値を取る文字を
  * 1つ置ける。curl のまとめ書きに使うのはよく使う文字だけ（-sSLk・-fsSL・-sSIv）。ほかの値を取らない文字（-O・-J・-R など）は1文字のときだけ
@@ -292,7 +293,7 @@ function summarizeOne(raw: string, lastAt: number): string {
     const single = fam === 'ps' || fam === 'openssl';
     const lm = t.match(single ? /^-([A-Za-z][\w.-]{0,40})(=)?/ : /^--([A-Za-z][\w.-]{0,40})(=)?/);
     if (lm) {
-      const table = fam === 'curl' ? CURL_LONG : fam === 'wget' ? WGET_LONG : fam === 'httpie' ? HTTPIE_LONG : fam === 'ps' ? PS_LONG : fam === 'openssl' ? OPENSSL_LONG : undefined;
+      const table = LONG[fam];
       const key = single ? lm[1].toLowerCase() : lm[1];
       const takes = table?.get(key);
       const dash = single ? '-' : '--';

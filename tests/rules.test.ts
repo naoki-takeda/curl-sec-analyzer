@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AT, evaluate, fixture, sampleText, target } from './helpers';
+import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../src/rules/ruleset';
 
 const HTML = 'HTTP/2 200\ncontent-type: text/html\n';
 const ids = (input: string) => evaluate(input).ids('t');
@@ -373,5 +374,12 @@ describe('E-04・E-05・T-11 の細部', () => {
       'New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384', 'Verify return code: 0 (ok)', 'notAfter=Jun  1 00:00:00 2025 GMT', ''].join('\n'));
     expect(e.targets[0].responses[0]?.headers.get('date')).toBeTruthy();
     expect(e.findings.filter(f => f.item === 'T-11').map(f => f.ruleId)).toContain('T-11.1');
+  });
+});
+
+describe('ルールの登録', () => {
+  it('scope は登録した一覧（ターゲット単位・ホスト単位・横断）と一致する', () => {
+    for (const [list, scope] of [[TARGET_RULES, 'target'], [HOST_RULES, 'host'], [ALL_CROSS_RULES, 'cross']] as const)
+      for (const r of list) expect(r.scope, r.id).toBe(scope);
   });
 });

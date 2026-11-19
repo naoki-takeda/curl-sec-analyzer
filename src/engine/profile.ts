@@ -1,9 +1,9 @@
 // engine/profile.ts：組織プロファイル
 import type { Finding, Profile, Severity } from '../model';
 import { sessionConfig } from '../parser/setCookie';
+import { SEVERITIES } from './summarize';
 import ITEMS from './items.json';
 
-const SEV: Severity[] = ['high', 'medium', 'low', 'info'];
 const ID = /^[HCRTEA]-\d\d(\.\d+)?$/;
 /** チェックリストにある項目か（H-99 のような存在しない項目を、黙って受け付けない） */
 const ITEM_IDS = new Set((ITEMS as { id: string }[]).map(i => i.id));
@@ -24,7 +24,7 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   if (!sevOk) errors.push('severity：項目ID（例：H-10）と重要度の組のオブジェクトにしてください');
   for (const [k, v] of Object.entries(sevOk ? (d.severity as Record<string, unknown> | undefined) ?? {} : {})) {
     if (!knownItem(k)) errors.push(`severity：「${k.slice(0, 40)}」は項目IDではありません`);
-    else if (!SEV.includes(v as Severity)) errors.push(`severity：「${k}」の重要度は high・medium・low・info のいずれか`);
+    else if (!SEVERITIES.includes(v as Severity)) errors.push(`severity：「${k}」の重要度は high・medium・low・info のいずれか`);
     else severity[k] = v as Severity;
   }
   const exclude = Array.isArray(d.exclude) ? (d.exclude as unknown[]).filter((x): x is string => typeof x === 'string' && /^[HCRTEA]-\d\d$/.test(x) && knownItem(x)) : [];
@@ -61,9 +61,8 @@ export function excludeItems(fs: Finding[], p?: Profile): Finding[] {
 export function overrideSeverity(fs: Finding[], p?: Profile): Finding[] {
   if (!p) return fs;
   return fs.map(f => {
-    if (f.status !== 'fail' && f.status !== 'suppressed') return f;
     // API の応答で情報に下げた HTML 向けの指摘（H-10 など）は、上書きで上げない（ひな形の "H-10": "low" で API の指摘を低に上げない）
-    if (f.apiInfo) return f;
+    if (f.status !== 'fail' || f.apiInfo) return f;
     const s = (f.condition !== undefined ? p.severity[`${f.item}.${f.condition}`] : undefined) ?? p.severity[f.item];
     return s && s !== f.severity ? { ...f, severity: s, originalSeverity: f.severity } : f;
   });

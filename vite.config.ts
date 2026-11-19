@@ -37,7 +37,7 @@ const ogp = (): Plugin => ({
   },
 });
 
-// 本番ビルドに LICENSE.txt（このツール）と THIRD_PARTY_LICENSES.txt（バンドルした依存パッケージ）を入れる
+// 本番ビルドに LICENSE.txt（このツール）を入れる（THIRD_PARTY_LICENSES.txt は下の rollup-plugin-license が作る）
 const licenseFiles = (): Plugin => ({
   name: 'license-files',
   apply: 'build',

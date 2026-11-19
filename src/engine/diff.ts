@@ -1,13 +1,13 @@
 // engine/diff.ts：前回の結果（JSONエクスポート）との差分
 import type { Finding, Profile, Severity } from '../model';
 import { parseProfile } from './profile';
+import { SEVERITIES } from './summarize';
 
 export type DiffKind = 'new' | 'resolved' | 'continuing' | 'severity-changed' | 'not-rechecked' | 'suppressed';
 export interface DiffRow { kind: DiffKind; ruleId: string; item: string; condition?: number; title: string; target: string; severity: Severity; before?: Severity; }
 export interface Baseline { generatedAt: string; toolVersion?: string; rulesetVersion?: string; findings: Finding[]; profile?: Profile; }
 
 const RULE_ID = /^([HCRTEA]-\d\d)\.(\d+|ok|na)$/;
-const SEVERITIES: Severity[] = ['high', 'medium', 'low', 'info'];
 const STATUSES: Finding['status'][] = ['pass', 'fail', 'na', 'suppressed'];
 
 /** 前回の結果の指摘1件を確かめる。形式が合わなければ undefined（手で編集したJSONや別のツールのJSONでも、表示を崩さないため） */
@@ -22,7 +22,7 @@ function validFinding(x: unknown): Finding | undefined {
   // 差分で使う項目だけを、型を確かめて取り出す（"evidence": 1 のような値で差分の計算を例外にしない）。
   // 長さは切らない（大きな CSP の証跡の後ろのホスト名が前回のキーからだけ落ち、同じ結果どうしが新規と解消に分かれるため）
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
-  return { ruleId: f.ruleId!, item: m[1], condition, title: str(f.title), severity: f.severity!, status: f.status!, target: str(f.target),
+  return { ruleId: f.ruleId!, item: m[1], condition, title: str(f.title), severity: f.severity!, status: f.status!, target: f.target,
            targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined, evidence: str(f.evidence), recommendation: '', references: [] };
 }
 
@@ -132,7 +132,7 @@ export function diffSummary(rows: DiffRow[]): Record<DiffKind, number> {
   return c;
 }
 
-/** 前回と今回でプロファイル（重要度・対象外の項目）が違うか。違えば「重要度の変化」に設定の違いが混ざる */
+/** 前回と今回でプロファイル（重要度・対象外の項目・セッションCookieの指定・自社の配信元。名前は除く）が違うか。違えば「重要度の変化」に設定の違いが混ざる */
 export function profileDiffers(before?: Profile, now?: Profile): boolean {
   // 重要度はキーの順番をそろえる（キーの順番だけが違う同じ設定を「プロファイルが違う」と警告しない）
   const norm = (p?: Profile) => JSON.stringify({ severity: Object.entries(p?.severity ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)), exclude: [...(p?.exclude ?? [])].sort(), names: [...(p?.sessionCookieNames ?? [])].sort(), hours: p?.sessionMaxAgeHours ?? 24, origins: [...(p?.trustedScriptOrigins ?? [])].sort() });

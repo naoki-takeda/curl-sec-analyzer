@@ -75,7 +75,7 @@ export function toCsv(fs: Finding[], targets: Target[]): string {
     const m = sourceMeta(f, ix);
     return [
       f.item, f.url ? `${f.target}（${f.url}）` : f.target, m.at, m.cmd,
-      f.status === 'suppressed' ? 'suppressed' : 'fail', circled(f.condition), SEVERITY_LABEL[f.severity], f.evidence, f.recommendation,
+      f.status, circled(f.condition), SEVERITY_LABEL[f.severity], f.evidence, f.recommendation,
       f.suppressedBy ? `${f.suppressedBy.reason}（${f.suppressedBy.until || '期限なし'}）` : '', '',
     ];
   });

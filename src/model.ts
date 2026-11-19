@@ -37,15 +37,14 @@ export interface Target {
 export interface RuleContext {
   target: Target; final?: HttpResponse; chain: HttpResponse[];
   isHttps?: boolean; responseKind: ResponseKind; sensitive?: boolean;
-  hostHsts?: boolean;               // 同じホストでHSTSが有効か（C-01②③が使う。ツール設計2「ルール間の依存」）
+  hostHsts?: boolean;               // 同じホストでHSTSが有効か（C-01②③が使う。engine/run.ts の hostHstsMap）
   hostSessionSameSite?: boolean;    // 同じホストのセッションCookieがすべて SameSite=Lax/Strict か（E-12 が使う。見えなければ undefined）
   profile?: Profile;                // 組織プロファイル（E-08 の自社の配信元など）
   now: number;                      // 期限の判定に使う時刻（採取時刻 #META at、なければ判定した時刻）。parser/target.ts の capturedAt
-  findings: Finding[];
 }
 export interface CrossContext {     // ホスト単位・横断ルール用
   targets: Target[]; byLabel(label: string): Target | undefined; withPrefix(prefix: string): Target[];
-  byHost(): Map<string, Target[]>; findings: Finding[];
+  byHost(): Map<string, Target[]>;
 }
 export type CoverageStatus = 'evaluated' | 'missing-input' | 'manual' | 'not-implemented' | 'excluded';
 export interface ItemInfo {
@@ -88,7 +87,7 @@ export interface Profile {
 }
 export interface Rule {
   id: string; title: string; appliesTo: 'html' | 'api' | 'any';
-  scope: 'target' | 'host' | 'cross'; dependsOn?: string[]; basis: string[];
+  scope: 'target' | 'host' | 'cross'; basis: string[];   // scope は登録する一覧（rules/ruleset.ts）と一致させる（tests/rules.test.ts）
   // 返り値の取り決め：評価したら必ず .ok か fail を返す。判定できなければ .na。
   // 空配列は「このターゲットには適用外」の意味にだけ使う（ツール設計2）。
   run?(ctx: RuleContext): Finding[];          // scope: target

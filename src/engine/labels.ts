@@ -34,7 +34,7 @@ export function allowedItems(label: string): Allow {
 /** HARのエントリに付けられるラベルか（parser/har.ts が使う） */
 export const allowedForHar = (label: string) => labelRow(label).har;
 
-/** 片方だけあると横断ルールを判定できない予約ラベルの組 [あるラベル, 足りないラベル, 項目] */
+/** 片方だけあると横断ルールを判定できない予約ラベルの組 [あるラベル, 足りないラベル, 項目]。CROSS_REQUIRES の2つのラベルの組と合わせる */
 export const RESERVED_HINTS: [string, string, string][] = [
   ['login', 'pre-login', 'C-09'], ['pre-login', 'login', 'C-09'], ['logout', 'after-logout', 'C-12'], ['after-logout', 'logout', 'C-12'],
 ];

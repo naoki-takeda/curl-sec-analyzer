@@ -22,10 +22,8 @@ export function coverage(fs: Finding[], implemented: Set<string>, list: ItemInfo
     const done = mine.filter(f => f.status !== 'na' || f.dedupedBy);   // 二重計上の防止で na にしたものは判定済み
     if (done.length) {
       const fails = done.filter(f => f.status === 'fail').length;
-      // ほかのラベルと比べる条件（横断：pre-login/login、logout/after-logout、session-sample-* など）が入力不足で na のときは、判定済みのまま
-      // 理由の欄にそれを示す（login だけで C-09 が「判定済み・0件」と出ると、①を確かめたように見える）。ターゲットの名前ではなく、
-      // ルールが付けた印（partial）で見る（C-12①（after-logout）・H-02③（apex）も含めるため）。
-      // 指摘があっても示す（T-09 の②だけで、①（旧バージョン）を確かめていないとき）
+      // 横断・ホスト単位の条件が入力不足（ルールが付けた印 partial）なら、判定済みのまま理由に示す（login だけで C-09 が「判定済み・0件」と
+      // 見えないように）。指摘があっても示す（T-09 の②だけで、①を確かめていないとき）
       const partial = [...new Set(mine.filter(f => f.status === 'na' && !f.dedupedBy && f.partial).map(f => f.recommendation || f.evidence).filter(Boolean))];
       const limited = done.every(f => f.limited) ? [LIMITED] : [];
       // ターゲットごとのルールの na（本文を採取していないページの E-07 など）も、ほかのターゲットで判定していれば判定済みのまま、件数と理由を示す

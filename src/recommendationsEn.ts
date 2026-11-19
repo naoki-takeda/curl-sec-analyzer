@@ -127,7 +127,6 @@ export const EXACT: Record<string, string> = {
   '認証情報を付けて採取し直す（401・403・ログイン画面への転送では、認証の内側で動くかが分からない）':
     'Capture again with credentials (a 401, a 403 or a redirect to the login page does not show whether it works behind authentication)',
   '2段階目（ワンタイムの番号の入力など）まで済ませた応答を login として採取する': 'Capture as login the response after completing the second step (such as entering the one-time code)',
-  '転送先の本文のある応答（認証後ページなど）で採取する': 'Capture the redirect target that has a body (such as the page after login)',
   '存在する API の URL で、認証情報を付けずに採取し直す': 'Capture again with an existing API URL, without credentials',
   "本番ビルドではインラインのソースマップ（webpack の inline-source-map・Vite の sourcemap: 'inline' など）を出さない（sourcesContent に元のソースがあるかは手動で確認）":
     "Do not emit inline source maps in production builds (webpack inline-source-map, Vite sourcemap: 'inline', etc.); check manually whether sourcesContent holds the original source",
@@ -219,7 +218,6 @@ Object.assign(EXACT, {
   'セッションCookie が暗号化した値（応答ごとに値が変わる）なので、セッションIDを再発行したかは値から分からない': 'The session cookie is encrypted (its value changes on every response), so whether the session ID was renewed cannot be told from the value',
   'ログイン前の Cookie だけを送って、ログイン後のページを取得できないか手動で確認する': 'Manually check whether sending only the pre-login cookies still retrieves a signed-in page',
   'サーバ側のセッションIDの作り方（フレームワークの既定の乱数か）を確認する': 'Check how the server generates session IDs (for example, the framework\'s default random generator)',
-  'CSPにnonceがない': 'The CSP has no nonce',
   '本文を取得して（C2）、Contact と Expires があるか確かめる': 'Fetch the body (C2) and check that it has Contact and Expires',
   'CSPのスクリプトのディレクティブにnonceがない': 'The CSP script directives (script-src, script-src-elem, script-src-attr, default-src) have no nonce',
   '比較できるセッションCookieがない': 'No session cookies to compare',
