@@ -1,4 +1,4 @@
-// commands.ts：コマンド生成器（C1〜C26 を #TARGET 付きで出力する）。生成したスクリプトは診断者が自分の端末で実行する
+// commands.ts：コマンド生成器（推奨コマンド C1〜C26 のうちスクリプトにできるものを #TARGET 付きで出力する。C3 は出さず、C15 は C5 の http で兼ねる）。生成したスクリプトは診断者が自分の端末で実行する
 export interface CommandOptions {
   host: string;              // 例：www.example.com
   apex?: string;             // 例：example.com（www を使う場合）
@@ -60,7 +60,7 @@ export function generateScript(o: CommandOptions): string {
     'else ossl() { openssl "$@"; }; fi',
     `trap 'rm -f "$hdr" "$body" \${probe:+"$probe"} \${tout:+"$tout"} \${terr:+"$terr"}' EXIT`, "trap 'exit 130' INT TERM HUP", '{');
 
-  L.push('', '# ---- 第1章：ヘッダ（C4・C2・C10） ----');
+  L.push('', '# ---- 第1章：ヘッダ（C4・C2・C10・C24） ----');
   t('top', `${H}/`); L.push('curl -sS -v -o /dev/null "$H/" 2>&1');
   t('page', `${H}/`); L.push('curl -sS -i "$H/"');
   t('static', `${H}${o.staticPath}`); L.push(`curl -sS -i "$H"${q(o.staticPath)}`);
@@ -211,7 +211,7 @@ export const cmdOf = (label: string) => CMD_BY_LABEL.find(([re]) => re.test(labe
 /** 診断カバレッジの「入力不足」に添える、必要なコマンド */
 export const ITEM_COMMANDS: Record<string, string> = {
   'H-02': 'C1（label=apex）', 'H-04': 'C24（csp-sample-*）', 'H-15': 'C18（logout）',
-  'C-07': 'C18（session-sample-*）', 'C-09': 'C18（pre-login・login）', 'C-10': 'C15（label=http）', 'C-12': 'C18（logout・after-logout）',
+  'C-07': 'C18（session-sample-*）', 'C-09': 'C18（pre-login・login）', 'C-10': 'C5・C15（label=http）', 'C-12': 'C18（logout・after-logout）',
   'R-01': 'C6', 'R-02': 'C7', 'R-03': 'C6（部分一致のOrigin）', 'R-04': 'C6', 'R-05': 'C8', 'R-06': 'C6', 'R-07': 'C6',
   'T-01': 'C9', 'T-04': 'C5（label=http）', 'T-05': 'C5', 'T-06': 'C19', 'T-07': 'C14', 'T-08': 'C20', 'T-09': 'C4・C12', 'T-10': 'C11・C23', 'T-11': 'C11', 'T-12': 'C5',
   'E-01': 'C25（label=error-*）', 'E-02': 'C2（ディレクトリのURL）', 'E-03': 'C13', 'E-04': 'C13・C2（/robots.txt）', 'E-05': 'C2（/actuator など）', 'E-06': 'C22',
@@ -222,7 +222,7 @@ export const ITEM_COMMANDS: Record<string, string> = {
 /** 英語UI用（ITEM_COMMANDS と同じキーをそろえる。tests/i18n.test.ts が漏れを検出する） */
 export const ITEM_COMMANDS_EN: Record<string, string> = {
   'H-02': 'C1 (label=apex)', 'H-04': 'C24 (csp-sample-*)', 'H-15': 'C18 (logout)',
-  'C-07': 'C18 (session-sample-*)', 'C-09': 'C18 (pre-login, login)', 'C-10': 'C15 (label=http)', 'C-12': 'C18 (logout, after-logout)',
+  'C-07': 'C18 (session-sample-*)', 'C-09': 'C18 (pre-login, login)', 'C-10': 'C5/C15 (label=http)', 'C-12': 'C18 (logout, after-logout)',
   'R-01': 'C6', 'R-02': 'C7', 'R-03': 'C6 (lookalike Origin)', 'R-04': 'C6', 'R-05': 'C8', 'R-06': 'C6', 'R-07': 'C6',
   'T-01': 'C9', 'T-04': 'C5 (label=http)', 'T-05': 'C5', 'T-06': 'C19', 'T-07': 'C14', 'T-08': 'C20', 'T-09': 'C4, C12', 'T-10': 'C11, C23', 'T-11': 'C11', 'T-12': 'C5',
   'A-01': 'unauth-* (fetch the API without credentials)', 'A-08': 'C26 (label=ctype, test environment)', 'A-11': 'method-*, old-* (run DELETE and similar tests manually, following the procedure)', 'A-10': 'C25 (label=error-*, 2 or more API errors)', 'R-09': 'C16 (label=websocket)',

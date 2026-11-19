@@ -101,12 +101,20 @@ export function targetKeys(targets: readonly Pick<Target, 'label' | 'url' | 'met
 }
 
 /**
+ * キーのラベルの部分。ラベルは空白を含んでよい（label="top page"。: と / は含まない）。\S+ で読むと、空白を含むラベルのキーを以前の形式とみなし、
+ * 伏せた部分の * を任意の文字列として照合して、別のページの指摘まで抑止する
+ */
+export const KEY_LABEL = String.raw`[^\s:/](?:[^:/]*[^\s:/])?`;
+const KEY_URL = new RegExp(String.raw`^(?:HAR \S+|${KEY_LABEL}) ((?:https?:\/\/|\/)\S*)`);
+const CURRENT_KEY = new RegExp(String.raw`${KEY_URL.source}(?: #\d+)?$`);
+
+/**
  * 以前の版の形式のキー。今のキーは urlKey の出力なので、キーの URL の部分にもう一度 urlKey をかけても変わらない。変わるものは以前の形式
  * （伏せた値の「…」やクエリの値、パス引数の値、並べ替えていない名前、残す形が違うパスの部分）。形式ごとに見分けず、この性質だけで見分ける
  * （パスの部分の残し方が変わったキーも見逃さないため）。読み込んだときに件数を知らせる
  */
 export function legacyHarKey(k?: string): boolean {
-  const m = k?.match(/^(?:HAR \S+|\S+) ((?:https?:\/\/|\/)\S*)/);
+  const m = k?.match(KEY_URL);
   return !!m && urlKey(m[1]) !== m[1];
 }
 
@@ -116,8 +124,6 @@ export function legacyHarKey(k?: string): boolean {
  * HAR GET * や https://a.example/admin* のような手で書いたパターンは、urlKey が変えるので含まれない
  */
 export function isCurrentKey(k: string): boolean {
-  // ラベルは空白を含んでよい（label="top page"。: と / は含まない）。\S+ で読むと、空白を含むラベルのキーを以前の形式とみなし、伏せた部分の *
-  // を任意の文字列として照合して、別のページの指摘まで抑止する
-  const m = k.match(/^(?:HAR \S+|[^\s:/](?:[^:/]*[^\s:/])?) ((?:https?:\/\/|\/)\S*)(?: #\d+)?$/);
+  const m = k.match(CURRENT_KEY);
   return !!m && urlKey(m[1]) === m[1];
 }

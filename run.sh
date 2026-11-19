@@ -24,4 +24,4 @@ t() { local label=$1 url=$2 s=$3; shift 3
   # 認証後のページ（Cookie は jar.txt から渡す。jar.txt はブラウザやログイン手順で用意し、chmod 600 にする）
   # t mypage     "$H/mypage"      1   -v -o /dev/null -b jar.txt
 } > out.txt
-echo "out.txt に書き出しました。ツールで読み込んだら削除してください：rm -f out.txt" >&2
+echo "out.txt に書き出しました。ツールで読み込んだら削除してください：rm -f out.txt jar.txt" >&2

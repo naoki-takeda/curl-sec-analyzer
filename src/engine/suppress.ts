@@ -1,7 +1,7 @@
 // engine/suppress.ts：例外登録（suppressions.json）の適用
 import type { Finding, Suppression } from '../model';
 import { baseLabel } from '../parser/target';
-import { isCurrentKey } from './targetKey';
+import { isCurrentKey, KEY_LABEL } from './targetKey';
 import { knownItem } from './profile';
 
 /**
@@ -28,8 +28,8 @@ const realDate = (s: string) => {
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
 };
-// 「ラベル URL」の形の target。ラベルは空白を含んでよい（: と / は含まない）
-const LABEL_URL = /^[^\s:/](?:[^:/]*[^\s:/])? https?:\/\//;
+// 「ラベル URL」の形の target
+const LABEL_URL = new RegExp(String.raw`^${KEY_LABEL} https?:\/\/`);
 
 /** 例外の対象が今の形式のキーか（例外ごとに1回だけ調べる。指摘×例外の組ごとに urlKey をかけると遅い） */
 const currentKeyCache = new Map<string, boolean>();
@@ -49,9 +49,8 @@ const isKeyTarget = (target: string): boolean => {
 export function matches(s: Suppression, f: Finding, currentKeys?: ReadonlySet<string>): boolean {
   const ruleOk = s.ruleId === f.item || s.ruleId === f.ruleId;
   if (!ruleOk) return false;   // 項目が違えば対象（パターンの照合）を見ない
-  // URL のパターンは、画面に出す（マスクした）URL のほかに、突き合わせのキーの URL（マスクとは別に作る。マスクの一覧を変えても変わらない）とも
-  // 照合する（マスクの一覧を変えても、URL のパターンが黙って外れない）。
-  // キーの最後の絶対 URL（「 #2」を除く）。ラベルの中の「/admin」のような語は URL にしない
+  // URL のパターンは、画面に出す（マスクした）URL のほかに、突き合わせのキーの URL（マスクとは別に作る）とも照合する（マスクの一覧を変えても
+  // 外れない）。キーの最後の絶対 URL（「 #2」を除く）を使う。ラベルの中の「/admin」のような語は URL にしない
   const keyUrl = f.targetKey?.match(/(?:^|\s)(https?:\/\/\S*)(?: #\d+)?$/)?.[1];
   const pattern = s.target.length <= MAX_PATTERN;
   const targetOk = s.target === f.target || s.target === f.targetKey || (pattern && !!f.url && wildcardMatch(s.target, f.url))
@@ -62,7 +61,7 @@ export function matches(s: Suppression, f: Finding, currentKeys?: ReadonlySet<st
     // 生の URL から作ったもの（f.keyUrl）を使う（マスクした URL では ASP.NET の (S(…)) が * になる）。形が「ラベル 空白 URL」のときだけ比べる
     // （組ごとに URL を解析し直すと、例外の照合が大きく遅くなる）
     || (!!f.keyUrl && LABEL_URL.test(s.target) && s.target === `${baseLabel(f.target)} ${f.keyUrl}`)
-    || s.target === '*';   // HAR は「HAR メソッド URL」で照合
+    || s.target === '*';   // 対象「*」はすべての指摘に当てる
   return targetOk;
 }
 
@@ -92,7 +91,7 @@ export function parseSuppressions(text: string): { list: Suppression[]; errors: 
   if (!Array.isArray(arr)) return { list, errors: ['配列、または suppressions を持つオブジェクトが必要です'] };
   if (arr.length > MAX_SUPPRESSIONS) errors.push(`例外は${MAX_SUPPRESSIONS}件までです（${arr.length}件のうち、${MAX_SUPPRESSIONS + 1}件目からは読みません）`);
   arr.slice(0, MAX_SUPPRESSIONS).forEach((x, i) => {
-    const s = (x && typeof x === 'object' ? x : {}) as Partial<Suppression>;   // null や数値の要素でも落ちない（fast-check で検出）
+    const s = (x && typeof x === 'object' ? x : {}) as Partial<Suppression>;   // null や数値の要素でも落ちない
     if (typeof s.ruleId !== 'string' || !/^[A-Z]-\d\d(\.\d+)?$/.test(s.ruleId)) errors.push(`${i + 1}件目：ruleId が不正です`);
     // チェックリストにない項目（H-99・Z-99）は受け付けない（組織プロファイルと同じ。綴りを誤った例外が黙って効かないことを防ぐ）
     else if (!knownItem(s.ruleId)) errors.push(`${i + 1}件目：ruleId「${s.ruleId}」は項目IDではありません`);

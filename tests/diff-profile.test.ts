@@ -1,6 +1,7 @@
 // 前回との差分・組織プロファイル・例外の照合（engine/diff.ts・profile.ts・suppress.ts）
 import { describe, expect, it } from 'vitest';
 import { diff } from '../src/engine/diff';
+import { isCurrentKey, legacyHarKey } from '../src/engine/targetKey';
 import { parseProfile } from '../src/engine/profile';
 import { parseInput } from '../src/parser/input';
 import { runAll } from '../src/engine/run';
@@ -123,5 +124,13 @@ describe('第51回：空白を含むラベルの例外の照合', () => {
     const s = { ruleId: 'H-01.1', target: 'top page https://a.example/files/*', reason: 'x' };
     const f = { item: 'H-01', ruleId: 'H-01.1', target: 'top page', targetKey: 'top page https://a.example/files/admin-console', url: 'https://a.example/files/admin-console' } as never;
     expect(matches(s as never, f, new Set())).toBe(false);
+  });
+});
+
+describe('以前の形式のキーの見分け方', () => {
+  it('空白を含むラベルのキーも、URL の部分で以前の形式かを見分ける', () => {
+    expect(legacyHarKey('top page https://a.example/x?token=1')).toBe(true);
+    expect(legacyHarKey('top page https://a.example/')).toBe(false);
+    expect(isCurrentKey('top page https://a.example/ #2')).toBe(true);
   });
 });

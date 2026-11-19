@@ -5,9 +5,10 @@
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
 import { showText } from '../shownText';
 import { targetKeys, urlKey } from './targetKey';
-import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isRedirectWithLocation, isSensitive, ownChain, responseKind, siteResponses } from '../parser/target';
+import { baseLabel, capturedAt, chainOf, finalResponse, hostOf, isHttps, isRedirectWithLocation, isSensitive, responseKind, siteResponses } from '../parser/target';
 import { looksLikeSession, parseSetCookie, sentAuthOf } from '../parser/setCookie';
 import { parseHsts } from '../rules/util';
+import { apexHop } from '../rules/headers';
 import { ALL_CROSS_RULES, HOST_RULES, TARGET_RULES } from '../rules/ruleset';
 import { allowedItems } from './labels';
 import { applySuppressions } from './suppress';
@@ -37,9 +38,8 @@ function dedupe(fs: Finding[]): Finding[] {
 function hostHstsMap(targets: Target[]): Map<string, boolean> {
   const m = new Map<string, boolean>();
   for (const t of targets) {
-    // apex は、ownChain の最初のホップで見る（H-01 の apexHop（rules/headers.ts）とは選び方が違い、http から -L で www へ転送した採取では
-    // www の応答になる）
-    const host = hostOf(t); const f = baseLabel(t.label) === 'apex' ? ownChain(t)[0] : finalResponse(t);
+    // apex は H-01 と同じく apex 自身の https の応答で見る（http から -L で www へ転送した採取の www の HSTS を apex のものとしない）
+    const host = hostOf(t); const f = baseLabel(t.label) === 'apex' ? apexHop(t) : finalResponse(t);
     if (!host || isHttps(t) !== true || !f) continue;
     const age = parseHsts(f.headers.get('strict-transport-security')?.[0]).maxAge;   // H-01 と同じ読み方（無効なヘッダは HSTS なし）
     m.set(host, (m.get(host) ?? false) || age > 0);

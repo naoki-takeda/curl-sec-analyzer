@@ -64,7 +64,8 @@ function buildShell() {
     const { list, errors } = parseSuppressions(await f.text());
     // 1件も読めなかった（形式の違うファイル）ときは、登録済みの例外を残す（画面で登録しただけの例外を消さない）
     if (list.length || !errors.length) state.suppressions = list;
-    const legacy = list.filter(s => legacyHarKey(s.target)).length;
+    // * を含むものは、以前の形式のキーでもパターンとして照合する（engine/suppress.ts の matches）ので、登録し直しを促さない
+    const legacy = list.filter(s => !s.target.includes('*') && legacyHarKey(s.target)).length;
     refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors, getLang())) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
   const profIn = hidden('.json,application/json', async f => {
