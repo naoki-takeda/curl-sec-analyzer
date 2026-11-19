@@ -2,7 +2,7 @@
 export interface SetCookie { name: string; value: string; attrs: Map<string, string | true>; raw: string; }
 
 /**
- * 本文・ヘッダの中の JWT（A-03 のデコード用に送った JWT を集める）。直前が英数字・ハイフンでないところから（ は「-eyJ」の繰り返しで
+ * 本文・ヘッダの中の JWT（A-03 のデコード用に送った JWT を集める）。直前が英数字・ハイフンでないところから（\b にすると「-eyJ」の繰り返しで
  * 2乗の時間になる）。g フラグなので String.prototype.match だけで使う（exec・test は lastIndex が残る）
  */
 export const JWT_IN_TEXT = /(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]*/g;

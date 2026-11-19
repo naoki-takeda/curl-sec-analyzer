@@ -53,7 +53,7 @@ export function generateScript(o: CommandOptions): string {
     // 一時ファイルには認証後の応答（Set-Cookie・本文）が入る。Ctrl-C や kill で止めたときも消す（dash は INT で EXIT の trap を実行しないので、
     // INT・TERM・HUP では exit して EXIT の trap を通す）。まだ作っていない一時ファイルは rm に渡さない（空の引数を渡さない）
     "probe=''; tout=''; terr=''",
-    '# openssl にも時間の上限を付ける（TCP を受け付けて黙るサーバで s_client が止まり続け、logout・after-logout を採取できなかった。timeout のない環境ではそのまま）',
+    '# openssl にも時間の上限を付ける（TCP を受け付けて黙るサーバで s_client が止まり続け、あとの logout・after-logout を採取できなくなるため。timeout のない環境ではそのまま）',
     // GNU の timeout は --foreground がないと別のプロセスグループで動かし、端末の Ctrl-C が openssl に届かない。使えれば付ける
     'if timeout --foreground 1 true 2>/dev/null; then ossl() { timeout --foreground 20 openssl "$@"; }',
     'elif command -v timeout >/dev/null 2>&1; then ossl() { timeout 20 openssl "$@"; }',
@@ -109,7 +109,6 @@ export function generateScript(o: CommandOptions): string {
   // CB は採取の印（RUN）と別にする（RUN をサーバに送ると、印を知ったサーバが本文に正しい印の偽のマーカーを書ける）。
   // #TARGET の url は単一引用符の中で展開されないので、パスだけを書く
   t('host-inj', `${H}/`); L.push(`curl -sS -i -H 'X-Forwarded-Host: evil.example' "$H/?csa=$CB"`);
-  // T-06 は、転送した応答だけで判定する（ログイン画面が 200 を返すと na）。next= で実際に転送する URL があれば、そちらに置き換えるよう書いておく
   L.push('# T-06：ログイン画面が 200 を返すと判定できない（na）。next= などで実際に転送する URL（ログアウト、ログイン後の転送先）に置き換える');
   t('open-redirect', `${H}${o.loginPath}`); L.push(`curl -sS -D - -o /dev/null "$H"${q(`${o.loginPath}?next=https://evil.example&returnTo=https://evil.example&url=https://evil.example`)}`);
   t('jsonp', `${H}${o.apiPath}?callback=test123`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(`${o.apiPath}?callback=test123`)}`);
@@ -144,7 +143,7 @@ export function generateScript(o: CommandOptions): string {
     // 期限や SAN を偽装させない。パーサは後ろの notAfter・SAN を使う）。証明書を受け取れなかったときは x509 を実行しない
     `cert=$(ossl s_client -connect ${q(hp)} -servername ${q(sni)} </dev/null 2>/dev/null | openssl x509)`,
     `if [ -n "$cert" ]; then printf '%s\\n' "$cert" | openssl x509 -noout -subject -issuer -dates; printf '%s\\n' "$cert" | openssl x509 -noout -ext subjectAltName | tr -d '\\r' | head -n 2; fi`,
-    // ↑ SAN の値の CR も除く（CR は head -n 2 を通り抜け、パーサが改行にそろえると「notAfter=…」の行ができた）
+    // ↑ SAN の値の CR も除く（CR は head -n 2 を通り抜け、パーサが改行にそろえると「notAfter=…」の行ができるため）
     // 手元の openssl がない（終了コード 127）・実行できない（126）・時間切れ（timeout の 124）・その指定を受け付けない（no cipher match。LibreSSL は @SECLEVEL を読まない）
     // ときは err（試していない）。拒否（ok=0）にすると、openssl のない環境で C12・C23 がすべて「拒否」になり、T-09・T-10 が合格になる。
     // 照合の前に、証明書の検証の行（depth=・verify error/return）を除く（サーバの証明書の subject の「O=unknown option」で、受け入れた
@@ -210,7 +209,7 @@ const CMD_BY_LABEL: [RegExp, string][] = [
   [/^(options|trace)$/, 'C9'], [/^host-inj$/, 'C14'], [/^open-redirect$/, 'C19'], [/^jsonp$/, 'C22'], [/^error-/, 'C25'], [/^probes$/, 'C13'],
   [/^tls$/, 'C11・C12・C23'], [/^crlf$/, 'C20'], [/^method-override$/, 'C21'], [/^xff-spoof$/, 'C17'], [/^ctype$/, 'C26'],
 ];
-export const cmdOf = (label: string) => CMD_BY_LABEL.find(([re]) => re.test(label))?.[1] ?? '-';
+const cmdOf = (label: string) => CMD_BY_LABEL.find(([re]) => re.test(label))?.[1] ?? '-';
 
 /** 診断カバレッジの「入力不足」に添える、必要なコマンド */
 export const ITEM_COMMANDS: Record<string, string> = {

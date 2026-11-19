@@ -32,7 +32,7 @@ export function uniqueLabels(targets: Target[]): ParseWarning[] {
 export const isRedirectWithLocation = (r?: HttpResponse): boolean => !!r && r.status >= 300 && r.status < 400 && r.headers.has('location');
 
 /** その URL の応答のホップか（1xx、プロキシの応答（CONNECT・407）、curl が認証し直した 401 を除く） */
-export const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
+const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
 export const chainOf = (t: Target): HttpResponse[] => t.responses.filter(isHop);
 
 /**

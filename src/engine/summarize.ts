@@ -9,10 +9,12 @@ export interface OverallRow { ruleId: string; item: string; condition?: number; 
 /** 同じルールIDの fail をまとめ、該当ターゲットを列挙する */
 export function overall(fs: Finding[]): OverallRow[] {
   const m = new Map<string, OverallRow>();
+  const seen = new Set<string>();   // ルールID×ターゲット（配列の includes では、数万件の HAR でターゲット数の2乗の時間になる）
   for (const f of fs) {
     if (f.status !== 'fail') continue;
     const row = m.get(f.ruleId) ?? { ruleId: f.ruleId, item: f.item, condition: f.condition, title: f.title, severity: f.severity, targets: [] };
-    if (!row.targets.includes(f.target)) row.targets.push(f.target);
+    const k = `${f.ruleId}\u0000${f.target}`;
+    if (!seen.has(k)) { seen.add(k); row.targets.push(f.target); }
     if (SEVERITIES.indexOf(f.severity) < SEVERITIES.indexOf(row.severity)) row.severity = f.severity;
     m.set(f.ruleId, row);
   }

@@ -15,7 +15,7 @@ export const state = {
   draft: { input: '', url: '', message: '' },
 };
 
-/** buildShell（main.ts）が作る画面の部品 */
+/** main.ts が作る画面の部品（dialog 以外は buildShell で作り直す） */
 export const refs = {} as {
   input: HTMLTextAreaElement; inputNote: HTMLDivElement; inputToggle: HTMLButtonElement; genDetails: HTMLDetailsElement;
   urlInput: HTMLInputElement; message: HTMLParagraphElement; results: HTMLElement; harBox: HTMLDivElement;

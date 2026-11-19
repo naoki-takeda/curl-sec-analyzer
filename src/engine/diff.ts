@@ -5,7 +5,7 @@ import { SEVERITIES } from './summarize';
 
 export type DiffKind = 'new' | 'resolved' | 'continuing' | 'severity-changed' | 'not-rechecked' | 'suppressed';
 export interface DiffRow { kind: DiffKind; ruleId: string; item: string; condition?: number; title: string; target: string; severity: Severity; before?: Severity; }
-export interface Baseline { generatedAt: string; toolVersion?: string; rulesetVersion?: string; findings: Finding[]; profile?: Profile; }
+export interface Baseline { generatedAt: string; rulesetVersion?: string; findings: Finding[]; profile?: Profile; }
 
 const RULE_ID = /^([HCRTEA]-\d\d)\.(\d+|ok|na)$/;
 const STATUSES: Finding['status'][] = ['pass', 'fail', 'na', 'suppressed'];
@@ -27,14 +27,14 @@ function validFinding(x: unknown): Finding | undefined {
 }
 
 export function parseBaseline(text: string): { baseline?: Baseline; error?: string; skipped: number } {
-  let d: { generatedAt?: unknown; toolVersion?: unknown; rulesetVersion?: unknown; findings?: unknown; profile?: unknown };
+  let d: { generatedAt?: unknown; rulesetVersion?: unknown; findings?: unknown; profile?: unknown };
   try { d = JSON.parse(text); } catch { return { error: 'JSONとして読めません', skipped: 0 }; }
   if (!d || typeof d !== 'object' || !Array.isArray(d.findings)) return { error: 'このツールでエクスポートしたJSONを選んでください（findings がありません）', skipped: 0 };
   const all = d.findings as unknown[];
   const findings = all.map(validFinding).filter((f): f is Finding => !!f);
   // プロファイルも組織プロファイルと同じ検査を通す（壊れた値で差分の警告の比較が落ちないように）
   const profile = d.profile && typeof d.profile === 'object' ? parseProfile(JSON.stringify(d.profile)).profile : undefined;
-  return { baseline: { generatedAt: typeof d.generatedAt === 'string' ? d.generatedAt : '', toolVersion: typeof d.toolVersion === 'string' ? d.toolVersion : undefined,
+  return { baseline: { generatedAt: typeof d.generatedAt === 'string' ? d.generatedAt : '',
                        rulesetVersion: typeof d.rulesetVersion === 'string' ? d.rulesetVersion : undefined, findings, profile },
            skipped: all.length - findings.length };
 }

@@ -93,7 +93,6 @@ function crossContext(targets: Target[]): CrossContext {
 interface RunOptions { rules?: Rule[]; hostRules?: Rule[]; crossRules?: Rule[]; suppressions?: Suppression[]; profile?: Profile; }
 
 export function runAll(targets: Target[], opt: RunOptions = {}): Finding[] {
-  // ⑦ プロファイルの除外 → ⑧ 二重減点の除去 → ⑨ 重要度の上書き → ⑩ 例外
   return withProfile(opt.profile, () => {
     // 機密応答の推定（送ったセッションCookie）は、組織プロファイルのセッションCookieの名前で作り直す（パーサはプロファイルを知らない）
     for (const t of targets) if (t.sentCookieNames || t.sentAuthorization) t.sentAuth = sentAuthOf(!!t.sentAuthorization, t.sentCookieNames ?? []);

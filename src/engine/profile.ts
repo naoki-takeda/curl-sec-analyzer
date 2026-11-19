@@ -11,7 +11,7 @@ const ID = /^[HCRTEA]-\d\d(\.\d+)?$/;
  */
 const CONDITIONS = new Map((ITEMS as { id: string; conditions: number }[]).map(i => [i.id, i.conditions]));
 /** 項目ID（H-01）か条件（H-01.1）の誤り：項目がない（item）、条件番号がない（condition）、正しい（undefined） */
-export const idProblem = (id: string): 'item' | 'condition' | undefined => {
+const idProblem = (id: string): 'item' | 'condition' | undefined => {
   const m = ID.exec(id);
   const n = m ? CONDITIONS.get(id.slice(0, 4)) : undefined;
   if (!n) return 'item';
@@ -53,7 +53,7 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   if (notArray(d.sessionCookieNames) || (Array.isArray(d.sessionCookieNames) && names.length !== d.sessionCookieNames.length)) errors.push('sessionCookieNames：Cookie名（英数字と記号）の配列にしてください');
   // 数値だけを受け付ける（Number() で変換すると true が1時間、"12"・[12] が12時間になり、書き誤りに気づけない）
   const hours = d.sessionMaxAgeHours === undefined ? 24 : typeof d.sessionMaxAgeHours === 'number' ? d.sessionMaxAgeHours : NaN;
-  const hoursOk = hours >= 1 && hours <= 24 * 400;   // エラーの文言のとおり 1 以上 9600 以下
+  const hoursOk = hours >= 1 && hours <= 24 * 400;
   if (!hoursOk) errors.push('sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）');
   // エラーにした値は使わない（既定値に戻す）
   return { profile: { name: typeof d.name === 'string' ? d.name.slice(0, 100) : '', severity, exclude, sessionCookieNames: names, sessionMaxAgeHours: hoursOk ? hours : 24, trustedScriptOrigins: origins }, errors };

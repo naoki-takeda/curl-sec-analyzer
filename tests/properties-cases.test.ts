@@ -95,9 +95,7 @@ describe('画面のマスク', () => {
     expect(maskText(`?code=nonce-${TOKEN}`)).toBe('?code=nonce-Xk…(20 chars)');
     expect(maskText(`?token='nonce-${TOKEN}'`)).toBe("?token='nonce-Xk…(20 chars)'");
   });
-});
 
-describe('画面のマスク', () => {
   it('エンコードした引用符・= の直後の URL（%22https://…）のパスワードも伏せる', () => {
     expect(maskText(`%22https://alice:${TOKEN}@a.example/`)).toBe('%22https://alice:****@a.example/');
     expect(maskText(`?u=%3Dhttps://alice:${TOKEN}@a.example/`)).not.toContain(TOKEN.slice(0, 8));

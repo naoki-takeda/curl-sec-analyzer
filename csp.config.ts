@@ -8,7 +8,7 @@
  * 方針
  * - 解析中に外部へ通信できないよう、fetch・WebSocket などの通信を禁止する（connect-src 'none'）。
  *   E2E（e2e/app.spec.ts）で、メタCSPが入っていることと外部へのリクエストがないことを確かめている。
- * - HAR の Worker は blob: URL で作り、ページの CSP を引き継がせる（src/ui/har.ts）。
+ * - HAR の読み込みと判定の Worker は blob: URL で作り、ページの CSP を引き継がせる（src/ui/har.ts・src/main.ts）。
  *   別ファイルの Worker にはメタCSPが効かない（Worker 自身の HTTP 応答の CSP が使われ、GitHub Pages は返さない）。
  * - 通信先・スクリプトの読み込み元の許可は増やさない。緩める場合は、プルリクエストに理由を書く
  *   （.github/pull_request_template.md）。tests/csp.test.ts が主要な指定を検査する。

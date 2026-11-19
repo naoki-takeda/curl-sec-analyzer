@@ -30,7 +30,7 @@ export interface HarChain {
   at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
 }
-export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; total: number; failed: number; internal?: number; }   // failed：応答のない（status 0 など）エントリの数
+export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; failed: number; internal?: number; }   // failed：応答のない（status 0 など）エントリの数
 
 export const isHar = (text: string) => /^\s*\{[\s\S]{0,200}"log"\s*:/.test(text);
 
@@ -178,7 +178,7 @@ export function importHar(text: string): HarImport {
   });
   suggestLabels(chains);
   const hosts = [...new Set(chains.map(c => c.host))];
-  return { chains, hosts, sanitized: chains.length > 0 && !anyCookie, total: entries.length, failed: all.length - entries.length - internalCount, internal: internalCount };
+  return { chains, hosts, sanitized: chains.length > 0 && !anyCookie, failed: all.length - entries.length - internalCount, internal: internalCount };
 }
 
 /**

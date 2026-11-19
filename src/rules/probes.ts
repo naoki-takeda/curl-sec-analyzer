@@ -69,7 +69,7 @@ const PROBE_PATTERNS: [string, string, RegExp, Content][] = [
   ['web-xml',       'E-03', /\/WEB-INF\/web\.xml$/,  new RegExp(`${START}(?:<\\?[^>]*>\\s*|<!--(?:(?!-->)[\\s\\S])*-->\\s*)*(?:<!DOCTYPE\\s+web-app\\b|<(?:[\\w-]+:)?web-app\\b)`, 'i')],
   // package.json・composer.json は、最上位にそのファイルに特有のキーがあるか、名前の形（@scope/名前、vendor/名前）のときだけ。
   // name・version だけでは、どのパスにも {"name":"api","version":"1.0"} を返す API と区別できない。入れ子の中のキー（"data":{"main":…}）は数えない。
-  // 特有のキーが採った先頭より後ろにある本物のファイル（以前の64バイトの採取を含む）は、②（判定保留。中身を手動で確認する）になる
+  // 特有のキーが採った先頭より後ろにある本物のファイルは、②（判定保留。中身を手動で確認する）になる
   ['package-json',  'E-03', /\/package\.json$/,      jsonFile(/^(?:private|scripts|dependencies|devDependencies|peerDependencies|workspaces|engines|packageManager)$/, /^@[\w.-]+\//, /^(?:main|module|exports|bin)$/)],
   ['composer-json', 'E-03', /\/composer\.json$/,     jsonFile(/^(?:require|require-dev|autoload|autoload-dev|minimum-stability|prefer-stable|repositories)$/, /^[\w.-]+\/[\w.-]+$/)],
   // eslint-disable-next-line no-control-regex -- ZIP のマジックバイト（PK 03 04）を照合する

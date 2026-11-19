@@ -182,7 +182,7 @@ export const bodyTruncated = (ctx: RuleContext) => (ctx.final?.body?.length ?? 0
 // （edge01.local.example-cdn.net の .local. は公開のホスト名）
 const INTERNAL_ADDR = String.raw`10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2}|127(?:\.\d{1,3}){3}|localhost`;
 const INTERNAL_SUFFIX = String.raw`\.(?:internal|local|lan|corp|intra)`;
-/** URL のホスト名（new URL().hostname）が内部のホストか（T-05②）。10.cdn.example.com のような、数字で始まる公開のホスト名は含めない */
+/** URL のホスト名（new URL().hostname）が内部のホストか（T-05②・E-09②）。10.cdn.example.com のような、数字で始まる公開のホスト名は含めない */
 export const INTERNAL_HOST = new RegExp(String.raw`^(?:${INTERNAL_ADDR})$|${INTERNAL_SUFFIX}$`, 'i');
 /** ヘッダの値（Via・X-Backend-Server など）の中の内部のホスト（H-16④）。前後が名前の続き（10.0.0.1.example.com・localhost.example.com）のものは含めない */
 export const INTERNAL_HOST_IN_TEXT = new RegExp(String.raw`(?<![\w.])(?:${INTERNAL_ADDR})(?!\w|\.\w)|[\w-]${INTERNAL_SUFFIX}(?![\w.-])`, 'i');
@@ -197,7 +197,7 @@ export const isLabelText = (key: string, v: string): boolean => {
 };
 /**
  * 公開を前提にした値（ブラウザに渡すために API が返す）。Stripe の PaymentIntent・SetupIntent の client_secret（pi_…_secret_…。Stripe.js に渡す）、
- * Stripe の公開キー（pk_live_・pk_test_）、Firebase の設定の Google API キー（AIza…。権限はセキュリティルールで絞る）。A-07①（高）にしない
+ * Stripe の公開キー（pk_live_・pk_test_）、Firebase の設定の Google API キー（AIza…。権限はセキュリティルールで絞る）。E-09①・A-07①（高）にしない
  */
 export const isPublicClientValue = (v: string): boolean =>
   /^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(v) || /^pk_(?:live|test)_[A-Za-z0-9]+$/.test(v) || /^AIza[0-9A-Za-z_-]{35}$/.test(v)
@@ -216,7 +216,7 @@ export const isPlaceholderValue = (v: string): boolean =>
  * ログイン・登録の画面の password:"required|min:8" を、秘密の値の代入（E-09①（高））にしない
  */
 const VALIDATION_RULE = /^[a-z_]+(?::[\w,.-]{1,20})?(?:\|[a-z_]+(?::[\w,.-]{1,20})?)+$/i;
-/** HTML の autocomplete の値（current-password・new-password・one-time-code など）。正規表現（^…$）も秘密の値ではない */
+/** HTML の autocomplete の値（current-password・new-password・one-time-code など） */
 const AUTOCOMPLETE = /^(?:current-password|new-password|one-time-code|username|email|off|on)$/i;
 /** 秘密の値ではない形（入力の検証の規則・正規表現 ^…$・autocomplete の値）。E-09 と A-07 で共有する（同じ値を片方だけで指摘しない） */
 export const notSecretFormat = (v: string): boolean => VALIDATION_RULE.test(v) || /^\^.*\$$/.test(v) || AUTOCOMPLETE.test(v);

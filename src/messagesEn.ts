@@ -1,6 +1,6 @@
 // messagesEn.ts：画面に出すエラーメッセージ（設定ファイルの読み込み、コマンド生成器の入力）の英訳
 // キーは engine/suppress.ts・engine/profile.ts・engine/diff.ts・commands.ts が返す日本語の文言。新しい文言を足したら、ここにも足す
-// （tests/i18n.test.ts が、不正な入力で出るメッセージに日本語が残らないことを確かめる）
+// （tests/regression/review4.test.ts が、不正な入力で出るメッセージに日本語が残らないことを確かめる）
 const EXACT: Record<string, string> = {
   'JSONとして読めません': 'The file is not valid JSON',
   '配列、または suppressions を持つオブジェクトが必要です': 'Expected an array, or an object with a suppressions array',

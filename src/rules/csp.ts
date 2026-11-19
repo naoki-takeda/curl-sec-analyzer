@@ -10,7 +10,7 @@ import type { Severity } from '../model';
 
 export interface CspIssue {
   item: 'H-04' | 'H-05' | 'H-07'; condition: number; severity: Severity;
-  directive: string; value?: string; type: string; description: string;
+  directive: string; value?: string; type: string;
 }
 
 const SCRIPT_DIRECTIVES = new Set(['script-src', 'script-src-elem', 'script-src-attr']);
@@ -27,7 +27,7 @@ export const EVALUATOR_ERROR = 'EVALUATOR_ERROR';
 export function evaluateCsp(policy: string): CspIssue[] {
   try { return evaluateCspUnsafe(policy); }
   catch {
-    return [{ item: 'H-07', condition: 4, severity: 'low', directive: '(ポリシー全体)', type: EVALUATOR_ERROR, description: 'csp_evaluator で解析できない値がある' }];
+    return [{ item: 'H-07', condition: 4, severity: 'low', directive: '(ポリシー全体)', type: EVALUATOR_ERROR }];
   }
 }
 
@@ -43,7 +43,7 @@ function evaluateCspUnsafe(policy: string): CspIssue[] {
     const maybe = f.severity === EvSeverity.HIGH_MAYBE || f.severity === EvSeverity.MEDIUM_MAYBE;
     // 'unsafe-eval' は csp_evaluator では MEDIUM_MAYBE だが、チェックリスト（H-04③）では中として扱う
     if ((maybe && f.type !== Type.SCRIPT_UNSAFE_EVAL && f.type !== Type.SCRIPT_UNSAFE_HASHES) || f.severity === EvSeverity.NONE) continue;
-    const base = { directive: f.directive, value: f.value, type: Type[f.type] ?? String(f.type), description: f.description };
+    const base = { directive: f.directive, value: f.value, type: Type[f.type] ?? String(f.type) };
     const isScript = isScriptDir(f.directive);
     switch (f.type) {
       case Type.SCRIPT_UNSAFE_INLINE: out.push({ ...base, item: 'H-04', condition: 1, severity: 'high' }); break;
@@ -62,7 +62,7 @@ function evaluateCspUnsafe(policy: string): CspIssue[] {
       case Type.OBJECT_ALLOWLIST_BYPASS: out.push({ ...base, item: 'H-05', condition: 1, severity: 'medium' }); break;
       case Type.DEPRECATED_DIRECTIVE: out.push({ ...base, item: 'H-07', condition: 1, severity: 'low' }); break;
       // csp_evaluator が知らない、仕様にある新しいディレクティブ（fenced-frame-src など）は、未知のディレクティブにしない
-      case Type.UNKNOWN_DIRECTIVE: if (NEW_DIRECTIVES.has(f.directive.toLowerCase())) break;
+      case Type.UNKNOWN_DIRECTIVE: if (NEW_DIRECTIVES.has(f.directive)) break;
         out.push({ ...base, item: 'H-07', condition: 4, severity: 'low' }); break;
       case Type.MISSING_SEMICOLON: case Type.INVALID_KEYWORD: case Type.NONCE_CHARSET:
         out.push({ ...base, item: 'H-07', condition: 4, severity: 'low' }); break;
@@ -84,8 +84,8 @@ function evaluateCspUnsafe(policy: string): CspIssue[] {
 /** ハッシュのソース（'sha256-…'。引用符と大文字・小文字は CSP の仕様のとおり） */
 const HASH_SOURCE = /^'sha(?:256|384|512)-/i;
 
-/** csp_evaluator の一覧にない、CSP の仕様（Level 3 と関連仕様）にあるディレクティブ */
-const NEW_DIRECTIVES = new Set(['fenced-frame-src', 'webrtc', 'trusted-types', 'require-trusted-types-for', 'script-src-attr', 'script-src-elem', 'style-src-attr', 'style-src-elem']);
+/** csp_evaluator の一覧（Directive）にない、CSP の仕様（Level 3 と関連仕様）にあるディレクティブ */
+const NEW_DIRECTIVES = new Set(['fenced-frame-src']);
 
 /** 証跡：ディレクティブと値、csp_evaluator の指摘の種類 */
 export const issueEvidence = (i: CspIssue) => `${i.directive}${i.value ? ` ${i.value}` : ''}（csp_evaluator: ${i.type}）`;

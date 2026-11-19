@@ -136,8 +136,8 @@ swagger | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 swagger | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 swagger | T-12.ok | info | pass | HTTP/2
 tls-probe | A-09.na | info | na | 応答がない
-tls-probe | H-01.na | info | na | HTTPSかどうか判定できない
-tls-probe | H-02.na | info | na | HSTSがない（H-01で判定）
+tls-probe | H-01.na | info | na | 応答がない
+tls-probe | H-02.na | info | na | 応答がない
 tls-probe | H-08.na | info | na | 応答がない
 tls-probe | H-11.na | info | na | 応答がない
 tls-probe | H-12.na | info | na | 応答がない
@@ -149,7 +149,7 @@ top | A-02.ok | info | pass | URL・Location・本文にトークンなし
 top | C-01.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
 top | C-02.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
 top | C-03.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
-top | C-04.ok | info | pass | .AspNetCore.Identity.Application, .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
+top | C-04.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
 top | C-05.ok | info | pass | .AspNetCore.Identity.ApplicationC1, .AspNetCore.Identity.ApplicationC2
 top | C-06.1 | info | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(65 chars); path=/; secure; httponly; samesite=lax
 top | C-06.1 | info | fail | .AspNetCore.Identity.ApplicationC2=Xy…(10 chars); path=/; secure; httponly; samesite=lax
@@ -220,8 +220,8 @@ video | R-04.ok | info | pass | ACAO: https://app.example.com
 video | T-12.ok | info | pass | HTTP/2
 
 ## coverage
-H-01 | evaluated | fails=10 | 一部のターゲット（1件）は入力不足 / #TARGET に url= を付ける
-H-02 | missing-input | fails=0 | HSTSがない（H-01で判定）
+H-01 | evaluated | fails=10 | 一部のターゲット（1件）は入力不足 / 応答がない
+H-02 | missing-input | fails=0 | HSTSがない（H-01で判定） / 応答がない
 H-03 | evaluated | fails=2
 H-04 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: csp-sample-1, csp-sample-2（同じURLを2回取得）
 H-05 | evaluated | fails=2

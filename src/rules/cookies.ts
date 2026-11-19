@@ -43,7 +43,7 @@ function perCookie(rule: Rule, ctx: RuleContext, judge: (c: SetCookie) => Findin
   return fails.length ? fails : [mk(rule, ctx, 'ok', 'info', 'pass', cs.map(cookieName).join(', '), '')];
 }
 
-export const cookieSecure: Rule = { id: 'C-01', title: 'Cookie の Secure 属性', appliesTo: 'any', scope: 'target',
+export const cookieSecure: Rule = { id: 'C-01', title: 'Secure', appliesTo: 'any', scope: 'target',
   basis: ['MDN HTTP Observatory'],
   run(ctx) {
     // http のターゲットでは見ない（Secure の有無は C-10 で見る）。HttpOnly・SameSite・期限・推測可能性（C-02・C-03・C-05・C-07 など）は
@@ -59,7 +59,7 @@ export const cookieSecure: Rule = { id: 'C-01', title: 'Cookie の Secure 属性
     });
   } };
 
-export const cookieHttpOnly: Rule = { id: 'C-02', title: 'Cookie の HttpOnly 属性', appliesTo: 'any', scope: 'target',
+export const cookieHttpOnly: Rule = { id: 'C-02', title: 'HttpOnly', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS'],
   run(ctx) {
     return perCookie(cookieHttpOnly, ctx,
@@ -67,7 +67,7 @@ export const cookieHttpOnly: Rule = { id: 'C-02', title: 'Cookie の HttpOnly �
       c => looksLikeSession(c, ctx.now));
   } };
 
-export const cookieSameSite: Rule = { id: 'C-03', title: 'Cookie の SameSite 属性', appliesTo: 'any', scope: 'target',
+export const cookieSameSite: Rule = { id: 'C-03', title: 'SameSite', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS', 'MDN HTTP Observatory'],
   run(ctx) {
     return perCookie(cookieSameSite, ctx, c => {
@@ -84,7 +84,6 @@ export const cookieSameSite: Rule = { id: 'C-03', title: 'Cookie の SameSite �
     });
   } };
 
-// C-04 は、Cookie を発行したホップのホストと比べるため、perCookie を使わない
 export const cookieDomain: Rule = { id: 'C-04', title: 'Domain・Path', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS', 'RFC 6265'],
   run(ctx) {
@@ -92,8 +91,10 @@ export const cookieDomain: Rule = { id: 'C-04', title: 'Domain・Path', appliesT
     // Cookie ごとに、それを発行したホップのホストと比べる。-L で a.example から www.a.example に転送し、www が
     // Domain=www.a.example で発行した Cookie を、ターゲットの URL のホスト（a.example）と比べて①にしないため
     const targetHost = hostnameOf(ctx.target.url ?? ctx.target.meta.url_effective);
-    const cs = siteResponses(ctx.target).flatMap(r => { const host = hostnameOf(r.url) ?? targetHost;
+    const all = siteResponses(ctx.target).flatMap(r => { const host = hostnameOf(r.url) ?? targetHost;
       return (r.headers.get('set-cookie') ?? []).map(raw => ({ c: parseSetCookie(raw), host })); }).filter(x => !isDeletion(x.c, ctx.now));
+    const names = new Set(all.map(x => x.c.name));
+    const cs = all.filter(x => !(isChunkMarker(x.c) && names.has(`${x.c.name}C1`)));   // 分割の印は数えない（perCookie と同じ）
     if (!cs.length) return [];
     const fails = cs.flatMap(({ c, host }) => {
       const d = c.attrs.get('domain');
@@ -256,6 +257,6 @@ export const cookieSharedCache: Rule = { id: 'C-13', title: 'Set-Cookieと共有
 export const cookiePartitioned: Rule = { id: 'C-11', title: 'Partitioned（CHIPS）', appliesTo: 'any', scope: 'target',
   basis: ['MDN: CHIPS'],
   run(ctx) {
-    return perCookie(cookiePartitioned, ctx, c => (c.attrs.get('samesite')?.toString().toLowerCase() === 'none' && !c.attrs.has('partitioned')
+    return perCookie(cookiePartitioned, ctx, c => (c.attrs.get('samesite')?.toString().toLowerCase() === 'none' && !c.attrs.has('partitioned') && !isInfraCookie(c.name)
       ? mk(cookiePartitioned, ctx, 1, 'info', 'fail', cookieEvidence(c), '第三者として埋め込まれる用途なら Partitioned を付ける（サードパーティCookieの廃止に備える）') : undefined));
   } };

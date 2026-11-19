@@ -12,15 +12,15 @@ const noLeak = (s: string, ...bad: string[]) => {
   return out;
 };
 
-describe('T9：URL のユーザー情報の途中で切れた URL（高）', () => {
-  it('H1：パスワードが空・数字だけで、ユーザー情報がパス・クエリ・フラグメントの @ まで続くもの', () => {
+describe('URL のユーザー情報の途中で切れた URL', () => {
+  it('パスワードが空・数字だけで、ユーザー情報がパス・クエリ・フラグメントの @ まで続くもの', () => {
     for (const s of ['curl https://john.doe:2024/@api.example.com/v1', 'curl https://john.doe:/@api.example.com', 'curl https://john.doe:2024#x@localhost:8080/',
       'curl https://john.doe:2024?x@localhost/', 'curl https://john.doe:#@intranet/', "curl wss://JOHN.DOE:1#@!'@api.example.com",
       'curl https://john.doe:2024\\/@api.example.com/', "curl 'https://john.doe:'@api.example.com'", 'curl https://john.doe:2024#x@[::1]:8080/'])
       noLeak(s, 'john', 'JOHN', 'doe', '2024');
   });
 
-  it('H2：引用符・エスケープした引用符・・・改行で、URL がユーザー情報の途中で切れたもの', () => {
+  it('引用符・エスケープした引用符・・・改行で、URL がユーザー情報の途中で切れたもの', () => {
     for (const s of [`curl 'https://first.last:'"$PASS"'@api.example.com/v1'`, `curl "https://first.last:\\"Secret\\"@api.example.com/v1"`,
       `curl_'https://first.last:'Secret'@api.example.com/v1'`, `curl "https://first.last:1234\\"abc@a.example.com/x"`,
       `curl -x "http://first.last:1234\\"x@proxy.example.com:3128" https://a.example.com/`, 'curl https://first.last:1234・abc@a.example.com/x',
@@ -32,14 +32,14 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
       noLeak(s, 'first', 'last', '1234', 'corp', 'Secret');
   });
 
-  it('H3：閉じていない引用符と、長いユーザー情報で「_」で切れたもの', () => {
+  it('閉じていない引用符と、長いユーザー情報で「_」で切れたもの', () => {
     expect(noLeak('curl "https://john.doe_svc:Secret@corp.example/', 'john', 'svc', 'Secret')).toBe('curl https://corp.example/');
     expect(noLeak("curl 'https://john.doe_svc:Secret@corp.example/", 'john', 'svc', 'Secret')).toBe('curl https://corp.example/');
     noLeak(`curl "https://john.doe:2024_x@corp.example/'`, 'john', '2024');
     noLeak(`curl_https://john.doe:2024_${'x'.repeat(210)}@host.example/`, 'john', '2024');
   });
 
-  it('H4：「_」で区切ったコマンドで、ユーザー情報が後ろの引数（_-d_・_-F_・_-u_）まで続いたもの', () => {
+  it('「_」で区切ったコマンドで、ユーザー情報が後ろの引数（_-d_・_-F_・_-u_）まで続いたもの', () => {
     // ユーザー情報か、URL のあとの値か見分けられないので、URL を **** にする
     noLeak('curl_https://api.example.com_-d_@secrets-alice.json', 'secrets', 'alice');
     noLeak('curl_https://api.example.com:8443_-F_file=@alice-cv.pdf', 'alice');
@@ -54,7 +54,7 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
     noLeak('curl_-x_http://john.doe:2024_-x@proxy.example.com:3128_https://a.example.com/', 'john', '2024');
   });
 
-  it('H5：「_」で区切ったコマンドで、@ と「_」を含むパスワードのかけらがホストとして出ない', () => {
+  it('「_」で区切ったコマンドで、@ と「_」を含むパスワードのかけらがホストとして出ない', () => {
     noLeak('curl_https://john.doe:p@ss.word_1@host.example/', 'john', 'ss.word', 'word');
   });
 
@@ -125,15 +125,15 @@ describe('T9：URL のユーザー情報の途中で切れた URL（高）', () 
   });
 });
 
-describe('T9：中の指摘', () => {
-  it('M1：「_」を含むヘッダの名前は出さない（もう一度かけると変わった）', () => {
+describe('実施コマンド・実施日時の要約のそのほかの誤り', () => {
+  it('「_」を含むヘッダの名前は出さない（もう一度かけると変わった）', () => {
     for (const s of [`curl -H 'X-Foo_Bar: secretval' https://api.example.com/x`, `iwr https://api.example.com/x -Headers 'X-Foo_Bar: v'`]) {
       const out = noLeak(s, 'secretval', 'Foo_Bar');
       expect(out).toContain('https://api.example.com/x');
     }
   });
 
-  it('M2：トークンのかけら（_-ILkT…・_-bvK9…）を短いオプションとして出さない', () => {
+  it('トークンのかけら（_-ILkT…・_-bvK9…）を短いオプションとして出さない', () => {
     // 値を取る文字1つと値（-b****）は、-ualice:pw と見分けられないので残る（出るのはかけらの先頭の1文字だけ。history.md の未対応）
     noLeak('curl_-sS_-H_Authorization:Bearer_-bvK9FAWoMpA8XjrXjMMzD9vJGFz_-ILkTgKrjZP8lM_https://api.example.com/x', 'ILkT', 'bvK', 'ILk');
     noLeak('curl -H Authorization:Bearer_abc_-iLkvH9xQ_-sSLk_GET https://api.example.com/x', 'iLkv', 'sSLk', 'GET');
@@ -141,18 +141,18 @@ describe('T9：中の指摘', () => {
     expect(f('curl_-sSLk_-H_Accept:x_https://a.example/')).toBe('curl -sSLk -H Accept:**** https://a.example/');
   });
 
-  it('M3：空白で区切ったコマンドの値の中の「_-H」を、ヘッダの名前として出さない', () => {
+  it('空白で区切ったコマンドの値の中の「_-H」を、ヘッダの名前として出さない', () => {
     // エスケープした引用符のあとの -H（-H "X-Note: \" -H X-Hunter-Pw:1 \""）は残る（\" で閉じないようにすると2乗の時間がかかる。history.md の未対応）
     noLeak('curl -u alice:x_-HX-Hunter-Two:1 https://api.example.com/x', 'Hunter');
     expect(f('curl -HX-Api-Key:abc https://a.example/')).toBe('curl -H X-Api-Key:**** https://a.example/');
   });
 
-  it('M4：コマンドのIDは C1〜C26・HAR・- だけ', () => {
+  it('コマンドのIDは C1〜C26・HAR・- だけ', () => {
     for (const s of ['C1', 'C9', 'C10', 'C26', 'HAR', '-']) expect(f(s)).toBe(s);
     for (const s of ['C0', 'C27', 'C99', 'C01']) expect(f(s)).toBe('****');
   });
 
-  it('M5：実施日時は、ありうる日時だけ（月・日・時・分・秒・時差の範囲）。秒の小数は3桁まで', () => {
+  it('実施日時は、ありうる日時だけ（月・日・時・分・秒・時差の範囲）。秒の小数は3桁まで', () => {
     for (const s of ['9999-99-99', '2026-13-01', '2026-10-32', '2026-10-13T24:00', '2026-10-13T10:60', '4111-11-11T11:11:11.111111+1111', '2026-10-13T10:00+15:00'])
       expect(summarizeAt(s), s).toBe('****');
     expect(summarizeAt('2026-10-13T10:00:05.123456+09:00')).toBe('2026-10-13T10:00:05.123+09:00');

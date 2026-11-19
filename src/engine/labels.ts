@@ -13,7 +13,7 @@ export function labelRow(raw: string): LabelRow {
       ?? ROWS.find(r => r.match === 'default')!;
 }
 
-export interface Allow { name: string; allowsItem(item: string): boolean; allowsFinding(f: Finding): boolean; }
+export interface Allow { allowsItem(item: string): boolean; allowsFinding(f: Finding): boolean; }
 
 /** 項目単位（H-01）と条件単位（T-05.2）の指定を判定する */
 export function allowedItems(label: string): Allow {
@@ -25,7 +25,6 @@ export function allowedItems(label: string): Allow {
     else items.add(item);
   }
   return {
-    name: row.name,
     allowsItem: item => items.has(item) || conds.has(item),
     allowsFinding: f => items.has(f.item) || f.condition === undefined || (conds.get(f.item)?.has(f.condition) ?? false),
   };

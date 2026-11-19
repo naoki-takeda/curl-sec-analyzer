@@ -68,7 +68,7 @@ function loginFormAction(b: string): boolean {
   for (let i = low.indexOf('<form'), n = 0; i >= 0 && n < 50; i = low.indexOf('<form', i + 5), n++) {
     const end = low.indexOf('>', i); if (end < 0 || end - i > 2000) continue;
     const close = low.indexOf('</form', end);
-    if (!/type\s*=\s*["']?password/.test(low.slice(end, close < 0 ? end + 8000 : Math.min(close, end + 8000)))) continue;
+    if (!PASSWORD_FIELD.test(low.slice(end, close < 0 ? end + 8000 : Math.min(close, end + 8000)))) continue;
     const action = low.slice(i, end).match(/(?<![\w-])action\s*=\s*["']?([^"'\s>]*)/)?.[1];   // data-action には当てない
     if (!action) return true;
     try {
@@ -235,6 +235,8 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
 // 署名付きのトークン：JWT、Flask（itsdangerous）の圧縮したセッション（.eJw… で始まる「.ペイロード.時刻.署名」）、
 // Django の signed_cookies（「ペイロード:時刻:署名」。圧縮したものは . で始まる）。m[1]・m[2] が署名の部分
 const JWT_VALUE = /^(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.([\w-]*)$|^\.?[\w-]+:[\w-]+:([\w-]+)$/;
+/** 署名のある署名付きのトークン（Django の署名は20文字以上） */
+const signedToken = (v: string) => { const m = v.match(JWT_VALUE); return !!m && (!!m[1] || (m[2]?.length ?? 0) >= 20); };
 /** 2つ以上のセッションIDを比べ、固定部分や連番がないかを見る（理由の文言を返す） */
 export function predictable(raw: string[]): string | undefined {
   // 署名付きのトークンは、同じアカウントで発行するとペイロード（iat・exp まで）の大部分が共通になるので、署名の部分だけで比べる。
@@ -276,7 +278,7 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
     for (const [rawName, vals] of byName) {
       if (vals.length < 2) continue;
       const name = rawName || '（名前なし）';   // 値だけの Set-Cookie（rules/cookies.ts の cookieName と同じ表示）
-      if (new Set(vals).size === 1 && !far && /^(?:(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.[\w-]+|\.?[\w-]+:[\w-]+:[\w-]{20,})$/.test(vals[0])) {
+      if (new Set(vals).size === 1 && !far && signedToken(vals[0])) {
         out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：署名付きのトークンが同じ値（同じ秒に同じ内容で署名した可能性）`, '秒をまたいで session-sample を採取し直す'));
         continue;
       }
@@ -320,8 +322,9 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
       const mpBody = mp ? finalResponse(mp)?.body ?? '' : '';
       // mypage がないときは、パスワード欄のフォームの送信先がログインらしいパス（または送信先なし）のときだけログイン画面とする
       // （メールアドレスの変更などで再入力を求めるアカウント画面（action="/account/email"）と分けるため）
-      if (loginForm(r.body ?? '') && !mp && !loginFormAction(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（パスワード欄のある画面。送信先がログインらしいパスでなく、ログイン後のページ（mypage）もないので、ログイン画面かは分からない）`, 'ログイン後のデータを返すページを label=mypage として採取する')];
-      if (loginForm(r.body ?? '') && !PASSWORD_FIELD.test(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
+      const lf = loginForm(r.body ?? '');
+      if (lf && !mp && !loginFormAction(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（パスワード欄のある画面。送信先がログインらしいパスでなく、ログイン後のページ（mypage）もないので、ログイン画面かは分からない）`, 'ログイン後のデータを返すページを label=mypage として採取する')];
+      if (lf && !PASSWORD_FIELD.test(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
       // データのない JSON（{}・{"user":null}。未認証の /api/auth/session）と GraphQL の認証の拒否は、旧Cookie でデータを返していない（A-01 と同じ判定）
       const gql = graphqlError(r.body);
       if (gql === 'denied') return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev}（GraphQL の認証エラー。データは null）`, '')];

@@ -137,16 +137,15 @@ export function parseInput(input: string): ParseResult {
     const mk = line.match(MARKER_RE);
     const a = mk ? attrs(mk[2]) : undefined;
     const own = !!a && (!runId || a.run === runId);
+    if (mk?.[1] === 'TARGET' && !own) ignoredMarkers++;   // 印の違う #TARGET（#BODY のあとの本文の中のものも）は、本文として読んだことを知らせる
     // #BODY のあとの本文は、次のマーカーまでそのまま本文に足す（本文の「HTTP/1.1 200 OK」・偽のヘッダ・CONNECTED(n) を読まない）
     if (inRaw && !own) {
-      if (runId && /^#TARGET\b/.test(line)) ignoredMarkers++;   // 印の違う #TARGET は、本文の中でも知らせる
       if (!rawBody) { if (line.trim()) unparsed++; continue; }
       appendBody(rawBody, line);
       continue;
     }
     if (METER_LINE.test(line) || (!inBody() && METER_LINE_NO_TIME.test(line))) continue;
     line = line.replace(METER_PREFIX, '');
-    if (mk && !own && mk[1] === 'TARGET') ignoredMarkers++;
     if (mk && a && own) {                              // マーカー行は必ず応答を閉じる
       // 前のターゲットの状態（CONNECT を送った、など）を持ち越さない（次のターゲットの本物の 200 をプロキシの応答とみなさない）
       close(); inOpenssl = false; vBody = false; connectReq = false; inRaw = false; rawBody = undefined; if (json) { unparsed += json.length; json = null; }
@@ -210,7 +209,7 @@ export function parseInput(input: string): ParseResult {
       firstLine = /^\* /.test(line) || VERBOSE_HINT.test(line) ? 'hint' : 'other';
       if (firstLine === 'hint') t.verbose = true;   // デバッグ版の curl の「* !!! WARNING !!!」なども -v の情報行として読む
     }
-    if (!inBody() && (!runId || firstLine === 'hint') && VERBOSE_HINT.test(line)) t.verbose = true;
+    if (!runId && !inBody() && VERBOSE_HINT.test(line)) t.verbose = true;   // 印のある入力は、上の最初の行だけで決める
     if (t.verbose && !inBody()) {                      // -v の解釈は verbose ターゲットのヘッダ部だけ
       // 受信ヘッダ（< の行）の途中の空行は無視する。終端は「<」の行で、空行ではない。
       // Windows の curl は受信ヘッダの行を CR CR LF で終え、画面の入力欄（textarea）はそれを改行2つ（空行）に変えるため、
@@ -324,7 +323,7 @@ export function parseInput(input: string): ParseResult {
     }
   }
   for (const tg of targets) tg.responses.forEach((r, i) => {
-    // CONNECT（プロキシ）の応答：理由句が「Connection established」のもの。理由句が違っても、本文のない 2xx のあとに応答が続くなら、それはプロキシの応答
+    // CONNECT（プロキシ）の応答：本文のない 2xx のあとに応答が続くもの（理由句はプロキシによって違う）。理由句「Connection established」の扱いは下
     const proxyReply = r.status >= 200 && r.status < 300 && i < tg.responses.length - 1 && !r.body?.trim() && r.reason !== 'header_json';
     // プロキシの認証要求（407）と、curl が認証し直した 401 のあとには、同じリクエストの応答が続く。その URL 自身の応答ではないので、
     // 最初の応答（T-04・A-01・C-09・C-12 などが見るステータス）にしない。プロキシの 407 を最初の応答にすると、T-04 が「HTTP を拒否」と合格にする
@@ -333,7 +332,7 @@ export function parseInput(input: string): ParseResult {
     // 407 はプロキシだけが返すので、あとに応答が続かなくても（プロキシの認証に失敗して諦めた）サイトの応答にしない
     // 理由句「Connection established」でプロキシの応答とみなすのは、あとに応答が続くときだけ（最後の応答の理由句を変えるだけでサイトの応答を
     // 消させない）。ただし、あとに応答が続かない（CONNECT のあとで curl が失敗した。社内のプロキシ越しの Schannel の失効確認の失敗など）ときも、
-    // 本文がなく、ヘッダがプロキシの応答の形（Proxy-Agent・Via・Date・Connection・Keep-Alive・Content-Length: 0 だけ）なら connect。
+    // 本文がなく、ヘッダがプロキシの応答の形（Proxy-Agent・Via・Date・Connection・Keep-Alive・Proxy-Connection・Content-Length: 0 だけ）なら connect。
     // この形をサーバが返しても、空の応答と同じで判定には使えない
     else if ((r.status === 200 && /connection established/i.test(r.reason ?? '') && (retried || proxyShape(r))) || proxyReply || r.status === 407) r.kind = 'connect';
     else if (r.status === 401 && retried) r.kind = 'challenge';
@@ -356,7 +355,7 @@ export function parseInput(input: string): ParseResult {
 // %{header_json} にほぼ必ずある応答ヘッダ。どれもない JSON（{"tags":["a"]} など）はヘッダとみなさない
 const TYPICAL_HEADER = /^(?:date|content-type|content-length|server|cache-control|set-cookie|strict-transport-security|vary|etag|last-modified|location|expires|age|via|connection|transfer-encoding)$/;
 /**
- * curl -w '%{header_json}' の出力。ステータスは #META response_code（C5の -w）から取る。なければ0（不明。あとの #META で補う）。
+ * curl -w '%{header_json}' の出力。ステータスは #META response_code（生成スクリプトは同じ -w で %{header_json} の前に出す）から取る。なければ0（不明。あとの #META で補う）。
  * undefined：まだ JSON として読めない（続きの行を待つ）。
  * null：JSON だがヘッダの形ではない（名前がヘッダに使える文字、値が文字列の配列、よくあるヘッダを含む、のどれかを満たさない）
  */
@@ -372,7 +371,6 @@ function headerJson(text: string, code?: string): HttpResponse | null | undefine
   for (const [k, v] of entries)
     if (k.toLowerCase() === 'set-cookie') { const list: string[] = []; dropped += pushCookies(list, (v as string[]).flatMap(splitSetCookie)); headers.set('set-cookie', list); }
     else headers.set(k.toLowerCase(), v as string[]);
-  // %{header_json} の Set-Cookie も上限まで（pushCookies）
   return { httpVersion: '', status: Number(code) || 0, reason: 'header_json', headers, rawNames: [...headers.keys()], kind: 'final', ...(dropped ? { droppedCookies: dropped } : {}) };
 }
 

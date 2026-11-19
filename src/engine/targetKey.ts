@@ -9,7 +9,7 @@ import { baseLabel } from '../parser/target';
 import { lowerToken, wordLike } from '../tokenShape';
 
 /**
- * 例外と前回の結果の突き合わせに使う URL（HAR の targetKey）。URL の形だけで作る：
+ * 例外と前回の結果の突き合わせに使う URL（HAR と、同じラベルが複数ある curl の targetKey、Finding.keyUrl、CSV の実施コマンドの URL）。URL の形だけで作る：
  * スキーム・ホスト・パス（トークンらしい部分は *、ASP.NET のセッション (S(…)) は (*)）と、クエリのパラメータの名前だけ（値は持たない）。
  * 値を持たないので秘密は入らず、同じページを記録し直しても変わらない。ユーザー情報とフラグメントは持たない
  */

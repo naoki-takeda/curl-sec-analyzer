@@ -10,17 +10,7 @@ curl-sec-analyzer の開発に参加するときの決まりです。使い方�
 
 ## 開発環境と検査
 
-Node.js は `.nvmrc` の版を使います（`engines` の下限は 22.12）。
-
-```sh
-npm ci
-npm run lint         # 型チェックと ESLint
-npm test             # 単体テスト（時間を測るテストは最後に別に流す。変更を監視するときは npm run test:watch）
-npm run audit        # 依存の署名の検証と、公開物に含まれる依存の既知の脆弱性の検査
-npm run build
-npx playwright install chromium firefox webkit
-npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build が必要）
-```
+Node.js は `.nvmrc` の版を使います（`engines` の下限は 22.12）。依存のインストール・検査・ビルド・E2E のコマンドは [README.md](README.md) の「開発」にあります。
 
 プルリクエストでは、CI（`.github/workflows/ci.yml`）が同じ検査を実行します。検査の中身は `.github/workflows/checks.yml` にあります。
 
@@ -28,7 +18,7 @@ npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build �
 
 - **描画**：`innerHTML`・`outerHTML`・`insertAdjacentHTML`・`document.write` を使わず、`textContent`・`el()`（`src/ui/dom.ts`）で描画します。`eval` 系も使いません。どちらも ESLint で禁止しています。
 - **ルール**（`src/rules/`）：評価したら必ず `.ok` か fail を返し、判定できなければ `.na` を返します。空配列は「適用外」のときだけに使います。
-- **文言**：画面の文言・推奨対応を足したら、英語（`src/messagesEn.ts`・`src/recommendationsEn.ts`）もそろえます。訳の漏れは `tests/i18n.test.ts` が検出します。
+- **文言**：画面の文言は `src/i18n.ts` の `ja`・`en` の両方に足します（足りないと型チェックで失敗します）。設定ファイル・コマンド生成器のエラーの英訳は `src/messagesEn.ts`、推奨対応と判定不能の理由の英訳は `src/recommendationsEn.ts` に足します。推奨対応の訳の漏れは `tests/i18n.test.ts` が検出します。
 - **ブラウザの保存領域**：localStorage・sessionStorage・IndexedDB・Cookie は使いません（理由は設計書の「ブラウザの保存領域」）。
 - **依存パッケージ**：追加はできるだけ避けます。追加する場合は、理由と、自前で実装しない理由をプルリクエストに書きます。
 

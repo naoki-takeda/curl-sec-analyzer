@@ -83,7 +83,7 @@ session-sample-* | C-07.na | info | na | .AspNetCore.CookiesC1：暗号化した
 session-sample-1 | C-01.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-02.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-03.ok | info | pass | .AspNetCore.CookiesC1
-session-sample-1 | C-04.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-1 | C-04.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-05.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-1 | C-06.1 | info | fail | .AspNetCore.CookiesC1=CfDJ…(53 chars); path=/; secure; samesite=lax; httponly
 session-sample-1 | C-07.ok | info | pass | .AspNetCore.CookiesC1
@@ -95,7 +95,7 @@ session-sample-1 | H-12.na | info | na | HTTP 302（鮮度の指定がなく、�
 session-sample-2 | C-01.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-02.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-03.ok | info | pass | .AspNetCore.CookiesC1
-session-sample-2 | C-04.ok | info | pass | .AspNetCore.Cookies, .AspNetCore.CookiesC1
+session-sample-2 | C-04.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-05.ok | info | pass | .AspNetCore.CookiesC1
 session-sample-2 | C-06.1 | info | fail | .AspNetCore.CookiesC1=CfDJ…(53 chars); path=/; secure; samesite=lax; httponly
 session-sample-2 | C-07.ok | info | pass | .AspNetCore.CookiesC1

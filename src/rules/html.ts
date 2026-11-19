@@ -2,7 +2,7 @@
 import type { Finding, Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
-import { INTERNAL_HOST, NO_BODY_REC, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
+import { INTERNAL_HOST, NO_BODY_REC, bodyNotCaptured, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
 import { clip } from '../mask';
 import { b64urlJson } from './jwt';
 
@@ -17,7 +17,7 @@ export interface Tag {
   /**
    * inert のうち、あとから要素になることもないもの（<textarea>・<title>・<style>・<xmp>・<iframe>・<noembed>・<noframes> の中身）。
    * <script> の中（document.write・x-template）、<template> の中（複製して使う）、<noscript> の中（スクリプトが無効なら要素）は、
-   * 読み込み・送信に使われうるので、E-07・E-08・E-10・E-12 はこれだけを除く
+   * 読み込み・送信に使われうるので、E-07・E-08・E-10・E-12（と E-09 の hidden の欄、H-07③）はこれだけを除く
    */
   text?: boolean;
 }
@@ -25,7 +25,7 @@ export interface Tag {
 /**
  * 証跡に値を出す属性。判定に使う属性（読み込み先・送信先・種類）だけにする。
  * それ以外（data-api-key、data-auth-token、nonce、value など）は、名前の付け方によらず秘密情報を含みうるので、値を「…」にする。
- * URL のパラメータのトークンは、このあと engine/run.ts の maskText でマスクする
+ * URL のパラメータのトークンは、このあと engine/run.ts の showText（mask.ts の maskText と語の形の許可リスト）で伏せる
  */
 const SHOWN_ATTRS = new Set(['src', 'href', 'action', 'data', 'rel', 'method', 'type', 'name', 'content', 'integrity', 'crossorigin', 'as']);
 function tagEvidence(name: string, attrs: Map<string, string>): string {
@@ -170,7 +170,7 @@ export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ct
  */
 export const noHtmlBody = (rule: Rule, ctx: RuleContext): Finding[] => {
   const s = ctx.final?.status ?? 0;
-  return ctx.responseKind === 'html' && s >= 200 && s < 300 && !ctx.final?.body?.trim()
+  return ctx.responseKind === 'html' && s >= 200 && s < 300 && bodyNotCaptured(ctx)
     ? [mk(rule, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
 };
 /**
@@ -221,12 +221,12 @@ export function metaCspFromHtml(html: string): string[] {
     .filter(Boolean);
 }
 
-/** 混在コンテンツ：①script・iframe・stylesheet、②img など */
+/** 混在コンテンツ：①script・iframe・embed・object・stylesheet・preload、②img・audio・video・source */
 export function mixedContent(html: string): { active: Tag[]; passive: Tag[] } {
   const ts = tags(html, ['script', 'iframe', 'link', 'img', 'audio', 'video', 'source', 'embed', 'object']).filter(t => !t.text);
   const isHttp = (v?: string) => !!v && /^http:\/\//i.test(v.trim());
   const active = ts.filter(t => (t.name === 'script' || t.name === 'iframe' || t.name === 'embed' || t.name === 'object') && isHttp(t.attrs.get('src') ?? t.attrs.get('data'))
-    || (t.name === 'link' && /stylesheet|preload|modulepreload/i.test(t.attrs.get('rel') ?? '') && isHttp(t.attrs.get('href'))));
+    || (t.name === 'link' && /stylesheet|preload/i.test(t.attrs.get('rel') ?? '') && isHttp(t.attrs.get('href'))));
   const passive = ts.filter(t => ['img', 'audio', 'video', 'source'].includes(t.name) && isHttp(t.attrs.get('src')));
   return { active, passive };
 }
@@ -362,8 +362,8 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     const posted = forms(html).filter(f => (f.form.attrs.get('method') ?? '').toLowerCase() === 'post')
       .flatMap(f => f.inputs).filter(i => i.attrs.get('type')?.toLowerCase() === 'hidden' && /^(?:id_token|access_token|code|state)$/i.test(i.attrs.get('name') ?? ''))
       .map(i => [i.index, i.end + 1] as const).sort((a, b) => b[0] - a[0]);
-    const scan = posted.reduce((h, [s, e]) => h.slice(0, s) + h.slice(e), html);
-    for (const [name, re] of SECRETS) if (re.test(scan)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
+    const text = posted.reduce((h, [s, e]) => h.slice(0, s) + h.slice(e), html);
+    for (const [name, re] of SECRETS) if (re.test(text)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
     const iu = internalUrl(html, pageHostOf(ctx)?.toLowerCase());
     if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
     // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す

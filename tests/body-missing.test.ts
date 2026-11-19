@@ -167,3 +167,14 @@ describe('HAR で残さない本文', () => {
     }
   });
 });
+
+describe('本文がない 2xx の HTML（204・Content-Length: 0）は、本文を採取していない na にしない', () => {
+  it('Content-Length: 0 の 200 → E-07 などは適用外', () => {
+    const { ids } = evaluate('#TARGET url=https://a.example/ label=page\nHTTP/2 200\ncontent-type: text/html\ncontent-length: 0\n\n');
+    expect(ids('page').filter(id => /^E-(?:02|07|08|09|10|12)\./.test(id))).toEqual([]);
+  });
+  it('-o /dev/null で本文を採取していない 200 → na のまま', () => {
+    const { ids } = evaluate('#TARGET url=https://a.example/ label=page\nHTTP/2 200\ncontent-type: text/html\ncontent-length: 1234\n\n');
+    expect(ids('page')).toContain('E-07.na');
+  });
+});

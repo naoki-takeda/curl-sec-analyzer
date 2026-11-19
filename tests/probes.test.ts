@@ -128,3 +128,14 @@ describe('処理命令の名前に - のある並びでも、すぐ終わる', {
     expect(performance.now() - t).toBeLessThan(1000);
   });
 });
+
+describe('E-04 security.txt の転送', () => {
+  const e04 = (input: string) => evaluate(input).findings.filter(f => f.item === 'E-04').map(f => f.ruleId);
+  it('-L なしの 3xx は、転送先を見ていないので na（RFC 9116 は転送を認める）', () => {
+    expect(e04('#TARGET url=https://www.example.com/.well-known/security.txt label=page\nHTTP/2 301\nlocation: https://example.com/.well-known/security.txt\n\n')).toEqual(['E-04.na']);
+    expect(e04('#TARGET url=https://www.example.com/ label=probes\n#PROBE path=/.well-known/security.txt head= code=301 size=0 ct=text/html\n')).toEqual(['E-04.na']);
+  });
+  it('404 は②のまま', () => {
+    expect(e04('#TARGET url=https://www.example.com/.well-known/security.txt label=page\nHTTP/2 404\ncontent-type: text/html\n\n<h1>Not Found</h1>\n')).toEqual(['E-04.2']);
+  });
+});

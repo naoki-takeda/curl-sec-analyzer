@@ -10,7 +10,7 @@ import { diff, parseBaseline } from './engine/diff';
 import { legacyHarKey } from './engine/targetKey';
 import { RULESET_VERSION, TOOL_VERSION } from './version';
 import { type Lang, getLang, setLang, tr } from './i18n';
-import sample from './sample';
+import sample from './sample.txt?raw';   // 「サンプルを入れる」の入力例（値はすべてダミー。192.0.2.0/24 は文書用のアドレス）
 import { BTN, LINK, PRIMARY, button, download, el, fileInput as hidden, labelFor, link, reducedMotion } from './ui/dom';
 import { type Message, actions, refs, state } from './ui/state';
 import { render, renderEmpty } from './ui/results';
@@ -23,7 +23,7 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 refs.dialog = el('dialog', 'm-auto w-[min(32rem,92vw)] rounded-md border border-line bg-surface p-0 text-ink backdrop:bg-black/40');
 Object.assign(actions, { analyze, cancelAnalysis, isAnalyzing: () => !!analyzing, say, renderSettings, openGenerator, loadSample });
 
-// ?lang= は ja・en（en-US などは en）だけを受け付ける。それ以外はブラウザの言語で決める（不明な値だと文言の表が引けず、判定で止まる）
+// ?lang= は ja・en（en-US などは en）だけを受け付け、それ以外の値はブラウザの言語で決める
 const qLang = new URLSearchParams(location.search).get('lang')?.toLowerCase() ?? '';
 setLang(/^(ja|en)(-|$)/.test(qLang) ? qLang.slice(0, 2) as Lang : (navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en'));
 // 他のサイトに埋め込まれたときは、入力欄を出さない（クリックジャッキング対策。メタCSPでは frame-ancestors が効かないため。ツール設計3）

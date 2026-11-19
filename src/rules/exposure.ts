@@ -107,7 +107,7 @@ export const dirListing: Rule = { id: 'E-02', title: 'ディレクトリリス�
     if (!b) return noHtmlBody(dirListing, ctx);
     // nginx・Apache の「Index of /」、Python の http.server、IIS の「[To Parent Directory]」、Tomcat の「Directory Listing For [/…]」、
     // Jetty の「<title>Directory: /…」、Express の serve-index の「listing directory /…」
-    const m = b.match(/<title>\s*Index of \/[^<]*<\/title>|<h1>\s*Index of \/|Directory listing for \/|\[To Parent Directory\]|Directory Listing For \[?\/|<title>\s*Directory: \/|<title>\s*listing directory \//i);
+    const m = b.match(/<title>\s*Index of \/[^<]*<\/title>|<h1>\s*Index of \/|\[To Parent Directory\]|Directory Listing For \[?\/|<title>\s*Directory: \/|<title>\s*listing directory \//i);
     return m ? [mk(dirListing, ctx, 1, 'medium', 'fail', m[0], 'ディレクトリの一覧表示を無効にする（nginx: autoindex off、Apache: Options -Indexes）')]
              : [mk(dirListing, ctx, 'ok', 'info', 'pass', '一覧表示なし', '')];
   } };
@@ -123,6 +123,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     const probe = ctx.target.probes.find(x => /\/security\.txt$/.test(x.path));
     if (probe) {                                              // C13 の存在確認（probes ラベル）
       if (!probe.code) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP 000、接続できなかった）`, PROBE_UNREACHED_REC)];
+      if (probe.code >= 300 && probe.code < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}、転送先を確かめていない）`, '-L を付けて、転送先まで採取し直す')];
       const hit = probePattern(probe.path, probe.headB64, probe.code);
       if (hit?.name === 'security-txt-comment') return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。採った先頭がコメントだけで、Contact・Expires があるかは分からない）`, '本文を取得して（C2）、Contact と Expires があるか確かめる')];
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
@@ -138,8 +139,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
       if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
       if (!b) return noBody();
-      // どのパスにも index.html を返す SPA の 200 は、robots.txt ではない（security.txt と同じ扱い）
-      // HTML かは本文で見る（robots.txt を text/html で返すサーバの User-agent・Disallow の行を見逃さない。robots.txt は < で始まらない）
+      // どのパスにも index.html を返す SPA の 200 は robots.txt ではない（なしとして合格）。HTML かは本文で見る（robots.txt を text/html で返す
+      // サーバの User-agent・Disallow の行を見逃さない。robots.txt は < で始まらない）
       if (/^\s*</.test(b))
         return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}、HTML の画面。SPA の可能性）`, '')];
       const m = b.match(ROBOTS_SENSITIVE);
@@ -147,6 +148,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
                : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', 'robots.txt に機密パスらしき記述なし', '')];
     }
     if (/\/security\.txt$/.test(p)) {
+      // RFC 9116 3 は転送を認めるので、-L なしの 3xx は転送先を見ていない
+      if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `security.txt を取得できない（HTTP ${st}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
       if (!b) return noBody();
       // どのパスにも index.html を返す SPA の 200 は、security.txt ではない

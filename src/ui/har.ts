@@ -12,8 +12,8 @@ import { renderEmpty } from './results';
 const say = (m: Message) => actions.say(m);
 
 // 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外すを押したりしたら、前の読み込みの結果は使わない
-let harLoad = 0;
-export const cancelHarLoad = () => { harLoad++; };
+let harLoad = 0; let harWorker: Worker | undefined;
+export const cancelHarLoad = () => { harLoad++; harWorker?.terminate(); harWorker = undefined; };
 
 export function loadHar(f: File) {
   if (f.size > HAR_MAX_BYTES) { say(() => tr().har.tooLarge); return; }
@@ -21,9 +21,10 @@ export function loadHar(f: File) {
   // Worker は blob: URL で作る（?worker&inline）。別ファイルの Worker には、そのファイルの HTTP 応答の CSP が使われ、
   // GitHub Pages は CSP ヘッダを返さないため、生の HAR（Cookie・パスワード）を持つ Worker から通信できてしまう。
   // blob: の Worker はページの CSP（connect-src 'none'）を引き継ぐ。メタCSPの worker-src blob: で許可する
-  const w = new HarWorker(); const gen = ++harLoad;
+  cancelHarLoad(); const w = new HarWorker(); harWorker = w; const gen = harLoad;
+  const done = () => { w.terminate(); if (harWorker === w) harWorker = undefined; };
   w.onmessage = (e: MessageEvent<{ ok: boolean; result?: HarImport; error?: string }>) => {
-    w.terminate();
+    done();
     if (gen !== harLoad) return;                     // 古い読み込みの結果
     if (!e.data.ok || !e.data.result) { const err = e.data.error; say(() => { const t = tr().har; return t.failed(err === 'JSON' ? t.invalidJson : err ?? '?'); }); return; }
     const imp = e.data.result;
@@ -33,10 +34,10 @@ export function loadHar(f: File) {
     renderHar(); say('');
     // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない。判定中（初回を含む）なら、読み込んだ HAR も入れて判定し直す
     if (state.last || actions.isAnalyzing()) actions.analyze();
-    if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直してエラーが出たら、そちらを残す
+    if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直したときは、判定のメッセージ（判定中・エラー）を残す
   };
-  w.onerror = () => { w.terminate(); if (gen === harLoad) say(() => tr().har.failed('worker')); };
-  f.text().then(t => w.postMessage(t));
+  w.onerror = () => { done(); if (gen === harLoad) say(() => tr().har.failed('worker')); };
+  f.text().then(t => w.postMessage(t), () => { done(); if (gen === harLoad) say(() => tr().har.failed('read')); });
 }
 /** HAR を外す。判定結果に HAR のターゲットが残らないよう、貼り付けがあれば判定し直し、なければ結果を消す */
 function removeHar() {

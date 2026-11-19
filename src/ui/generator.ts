@@ -14,7 +14,7 @@ export function commandGenerator() {
   const grid = el('div', 'grid gap-x-3 gap-y-2 sm:grid-cols-2');
   for (const [k, ph] of fields) {
     const i = el('input', 'mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 font-mono text-[13px]'); i.id = `gen-${k}`; i.placeholder = ph;
-    if (k !== 'host' && k !== 'apex' && k !== 'wsPath') i.value = ph;   // 任意の項目は空のまま
+    if (k !== 'host' && k !== 'apex' && k !== 'wsPath') i.value = ph;   // ホスト名（必須）と任意の項目（apex・WebSocket）は空のまま
     if (draft.values.has(k)) i.value = draft.values.get(k)!;
     i.addEventListener('input', () => { draft.values.set(k, i.value); });
     inputs.set(k, i); grid.append(el('div', '', labelFor(i.id, T.fields[k]), i));
@@ -28,14 +28,15 @@ export function commandGenerator() {
   const actions = el('div', 'mt-2 hidden flex-wrap gap-2',
     button(T.copy, BTN, async () => { try { await navigator.clipboard.writeText(out.value); err.textContent = T.copied; } catch { out.select(); err.textContent = T.copyFailed; } }),
     button(T.saveSh, BTN, () => download('csa-collect.sh', 'text/x-shellscript', out.value)));
+  const show = () => { out.classList.remove('hidden'); actions.classList.remove('hidden'); actions.classList.add('flex'); };
   const gen = button(T.make, 'rounded-md bg-primary px-4 py-2 font-bold text-primary-ink hover:opacity-90', () => {
     const v = (k: string) => inputs.get(k)!.value.trim();
     const o: CommandOptions = { host: v('host'), apex: v('apex') || undefined, apiPath: v('apiPath'), loginPath: v('loginPath'),
       mypagePath: v('mypagePath'), logoutPath: v('logoutPath'), staticPath: v('staticPath'), wsPath: v('wsPath') || undefined, dangerous: danger.checked };
     const errors = validate(o);
-    err.textContent = getLang() === 'en' ? joinMessages(errors, 'en') : errors.join('。');
+    err.textContent = joinMessages(errors, getLang());
     if (errors.length) { out.classList.add('hidden'); actions.classList.add('hidden'); draft.output = ''; return; }
-    out.value = draft.output = generateScript(o); out.classList.remove('hidden'); actions.classList.remove('hidden'); actions.classList.add('flex');
+    out.value = draft.output = generateScript(o); show();
   });
   const d = el('details', 'mt-4 rounded-md border border-line bg-surface p-4',
     el('summary', 'cursor-pointer font-bold', T.title),
@@ -43,7 +44,7 @@ export function commandGenerator() {
     el('div', 'mt-3', grid), el('div', 'mt-3 flex items-center gap-2', danger, labelFor('gen-danger', T.danger, 'text-sm')),
     el('div', 'mt-3', gen), err, out, actions);
   d.id = 'generator';
-  if (draft.output) { out.value = draft.output; out.classList.remove('hidden'); actions.classList.remove('hidden'); actions.classList.add('flex'); }
+  if (draft.output) { out.value = draft.output; show(); }
   d.open = draft.open; d.addEventListener('toggle', () => { draft.open = d.open; });
   return d;
 }

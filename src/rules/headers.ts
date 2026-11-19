@@ -14,10 +14,7 @@ export const apexHop = (t: Target) => {
   const host = hostnameOf(t.url);
   return host ? chainOf(t).find(r => /^https:/i.test(r.url ?? '') && hostnameOf(r.url) === host) : undefined;
 };
-/**
- * 判定に使う HSTS ヘッダ（H-01・H-02）。apex は、apex 自身の応答（apexHop）で見る（-L や HAR で www への転送をたどった最後の応答は
- * www のもの）。noApex は、apex で apex 自身の https の応答がないこと
- */
+/** 判定に使う HSTS ヘッダ（H-01・H-02）。apex は apexHop の応答で見る。noApex は、apex で apex 自身の https の応答がないこと */
 const hstsOf = (ctx: RuleContext): { noApex: boolean; v?: string } => {
   const apex = baseLabel(ctx.target.label) === 'apex';
   const r = apex ? apexHop(ctx.target) : ctx.final;
@@ -32,7 +29,8 @@ export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appl
   basis: ['OWASP HTTP Headers CS', 'MDN HTTP Observatory'],
   run(ctx) {
     if (ctx.isHttps === false) return [];               // http のターゲットは適用外（T-04 で評価）
-    if (ctx.isHttps === undefined || !ctx.final) return [mk(hsts, ctx, 'na', 'info', 'na', ...UNKNOWN_SCHEME)];
+    if (ctx.isHttps === undefined) return [mk(hsts, ctx, 'na', 'info', 'na', ...UNKNOWN_SCHEME)];
+    if (!ctx.final) return [mk(hsts, ctx, 'na', 'info', 'na', '応答がない', '')];
     const { noApex, v } = hstsOf(ctx);
     if (noApex) return noApexHttps(hsts, ctx);
     const rec = 'Strict-Transport-Security: max-age=63072000; includeSubDomains';
@@ -154,9 +152,10 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
   run(ctx) {
     if (ctx.isHttps === false) return [];
     if (ctx.isHttps === undefined) return [mk(hstsPreload, ctx, 'na', 'info', 'na', ...UNKNOWN_SCHEME)];
+    if (!ctx.final) return [mk(hstsPreload, ctx, 'na', 'info', 'na', '応答がない', '')];
     const { noApex, v } = hstsOf(ctx);
     if (noApex) return noApexHttps(hstsPreload, ctx);
-    if (!ctx.final || !v) return [mk(hstsPreload, ctx, 'na', 'info', 'na', 'HSTSがない（H-01で判定）', '')];
+    if (!v) return [mk(hstsPreload, ctx, 'na', 'info', 'na', 'HSTSがない（H-01で判定）', '')];
     // 構文の誤ったヘッダ（カンマ区切りの max-age=…, includeSubDomains, preload など）はブラウザが無視する。H-01③ で指摘するので、
     // ここで「preload なし」とは言わない
     const { valid, maxAge: age } = parseHsts(v);

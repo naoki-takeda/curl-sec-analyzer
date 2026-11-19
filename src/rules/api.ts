@@ -16,7 +16,6 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     const ct = header(ctx, 'content-type')[0] ?? '';
     const looksJson = /^\s*[{[]/.test(f.body ?? '');
     if (ctx.responseKind !== 'api') {
-      // 値の前の空白は、下の kind=api の分岐と同じく読み飛ばす（「Content-Type:  text/html」の折り返し・空白の多い値でも同じ判定にする）
       return /^\s*text\/html/i.test(ct) && looksJson
         ? [mk(jsonHeaders, ctx, 1, 'medium', 'fail', `Content-Type: ${ct}（本文はJSON）`, 'JSONは application/json で返す（text/html だとXSSの原因になる）')]
         : [];                                                  // API応答ではないターゲットは適用外
@@ -32,7 +31,6 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     return out.length ? out : [mk(jsonHeaders, ctx, 'ok', 'info', 'pass', ct, '')];
   } };
 
-export { API_TOP10 } from '../engine/standards';
 
 /**
  * A-01・A-08・A-11 が判定に使う応答（r）とステータス。同じページへの転送（末尾の / への 307 など）はたどった先（hop）で見る。

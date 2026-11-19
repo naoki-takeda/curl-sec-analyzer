@@ -29,7 +29,6 @@ html { background: var(--paper); color: var(--ink); }
 body { font-family: var(--font-sans); line-height: 1.7; font-feature-settings: "palt" 0; }
 :focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
 .num { font-variant-numeric: tabular-nums; }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 /* 折りたたみの見出しを横並び（flex）にするとブラウザの三角が消えるため、目印を自前で付ける（ui/dom.ts の disclosure） */
 summary.summary-custom { list-style: none; }

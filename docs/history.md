@@ -1247,3 +1247,15 @@ v1.0 の範囲を実装し、要確認事項（第44回）を確かめたので�
 | 修正のレビュー | 採取のスクリプトの後始末が、s_server がすでに終わっていると set -e で止まり、一時ディレクトリ（鍵・login.txt）を残した（中）。HAR で残す本文に image/svg+xml・Office の文書（openxmlformats）まで入り、値の前の空白で一致しなかった。言語を切り替えると aria-busy が消えた。値の変わらない入力（同じ文字列の貼り付け）でも判定を止めた。har.ts の冒頭のコメントが古かった（低） | 後始末は kill の失敗を無視して最後まで行う。XML は text/xml と application/…+xml・application/xml だけにし、値の前の空白を読み飛ばす。言語を切り替えたら付け直す。判定した入力・URL と同じ値なら止めない。コメントを直した | `scripts/capture-fixture.sh`、`src/parser/har.ts`、`src/main.ts` |
 | 判断したこと | 2万件の HAR の判定は約75秒かかるが、時間は件数に比例する（HTML の本文1件あたり約3.4ミリ秒）ので、性能の目標の範囲として扱う | — | — |
 | 未対応（低） | svn の entries のパターンが soft-404（`404\n`）で①（高）になる（以前から）。`<!--`・`<?xml` で始まる HTML を HTML の画面とみなさない。BOM で始まる .env・security.txt。'unsafe-hashes' のポリシーが複数のときの端のケース（情報だけ）。本文が実際に空の応答（chunked の 401 など）の na。Worker の生成・送信の例外と messageerror を捕まえない。置き換わった判定のあとの設定の読み込みのエラーが消える。a11y の E2E が判定の完了を待たない、消去の E2E が遅い環境で何も確かめずに通りうる、HAR を外す経路の E2E がない。CHANGELOG の既知の限界の E-01・A-07 の書き方。第57回の差分の説明に orphan-block の警告がない。設計書の「画面はルールを読み込まない」（rules/util.ts の hstsDirective は読み込む）。テストの細かい重複。ありふれた JSON（`{"private":false}`）の package.json の① | 次回以降 | — |
+
+### 整理（第60回、32回目の新鮮な目でのレビュー：領域ごとの5人のレビュアー。1.0.0 の公開の前）
+
+リポジトリ全体を、パーサと生成スクリプト、ヘッダ・Cookie・CORS・通信のルール、本文・API・横断のルール、エンジン・エクスポート・マスク、画面・ビルド・文書の5つの領域に分け、冗長な記述、使っていないコード、文書・コメントと実装の食い違いを見た。秘密の値が漏れる不具合はなかった
+
+| 対象 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 判定 | URL のある https のターゲットに応答がないとき、H-01・H-02 を「HTTPSかどうか判定できない（url= を付ける）」にした。C-11 は、属性を運営者が変えられない負荷分散・CDN の Cookie（`ARRAffinitySameSite`・`__cf_bm`）を指摘した（C-03③・C-04① は除いていた）。C-04 は ASP.NET Core の分割の印（`chunks-N`）も数えた。security.txt の 3xx（`-L` なし）を②にした（RFC 9116 は転送を認める。robots.txt は na）。本文が実際に空の 2xx の HTML（`Content-Length: 0`）を「本文を採取していない」の na にした | H-01・H-02 は「応答がない」の na。C-11 は負荷分散・CDN の Cookie を除く。C-04 は perCookie と同じく分割の印を除く。security.txt の 3xx は na。本文の項目は `bodyNotCaptured` で見る | `src/rules/headers.ts`・`cookies.ts`・`exposure.ts`・`html.ts`、ゴールデン、`tests/probes.test.ts`・`tests/body-missing.test.ts` |
+| 画面 | 読み込み中に別の HAR を読む・消去すると、前の HAR の Worker が最後まで解析を続けた。ファイルを読めないと「読み込んでいます」のまま止まった | 前の Worker を止め、読めなければ失敗と知らせる | `src/ui/har.ts` |
+| 文書と実装の食い違い | 設計書：HAR の `sentOrigin`・HAR と判定する条件・残す本文の種類、URL を決める順、obs-fold の報告、`-v` の本文の読み飛ばし、CSP の H-04②④・H-07①、H-16⑤ の X-Runtime、T-01② の ACAM、R-08 の na、E-07①②・E-09 の除外の範囲、評価の順序（横断ルールは結果を見ない）、第8章の JSON、trustedScriptOrigins のポート、urlKey のトークン、画面設計の順と列、英語の画面の管理、Worker の画面の側。README・CONTRIBUTING・PR テンプレートの文言のファイル。コメント：`maskText`→`showText`、`messagesEn` の検査のテスト、`setCookie.ts` の制御文字（`\b` が backspace の文字になっていた） | 実装に合わせた | 設計書、README、CONTRIBUTING、`.github/pull_request_template.md`、`src/` のコメント |
+| 冗長・不要 | 使っていない `CspIssue.description`・`HarImport.total`・`Baseline.toolVersion`・`Allow.name`・訳の2件・`src/sample.ts`・`src/vite-env.d.ts`、ほかのファイルで使わない export、同じ式の重複（`PASSWORD_FIELD`・署名付きのトークン・`loginForm`・#TARGET の数え方）、設計書の重複した段落、CONTRIBUTING の README と同じコマンド、CHANGELOG の第48回〜第59回の要約（経緯と重複） | 外した。CHANGELOG は以前の版との違いだけを残した。`overall` の重複の確認を Set にした（数万件の HAR で2乗の時間） | 各ファイル |
+| テストの名前 | `tests/t7-keys.test.ts`・`t9-summary.test.ts` が作業の番号の名前のままだった | `properties-cases.test.ts`・`cmd-summary-cases.test.ts` にし、テストの名前から番号を外した | `tests/` |
