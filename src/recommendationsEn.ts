@@ -145,7 +145,7 @@ export const EXACT: Record<string, string> = {
   '転送先まで（-L）採取し直す': 'Capture again following the redirect (-L)',
   '認証後に使う WebSocket なら #TARGET に sensitive=1、公開用なら sensitive=0 を付ける': 'If the WebSocket is used after login, add sensitive=1 to #TARGET; if it is public, add sensitive=0',
   'C12（プロトコルごとの接続の確認）を採取する': 'Capture C12 (per-protocol connection checks)',
-  '本文のある応答（200 など）で採取する（204・304 は対象外）': 'Capture a response with a body (such as 200); 204 and 304 are not evaluated',
+  '本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）': 'Capture a response with a body (such as 200); responses without a body (204, 304, redirects, Content-Length: 0) are not evaluated',
   'GraphQL の IDE は本番で無効にするか、認証の内側に置く（introspection は POST して別に確かめる）': 'Disable the GraphQL IDE in production or put it behind authentication (check introspection separately with a POST)',
   'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする': 'Replace the framework default error page with your own (or RFC 9457 problem details)',
   'ディレクトリの一覧表示を無効にする（nginx: autoindex off、Apache: Options -Indexes）': 'Disable directory listing (nginx: autoindex off, Apache: Options -Indexes)',

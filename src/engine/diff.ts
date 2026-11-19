@@ -2,6 +2,7 @@
 import type { Finding, Profile, Severity } from '../model';
 import { parseProfile } from './profile';
 import { SEVERITIES } from './summarize';
+import { baseLabel } from '../parser/target';
 
 export type DiffKind = 'new' | 'resolved' | 'continuing' | 'severity-changed' | 'not-rechecked' | 'suppressed';
 export interface DiffRow { kind: DiffKind; ruleId: string; item: string; condition?: number; title: string; target: string; severity: Severity; before?: Severity; }
@@ -45,7 +46,7 @@ const tkey = (f: Finding) => f.targetKey ?? f.target;
  * 証跡の突き合わせの形：証跡に出てくるホスト名（URL・CSP の配信元）の一覧。同じルール・ターゲットで別の配信元の指摘（E-08 の cdn-a と cdn-b、
  * E-07 の読み込み先）を別の指摘として突き合わせる（cdn-a を直して cdn-b が増えたことを「継続」の1行にしない）。
  * ホスト名だけを使うのは、証跡のほかの部分は画面のマスク（mask.ts・shownText.ts）で形が変わるため（突き合わせのキーはマスクに依存しない。
- * マスクの規則を変えただけで、変わらない指摘を新規と解消にしない）。ホスト名はマスクしない。
+ * マスクの規則を変えただけで、変わらない指摘を新規と解消にしない）。ホスト名は「スキーム://」のあとのものを取る（showText もマスクしない）。
  * ホスト名はサイトにまとめない（ajax.googleapis.com に storage.googleapis.com のスクリプトが増えたことや、*.github.io・*.cloudfront.net の
  * 別の持ち主の配信元を、1つの「継続」にしない）。そのため、A-01② の転送先が同じサイトの別のサーバ（web-03 → web-07）に変わっただけでも
  * 「解消」と「新規」に分かれる（見逃すより安全なので、そのままにする）
@@ -67,12 +68,12 @@ const isHar = (f: Finding) => tkey(f).startsWith('HAR ');
 /** キーがラベルだけ（top、以前の版の top#2）。同じラベルが複数あるときの「ラベル＋URL」（top https://…）は末尾が URL（ラベルは空白を含みうるので、空白の有無では見ない） */
 const labelOnly = (f: Finding) => !isHar(f) && !/ (?:[a-z][\w+.-]*:\/\/|\/)\S*(?: #\d+)?$/i.test(tkey(f));
 /** 「ラベル＋URL」の形のキー（同じラベルが複数あったときのキー。今回はラベルだけのキーになったものを、前回と URL で突き合わせる） */
-const altKey = (f: Finding): string | undefined => (!isHar(f) && f.keyUrl && labelOnly(f) ? `${f.target.replace(/#\d+$/, '')} ${f.keyUrl}` : undefined);
+const altKey = (f: Finding): string | undefined => (f.keyUrl && labelOnly(f) ? `${baseLabel(f.target)} ${f.keyUrl}` : undefined);
 /** 指摘として残っているもの。例外を適用した指摘（suppressed）も、直ってはいないので含める */
 const isOpen = (f: Finding) => f.status === 'fail' || f.status === 'suppressed';
 
 /**
- * 指摘（fail・suppressed）を「ルールID×ターゲット」で突き合わせる。
+ * 指摘（fail・suppressed）を「ルールID×ターゲット×証跡のホスト」（key）で突き合わせる。
  * - 今回 suppressed：前回 fail（または前回なし）なら「例外登録」。前回も suppressed なら変化なしとして出さない
  * - 今回 fail：前回なしなら「新規」。前回 suppressed（例外の期限切れなど）は既知の指摘なので「継続」か「重要度の変化」
  * - 前回の指摘が今回ない場合、同じターゲットで同じ項目を判定していれば「解消」、判定していなければ「再診断していない」とする
@@ -89,7 +90,7 @@ export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   const failNow = new Map<string, Set<string>>();
   for (const f of after.filter(isOpen)) for (const k of ids(f)) (failNow.get(k) ?? failNow.set(k, new Set()).get(k)!).add(f.ruleId);
   const evaluatedNow = new Set(after.filter(f => (f.status !== 'na' || f.dedupedBy) && !f.limited).flatMap(ids).filter(k => !naNow.has(k)));
-  /** 同じ項目・ターゲットに、前回と別の条件の今回の fail があるか（同じ条件の別の配信元 cdn-a → cdn-b は、条件を確かめているので「解消」でよい） */
+  /** 同じ項目・ターゲットに、前回の条件より前の番号の条件の今回の fail があるか（同じ条件の別の配信元 cdn-a → cdn-b は、条件を確かめているので「解消」でよい） */
   const condOf = (r: string) => Number(r.split('.').pop()) || 0;
   const otherCondFail = (f: Finding) => ids(f).some(k => [...(failNow.get(k) ?? [])].some(r => r !== f.ruleId && condOf(r) > 0 && condOf(r) < condOf(f.ruleId)));
   const rows: DiffRow[] = [];
@@ -108,7 +109,7 @@ export function diff(before: Finding[], after: Finding[]): DiffRow[] {
   const labelKey = (f: Finding) => `${f.ruleId}\u0000${f.target}\u0000${evidenceKey(f.evidence)}`;
   // ラベルで突き合わせるのは、前回のキーがラベルだけ（top・以前の版の top#2）のものだけ。前回が「ラベル＋URL」なら、URL の違う今回の同じラベルの
   // ターゲットと組にしない（a.example の前回の指摘を、b.example の今回の指摘と「継続」にしない）
-  for (const [k, f] of prev) if (!used.has(k) && !isHar(f) && labelOnly(f)) { const l = labelKey(f); if (!byLabel.has(l)) byLabel.set(l, k); }
+  for (const [k, f] of prev) if (!used.has(k) && labelOnly(f)) { const l = labelKey(f); if (!byLabel.has(l)) byLabel.set(l, k); }
   for (const [k, f] of now) {
     if (pairs.has(k)) continue;
     const pk = isHar(f) ? undefined : byLabel.get(labelKey(f));

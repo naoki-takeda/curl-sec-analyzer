@@ -1,15 +1,27 @@
 import type { Finding, Rule, RuleContext, Severity, Status } from '../model';
 import { wordLike } from '../tokenShape';
-import { BODY_LIMIT } from '../parser/target';
+import { BODY_LIMIT, isRedirectWithLocation } from '../parser/target';
 
-export function mk(rule: Rule, ctx: RuleContext, cond: number | 'ok' | 'na', severity: Severity, status: Status,
-                   evidence: string, recommendation: string, extra: Partial<Finding> = {}): Finding {
-  return { ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined,
-           title: rule.title, severity, status, target: ctx.target.label, evidence, recommendation,
-           references: rule.basis, ...extra };
-}
+/** 送ったテスト値のホスト（既知のテスト値。ツール設計1。生成するコマンド（src/commands.ts）と同じ値） */
+export const TEST_HOST = 'evil.example';
+export const TEST_HOST_RE = new RegExp(TEST_HOST.replace(/\./g, '\\.'), 'i');
+/** 指摘を作る（target はラベルかホスト。ホスト単位のルールは host も付ける） */
+export const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string, host?: string): Finding =>
+  ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
+     target, ...(host === undefined ? {} : { host }), evidence, recommendation, references: rule.basis });
+/** ターゲット単位のルールの指摘 */
+export const mk = (rule: Rule, ctx: RuleContext, cond: number | 'ok' | 'na', severity: Severity, status: Status,
+                   evidence: string, recommendation: string, extra: Partial<Finding> = {}): Finding =>
+  ({ ...cf(rule, ctx.target.label, cond, severity, status, evidence, recommendation), ...extra });
+/** 応答がない（ヘッダを見るルールで、採取できなかったターゲット）の判定不能 */
+export const noResponse = (rule: Rule, ctx: RuleContext): Finding => mk(rule, ctx, 'na', 'info', 'na', '応答がない', '');
 
 export const header = (ctx: RuleContext, name: string): string[] => ctx.final?.headers.get(name) ?? [];
+/** Cache-Control のディレクティブ（小文字）。カンマで区切る（引用符の中のカンマ（private="Set-Cookie, X-A"）では区切らない） */
+export const cacheDirectives = (values: string[]): string[] =>
+  (values.join(', ').toLowerCase().match(/(?:[^,"]|"[^"]*"?)+/g) ?? []).map(s => s.trim()).filter(Boolean);
+/** ディレクティブの名前（private="Set-Cookie" は private） */
+export const directiveNames = (parts: string[]): Set<string> => new Set(parts.map(s => s.split('=')[0].trim()));
 
 /**
  * CSP のヘッダ値を、ポリシーごとに分ける。1つのヘッダ値の中のカンマは、ポリシーの区切り（CSP3 の serialized-policy-list）。
@@ -32,7 +44,9 @@ export const isNosniff = (ctx: RuleContext): boolean =>
 // 静的リソース（JS・CSS・画像・フォント・動画・音声・WebAssembly）と、誰にでも同じ内容を返す公開ファイル（robots.txt、sitemap.xml、
 // /.well-known/ の下など）。拡張子はパスの末尾だけで見る（クエリの ?avatar=me.png・?format=x.css で、利用者ごとの API を静的リソースにしない）
 const STATIC_RE = /\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|map|wasm|mp4|m4v|webm|ogv|mov|mp3|m4a|aac|oga|ogg|opus|wav|flac)$/i;
-const STATIC_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|image\/|font\/|video\/|audio\/|application\/wasm\b)/i;
+/** JS・CSS・フォントの Content-Type（古いフォントの型 application/font-woff・application/vnd.ms-fontobject を含む） */
+export const ASSET_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|font\/|application\/(?:x-)?font|application\/vnd\.ms-fontobject\b)/i;
+const STATIC_CT = /^\s*(?:image\/|video\/|audio\/|application\/wasm\b)/i;
 const PUBLIC_FILE = /\/(?:robots\.txt|sitemap[\w-]*\.xml(?:\.gz)?|favicon\.ico|(?:app-)?ads\.txt|humans\.txt|security\.txt|crossdomain\.xml|browserconfig\.xml|manifest\.json|[\w-]+\.webmanifest)$|\/\.well-known\//i;
 const pathOf = (u: string) => { try { return new URL(u).pathname; } catch { return u.replace(/[?#].*$/s, ''); } };
 // JSONP（?callback=）は、拡張子が .js（/api/user.js?callback=）でも Content-Type が JS でも、利用者ごとのデータを返す動的な応答なので、
@@ -41,7 +55,7 @@ const JSONP_PARAM = /[?&](?:callback|jsonp)=/i;
 export const isStaticResource = (ctx: RuleContext): boolean => {
   const u = ctx.target.url ?? '';
   const p = pathOf(u);
-  return PUBLIC_FILE.test(p) || (!JSONP_PARAM.test(u) && (STATIC_RE.test(p) || STATIC_CT.test(header(ctx, 'content-type')[0] ?? '')));
+  return PUBLIC_FILE.test(p) || (!JSONP_PARAM.test(u) && (STATIC_RE.test(p) || [ASSET_CT, STATIC_CT].some(re => re.test(header(ctx, 'content-type')[0] ?? ''))));
 };
 /**
  * 機密応答かどうか（第0章 0.3）。ただし静的リソースと公開ファイルは、sensitive=1 を明示したときだけ機密とする。
@@ -104,6 +118,10 @@ export const hstsDirective = (v: string | undefined, name: 'includesubdomains' |
 /** ログイン・ログアウトに失敗した採取での判定不能（na）の推奨対応（C-09・C-12・H-15） */
 export const LOGOUT_FAILED_REC = 'ログアウトの方法（POST など）に合わせて logout を採取し直す';
 export const LOGIN_FAILED_REC = 'テスト用アカウントでログインできることを確かめて、login を採取し直す';
+/** 機密応答かどうか分からないときの推奨（第0章 0.3） */
+export const SENSITIVE_REC = '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける';
+/** 転送先を採取していないときの推奨 */
+export const FOLLOW_REC = '-L を付けて、転送先まで採取し直す';
 /**
  * 本文を見て判定するルールで、本文を採取していないとき（-v、-D - -o /dev/null、HAR の本文なし）の推奨。
  * 本文がないのに「反映されない」「参照なし」と合格にすると、見逃しになり、カバレッジも水増しになる
@@ -115,8 +133,18 @@ export const NO_BODY_REC = '本文も含めて採取し直す（curl は -v で�
  */
 export const bodyNotCaptured = (ctx: RuleContext): boolean => {
   const f = ctx.final;
-  return !!f && !f.body?.trim() && f.status !== 204 && f.status !== 304 && header(ctx, 'content-length')[0]?.trim() !== '0';
+  return !!f && !f.body?.trim() && !noContent(ctx) && !zeroLength(ctx);
 };
+/**
+ * 本文のない応答（204 No Content、304 Not Modified）。キャッシュに残す内容も、ほかのオリジンに読ませる内容も、スニッフィングする本文も
+ * ないので、H-08・H-11・H-12・A-09 の対象外（ビーコンや XHR の 204 を指摘しない）
+ */
+export const noContent = (ctx: RuleContext): boolean => ctx.final?.status === 204 || ctx.final?.status === 304;
+export const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）';
+/** Content-Length: 0 の応答 */
+export const zeroLength = (ctx: RuleContext): boolean => header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
+/** スニッフィングする本文がない応答（H-08・A-09②）：204・304、Location のある 3xx（ブラウザは 3xx の本文を表示しない）、Content-Length: 0 */
+export const nothingToSniff = (ctx: RuleContext): boolean => noContent(ctx) || isRedirectWithLocation(ctx.final) || zeroLength(ctx);
 /** プローブ（C13）のコードが 000（接続できなかった）のときの推奨。ファイルがあるかどうかは分からないので、合格にしない（E-03・E-04・E-13） */
 export const PROBE_UNREACHED_REC = 'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）';
 const AUTH_FLAG = /^(?:is_?)?(?:authenticated|authorized|logged_?in|signed_?in|auth|ok|success|valid)$/i;
@@ -129,7 +157,7 @@ const parseJson = (body: string | undefined): unknown => {
   try { return JSON.parse(b); } catch { return undefined; }
 };
 /**
- * データのない JSON の本文（{}・[]・null、値がすべて null・false・空のもの。NextAuth の未認証の /api/auth/session の {}、
+ * データのない JSON の本文（{}・[]・null、値がすべて null・空のもの（false はログインの状態の名前のときだけ空とみなす）。NextAuth の未認証の /api/auth/session の {}、
  * {"authenticated":false,"user":null}）と、エラーだけを返した JSON。保護データを返していないので、A-01①・C-12①（高）にしない
  */
 export const noDataJson = (body: string | undefined): boolean => {

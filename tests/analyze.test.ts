@@ -29,3 +29,11 @@ describe('analyzeInput', () => {
     expect(structuredClone(r).findings).toEqual(r.findings);
   });
 });
+
+describe('analyzeInput の URL 欄', () => {
+  it('url= を書いた default のターゲットは URL 欄で補わず、その url= を読めない警告を残す', () => {
+    const r = analyzeInput(req('#TARGET url=www.example.com\nHTTP/2 200\ncontent-type: text/html\n\n<p>x</p>\n', 'https://a.example/'));
+    expect(r.targets[0].url).toBe('www.example.com');
+    expect(r.warnings.find(w => w.kind === 'unknown-url')?.detail).toContain('url= を URL として読めません');
+  });
+});

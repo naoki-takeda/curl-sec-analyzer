@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run --tagsFilter=!perf && vitest run --tagsFilter=perf --no-file-parallelism",
-    "test:watch": "vitest",
+    "test:watch": "vitest --tagsFilter=!perf",
     "test:e2e": "playwright test",
     "lint": "tsc --noEmit && eslint .",
     "audit": "npm run audit:signatures && npm run audit:deps",

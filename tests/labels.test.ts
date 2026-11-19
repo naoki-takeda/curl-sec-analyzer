@@ -1,6 +1,6 @@
 // 診断カバレッジで案内する「必要なラベル」が、ルールの実際の判定範囲と一致することを確かめる
 import { describe, expect, it } from 'vitest';
-import { requiredLabels } from '../src/engine/labels';
+import { RESERVED_HINTS, requiredLabels } from '../src/engine/labels';
 import { ITEMS } from '../src/engine/coverage';
 import { evaluate } from './helpers';
 
@@ -26,5 +26,11 @@ describe('必要なラベル', () => {
     expect(t('top', 'https://a.example/api', 'HTTP/2 415').some(i => i.startsWith('A-08'))).toBe(false);
     expect(t('logout', 'https://a.example/logout', 'HTTP/2 302\nlocation: /')).toContain('H-15.1');
     expect(t('http', 'http://a.example/admin', 'HTTP/1.1 401 Unauthorized\nWWW-Authenticate: Basic realm="x"')).toContain('A-01.3');   // B：HTTPでのBasic認証
+  });
+});
+
+describe('予約ラベルの組の案内', () => {
+  it('横断ルールの2つのラベルの組（C-09・C-12）から、両方向の組を作る', () => {
+    expect([...RESERVED_HINTS].sort()).toEqual([['after-logout', 'logout', 'C-12'], ['login', 'pre-login', 'C-09'], ['logout', 'after-logout', 'C-12'], ['pre-login', 'login', 'C-09']]);
   });
 });

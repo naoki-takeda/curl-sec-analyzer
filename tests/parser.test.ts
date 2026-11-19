@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { attrs, parseInput } from '../src/parser/input';
-import { finalResponse, isHttps, logoutFailed, siteOf } from '../src/parser/target';
+import { finalResponse, isHttps, siteOf } from '../src/parser/target';
+import { logoutFailed } from '../src/rules/html';
 import { importHar } from '../src/parser/har';
 import { fixture, sampleText } from './helpers';
+import { analyze } from './golden/analyze';
 
 describe('parseInput', () => {
   it('#TARGET ごとにターゲットを分け、url・label・sensitive を読む', () => {
@@ -78,5 +80,37 @@ ${body}
     const c = importHar(har).chains[0];
     expect(c.method).toBe('POST');
     expect(c.suggested).toBe('login');
+  });
+});
+
+describe('HAR のラベルの候補', () => {
+  const entry = (method: string, url: string, reqHeaders: { name: string; value: string }[] = []) =>
+    ({ request: { method, url, headers: reqHeaders }, response: { status: 200, headers: [] } });
+  const har = (...entries: unknown[]) => JSON.stringify({ log: { entries } });
+  it('ASP.NET の /Account/LogOff と /log_out も logout の候補にする', async () => {
+    expect(importHar(har(entry('POST', 'https://a.example/Account/LogOff'))).chains[0].suggested).toBe('logout');
+    expect(importHar(har(entry('GET', 'https://a.example/log_out'))).chains[0].suggested).toBe('logout');
+  });
+  it('一覧の「自動（はい）」は、組織プロファイルのセッションCookieの名前で作り直す', async () => {
+    const { suggestLabels } = await import('../src/parser/har');
+    const { withProfile, parseProfile } = await import('../src/engine/profile');
+    const imp = importHar(har(entry('GET', 'https://a.example/me', [{ name: 'Cookie', value: 'corpauth=abc' }])));
+    expect(imp.chains[0].sentAuth).toBe(false);
+    withProfile(parseProfile('{"sessionCookieNames":["corpauth"]}').profile, () => suggestLabels(imp.chains, true));
+    expect(imp.chains[0].sentAuth).toBe(true);
+  });
+});
+
+describe('最初の #TARGET と HAR の redirectURL', () => {
+  it('属性のない #TARGET が最初なら、後ろの行の run= を印にしない（本文が作ったマーカーで利用者のターゲットを消さない）', () => {
+    const { targets } = parseInput(['#TARGET', 'HTTP/1.1 200 OK', 'content-type: text/html', '', '<p>hi</p>', '#TARGET run=0123456789abcdef label=login',
+      '#TARGET url=https://a.example/ label=top', 'HTTP/1.1 200 OK', 'content-type: text/html', '', '<p>top</p>', ''].join('\n'));
+    expect(targets.map(t => t.label)).toContain('top');
+  });
+  it('HAR の redirectURL が文字列でなくても、ルールを例外で止めない', () => {
+    const har = { log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z', request: { method: 'GET', url: 'https://a.example/r', headers: [] },
+      response: { status: 302, headers: [], redirectURL: { a: 1 }, content: { mimeType: 'text/html', text: '' } } }] } };
+    const r = analyze('', JSON.stringify(har));
+    expect(r.findings.filter(f => f.evidence.includes('エラーが発生した'))).toEqual([]);
   });
 });

@@ -58,7 +58,10 @@ const PROBE_PATTERNS: [string, string, RegExp, Content][] = [
   // detached HEAD（CI・デプロイで多い）は、コミットの ID（SHA-1 の40桁、SHA-256 の64桁）だけの1行
   ['git-head',      'E-03', /\/\.git\/HEAD$/,        /^(?:ref: refs\/|[0-9a-f]{40}(?:[0-9a-f]{24})?\s*$)/],
   // 中身のパターンは、エラーページ（JSON・XMLのエラー応答）に一致しないものにする（<?xml だけ、{ だけでは判定しない）
-  ['svn-entries',   'E-03', /\/\.svn\/entries$/,     /^\d+\s*$|<wc-entries\b/m],
+  // Subversion 1.4〜1.6 は形式番号（8〜10）・空行・dir の3行で始まり、1.7 以降は形式番号の 12 だけのファイル、1.3 までは XML の <wc-entries>。
+  // どれもファイルの先頭だけを見る（行の始めのどこかの数字だけの行では、200 で返す soft-404 の「404」「Not Found\n0」に一致し、数字だけの本文
+  // （件数を返す API の「10」）にも一致する）
+  ['svn-entries',   'E-03', /\/\.svn\/entries$/,     new RegExp(`^(?:(?:8|9|10)\\r?\\n\\r?\\ndir\\r?\\n|12(?:\\r?\\n)?$|${START.slice(1)}(?:<\\?xml\\b[^>]*>\\s*)?<wc-entries\\b)`)],
   // eslint-disable-next-line no-control-regex -- .DS_Store のマジックバイト（00 00 00 01 Bud1）を照合する
   ['ds-store',      'E-03', /\/\.DS_Store$/,         /^\x00\x00\x00\x01Bud1/],
   // export KEY=…（シェルで読み込む形）と、= の前後の空白（KEY = value）も。小文字の名前は、ほかの平文の応答と見分けにくいので入れない

@@ -139,3 +139,14 @@ describe('E-04 security.txt の転送', () => {
     expect(e04('#TARGET url=https://www.example.com/.well-known/security.txt label=page\nHTTP/2 404\ncontent-type: text/html\n\n<h1>Not Found</h1>\n')).toEqual(['E-04.2']);
   });
 });
+
+describe('svn の entries はファイルの先頭だけを見る', () => {
+  it('Subversion 1.7 以降（12 だけ）・1.4〜1.6（先頭が形式番号の行）・1.3 まで（XML の <wc-entries>）は一致する', () => {
+    for (const s of ['12\n', '12', '10\n\ndir\n0\nhttps://svn.example.com/repo/trunk\n', '8\r\n\r\ndir\r\n', '<?xml version="1.0" encoding="utf-8"?>\n<wc-entries\n   xmlns="svn:">'])
+      expect(probePattern('/.svn/entries', b64(s), 200)?.name, JSON.stringify(s)).toBe('svn-entries');
+  });
+  it('200 で返す soft-404 の「404」「Not Found\n0」、数字だけの本文（件数を返す API）、ほかの数字の行には一致しない', () => {
+    for (const s of ['404\n', 'Not Found\n0\n', 'Error\n12\n', '1\n', '200 OK\n', '<html><body><wc-entries></wc-entries>', '10', '8\n', '12\n{"error":1}', '8\n{"error":1}', '11\n'])
+      expect(probePattern('/.svn/entries', b64(s), 200), JSON.stringify(s)).toBeUndefined();
+  });
+});

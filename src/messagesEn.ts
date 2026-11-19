@@ -13,8 +13,9 @@ const EXACT: Record<string, string> = {
   'sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）':'sessionMaxAgeHours must be a number of hours from 1 to 9600 (the default of 24 hours is used)',
   'ホスト名は英数字・ハイフン・ドット（必要なら :ポート）だけで書いてください': 'Use only letters, digits, hyphens and dots in the host name (plus :port if needed)',
   'apexドメインの書き方が正しくありません': 'The apex domain is not valid',
+  'name は文字列にしてください': 'name must be a string',
 };
-const FIELD: Record<string, string> = { API: 'API', ログイン: 'Login', 認証後ページ: 'Page after login', ログアウト: 'Logout', 静的リソース: 'Static resource', WebSocket: 'WebSocket' };
+const FIELD: Record<string, string> = { 機密のAPI: 'Sensitive API', ログイン: 'Login', 認証後のページ: 'Page behind login', ログアウト: 'Logout', '静的リソース（JS）': 'Static resource (JS)', WebSocket: 'WebSocket' };
 const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：ruleId が不正です$/, m => `Entry ${m[1]}: invalid ruleId`],
   [/^(\d+)件目：ruleId「(.*)」は項目IDではありません$/s, m => `Entry ${m[1]}: ruleId "${m[2]}" is not a check ID`],

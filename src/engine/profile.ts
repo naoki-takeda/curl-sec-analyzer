@@ -2,14 +2,14 @@
 import type { Finding, Profile, Severity } from '../model';
 import { sessionConfig } from '../parser/setCookie';
 import { SEVERITIES } from './summarize';
-import ITEMS from './items.json';
+import { ITEMS } from './coverage';
 
 const ID = /^[HCRTEA]-\d\d(\.\d+)?$/;
 /**
  * チェックリストにある項目・条件か（H-99 のような存在しない項目と、H-01.9・H-01.0 のような存在しない条件を、黙って受け付けない。
  * 綴りを誤った重要度の上書きや例外が、効かないまま残るため）
  */
-const CONDITIONS = new Map((ITEMS as { id: string; conditions: number }[]).map(i => [i.id, i.conditions]));
+const CONDITIONS = new Map(ITEMS.map(i => [i.id, i.conditions]));
 /** 項目ID（H-01）か条件（H-01.1）の誤り：項目がない（item）、条件番号がない（condition）、正しい（undefined） */
 const idProblem = (id: string): 'item' | 'condition' | undefined => {
   const m = ID.exec(id);
@@ -28,7 +28,8 @@ const PROFILE_KEYS = ['name', 'severity', 'exclude', 'sessionCookieNames', 'sess
 // 配列にする項目が配列でない（"exclude": "T-12"）なら、黙って空にせずエラーにする（既定の設定のまま判定したことに気づけるように）
 const notArray = (v: unknown) => v !== undefined && !Array.isArray(v);
 
-export function parseProfile(text: string): { profile?: Profile; errors: string[] } {
+/** recognized：組織プロファイルの項目が1つでもある（形式の違うファイルを読んだときに、読み込み済みのプロファイルを残すため） */
+export function parseProfile(text: string): { profile?: Profile; errors: string[]; recognized?: boolean } {
   let d: Record<string, unknown>;
   try { d = JSON.parse(text); } catch { return { errors: ['JSONとして読めません'] }; }
   if (!d || typeof d !== 'object' || Array.isArray(d)) return { errors: ['オブジェクトが必要です'] };
@@ -56,7 +57,9 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   const hoursOk = hours >= 1 && hours <= 24 * 400;
   if (!hoursOk) errors.push('sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）');
   // エラーにした値は使わない（既定値に戻す）
-  return { profile: { name: typeof d.name === 'string' ? d.name.slice(0, 100) : '', severity, exclude, sessionCookieNames: names, sessionMaxAgeHours: hoursOk ? hours : 24, trustedScriptOrigins: origins }, errors };
+  if (d.name !== undefined && typeof d.name !== 'string') errors.push('name は文字列にしてください');
+  const recognized = PROFILE_KEYS.some(k => k in d);
+  return { recognized, profile: { name: typeof d.name === 'string' ? d.name.slice(0, 100) : '', severity, exclude, sessionCookieNames: names, sessionMaxAgeHours: hoursOk ? hours : 24, trustedScriptOrigins: origins }, errors };
 }
 
 /** 実行中だけプロファイルのセッション設定を有効にする */

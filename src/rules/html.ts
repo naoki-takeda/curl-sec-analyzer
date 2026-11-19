@@ -1,12 +1,13 @@
 // rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64KBまで。タグとコメントは HTML の字句解析をなぞった走査（scan）で読む
-import type { Finding, Rule, RuleContext } from '../model';
-import { hostOf } from '../parser/target';
+import type { Finding, Rule, RuleContext, Target } from '../model';
+import { LOGOUT_WORD, finalResponse, firstStatus, hostOf, ownChain } from '../parser/target';
+import { looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { isTrustedOrigin } from '../engine/profile';
-import { INTERNAL_HOST, NO_BODY_REC, bodyNotCaptured, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
+import { INTERNAL_HOST, NO_BODY_REC, SENSITIVE_REC, bodyNotCaptured, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
 import { clip } from '../mask';
 import { b64urlJson } from './jwt';
 
-export interface Tag {
+interface Tag {
   name: string; attrs: Map<string, string>; index: number;
   /** タグを閉じる > の位置（引用符で囲んだ属性の値の中の > では閉じない。E-09 がタグを取り除く範囲） */
   end: number;
@@ -375,7 +376,8 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     return out.length ? out : [mk(htmlSecrets, ctx, 'ok', 'info', 'pass', '秘密情報・内部情報らしき記述なし', '')];
   } };
 
-type Form = { form: Tag; inputs: Tag[] };
+/** stop：その form の中の終わり（閉じタグか次の form の位置） */
+type Form = { form: Tag; inputs: Tag[]; stop: number };
 let formsMemo: { html: string; out: Form[] } | undefined;   // E-09・E-10・E-12 が同じ本文で呼ぶ
 /**
  * form ごとに、その中（閉じタグか次の form まで）の input を集める。input の位置（index）はページ全体での位置（E-09 がその位置のタグを取り除く）。
@@ -393,7 +395,7 @@ function forms(html: string): Form[] {
     while (j < inputs.length && inputs[j].index < f.index) j++;
     const own: Tag[] = [];
     while (j < inputs.length && inputs[j].index < stop) own.push(inputs[j++]);
-    return { form: f, inputs: own };
+    return { form: f, inputs: own, stop };
   });
   formsMemo = { html, out };
   return out;
@@ -434,7 +436,7 @@ export const csrfToken: Rule = { id: 'E-12', title: 'HTML本文：CSRFトーク�
     if (!missing.length) return [mk(csrfToken, ctx, 'ok', 'info', 'pass', `POSTフォーム${posts.length}件にトークンらしき項目あり`, '')];
     // ①は「トークンがなく、SameSite も Lax/Strict でない」。認証後ページ（機密応答）が前提なので、機密かどうか分からなければ na（第0章 0.3）
     if (ctx.sensitive === undefined)
-      return [mk(csrfToken, ctx, 'na', 'info', 'na', `トークンのないPOSTフォーム${missing.length}件（機密応答かどうか分からない）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
+      return [mk(csrfToken, ctx, 'na', 'info', 'na', `トークンのないPOSTフォーム${missing.length}件（機密応答かどうか分からない）`, SENSITIVE_REC)];
     if (ctx.hostSessionSameSite === true)
       return [mk(csrfToken, ctx, 'ok', 'info', 'pass', `トークンのないPOSTフォーム${missing.length}件。同じホストのセッションCookieは SameSite=Lax/Strict`, '')];
     return missing.map(f => mk(csrfToken, ctx, 1, 'info', 'fail', f.form.evidence,
@@ -442,9 +444,16 @@ export const csrfToken: Rule = { id: 'E-12', title: 'HTML本文：CSRFトーク�
                                         : 'POSTフォームにCSRFトークンを入れる（セッションCookieが見つからないため SameSite は確認できない。実効性の確認は範囲外）'));
   } };
 
-const INPUT_TAG = /<input\b[^>]*(?:>|$)/gi;
-const attr = (tag: string, name: string) => tag.match(new RegExp(String.raw`(?<![\w-])${name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`, 'i'))?.slice(1).find(v => v !== undefined) ?? '';
 const NON_TEXT_INPUT = /^(?:hidden|password|submit|button|checkbox|radio|image|reset|file|range|color)$/i;
+const attrOf = (t: Tag, name: string) => t.attrs.get(name) ?? '';
+const isPassword = (t: Tag) => attrOf(t, 'type').toLowerCase() === 'password';
+/** フォームごとの input。form のない本文（フォームを使わない画面）は、本文の input をまとめて1つとする */
+const inputGroups = (html: string): { form?: Tag; inputs: Tag[] }[] => {
+  const fs = forms(html);
+  return fs.length ? fs : [{ inputs: tags(html, ['input']).filter(t => !t.text) }];
+};
+/** ログインのフォームの送信先らしいパス（C-12 の送信先の確認と、パスワード欄だけのフォーム） */
+export const LOGIN_ACTION = /(?:^|\/)(?:log-?in|sign[-_]?in|signon|sessions?|auth(?:enticate)?|j_(?:spring_)?security_check)(?:[/?.#]|$)/i;
 const SETTING_FIELD = /(?:^|[\s_-])(?:new|confirm|confirmation|retype|repeat)(?:[\s_-]|$)|new[-_]?pass|(?:pass(?:word)?|pwd)[-_]?confirm/i;
 /**
  * ログイン画面・認証の入り口のパス（C-09・C-12・T-06 で共有。パスの最後で一致させる）：/login・/signin・Devise の /users/sign_in・
@@ -462,25 +471,55 @@ export const LOGIN_PATH = /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login|
  * そのうえで、ユーザー名の欄（文字を入力する input か、2段階のログイン画面の hidden の username など）があるもの。パスワード欄だけのフォームは、
  * autocomplete="current-password" で、送信先（action）がログインらしいもの（sudo・reauth・confirm・verify を除く）だけ
  * （ユーザー名を文字で表示した2段階目の画面を、GitHub の sudo モードのような再認証の画面と分けるため）。
- * input はタグごとに取り出して見る（閉じない「<input 」が並ぶ本文でも線形時間にするため）
+ * フォームと input は forms()・tags() で読む（ブラウザと同じ字句解析。<form-field> のようなカスタム要素をフォームとしない）
  */
 export function loginForm(body: string): boolean {
-  const chunks = /<form\b/i.test(body) ? body.split(/<form\b/i).slice(1).map(c => c.split(/<\/form\s*>/i)[0]) : [body];
-  return chunks.some(f => {
-    const inputs = f.match(INPUT_TAG) ?? [];
-    const pw = inputs.filter(t => /^password$/i.test(attr(t, 'type')));
+  return inputGroups(body).some(({ form, inputs }) => {
+    const pw = inputs.filter(isPassword);
     if (pw.length !== 1) return false;
-    const ac = attr(pw[0], 'autocomplete'), nameId = `${attr(pw[0], 'name')} ${attr(pw[0], 'id')}`;
-    if (SETTING_FIELD.test(`${nameId} ${ac}`)) return false;
+    const ac = attrOf(pw[0], 'autocomplete'), pwName = attrOf(pw[0], 'name');
+    if (SETTING_FIELD.test(`${pwName} ${attrOf(pw[0], 'id')} ${ac}`)) return false;
     const currentPassword = /\bcurrent-password\b/i.test(ac);
     // 再認証の欄を除く。name の current_password は、name がちょうど current-password で autocomplete も current-password のときだけ認める
     // （Devise の再認証のフォームも autocomplete="current-password" を付ける）。id は old-password・old_password だけを見る
-    const pwName = attr(pw[0], 'name');
-    if ((/(?:current|old)[-_]?pass/i.test(pwName) && !(currentPassword && /^current-password$/i.test(pwName))) || /old[-_]?pass/i.test(attr(pw[0], 'id'))) return false;
-    const user = inputs.some(t => !NON_TEXT_INPUT.test(attr(t, 'type')))
-      || inputs.some(t => /^hidden$/i.test(attr(t, 'type')) && /^(?:user(?:name)?|email|login|identifier|j_username)$/i.test(attr(t, 'name')));
+    if ((/(?:current|old)[-_]?pass/i.test(pwName) && !(currentPassword && /^current-password$/i.test(pwName))) || /old[-_]?pass/i.test(attrOf(pw[0], 'id'))) return false;
+    const user = inputs.some(t => !NON_TEXT_INPUT.test(attrOf(t, 'type')))
+      || inputs.some(t => /^hidden$/i.test(attrOf(t, 'type')) && /^(?:user(?:name)?|email|login|identifier|j_username)$/i.test(attrOf(t, 'name')));
     if (user) return true;
-    const action = attr(f.slice(0, Math.max(0, f.indexOf('>'))), 'action');
-    return currentPassword && /\/(?:log-?in|sign[-_]?in|signon|sessions?|auth(?:enticate)?)(?:[/?.#]|$)/i.test(action) && !/sudo|re-?auth|confirm|verify/i.test(action);
+    const action = form ? attrOf(form, 'action') : '';
+    return currentPassword && LOGIN_ACTION.test(action) && !/sudo|re-?auth|confirm|verify/i.test(action);
+  });
+}
+/** パスワード欄（type=password の input）があるか。CSS・JavaScript の中の「type=password」の文字は数えない */
+export const hasPasswordField = (html: string): boolean => tags(html, ['input']).some(t => !t.text && isPassword(t));
+/** パスワード欄のあるフォームの送信先（action の属性がなければ undefined） */
+export const passwordFormActions = (html: string): (string | undefined)[] =>
+  forms(html).filter(f => f.inputs.some(isPassword)).map(f => f.form.attrs.get('action'));
+
+/**
+ * ログアウトの応答が失敗（4xx・5xx）しているか、ログアウトの確認画面か。GET の /logout に 405 を返すアプリなどでは、ログアウトしていないので、
+ * C-12（ログアウト後の無効化・Cookie の削除）と H-15 を判定しない
+ */
+export const logoutFailed = (t: Target): boolean => {
+  const s = firstStatus(t);
+  return s >= 400 || (s >= 200 && s < 300 && logoutConfirmPage(t));
+};
+/**
+ * ログアウトの確認画面（GET では「ログアウトしますか」のフォームを返すだけで、POST でログアウトする作り。ASP.NET Core Identity の既定の画面、
+ * Spring Security の既定のログアウトの確認画面）。次のすべてに当たるもの：
+ * - セッションCookie らしい名前の Cookie を消しも発行し直しもせず、Clear-Site-Data もない（AWSALB のような毎回の Cookie は見ない）
+ * - 本文に、送信先（action）に logout・signout・logoff の語がある POST のフォームがあり、その中にログアウトのボタンの文言がある
+ *   （action のないフォームや購読のフォームを置くだけで本物のログアウトの C-12① を na に隠せないよう、送信先と文言の両方を見る）
+ * - パスワード欄（ログアウトのあとのログインの画面）と、ASP.NET WebForms の __VIEWSTATE（ページ全体を囲むフォーム）がない。
+ *   パスワード欄はタグで見る（CSS・JavaScript の「type=password」の文字で、確認画面を見逃さない）
+ */
+function logoutConfirmPage(t: Target): boolean {
+  if (ownChain(t).some(r => r.headers.has('clear-site-data') || (r.headers.get('set-cookie') ?? []).some(c => looksLikeSessionName(parseSetCookie(c).name)))) return false;
+  const body = finalResponse(t)?.body ?? '';
+  if (/__VIEWSTATE/i.test(body) || hasPasswordField(body)) return false;
+  return forms(body).some(({ form, stop }) => {
+    if (form.attrs.get('method')?.trim().toLowerCase() !== 'post' || !LOGOUT_WORD.test(form.attrs.get('action') ?? '')) return false;
+    const inner = body.slice(form.end + 1, Math.min(stop, form.end + 4000));
+    return LOGOUT_WORD.test(inner.replace(/<[^>]{0,500}>/g, ' ')) || /value\s*=\s*["'][^"']{0,40}(?:log\s*out|sign\s*out|ログアウト)/i.test(inner);
   });
 }

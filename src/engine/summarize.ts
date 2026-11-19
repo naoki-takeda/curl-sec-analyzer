@@ -4,7 +4,7 @@ import type { Finding, Severity } from '../model';
 export const SEVERITIES: Severity[] = ['high', 'medium', 'low', 'info'];
 export const SEVERITY_LABEL: Record<Severity, string> = { high: '高', medium: '中', low: '低', info: '情報' };
 
-export interface OverallRow { ruleId: string; item: string; condition?: number; title: string; severity: Severity; targets: string[]; }
+interface OverallRow { ruleId: string; item: string; condition?: number; title: string; severity: Severity; targets: string[]; }
 
 /** 同じルールIDの fail をまとめ、該当ターゲットを列挙する */
 export function overall(fs: Finding[]): OverallRow[] {

@@ -2,8 +2,7 @@
 // - 対応は items.json の asvs・ipa に持つ。「関連する要件」であり、その要件の合否を判定するものではない
 // - ASVS の要件の文言は CC BY-SA 4.0 のため取り込まず、要件IDとレベルだけを持つ（asvs-levels.json は原典の v5.0.0 タグから生成）
 // - IPA の項番：第1章は「4-(iii)」「4-(iv)-a」、第2章は節番号と番号を「2.3-1)」のようにつなぐ
-import type { ItemInfo } from '../model';
-import items from './items.json';
+import { ITEMS } from './coverage';
 import levels from './asvs-levels.json';
 
 /** OWASP API Security Top 10 2023 との対応（画面とエクスポートに表示） */
@@ -16,10 +15,10 @@ export const ASVS_VERSION = '5.0.0';
 export const IPA_EDITION = '安全なウェブサイトの作り方 改訂第7版';
 export const IPA_EDITION_EN = 'IPA "How to Secure Your Web Site", 7th edition (Japanese)';
 
-const BY_ID = new Map((items as ItemInfo[]).map(i => [i.id, i]));
+const BY_ID = new Map(ITEMS.map(i => [i.id, i]));
 const LEVELS = levels as Record<string, number>;
 
-export interface Standards { asvs: string[]; ipa: string[]; }
+interface Standards { asvs: string[]; ipa: string[]; }
 export const standardsOf = (item: string): Standards => {
   const it = BY_ID.get(item);
   return { asvs: it?.asvs ?? [], ipa: it?.ipa ?? [] };

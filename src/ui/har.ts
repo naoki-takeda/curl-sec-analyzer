@@ -1,48 +1,53 @@
 // ui/har.ts：HARの読み込み（Web Worker）と、エントリ一覧の画面
 import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarChain, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
 import { withProfile } from '../engine/profile';
-import { tr } from '../i18n';
+import { type HarFailure, tr } from '../i18n';
 import { showText } from '../shownText';
 import { BTN, button, el, labelFor, options, table, td } from './dom';
-import HarWorker from '../worker.ts?worker&inline';
+import HarWorker from '../harWorker.ts?worker&inline';
 import { type Message, actions, refs, state } from './state';
 import { renderEmpty } from './results';
 
-// メッセージは文言を作る関数で渡す（言語を切り替えたら、その言語で出し直すため。main.ts の say）
-const say = (m: Message) => actions.say(m);
+const say = (m?: Message) => actions.say(m);
 
 // 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外すを押したりしたら、前の読み込みの結果は使わない
 let harLoad = 0; let harWorker: Worker | undefined;
 export const cancelHarLoad = () => { harLoad++; harWorker?.terminate(); harWorker = undefined; };
 
 export function loadHar(f: File) {
-  if (f.size > HAR_MAX_BYTES) { say(() => tr().har.tooLarge); return; }
+  if (f.size > HAR_MAX_BYTES) { say(() => tr().har.tooLarge(HAR_MAX_BYTES / 1024 / 1024)); return; }
   say(() => tr().har.loading);
-  // Worker は blob: URL で作る（?worker&inline）。別ファイルの Worker には、そのファイルの HTTP 応答の CSP が使われ、
-  // GitHub Pages は CSP ヘッダを返さないため、生の HAR（Cookie・パスワード）を持つ Worker から通信できてしまう。
-  // blob: の Worker はページの CSP（connect-src 'none'）を引き継ぐ。メタCSPの worker-src blob: で許可する
-  cancelHarLoad(); const w = new HarWorker(); harWorker = w; const gen = harLoad;
+  // Worker は blob: URL で作る（ページの CSP を引き継ぐため。csp.config.ts）。作れない・送れない・結果を受け取れないときも失敗と知らせる
+  cancelHarLoad();
+  let w: Worker;
+  try { w = new HarWorker(); } catch { say(() => tr().har.failed('worker')); return; }
+  harWorker = w; const gen = harLoad;
   const done = () => { w.terminate(); if (harWorker === w) harWorker = undefined; };
+  const failed = (e: HarFailure) => { done(); if (gen === harLoad) say(() => tr().har.failed(e)); };
   w.onmessage = (e: MessageEvent<{ ok: boolean; result?: HarImport; error?: string }>) => {
     done();
     if (gen !== harLoad) return;                     // 古い読み込みの結果
-    if (!e.data.ok || !e.data.result) { const err = e.data.error; say(() => { const t = tr().har; return t.failed(err === 'JSON' ? t.invalidJson : err ?? '?'); }); return; }
+    if (!e.data.ok || !e.data.result) { const err = e.data.error === 'JSON' ? 'json' : 'format'; say(() => tr().har.failed(err)); return; }
     const imp = e.data.result;
     // Worker の中では組織プロファイルが分からないため、プロファイルがあればセッションCookieの名前を反映して候補を作り直す
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));
     state.har = { imp, hosts: defaultHarHosts(imp), name: f.name };
-    renderHar(); say('');
+    renderHar(); say();
     // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない。判定中（初回を含む）なら、読み込んだ HAR も入れて判定し直す
     if (state.last || actions.isAnalyzing()) actions.analyze();
     if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直したときは、判定のメッセージ（判定中・エラー）を残す
   };
-  w.onerror = () => { done(); if (gen === harLoad) say(() => tr().har.failed('worker')); };
-  f.text().then(t => w.postMessage(t), () => { done(); if (gen === harLoad) say(() => tr().har.failed('read')); });
+  w.onerror = w.onmessageerror = () => failed('worker');
+  f.text().then(t => { try { w.postMessage(t); } catch { failed('worker'); } }, () => failed('read'));
 }
-/** HAR を外す。判定結果に HAR のターゲットが残らないよう、貼り付けがあれば判定し直し、なければ結果を消す */
+/**
+ * HAR を外す。判定結果に HAR のターゲットが残らないよう、貼り付けがあれば判定し直し、なければ結果を消す。押したボタンは消えるので、
+ * フォーカスは「ファイルを開く」に移す（body に落とさない。WCAG 2.4.3）
+ */
 function removeHar() {
   const was = actions.isAnalyzing();
-  cancelHarLoad(); actions.cancelAnalysis(); state.har = null; renderHar(); say('');
+  cancelHarLoad(); actions.cancelAnalysis(); state.har = null; renderHar(); say();
+  document.querySelector<HTMLButtonElement>('#open-file')?.focus();
   if (!state.last && !was) return;
   if (refs.input.value.trim()) actions.analyze();
   else { state.last = null; renderEmpty(); }

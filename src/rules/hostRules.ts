@@ -3,8 +3,7 @@ import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { HTML_PROBE_PATHS, htmlProbe, probePattern } from './probes';
 import { hasCertificate, nameMatches, parseOpenssl, type TlsInfo } from '../parser/openssl';
 import { hostnameOf } from '../parser/target';
-import { PROBE_UNREACHED_REC } from './util';
-import { cf } from './cross';
+import { PROBE_UNREACHED_REC, cf } from './util';
 
 const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string) =>
   cf(rule, host, cond, severity, status, evidence, recommendation, host);
@@ -61,7 +60,8 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
       else if (oldProbes.some(p => p.result === 'rejected'))
         out.push(reachedTls(ts, negotiated.length) ? hf(tlsVersion, host, 'ok', 'info', 'pass', '旧バージョンは拒否された', '')
           : hf(tlsVersion, host, 'na', 'info', 'na', 'どのバージョンでも接続できなかった（旧バージョンを拒否したのか、openssl が対象に届かないのかが分からない）', UNREACHED_TLS_REC));
-      else if (probes.length) out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（手元のOpenSSLが非対応）', '旧バージョンに対応した環境で C12 を実行する'));
+      else if (errored.length) out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（手元のOpenSSLが非対応）', '旧バージョンに対応した環境で C12 を実行する'));
+      else if (probes.length) out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（旧バージョン（tls1・tls1_1）の #TLSPROBE がない）', 'C12（プロトコルごとの接続の確認）を採取する'));
       // プローブがなく、合意したバージョン（-v）が新しいだけなら、旧バージョンを受け入れるか（①）は分からない。② だけで「判定済み」と数えないよう、①は na として出す
       else out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（#TLSPROBE がない。合意したバージョンだけでは分からない）', 'C12（プロトコルごとの接続の確認）を採取する'));
       // TLS 1.3 のプローブ（#TLSPROBE v=tls1_3）で接続できたなら、合意が 1.2 なのは curl 側の事情（古い OpenSSL など）。②にしない

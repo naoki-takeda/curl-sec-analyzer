@@ -1,10 +1,13 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext, Target } from '../model';
-import { INTERNAL_HOST_IN_TEXT, LOGOUT_FAILED_REC, NO_BODY_REC, cspPolicies, header, hstsDirective, isNosniff, isStaticResource, mk, parseCsp, parseHsts, sensitiveUnlessStatic } from './util';
+import { INTERNAL_HOST_IN_TEXT, LOGOUT_FAILED_REC, NO_BODY_REC, NO_CONTENT_REC, SENSITIVE_REC, cacheDirectives, cspPolicies, directiveNames, header, hstsDirective, isNosniff, isStaticResource, mk, noContent, noResponse, nothingToSniff, parseCsp, parseHsts, sensitiveUnlessStatic, zeroLength } from './util';
 import { clip, maskValue } from '../mask';
-import { baseLabel, chainOf, firstStatus, hostnameOf, isRedirectWithLocation, logoutFailed, siteResponses } from '../parser/target';
-import { htmlBody, metaCspPolicies, mixedContent, tags } from './html';
+import { baseLabel, chainOf, firstStatus, hostnameOf, isRedirectWithLocation, siteResponses } from '../parser/target';
+import { htmlBody, logoutFailed, metaCspPolicies, mixedContent, tags } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
+
+/** CSP のソースのうち、スキームだけの指定（https:・data:）。H-05②・H-06④ */
+const SCHEME_ONLY = /^[a-z][a-z0-9+.-]*:$/i;
 
 /**
  * apex 自身の https の応答（ホストが apex のホップ）。http で採取して -L で www へ転送したとき、ownChain の最初は www の応答なので、
@@ -30,7 +33,7 @@ export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appl
   run(ctx) {
     if (ctx.isHttps === false) return [];               // http のターゲットは適用外（T-04 で評価）
     if (ctx.isHttps === undefined) return [mk(hsts, ctx, 'na', 'info', 'na', ...UNKNOWN_SCHEME)];
-    if (!ctx.final) return [mk(hsts, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(hsts, ctx)];
     const { noApex, v } = hstsOf(ctx);
     if (noApex) return noApexHttps(hsts, ctx);
     const rec = 'Strict-Transport-Security: max-age=63072000; includeSubDomains';
@@ -49,7 +52,7 @@ export const hsts: Rule = { id: 'H-01', title: 'Strict-Transport-Security', appl
 export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）', appliesTo: 'html', scope: 'target',
   basis: ['OWASP CSP CS', 'MDN HTTP Observatory'],
   run(ctx) {
-    if (!ctx.final) return [mk(cspPresence, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(cspPresence, ctx)];
     const rawEnforce = header(ctx, 'content-security-policy'); const enforce = cspPolicies(ctx);
     const ro = header(ctx, 'content-security-policy-report-only');
     const rec = "Content-Security-Policy: default-src 'self'; script-src 'nonce-…' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
@@ -58,9 +61,13 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
     const headerEffective = enforce.length > 0;
     const meta = headerEffective ? [] : metaCspPolicies(ctx);
     if (meta.length) return [mk(cspPresence, ctx, 'ok', 'info', 'pass', `<meta http-equiv> の CSP: ${meta.join(' / ')}（frame-ancestors・report-uri・sandbox は meta では効かない）`, '')];
-    // ヘッダがなく本文も採取していない（-D - -o /dev/null、-v）なら、<meta> の CSP があるかが分からないので①にしない（採取の方法で結果を変えない）。
-    // HTML の応答だけ（JSON の API の応答には本文があっても htmlBody は空。API は①を情報に下げ、A-09③ として数える（DEDUPE））
-    if (!rawEnforce.length && !ro.length && ctx.responseKind === 'html' && !htmlBody(ctx)) return [mk(cspPresence, ctx, 'na', 'info', 'na', 'CSP のヘッダなし（本文を採取していないので、<meta> の CSP があるかは分からない）', NO_BODY_REC)];
+    // 強制モードのヘッダが効かず（ない・Report-Only だけ・ディレクティブがない）、本文も採取していない（-D - -o /dev/null、-v）なら、
+    // <meta> の CSP があるかが分からないので①〜③にしない（採取の方法で結果を変えない）。HTML の応答だけ（JSON の API の応答には本文が
+    // あっても htmlBody は空。API は①を情報に下げ、A-09③ として数える（DEDUPE））
+    if (!headerEffective && ctx.responseKind === 'html' && !htmlBody(ctx)) {
+      const state = rawEnforce.length ? `ディレクティブのない CSP: ${rawEnforce.join(' / ')}` : ro.length ? `Report-Onlyのみ: ${ro[0]}` : 'CSP のヘッダなし';
+      return [mk(cspPresence, ctx, 'na', 'info', 'na', `${state}（本文を採取していないので、<meta> の CSP があるかは分からない）`, NO_BODY_REC)];
+    }
     if (!rawEnforce.length && !ro.length) return [mk(cspPresence, ctx, 1, 'high', 'fail', '(ヘッダなし)', rec)];
     if (!rawEnforce.length) return [mk(cspPresence, ctx, 2, 'medium', 'fail', `Report-Onlyのみ: ${ro[0]}`, '確認できたら強制モードの Content-Security-Policy に切り替える')];
     // ③は、どのポリシーにもディレクティブがないとき（ブラウザは空のポリシーを無視し、ほかのすべての強制ポリシーを適用する。CSP3）
@@ -71,13 +78,13 @@ export const cspPresence: Rule = { id: 'H-03', title: 'CSP（存在・強制）'
 export const clickjacking: Rule = { id: 'H-06', title: 'クリックジャッキング対策（frame-ancestors・X-Frame-Options）', appliesTo: 'html', scope: 'target',
   basis: ['MDN', 'OWASP Secure Headers'],
   run(ctx) {
-    if (!ctx.final) return [mk(clickjacking, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(clickjacking, ctx)];
     // 複数のポリシーは、すべてを満たすものだけが許される（制限が重なる）。frame-ancestors を指定したポリシーのうち、
     // 1つでも広くないものがあれば、埋め込みはそれで制限される（* のポリシーと 'none' のポリシーが両方あれば 'none'）
     const fas = cspPolicies(ctx).map(parseCsp).filter(m => m.has('frame-ancestors')).map(m => m.get('frame-ancestors')!);
     // frame-ancestors は X-Frame-Options より優先されるので、広い指定（*、https: などのスキームだけ、*.example.com）は④にする
     // ホストが * だけのもの（https://*、*:443、https://*:*）も、どのサイトにも埋め込みを許すので広い指定とする
-    const isBroad = (fa: string[]) => fa.some(s => /^[a-z][\w+.-]*:$/i.test(s) || /^(?:[a-z][\w+.-]*:\/\/)?\*(?:\.|:(?:\d+|\*)\/?$|\/?$)/i.test(s));
+    const isBroad = (fa: string[]) => fa.some(s => SCHEME_ONLY.test(s) || /^(?:[a-z][\w+.-]*:\/\/)?\*(?:\.|:(?:\d+|\*)\/?$|\/?$)/i.test(s));
     const strict = fas.find(fa => !isBroad(fa));
     if (fas.length && !strict) return [mk(clickjacking, ctx, 4, 'medium', 'fail', fas.map(fa => `frame-ancestors ${fa.join(' ')}`).join(' / '), "frame-ancestors は 'none' か 'self'（埋め込みを許す相手は個別のオリジン）にする")];
     if (strict) return [mk(clickjacking, ctx, 'ok', 'info', 'pass', `frame-ancestors ${strict.join(' ')}`, '')];
@@ -94,19 +101,13 @@ export const clickjacking: Rule = { id: 'H-06', title: 'クリックジャッキ
     return [mk(clickjacking, ctx, 1, 'medium', 'fail', `X-Frame-Options: ${raw}（不正な値。ブラウザは無視する）`, rec)];
   } };
 
-// 本文のない応答（204 No Content、304 Not Modified）。キャッシュに残す内容も、ほかのオリジンに読ませる内容も、スニッフィングする本文も
-// ないので、H-12・H-11・H-08 の対象外（ビーコンや XHR の 204 を指摘しない。H-13 も同じ応答を除く）
-const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（204・304 は対象外）';
-const NO_CONTENT = (ctx: RuleContext) => ctx.final?.status === 204 || ctx.final?.status === 304;
 /** 経験的にキャッシュしてよいステータス（RFC 9110 15.1。これ以外は、鮮度の指定がなければキャッシュに保存されない） */
 const HEURISTIC_CACHEABLE = new Set([200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501]);
 export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS'],
   run(ctx) {
-    if (!ctx.final) return [mk(nosniff, ctx, 'na', 'info', 'na', '応答がない', '')];
-    // 本文のない転送（Location のある 3xx）と Content-Length: 0 の応答も、スニッフィングする本文がない（ブラウザは 3xx の本文を表示しない）
-    const empty = NO_CONTENT(ctx) || isRedirectWithLocation(ctx.final) || header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
-    if (empty) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
+    if (!ctx.final) return [noResponse(nosniff, ctx)];
+    if (nothingToSniff(ctx)) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const v = header(ctx, 'x-content-type-options').join(', ');
     if (isNosniff(ctx)) return [mk(nosniff, ctx, 'ok', 'info', 'pass', v, '')];
     return [mk(nosniff, ctx, 1, 'medium', 'fail', v || '(ヘッダなし)', 'X-Content-Type-Options: nosniff')];
@@ -115,12 +116,10 @@ export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appl
 export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesTo: 'any', scope: 'target',
   basis: ['OWASP HTTP Headers CS', 'OWASP REST Security CS'],
   run(ctx) {
-    if (!ctx.final) return [mk(cacheControl, ctx, 'na', 'info', 'na', '応答がない', '')];
-    if (NO_CONTENT(ctx)) return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
+    if (!ctx.final) return [noResponse(cacheControl, ctx)];
+    if (noContent(ctx)) return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const cc = header(ctx, 'cache-control').join(', ').toLowerCase();
-    // カンマで区切る（引用符の中のカンマ（private="Set-Cookie, X-A"）では区切らない）
-    const parts = (cc.match(/(?:[^,"]|"[^"]*"?)+/g) ?? []).map(s => s.trim()).filter(Boolean);
-    const dirs = new Set(parts.map(s => s.split('=')[0].trim()));
+    const parts = cacheDirectives(header(ctx, 'cache-control')); const dirs = directiveNames(parts);
     // 値のある private（private="Set-Cookie"）は、仕様では、そのヘッダだけを除いて共有キャッシュに本文を保存してよい指定（RFC 9111 5.2.2.7）。
     // ただし多くのキャッシュは値を無視して値のない private として扱う（同じ節の注記）ので、②のまま証跡に書く
     const qualifiedPrivate = parts.some(p => /^private\s*=/.test(p));
@@ -137,7 +136,7 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
     // 静的リソース・公開ファイルは、sensitive=1 を明示したときだけ機密応答として扱う（rules/util.ts の sensitiveUnlessStatic。静的リソースでは
     // undefined にならない）。機密でない応答だけでの判定は limited にする
     const sensitive = sensitiveUnlessStatic(ctx);
-    if (sensitive === undefined) return [mk(cacheControl, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（${ev}）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
+    if (sensitive === undefined) return [mk(cacheControl, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（${ev}）`, SENSITIVE_REC)];
     if (!sensitive) return [isStatic && !cc
       ? mk(cacheControl, ctx, 3, 'info', 'fail', ev, '静的リソースにもキャッシュ方針（max-age など）を明示する', { limited: true })
       : mk(cacheControl, ctx, 'ok', 'info', 'pass', ev, '', { limited: true })];
@@ -152,7 +151,7 @@ export const hstsPreload: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo:
   run(ctx) {
     if (ctx.isHttps === false) return [];
     if (ctx.isHttps === undefined) return [mk(hstsPreload, ctx, 'na', 'info', 'na', ...UNKNOWN_SCHEME)];
-    if (!ctx.final) return [mk(hstsPreload, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(hstsPreload, ctx)];
     const { noApex, v } = hstsOf(ctx);
     if (noApex) return noApexHttps(hstsPreload, ctx);
     if (!v) return [mk(hstsPreload, ctx, 'na', 'info', 'na', 'HSTSがない（H-01で判定）', '')];
@@ -238,7 +237,7 @@ export const cspScript: Rule = { id: 'H-04', title: 'CSP：script-src', appliesT
   } };
 
 /** base-uri が * かスキームだけ（https:・data:）を含む（どの <base> も止めない） */
-const looseBaseUri = (p: Map<string, string[]>) => (p.get('base-uri') ?? []).some(v => v === '*' || /^[a-z][a-z0-9+.-]*:$/i.test(v));
+const looseBaseUri = (p: Map<string, string[]>) => (p.get('base-uri') ?? []).some(v => v === '*' || SCHEME_ONLY.test(v));
 
 export const cspObjectBase: Rule = { id: 'H-05', title: 'CSP：object-src・base-uri', appliesTo: 'html', scope: 'target',
   basis: ['Chrome Lighthouse csp-xss', 'Google csp_evaluator'],
@@ -288,7 +287,7 @@ const RP_WEAK = ['no-referrer-when-downgrade', 'origin', 'origin-when-cross-orig
 export const referrerPolicy: Rule = { id: 'H-09', title: 'Referrer-Policy', appliesTo: 'html', scope: 'target',
   basis: ['MDN', 'OWASP HTTP Headers CS'],
   run(ctx) {
-    if (!ctx.final) return [mk(referrerPolicy, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(referrerPolicy, ctx)];
     // <meta name="referrer"> は、文書の方針をその位置から上書きする（ヘッダが no-referrer でも meta の unsafe-url が効く。meta より前に読み込んだ
     // 画像・スクリプトにはヘッダや前の meta の方針が効く）。ヘッダと、<script> などの中身・<template> の中でない meta のうち、最も弱いもので
     // 判定する（最後の meta だけでは判定しない）。meta の古い値（never・always・default・origin-when-crossorigin）は HTML の仕様どおりに
@@ -328,7 +327,7 @@ export const validPermissionsPolicy = (v: string): boolean => v.split(',').every
 export const permissionsPolicy: Rule = { id: 'H-10', title: 'Permissions-Policy', appliesTo: 'html', scope: 'target',
   basis: ['MDN', 'OWASP Secure Headers'],
   run(ctx) {
-    if (!ctx.final) return [mk(permissionsPolicy, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(permissionsPolicy, ctx)];
     const pps = header(ctx, 'permissions-policy');
     const pp = pps.join(', ');
     const rec = 'Permissions-Policy: camera=(), microphone=(), geolocation=()';
@@ -343,8 +342,8 @@ export const permissionsPolicy: Rule = { id: 'H-10', title: 'Permissions-Policy'
 export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CORP', appliesTo: 'any', scope: 'target',
   basis: ['MDN', 'OWASP Secure Headers'],
   run(ctx) {
-    if (!ctx.final) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', '応答がない', '')];
-    if (NO_CONTENT(ctx)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
+    if (!ctx.final) return [noResponse(crossOriginIsolation, ctx)];
+    if (noContent(ctx)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     const out = []; const sensitive = sensitiveUnlessStatic(ctx);
     // 守りにならない値は、ないのと同じ：CORP の cross-origin（どのサイトからも読み込める）、COOP の unsafe-none（既定の動作）と、
     // 知らない値・2つ以上の値（ブラウザは読めずに無視する）。値は大文字・小文字を区別する（ブラウザは Same-Origin を読めずに無視する）
@@ -363,7 +362,7 @@ export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CO
     // 機密かどうか分からず、守りになる CORP もなければ、①を判定していない。COOP（②）があっても合格にしない（カバレッジの水増しになる）。
     // CORP の cross-origin・読めない値も、ないのと同じ
     if (sensitive === undefined && !corpProtects)
-      return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（${corp === undefined ? 'CORP なし' : `CORP: ${header(ctx, 'cross-origin-resource-policy').join(', ')}`}${ctx.responseKind === 'html' ? '、COOP あり' : ''}）`, '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける')];
+      return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `機密応答かどうか分からない（${corp === undefined ? 'CORP なし' : `CORP: ${header(ctx, 'cross-origin-resource-policy').join(', ')}`}${ctx.responseKind === 'html' ? '、COOP あり' : ''}）`, SENSITIVE_REC)];
     return [mk(crossOriginIsolation, ctx, 'ok', 'info', 'pass', [...header(ctx, 'cross-origin-opener-policy'), ...header(ctx, 'cross-origin-resource-policy')].join(' / ') || '(該当なし)', '')];
   } };
 
@@ -371,7 +370,7 @@ export const contentType: Rule = { id: 'H-13', title: 'Content-Typeとcharset', 
   basis: ['OWASP HTTP Headers CS'],
   run(ctx) {
     const f = ctx.final;
-    if (!f) return [mk(contentType, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!f) return [noResponse(contentType, ctx)];
     // 別のサイトへの転送で終わったターゲット（-L で転送先を採取していても、転送先は対象の応答として判定しない）は、ヘッダの項目を
     // 判定できないことを na で示す（黙って消さない）
     if (f.status >= 300 && f.status < 400 && ctx.chain.at(-1) !== f)
@@ -381,7 +380,7 @@ export const contentType: Rule = { id: 'H-13', title: 'Content-Typeとcharset', 
     // 本文が空の応答（Content-Length: 0 の 401・201 など。Spring Security の API の 401）は、型を示す本文がないので①の対象外
     // HTTP/2 は Content-Length を付けないことがあるので、本文がない（空・採取していない）201・202・401・403 も対象外にする（本文のない
     // 認証の拒否・作成の応答が多い。本文があれば①）
-    if (!ct && (header(ctx, 'content-length').some(v => /^\s*0\s*$/.test(v)) || ([201, 202, 401, 403].includes(f.status) && !f.body?.trim()))) return [];
+    if (!ct && (zeroLength(ctx) || ([201, 202, 401, 403].includes(f.status) && !f.body?.trim()))) return [];
     if (!ct) return [mk(contentType, ctx, 1, 'medium', 'fail', '(Content-Typeなし)', 'Content-Type を必ず付ける（HTML は text/html; charset=utf-8）')];
     if (/^text\/html/i.test(ct) && !/charset=/i.test(ct)) return [mk(contentType, ctx, 2, 'medium', 'fail', ct, 'Content-Type: text/html; charset=utf-8')];
     return [mk(contentType, ctx, 'ok', 'info', 'pass', ct, '')];
@@ -390,7 +389,7 @@ export const contentType: Rule = { id: 'H-13', title: 'Content-Typeとcharset', 
 export const xpcdp: Rule = { id: 'H-14', title: 'X-Permitted-Cross-Domain-Policies', appliesTo: 'html', scope: 'target',
   basis: ['OWASP Secure Headers'],
   run(ctx) {
-    if (!ctx.final) return [mk(xpcdp, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(xpcdp, ctx)];
     const v = header(ctx, 'x-permitted-cross-domain-policies')[0];
     if (!v) return [mk(xpcdp, ctx, 1, 'low', 'fail', '(ヘッダなし)', 'X-Permitted-Cross-Domain-Policies: none')];
     // ② none・master-only 以外（all、by-content-type など）はポリシーファイルによる読み込みを許す
@@ -402,7 +401,7 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
   basis: ['MDN', 'OWASP Secure Headers'],
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'logout') return [];          // ログアウト応答だけ
-    if (!ctx.final) return [mk(clearSiteData, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(clearSiteData, ctx)];
     if (logoutFailed(ctx.target)) return [mk(clearSiteData, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const csd = siteResponses(ctx.target).flatMap(r => r.headers.get('clear-site-data') ?? []).join(', ');
     const rec = 'Clear-Site-Data: "cache", "cookies", "storage"';
@@ -414,8 +413,8 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
   } };
 
 const PRODUCT_HEADERS = ['server', 'x-powered-by', 'x-aspnet-version', 'x-aspnetmvc-version', 'x-generator'];
-// プロトコルの名前（HTTP・HTTPS・SPDY・S-HTTP）と版は製品の版ではない
-const VIA_PRODUCT = /(?<![\w.-])(?!(?:HTTPS?|SPDY|SHTTP)\/)[A-Za-z][\w.-]*\/\d+\.\d+/i;
+// プロトコルの名前（HTTP・HTTPS・SPDY・S-HTTP（SHTTP））と版は製品の版ではない
+const VIA_PRODUCT = /(?<![\w.-])(?!(?:HTTPS?|SPDY|S-?HTTP)\/)[A-Za-z][\w.-]*\/\d+\.\d+/i;
 // CDN が付ける Server-Timing の項目（Cloudflare の cfL4・cfExtPri、CloudFront の cdn-*、Akamai の edge・origin・ak_p、Fastly）。アプリの内部処理ではない
 const CDN_TIMING = /^(?:cf[A-Z]\w*|cdn-[\w-]+|cdn|edge|origin|ak_p|fastly[\w-]*|x-cache|cache)$/;
 /**
@@ -434,7 +433,7 @@ const appTimings = (v: string): string[] => {
 export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン・デバッグ情報の露出', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG-INFO-02', 'IPA'],
   run(ctx) {
-    if (!ctx.final) return [mk(productInfo, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(productInfo, ctx)];
     const out = [];
     for (const h of PRODUCT_HEADERS) for (const v of header(ctx, h)) {
       // X-Generator は「Drupal 10 (https://www.drupal.org)」のように主な版だけを出す。Server・X-Powered-By は「AmazonS3」の
@@ -460,7 +459,7 @@ export const productInfo: Rule = { id: 'H-16', title: '製品・バージョン�
 export const deprecatedHeaders: Rule = { id: 'H-17', title: '廃止・非推奨ヘッダ', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Secure Headers', 'MDN'],
   run(ctx) {
-    if (!ctx.final) return [mk(deprecatedHeaders, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(deprecatedHeaders, ctx)];
     const out = [];
     const xss = header(ctx, 'x-xss-protection')[0];
     if (xss && /^1/.test(xss.trim())) out.push(mk(deprecatedHeaders, ctx, 1, 'low', 'fail', `x-xss-protection: ${xss}`, 'X-XSS-Protection は送らないか 0 にする（CSPで対策する）'));

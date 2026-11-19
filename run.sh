@@ -3,7 +3,7 @@
 # 使い方：HOST を書き換えて bash run.sh。out.txt をツールで読み込んだら削除する（rm -f out.txt jar.txt）
 # 簡易版。ログインの流れや CORS・TLS を含む推奨コマンドは、ツールの「コマンドを作る」で生成する
 set -u
-umask 077                         # out.txt と jar.txt を本人だけが読めるようにする（設計書 0.5）
+umask 077                         # out.txt を本人だけが読めるようにする（設計書 0.5）
 rm -f out.txt                     # umask は新しく作るファイルにだけ効くので、前からある out.txt は消してから作る
 HOST=${HOST:-www.example.com}
 H=https://$HOST

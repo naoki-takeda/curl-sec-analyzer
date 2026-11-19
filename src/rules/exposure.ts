@@ -2,7 +2,7 @@
 import type { HttpResponse, Rule, RuleContext } from '../model';
 import { clip } from '../mask';
 import { probePattern } from './probes';
-import { NO_BODY_REC, PROBE_UNREACHED_REC, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk } from './util';
+import { ASSET_CT, FOLLOW_REC, NO_BODY_REC, PROBE_UNREACHED_REC, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk, noContent } from './util';
 import { baseLabel, ownChain } from '../parser/target';
 import { allowedItems } from '../engine/labels';
 import { AWS_KEY, noHtmlBody } from './html';
@@ -123,22 +123,23 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     const probe = ctx.target.probes.find(x => /\/security\.txt$/.test(x.path));
     if (probe) {                                              // C13 の存在確認（probes ラベル）
       if (!probe.code) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP 000、接続できなかった）`, PROBE_UNREACHED_REC)];
-      if (probe.code >= 300 && probe.code < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}、転送先を確かめていない）`, '-L を付けて、転送先まで採取し直す')];
+      if (probe.code >= 300 && probe.code < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}、転送先を確かめていない）`, FOLLOW_REC)];
       const hit = probePattern(probe.path, probe.headB64, probe.code);
       if (hit?.name === 'security-txt-comment') return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。採った先頭がコメントだけで、Contact・Expires があるかは分からない）`, '本文を取得して（C2）、Contact と Expires があるか確かめる')];
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
         : [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `${probe.path}（HTTP ${probe.code}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
     }
     // 本文を取得したターゲット（一般のターゲット）。2xx でなければファイルがない（404 のエラーページの本文を、ファイルの中身として読まない）。
-    // 2xx（ステータスの分からないものを含む）で本文を採取していない（-I、-o /dev/null、HAR の本文なし）なら、中身を判定できない
+    // 2xx（ステータスの分からないものを含む）で本文を採取していない（-I、-o /dev/null、HAR の本文なし）なら、中身を判定できない。
+    // 304 は中身が分からないので適用外。204・Content-Length: 0 は空のファイル
     if (!ctx.final) return [];
     const st = ctx.final.status; const got = !st || (st >= 200 && st < 300);
     const noBody = () => [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)];
     if (/\/robots\.txt$/.test(p)) {
       // 転送（3xx）を -L なしで採取したものは、転送先の robots.txt を見ていない
-      if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
+      if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, FOLLOW_REC)];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
-      if (!b) return noBody();
+      if (!b) return bodyNotCaptured(ctx) ? noBody() : st === 304 ? [] : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt が空（HTTP ${st}）`, '')];
       // どのパスにも index.html を返す SPA の 200 は robots.txt ではない（なしとして合格）。HTML かは本文で見る（robots.txt を text/html で返す
       // サーバの User-agent・Disallow の行を見逃さない。robots.txt は < で始まらない）
       if (/^\s*</.test(b))
@@ -149,14 +150,15 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     }
     if (/\/security\.txt$/.test(p)) {
       // RFC 9116 3 は転送を認めるので、-L なしの 3xx は転送先を見ていない
-      if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
+      if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, FOLLOW_REC)];
       if (!got) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `security.txt を取得できない（HTTP ${st}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
-      if (!b) return noBody();
+      if (!b && (bodyNotCaptured(ctx) || st === 304)) return st === 304 ? [] : noBody();
+      const txt = b ?? '';
       // どのパスにも index.html を返す SPA の 200 は、security.txt ではない
-      if (looksHtml(ctx, b))
+      if (looksHtml(ctx, txt))
         return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `HTML の画面が返った（security.txt ではない。HTTP ${st || '不明'}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
       // 値は同じ行の中だけ（空の「Expires:」で次の行を値にしない）
-      const ex = b.match(/^Expires:[ \t]*(.+)$/im)?.[1].trim(); const contact = /^Contact:/im.test(b);
+      const ex = txt.match(/^Expires:[ \t]*(.+)$/im)?.[1].trim(); const contact = /^Contact:/im.test(txt);
       if (!contact || !ex) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Contact: ${contact ? 'あり' : 'なし'} / Expires: ${ex || 'なし'}`, 'Contact と Expires を書く')];
       // 読めない Expires（never など）は、期限が書かれていないのと同じ（RFC 9116 は RFC 3339 の日時を求める）
       const exAt = Date.parse(ex);
@@ -202,7 +204,7 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     while (chain[i].kind === 'redirect') {
       const to = docRedirect(chain[i], ctx.target.url);
       if (!to) break;
-      if (!chain[i + 1]) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${chain[i].status}（同じホストの ${to} への転送。転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
+      if (!chain[i + 1]) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${chain[i].status}（同じホストの ${to} への転送。転送先を採取していない）`, FOLLOW_REC)];
       i++;
     }
     const f = chain[i];
@@ -252,7 +254,9 @@ export const jsonp: Rule = { id: 'E-06', title: 'JSONP', appliesTo: 'any', scope
     try { const q = new URL(ctx.target.url ?? '').searchParams; cb = q.get('callback') ?? q.get('jsonp'); } catch { /* URLなし */ }
     if (!cb || !ctx.final) return [];
     const raw = body(ctx);
-    if (!raw && ctx.final.status >= 200 && ctx.final.status < 300) return [mk(jsonp, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
+    // 304 は中身が分からないので適用外。204・Content-Length: 0 は本文がないので JSONP ではない
+    if (!raw && noContent(ctx)) return [];
+    if (!raw && bodyNotCaptured(ctx) && ctx.final.status >= 200 && ctx.final.status < 300) return [mk(jsonp, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
     const b = (raw ?? '').trimStart();
     // 「cb(」「/**/cb(」のほか、Express の res.jsonp の形「/**/ typeof cb === 'function' && cb(」も JSONP とみなす
     const esc = cb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -273,7 +277,6 @@ const ACTIVE_CT = /^\s*(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|tex
 // HLS・DASH のプレイリスト（application/vnd.apple.mpegurl・x-mpegurl・dash+xml）も、プレイヤーが読み込むもので、ダウンロードではない
 const INLINE_MEDIA_CT = /^\s*(?:image\/(?!svg)|audio\/|video\/|application\/(?:vnd\.apple\.mpegurl|x-mpegurl|dash\+xml)\b)/i;
 // 旧式のフォント（application/vnd.ms-fontobject。.eot）も含める
-const BUILD_ASSET_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|font\/|application\/(?:x-)?font|application\/vnd\.ms-fontobject\b)/i;
 export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード応答', appliesTo: 'any', scope: 'target',
   basis: ['OWASP File Upload CS'],
   run(ctx) {
@@ -304,7 +307,7 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     if (uploadPath && ACTIVE_CT.test(ct) && !/^\s*attachment\s*(?:;|$)/i.test(cd))
       return [mk(downloadResponse, ctx, 1, 'high', 'fail', `Content-Type: ${ct} / Content-Disposition: ${cd || '(なし)'}`, '利用者がアップロードしたファイルは別オリジンから attachment で配信する')];
     // ビルドした CSS・JS・フォント（Drupal の /sites/default/files/css/…、Next.js の /_next/static/media/…）は、ページが読み込むもので、ダウンロードではない
-    if (!cd && BUILD_ASSET_CT.test(ct)) return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Type: ${ct}（CSS・JS・フォント）`, '')];
+    if (!cd && ASSET_CT.test(ct)) return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Type: ${ct}（CSS・JS・フォント）`, '')];
     if (!cd && INLINE_MEDIA_CT.test(ct)) return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Type: ${ct}（画像・音声・動画はその場で表示）`, '')];
     if (!cd) return [mk(downloadResponse, ctx, 2, 'low', 'fail', `Content-Type: ${ct}（Content-Dispositionなし）`, 'Content-Disposition: attachment; filename="…" を付ける')];
     return [mk(downloadResponse, ctx, 'ok', 'info', 'pass', `Content-Disposition: ${cd}`, '')];
@@ -324,9 +327,11 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     if (!ctx.final) return [];
     const b = body(ctx);
     const ref = header(ctx, 'sourcemap')[0] ?? header(ctx, 'x-sourcemap')[0] ?? b?.match(/\/[/*]#\s*sourceMappingURL=(\S+)/)?.[1];
-    const isJs = /javascript|ecmascript/i.test(header(ctx, 'content-type')[0] ?? '') || /\.m?js(?:[?#]|$)/.test(ctx.target.url ?? '');
+    const isJs = /javascript|ecmascript/i.test(header(ctx, 'content-type')[0] ?? '') || /\.m?js$/.test(path(ctx));   // 拡張子はパスで見る（クエリの ?name=lib.js で JS にしない）
     if (!isJs && !ref) return [];
-    if (!ref && (!b || bodyTruncated(ctx))) return [mk(sourceMap, ctx, 'na', 'info', 'na', b ? '本文の先頭64KBに参照なし（参照は末尾にあることが多い）' : '本文を採取していない', NO_BODY_REC)];
+    // 本文のない応答（キャッシュした JS の 304 など）は適用外
+    if (!ref && !b) return bodyNotCaptured(ctx) ? [mk(sourceMap, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
+    if (!ref && bodyTruncated(ctx)) return [mk(sourceMap, ctx, 'na', 'info', 'na', '本文の先頭64KBに参照なし（参照は末尾にあることが多い）', NO_BODY_REC)];
     // 本文に埋め込んだソースマップ（data:application/json;base64,…）は、.map を配信しているのと同じ（sourcesContent に元のソースを含みうる）。
     // 「.map を C13 に追加して確かめる」は当てはまらないので、証跡と推奨を分ける（①はプローブ（probes ラベル）の条件なので②のまま。中身は証跡に出さない）
     if (ref && /^data:/i.test(ref)) return [mk(sourceMap, ctx, 2, 'low', 'fail', '本文に埋め込んだソースマップ（data:。中身は表示しない）', '本番ビルドではインラインのソースマップ（webpack の inline-source-map・Vite の sourcemap: \'inline\' など）を出さない（sourcesContent に元のソースがあるかは手動で確認）')];

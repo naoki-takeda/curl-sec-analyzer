@@ -91,7 +91,7 @@ describe('情報露出（E-01、E-02、E-04〜E-06、E-11、E-13）', () => {
   it('エラーの詳細', () => {
     expect(at('https://a.example/x', 'HTTP/1.1 500 Error\ncontent-type: text/html\n\njava.lang.NullPointerException\n\tat com.example.Foo.bar(Foo.java:42)', 'error-x')).toContain('E-01.2');
     expect(at('https://a.example/x', 'HTTP/1.1 500 Error\ncontent-type: text/html\n\n<h1>Whitelabel Error Page</h1>', 'error-x')).toContain('E-01.3');
-    // 資格情報のない jdbc: は②、資格情報を含むものは①（積み残しの対応1、tests/backlog1.test.ts）
+    // 資格情報のない jdbc: は②、資格情報を含むものは①（積み残しの対応1、tests/regression/backlog1.test.ts）
     expect(at('https://a.example/x', 'HTTP/1.1 500 Error\ncontent-type: text/plain\n\njdbc:mysql://db:3306/app', 'error-x')).toContain('E-01.2');
     expect(at('https://a.example/x', 'HTTP/1.1 500 Error\ncontent-type: text/plain\n\njdbc:mysql://db:3306/app?user=app&password=Secr3t', 'error-x')).toContain('E-01.1');
   });

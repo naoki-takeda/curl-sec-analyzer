@@ -33,7 +33,7 @@ export function urlKey(raw: string): string {
   const params = new Map<string, string>();
   for (const [n, v] of u.searchParams) {
     const name = keySegment(n); if (!name) continue;   // 名前のないパラメータ（?=x）は持たない（URLSearchParams は「?&q」の空の名前を読まない）
-    const keep = (KEY_NUMBER_NAMES.test(n) && /^\d{1,4}$/.test(v)) || (KEY_WORD_NAMES.test(n) && /^[A-Za-z][A-Za-z_-]{0,19}$/.test(v));
+    const keep = (KEY_NUMBER_NAMES.test(n) && /^\d{1,4}$/.test(v)) || (KEY_WORD_NAMES.test(n) && /^[A-Za-z][A-Za-z_-]{0,19}$/.test(v) && keySegment(v) === v);   // 語の値もパスと同じ形だけ（乱数の英字を残さない）
     const k = keep ? `${name}=${v}` : name;
     params.set(name, params.has(name) && params.get(name) !== k ? name : k);
   }

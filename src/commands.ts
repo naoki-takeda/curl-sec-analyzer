@@ -20,7 +20,8 @@ export function validate(o: CommandOptions): string[] {
   const e: string[] = [];
   if (!safeHost(o.host)) e.push('ホスト名は英数字・ハイフン・ドット（必要なら :ポート）だけで書いてください');
   if (o.apex && !safeHost(o.apex)) e.push('apexドメインの書き方が正しくありません');
-  for (const [k, v] of Object.entries({ API: o.apiPath, ログイン: o.loginPath, 認証後ページ: o.mypagePath, ログアウト: o.logoutPath, 静的リソース: o.staticPath, ...(o.wsPath ? { WebSocket: o.wsPath } : {}) }))
+  // 欄の名前は画面の欄（i18n.ts の gen.fields）と同じにする（英訳は messagesEn.ts の FIELD）
+  for (const [k, v] of Object.entries({ 機密のAPI: o.apiPath, ログイン: o.loginPath, 認証後のページ: o.mypagePath, ログアウト: o.logoutPath, '静的リソース（JS）': o.staticPath, ...(o.wsPath ? { WebSocket: o.wsPath } : {}) }))
     if (!safePath(v)) e.push(`${k}のパスは / で始まる英数字と - . _ ~ % / で書いてください`);
   return e;
 }
@@ -35,7 +36,7 @@ export function generateScript(o: CommandOptions): string {
   // どのマーカー行にも、実行ごとの乱数の印（run=$RUN）を付ける。ツールは最初の #TARGET の印と同じマーカー行だけを読む（parser/input.ts。
   // 診断対象のサーバが応答の本文に書いた #TARGET・#META・#PROBE で、ターゲットを作ったり分けたりできないように）
   const meta = (cmd: string) => `echo "#META at=$(date +%Y-%m-%dT%H:%M:%S) cmd=${cmd} run=$RUN"`;
-  // #TARGET の前に改行を出す（curl -i の本文が改行で終わらないと、#TARGET が前の本文の行にくっつく）
+  // #TARGET の前に改行を出す（前のコマンドの出力が改行で終わらなくても、#TARGET を行の始めに出すための保険）
   const t = (label: string, url: string, extra = '') => L.push('echo', `echo ${q(`#TARGET url=${url} label=${label}${extra}`)}" run=$RUN"`, meta(cmdOf(label)));
   L.push('#!/usr/bin/env bash',
     '# curl-sec-analyzer の推奨コマンド（コマンド生成器で作成）。出力を out.txt にまとめ、ツールに貼り付けて判定する',
@@ -68,14 +69,14 @@ export function generateScript(o: CommandOptions): string {
   t('notfound', `${H}/no-such-page-csa404`); L.push('curl -sS -i "$H/no-such-page-csa404"');
   L.push('for i in 1 2; do', `  echo "#TARGET url=$H/ label=csp-sample-$i run=$RUN"; ${meta('C24')}; curl -sS -D - -o /dev/null "$H/"   # C24`, 'done');
 
-  L.push('', '# ---- 第4章：HTTP→HTTPS（C5・C15） ----');
+  L.push('', '# ---- 第4章：HTTP→HTTPS（C5・C15。apex は C1） ----');
   t('http', `http://${hostname}/`);
   L.push(`curl -sS -L -D - -o /dev/null -w '\\n#META response_code=%{response_code} num_redirects=%{num_redirects} url_effective=%{url_effective} http_version=%{http_version} run='"$RUN"'\\n' ${q(`http://${hostname}/`)}`);
   if (o.apex) {
     t('apex', `https://${o.apex}/`); L.push(`curl -sS -D - -o /dev/null ${q(`https://${o.apex}/`)}`);
   }
 
-  L.push('', '# ---- 第2章：ログインの流れ（C18）。login.txt にログインのPOST本文を書いておく ----');
+  L.push('', '# ---- 第2章：ログインの流れ（C18。ログイン後のページ・API は C2）。login.txt にログインのPOST本文を書いておく ----');
   // pre-login は -b を付けない（スクリプトの初めに jar.txt を消すので、-b jar.txt だと -v の1行目に「* WARNING: failed to open cookie file」が出る）
   t('pre-login', `${H}${o.loginPath}`); L.push(`curl -sS -v -o /dev/null -c jar.txt "$H"${q(o.loginPath)} 2>&1`);
   // login は本文も取る（#BODY の形。下の置き換え）。本文がないと、パスワード欄のある画面を 200 で返し直す失敗（Django・ASP.NET Identity・
@@ -113,7 +114,7 @@ export function generateScript(o: CommandOptions): string {
   t('open-redirect', `${H}${o.loginPath}`); L.push(`curl -sS -D - -o /dev/null "$H"${q(`${o.loginPath}?next=https://evil.example&returnTo=https://evil.example&url=https://evil.example`)}`);
   t('jsonp', `${H}${o.apiPath}?callback=test123`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(`${o.apiPath}?callback=test123`)}`);
 
-  L.push('', '# ---- 第5章：エラー・既知ファイル（C13） ----');
+  L.push('', '# ---- 第5章：エラー・既知ファイル（C25・C2・C13） ----');
   t('error-url', `${H}/%25%25%25`); L.push(`curl -sS -i "$H/%%%"`);
   t('error-api', `${H}${o.apiPath}/abc`); L.push(`curl -sS -i -b jar.txt "$H"${q(`${o.apiPath}/abc`)}`);
   t('robots', `${H}/robots.txt`); L.push('curl -sS -i "$H/robots.txt"');
@@ -166,7 +167,7 @@ export function generateScript(o: CommandOptions): string {
     `  printf '#CIPHERPROBE run=%s c=%s ok=%s\\n' "$RUN" "$c" "$r"`, 'done', 'rm -f "$tout" "$terr"');
 
   if (o.dangerous) {
-    L.push('', '# ---- 検証環境でだけ実行する試験（C20・C21・C17） ----');
+    L.push('', '# ---- 検証環境でだけ実行する試験（C20・C21・C26・C17） ----');
     t('crlf', `${H}${o.loginPath}`); L.push(`curl -sS -D - -o /dev/null "$H"${q(`${o.loginPath}?next=%0d%0aSet-Cookie:%20crlf=1`)}`);
     // T-03：上書き先には副作用のない OPTIONS を使う（DELETE だと、上書きが効いた場合にデータが消える）。応答に Allow が出れば上書きが効いている
     t('method-override', `${H}${o.apiPath}`); L.push(`curl -sS -i -X POST -b jar.txt -H 'X-HTTP-Method-Override: OPTIONS' -H 'X-HTTP-Method: OPTIONS' "$H"${q(o.apiPath)}`);

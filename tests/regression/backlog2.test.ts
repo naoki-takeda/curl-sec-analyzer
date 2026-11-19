@@ -262,7 +262,7 @@ describe('独立したレビューの指摘（第21回）', () => {
   it('R-1 H-03③：カンマのあとのかけら（report-uri の URL の中、ソースの区切りの誤り）だけが読めなくても③にしない', () => {
     expect(ids(page("content-security-policy: script-src 'nonce-AbCdEf0123456789xyz' 'strict-dynamic'; object-src 'none'; base-uri 'none'; report-uri https://r.example/csp?a=1,2"), 'H-03')).toEqual(['H-03.ok']);
     expect(ids(page("content-security-policy: default-src 'self'; img-src 'self', data:"), 'H-03')).toEqual(['H-03.ok']);
-    expect(ids(page('content-security-policy: ,'), 'H-03')).toEqual(['H-03.3']);   // ディレクティブが1つもなければ今までどおり③
+    expect(ids(page('content-security-policy: ,', '<html><body>x</body></html>'), 'H-03')).toEqual(['H-03.3']);   // ディレクティブが1つもなければ③（本文がなければ na）
   });
 
   it('R-2 T-11：切れた PEM・空行の入った PEM で「SAN がない」にしない。x509 の SAN の行があれば SAN はある', () => {

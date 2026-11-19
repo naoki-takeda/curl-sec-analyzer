@@ -42,13 +42,13 @@ curl と openssl の出力、またはブラウザの HAR を読み込むと、W
 }
 ```
 
-- **英語UI**：右上の「English」で切り替えます（ブラウザの言語が日本語以外なら英語で始まります。`?lang=en` でも指定できます）。画面の文言、項目名、重要度、推奨対応、Markdown が英語になります。判定の証跡と CSV（第8章の記録様式）は日本語のままです。推奨対応の英訳は `src/recommendationsEn.ts` にあり、ルールに文言を追加したときの訳漏れはテストで検出します。
+- **英語UI**：右上の「English」で切り替えます（ブラウザの言語が日本語以外なら英語で始まります。`?lang=en` でも指定できます）。画面の文言、項目名、重要度、推奨対応、Markdown が英語になります。判定の証跡、解析の警告、CSV（第8章の記録様式）、生成したスクリプトは日本語のままです。推奨対応の英訳は `src/recommendationsEn.ts` にあり、ルールに文言を追加したときの訳漏れはテストで検出します。
 
 CSP（H-04・H-05・H-07）は Google の csp_evaluator（Apache-2.0）で評価し、指摘をチェックリストの条件に振り分けています。
 
 そのほかの機能：curl・openssl・HAR の取り込み、コマンド生成器、ラベル対応表、ターゲット横断・ホスト単位の判定、診断カバレッジ、例外登録、Markdown・JSON・CSV のエクスポート（マスク済み）。
 
-v1.0 の範囲として、各項目を **OWASP ASVS 5.0.0** の要件と **IPA「安全なウェブサイトの作り方」改訂第7版** の項番に対応付けました。画面の項目名の横、Markdown（診断カバレッジの表の「ASVS 5.0.0」「IPA」列）、JSON（`standards`）に出ます。これは関連する要件の番号で、その要件を満たすかどうかの判定ではありません。対応は `src/engine/items.json` の `asvs`・`ipa` にあり、ASVS の要件のレベル（L1〜L3）は原典の v5.0.0 タグから作った `src/engine/asvs-levels.json` にあります（要件の文言は CC BY-SA 4.0 のため含めていません）。
+v1.0 の範囲として、各項目を **OWASP ASVS 5.0.0** の要件と **IPA「安全なウェブサイトの作り方」改訂第7版** の項番に対応付けました。画面の項目名の横、Markdown（診断カバレッジの表の「ASVS 5.0.0」「IPA」列）、JSON（`standards`）に出ます。これは関連する要件の番号で、その要件を満たすかどうかの判定ではありません（対応の持ち方は設計書の「ASVS 5.0・IPAとの対応」）。
 
 ブラウザだけで使う運用のため、CLI 版は作りません（`docs/design.md` の「判断の根拠」14）。版は 1.0.0 からセマンティックバージョニングで付けます（`docs/design.md` の「版の付け方」）。
 
@@ -70,8 +70,8 @@ npm run screenshot   # README の画像（docs/screenshot.png）と共有用の�
 
 | ディレクトリ | 内容 |
 |---|---|
-| `src/parser/` | 貼り付けの解析（#TARGET、-i、-D -、-v、-L）と Set-Cookie の解析 |
-| `src/rules/` | 判定ルール。評価したら必ず `.ok` か fail を返し、判定できなければ `.na`。空配列は「適用外」だけに使う |
+| `src/parser/` | 貼り付けの解析（#TARGET、-i、-D -、-v、-L、openssl）、HAR の取り込み、Set-Cookie の解析 |
+| `src/rules/` | 判定ルール（第1〜6章） |
 | `src/ui/` | 画面の部品（結果、HAR、コマンド生成器、例外のダイアログ、状態） |
 | `src/engine/` | ルールの実行、ラベル対応表、例外、診断カバレッジ、集計 |
 | `src/export/` | Markdown・JSON・CSV のエクスポート |
@@ -87,7 +87,7 @@ npm run screenshot   # README の画像（docs/screenshot.png）と共有用の�
 
 - プルリクエストごとに、GitHub Actions（`ci.yml`）が依存の検査・型チェック・テスト・ビルド・E2E を実行します。`main` への push では同じ検査（`deploy.yml`）に通ったビルドだけを GitHub Pages に公開します。リポジトリの Settings → Pages で Source を「GitHub Actions」にしてください。
 - 公開リポジトリでは、CodeQL（コードとワークフローの脆弱性）と dependency-review（プルリクエストで新しく入る依存）も実行します。dependency-review のために、Settings → Code security で Dependency graph を有効にしてください。
-- `vite.config.ts` は `base: './'` なので、サブパス（`/curl-sec-analyzer/`）でも独自ドメインでも動きます。 独自ドメインで公開する場合は、共有用の画像のURLのために、リポジトリの変数 `SITE_URL`（Settings → Secrets and variables → Actions → Variables）に公開URLを設定してください。
+- `vite.config.ts` は `base: './'` なので、サブパス（`/curl-sec-analyzer/`）でも独自ドメインでも動きます。独自ドメインで公開する場合は、共有用の画像のURLのために、リポジトリの変数 `SITE_URL`（Settings → Secrets and variables → Actions → Variables）に公開URLを設定してください。
 - 同じ組織の他の Pages とはオリジンを共有します。ツールはブラウザに何も保存せず、他のページへの埋め込みも拒否しますが、同じ組織の Pages に信頼できないコードや外部のスクリプトを読み込むページを置かないでください（理由は `docs/design.md` の「公開先とオリジン」）。
 
 ## ライセンス
@@ -97,7 +97,3 @@ MIT License（`LICENSE`）。公開したページの「第三者のライセン
 ## 脆弱性の報告
 
 このツール自体の脆弱性は、公開の Issue ではなく GitHub の「Report a vulnerability」から報告してください（[SECURITY.md](SECURITY.md)）。誤検知・見落としの報告は Issue テンプレートを使い、マスク済みのエクスポートかダミーの値で再現してください。
-
-## 設計書
-
-`docs/design.md` が設計書の正本です。仕様を変えるときは、実装と同じプルリクエストで設計書も更新してください（[CONTRIBUTING.md](CONTRIBUTING.md)）。

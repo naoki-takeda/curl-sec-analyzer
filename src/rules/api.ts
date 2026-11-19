@@ -1,18 +1,17 @@
 // rules/api.ts：第6章 WebAPI（A-01〜A-03、A-07〜A-11。A-04〜A-06は手動確認）
 import type { CrossContext, Finding, HttpResponse, Rule, RuleContext } from '../model';
-import { baseLabel, finalResponse, responseKind, sameDocumentHop } from '../parser/target';
+import { baseLabel, finalResponse, responseKind, sameDocumentHop, targetUrl } from '../parser/target';
 import { JWT_IN_TEXT } from '../parser/setCookie';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { NO_BODY_REC, bodyNotCaptured, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, notSecretFormat, notSecretText } from './util';
+import { FOLLOW_REC, NO_BODY_REC, NO_CONTENT_REC, bodyNotCaptured, cf, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, noResponse, notSecretFormat, notSecretText, nothingToSniff, zeroLength } from './util';
 import { loginForm } from './html';
-import { cf } from './cross';
 import { b64urlJson } from './jwt';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
   basis: ['OWASP REST Security CS', 'OWASP Secure Headers'],
   run(ctx) {
     const f = ctx.final;
-    if (!f) return [mk(jsonHeaders, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!f) return [noResponse(jsonHeaders, ctx)];
     const ct = header(ctx, 'content-type')[0] ?? '';
     const looksJson = /^\s*[{[]/.test(f.body ?? '');
     if (ctx.responseKind !== 'api') {
@@ -23,9 +22,8 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     const out = [];
     // kind=api を明示したターゲットでも、text/html で返していれば①（自動判定では text/html は API 応答にならないため、上の分岐で見る）
     if (/^\s*text\/html/i.test(ct)) out.push(mk(jsonHeaders, ctx, 1, 'medium', 'fail', `Content-Type: ${ct}（API応答）`, 'JSONは application/json で返す（text/html だとXSSの原因になる）'));
-    // 本文のない応答（204・304、Location のある 3xx、Content-Length: 0）は、スニッフィングされる本文がない（H-08 と同じ）
-    const empty = f.status === 204 || f.status === 304 || (f.status >= 300 && f.status < 400 && f.headers.has('location')) || header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
-    if (empty) return out.length ? out : [mk(jsonHeaders, ctx, 'na', 'info', 'na', `HTTP ${f.status}（本文のない応答）`, '本文のある応答（200 など）で採取する（204・304 は対象外）')];
+    // 本文のない応答は、スニッフィングされる本文がない（H-08 と同じ）
+    if (nothingToSniff(ctx)) return out.length ? out : [mk(jsonHeaders, ctx, 'na', 'info', 'na', `HTTP ${f.status}（本文のない応答）`, NO_CONTENT_REC)];
     if (!isNosniff(ctx)) out.push(mk(jsonHeaders, ctx, 2, 'medium', 'fail', 'nosniff なし', 'X-Content-Type-Options: nosniff'));
     if (!header(ctx, 'content-security-policy').length) out.push(mk(jsonHeaders, ctx, 3, 'info', 'fail', 'CSPなし', "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"));
     return out.length ? out : [mk(jsonHeaders, ctx, 'ok', 'info', 'pass', ct, '')];
@@ -65,7 +63,7 @@ const htmlPage = (r: HttpResponse | undefined): 'login' | 'html' | 'unknown' | u
  * （http から https に転送した先の Basic は HTTPS なので対象外）。チャレンジは複数のヘッダ・カンマ区切りのどれにあってもよい
  */
 function basicOverHttp(ctx: RuleContext): string | undefined {
-  let url = ctx.target.url ?? ctx.target.meta.url_effective;
+  let url = targetUrl(ctx.target);
   for (const r of ctx.chain) {
     if (!url || !/^http:/i.test(url)) return undefined;
     const www = r.headers.get('www-authenticate') ?? [];
@@ -87,7 +85,7 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
     if (!ctx.target.label.startsWith('unauth-')) return [];   // ①②は認証情報を付けずに送ったターゲット（unauth-*）だけ
     if (ctx.target.sentAuth) return [mk(unauthAccess, ctx, 'na', 'info', 'na', '認証情報（Cookie・Authorization）を送っている', 'unauth-* は認証情報を付けずに採取する')];
     const { hop, r, unfollowed, status: s } = judged(ctx);
-    if (unfollowed) return [mk(unauthAccess, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, '-L を付けて、転送先まで採取し直す')];
+    if (unfollowed) return [mk(unauthAccess, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, FOLLOW_REC)];
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!s) return [mk(unauthAccess, ctx, 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     if (s >= 200 && s < 300) {
@@ -103,7 +101,7 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
       if (noDataJson(r?.body)) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（データのない JSON。保護データを返したかは分からない）`, '認証が必要なデータを返す API の URL で採取し直す')];
       // 本文のない応答（204、content-length: 0）はデータを返していない。本文を採取していない（-o /dev/null）なら、データを返したかが分からない
       if (!r?.body?.trim()) {
-        const empty = s === 204 || header(ctx, 'content-length')[0]?.trim() === '0';
+        const empty = s === 204 || zeroLength(ctx);
         return [mk(unauthAccess, ctx, 'na', 'info', 'na', empty ? `HTTP ${s}（本文のない応答。データを返していない）` : `HTTP ${s}（本文を採取していないので、データを返したかは分からない）`,
           empty ? '認証が必要なデータを返す API の URL で採取し直す' : NO_BODY_REC)];
       }
@@ -304,8 +302,8 @@ export const requestContentType: Rule = { id: 'A-08', title: 'リクエストの
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'ctype') return [];
     const { unfollowed, status: s } = judged(ctx);
-    if (unfollowed) return [mk(requestContentType, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, '-L を付けて、転送先まで採取し直す')];
-    if (!s) return [mk(requestContentType, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (unfollowed) return [mk(requestContentType, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, FOLLOW_REC)];
+    if (!s) return [noResponse(requestContentType, ctx)];
     // 認証・認可・パスで断られた応答（401・403・404）は、Content-Type を確かめるところまで届いていない
     if (s === 401 || s === 403 || s === 404) return [mk(requestContentType, ctx, 'na', 'info', 'na', `HTTP ${s}（Content-Type を確かめる前に断られた）`, '認証情報を付けて、存在する API の URL で採取し直す')];
     if (s >= 200 && s < 300)
@@ -324,8 +322,8 @@ export const methodControl: Rule = { id: 'A-11', title: 'メソッド制御・�
     const l = ctx.target.label;
     if (!l.startsWith('method-') && !l.startsWith('old-')) return [];
     const { r, unfollowed, status: s } = judged(ctx);
-    if (unfollowed) return [mk(methodControl, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, '-L を付けて、転送先まで採取し直す')];
-    if (!s) return [mk(methodControl, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (unfollowed) return [mk(methodControl, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, FOLLOW_REC)];
+    if (!s) return [noResponse(methodControl, ctx)];
     const ok2xx = s >= 200 && s < 300;
     // HTML の画面の 200（SPA の index.html・ログイン画面）は、そのメソッド・旧版の API が動いたかが分からない
     const page = ok2xx ? htmlPage(r) : undefined;

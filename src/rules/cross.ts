@@ -1,22 +1,18 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
-import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHttps, logoutFailed, ownChain, sameDocumentHop, siteResponses, trimPath } from '../parser/target';
+import type { Finding, Rule, Target } from '../model';
+import { capturedAt, finalResponse, firstStatus, hostOf, isHttps, ownChain, sameDocumentHop, siteResponses, trimPath } from '../parser/target';
 import { MAIN_SESSION, isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, notSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
-import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
+import { FOLLOW_REC, LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, cf, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
+import { apexHop } from './headers';
+import { LOGIN_ACTION, LOGIN_PATH, hasPasswordField, loginForm, logoutFailed, metaCspFromHtml, passwordFormActions } from './html';
 
-/** 横断・ホスト単位のルールの指摘（target はラベルかホスト。ホスト単位のルールは host も付ける） */
-export const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string, host?: string): Finding =>
-  ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
-     target, ...(host === undefined ? {} : { host }), evidence, recommendation, references: rule.basis });
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
 // 対象のサイトの応答だけを見る（C-01〜C-07 と同じ siteResponses。-L でたどった外部の IdP の Cookie（idp_session）を、アプリの再発行とみなさない）
 const sessionCookies = (t: Target) => { const now = capturedAt(t); return siteResponses(t).flatMap(r => r.headers.get('set-cookie') ?? [])
   .map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, now) && looksLikeSession(c, now) && !isChunkMarker(c)); };   // 値を比べるので、分割の印は除く
 
-const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
 /**
  * SPA の画面：ルートの要素（root・app・__next・__nuxt・q-app）とスクリプトがあり、タグ・スクリプト・スタイルの外の文字がないか、
  * 「Loading…」「読み込み中」だけの HTML（<noscript> の案内を除く）。文字数では見ない（短いサーバ描画のマイページ（マイページ 山田太郎様のご注文）がある）。
@@ -62,22 +58,14 @@ function stateData(body: string): boolean {
   }
   return false;
 }
-/** パスワード欄のあるフォームの送信先が、ログインらしいパス（LOGIN_PATH）か、送信先がない（同じ URL に送る）か（タグは indexOf で線形に読む） */
+/** パスワード欄のあるフォームの送信先が、ログインらしいパスか、送信先がない（同じ URL に送る）か */
 function loginFormAction(b: string): boolean {
-  const low = b.slice(0, 65536).toLowerCase();
-  for (let i = low.indexOf('<form'), n = 0; i >= 0 && n < 50; i = low.indexOf('<form', i + 5), n++) {
-    const end = low.indexOf('>', i); if (end < 0 || end - i > 2000) continue;
-    const close = low.indexOf('</form', end);
-    if (!PASSWORD_FIELD.test(low.slice(end, close < 0 ? end + 8000 : Math.min(close, end + 8000)))) continue;
-    const action = low.slice(i, end).match(/(?<![\w-])action\s*=\s*["']?([^"'\s>]*)/)?.[1];   // data-action には当てない
-    if (!action) return true;
-    try {
-      const path = new URL(action, 'https://x.invalid/').pathname.replace(/\/+$/, '');
-      // ログインの語を途中に含むパス（/login/password・/users/sign_in・/session）も含める
-      if (LOGIN_PATH.test(path) || /(?:^|\/)(?:log-?in|sign-?in|sign_in|sessions?|authenticate|auth|j_(?:spring_)?security_check)(?:[/.]|$)/i.test(path) || path === '') return true;
-    } catch { /* 読めない送信先 */ }
-  }
-  return false;
+  return passwordFormActions(b).some(action => {
+    if (!action?.trim()) return true;
+    // ログインの語を途中に含むパス（/login/password・/users/sign_in・/session）も含める
+    try { const path = new URL(action.trim(), 'https://x.invalid/').pathname.replace(/\/+$/, ''); return path === '' || LOGIN_PATH.test(path) || LOGIN_ACTION.test(path); }
+    catch { return false; }   // 読めない送信先
+  });
 }
 /**
  * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64KB で、閉じタグまで）：type="application/json" のスクリプト、
@@ -159,12 +147,12 @@ function loginRejected(login: Target, pre: Target): string | undefined {
       const loginLike = LOGIN_PATH.test(path) && (!self || to.host === self.host) && !/[?&](?:code|ticket|SAMLart|state)=/i.test(to.search);
       if (/[?&](?:error|failed|fail|login_error|authfailed)(?:[=&]|$)/i.test(to.search) || loginLike || backToSelf || backToPre) {
         const fin = finalResponse(login);
-        return fin && fin !== first && fin.status >= 200 && fin.status < 300 && PASSWORD_FIELD.test(fin.body ?? '')
+        return fin && fin !== first && fin.status >= 200 && fin.status < 300 && hasPasswordField(fin.body ?? '')
           ? `HTTP ${first.status} でログイン画面に戻され、パスワード欄のある画面を返した` : `HTTP ${first.status} でログイン画面に戻された`;
       }
     }
   }
-  if (first.status >= 200 && first.status < 300 && PASSWORD_FIELD.test(first.body ?? '')) return `HTTP ${first.status} でパスワード欄のある画面を返した`;
+  if (first.status >= 200 && first.status < 300 && hasPasswordField(first.body ?? '')) return `HTTP ${first.status} でパスワード欄のある画面を返した`;
   // JSON の API のログインが、200 でエラーだけの JSON（{"success":false,"error":"invalid_credentials"}）を返した
   if (first.status >= 200 && first.status < 300 && errorJson(first.body)) return `HTTP ${first.status} でエラーの JSON を返した`;
   return undefined;
@@ -206,7 +194,7 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // SSO のコールバック（Location に ?code=・?ticket=）へ転送しただけで、その先を採取していない（-L なし）なら、セッションはコールバックで
     // 発行されるので、再発行したかは分からない
     if (!after.length && lc.length === 1 && /[?&](?:code|ticket|SAMLart)=/i.test(lc[0].headers.get('location')?.[0] ?? ''))
-      return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
+      return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, FOLLOW_REC)];
     const reused = !after.length || after.some(a => before.has(a));
     // 2xx のログインで本文を採取していない（-v -o /dev/null、HAR の本文なし）なら、パスワード欄のある画面を返し直す失敗（loginRejected）と
     // 成功を見分けられない。失敗ならセッションIDを再発行しないのは当然なので、①（高）にせず na にする（3xx は Location で見分けるので判定する）
@@ -313,7 +301,7 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     // 301 のあとに旧Cookieで 200 になることがある）
     const { hop, unfollowed } = sameDocumentHop(after);
     const r = hop!;
-    if (unfollowed) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `HTTP ${r.status}（同じページへの転送。転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
+    if (unfollowed) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `HTTP ${r.status}（同じページへの転送。転送先を採取していない）`, FOLLOW_REC)];
     const i = chain.indexOf(r);
     const ev = `旧Cookieでの認証後ページが HTTP ${r.status}${i ? `（同じページへの転送のあと）` : ''}`;
     if (r.status >= 200 && r.status < 300) {
@@ -324,7 +312,7 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
       // （メールアドレスの変更などで再入力を求めるアカウント画面（action="/account/email"）と分けるため）
       const lf = loginForm(r.body ?? '');
       if (lf && !mp && !loginFormAction(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（パスワード欄のある画面。送信先がログインらしいパスでなく、ログイン後のページ（mypage）もないので、ログイン画面かは分からない）`, 'ログイン後のデータを返すページを label=mypage として採取する')];
-      if (lf && !PASSWORD_FIELD.test(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
+      if (lf && !hasPasswordField(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
       // データのない JSON（{}・{"user":null}。未認証の /api/auth/session）と GraphQL の認証の拒否は、旧Cookie でデータを返していない（A-01 と同じ判定）
       const gql = graphqlError(r.body);
       if (gql === 'denied') return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev}（GraphQL の認証エラー。データは null）`, '')];
@@ -382,8 +370,7 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
     // apex 自身の https の応答で見る（-L や HAR で www への転送をたどった最後の応答は www のもの）。http で採取して https の apex に転送したもの
     // （http://a.example → https://a.example → www）は、その https のホップ。https の apex の応答がなければ、HSTS を返すかは分からない
     // （http の応答の HSTS はブラウザが無視する）
-    const httpsHop = /^https:/i.test(apex.url ?? '') ? ownChain(apex)[0]
-      : chainOf(apex).find(r => { try { const u = new URL(r.url ?? ''); return u.protocol === 'https:' && u.hostname.toLowerCase() === ah; } catch { return false; } });
+    const httpsHop = apexHop(apex);   // H-01・H-02 と同じ応答
     if (!httpsHop && isHttps(apex) !== undefined) return [cf(apexHsts, 'apex', 'na', 'info', 'na', 'apex の https の応答がない（http の応答の HSTS はブラウザが無視する）', 'apex の https の URL（https://apexドメイン/）で採取する')];
     // 証跡に出す、preload を付けた応答のホスト（label=apex で www へ転送した最後の応答なら www）
     const finalHost = (() => { try { return new URL(finalResponse(preload)?.url ?? preload.url ?? '').hostname.toLowerCase(); } catch { return undefined; } })();

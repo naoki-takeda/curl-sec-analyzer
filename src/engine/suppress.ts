@@ -92,7 +92,7 @@ export function parseSuppressions(text: string): { list: Suppression[]; errors: 
   if (arr.length > MAX_SUPPRESSIONS) errors.push(`例外は${MAX_SUPPRESSIONS}件までです（${arr.length}件のうち、${MAX_SUPPRESSIONS + 1}件目からは読みません）`);
   arr.slice(0, MAX_SUPPRESSIONS).forEach((x, i) => {
     const s = (x && typeof x === 'object' ? x : {}) as Partial<Suppression>;   // null や数値の要素でも落ちない
-    if (typeof s.ruleId !== 'string' || !/^[A-Z]-\d\d(\.\d+)?$/.test(s.ruleId)) errors.push(`${i + 1}件目：ruleId が不正です`);
+    if (typeof s.ruleId !== 'string') errors.push(`${i + 1}件目：ruleId が不正です`);
     // チェックリストにない項目（H-99・Z-99）は受け付けない（組織プロファイルと同じ。綴りを誤った例外が黙って効かないことを防ぐ）
     else if (!knownItem(s.ruleId)) errors.push(`${i + 1}件目：ruleId「${s.ruleId}」${idProblemText(s.ruleId)}`);
     else if (typeof s.target !== 'string' || !s.target) errors.push(`${i + 1}件目：target がありません`);

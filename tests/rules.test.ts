@@ -22,10 +22,14 @@ describe('H-01 HSTS', () => {
 });
 
 describe('H-03 CSP・H-06 クリックジャッキング', () => {
-  it('CSPなし→①（本文を採取していなければ na）、Report-Onlyのみ→②、強制あり→ok', () => {
-    expect(ids(target('https://a.example/', `${HTML}\n\n<html><body>x</body></html>`))).toContain('H-03.1');
+  it('CSPなし→①、Report-Onlyのみ→②、強制あり→ok（強制のヘッダが効かず本文を採取していなければ na）', () => {
+    const body = '\n\n<html><body>x</body></html>';
+    expect(ids(target('https://a.example/', `${HTML}${body}`))).toContain('H-03.1');
     expect(ids(target('https://a.example/', HTML))).toContain('H-03.na');   // <meta> の CSP があるかが分からない
-    expect(ids(target('https://a.example/', HTML + "content-security-policy-report-only: default-src 'self'"))).toContain('H-03.2');
+    const ro = HTML + "content-security-policy-report-only: default-src 'self'";
+    expect(ids(target('https://a.example/', ro + body))).toContain('H-03.2');
+    expect(ids(target('https://a.example/', ro))).toContain('H-03.na');     // <meta> の CSP が強制しているかもしれない
+    expect(ids(target('https://a.example/', `${HTML}content-security-policy: ,`))).toContain('H-03.na');
     expect(ids(target('https://a.example/', HTML + "content-security-policy: default-src 'self'"))).toContain('H-03.ok');
   });
   it('両方なし→①、ALLOW-FROM→②、XFOのみ→③、frame-ancestors→ok', () => {
@@ -463,5 +467,70 @@ describe('先頭が0の条件番号', () => {
   it('H-01.01 は H-01.1 と照合されず効かないのでエラーにする', async () => {
     const { parseProfile } = await import('../src/engine/profile');
     expect(parseProfile(JSON.stringify({ severity: { 'H-01.01': 'low' } })).errors).toEqual(['severity：「H-01.01」は条件番号がH-01にありません（1〜4）']);
+  });
+});
+
+describe('C-13 の Cache-Control', () => {
+  it('C-13：引用符の中の public（private="X-Public"）では共有キャッシュとみなさない', () => {
+    const r = evaluate(target('https://a.example/login', `HTTP/2 200\ncontent-type: text/html\ncache-control: private="X-Public", max-age=60\nset-cookie: SESSIONID=${'a1B2'.repeat(8)}; Secure; HttpOnly; SameSite=Lax`));
+    expect(r.findings.filter(f => f.item === 'C-13').map(f => f.ruleId)).not.toContain('C-13.1');
+  });
+});
+
+describe('CORS：Origin を送っていない・自サイトの Origin の応答', () => {
+  const v = (label: string, url: string, sent: string[], recv: string[]) => [`#TARGET url=${url} label=${label}`, '* Connected to a.example (192.0.2.1) port 443',
+    ...sent.map(l => `> ${l}`), '>', ...recv.map(l => `< ${l}`), '<', ''].join('\n');
+  const of = (input: string, item: string, label: string) => evaluate(input).findings.filter(f => f.item === item && f.target === label).map(f => f.ruleId);
+  it('R-09：Origin を送っていない・自サイトの Origin の 401・403 は合格にしない（認証が足りないための拒否かもしれない）', () => {
+    expect(of(v('websocket', 'https://a.example/ws', ['GET /ws HTTP/1.1', 'Host: a.example'], ['HTTP/1.1 403 Forbidden']), 'R-09', 'websocket')).toEqual(['R-09.na']);
+    expect(of(v('websocket', 'https://a.example/ws', ['GET /ws HTTP/1.1', 'Host: a.example', 'Origin: https://a.example'], ['HTTP/1.1 403 Forbidden']), 'R-09', 'websocket')).toEqual(['R-09.na']);
+    expect(of(v('websocket', 'https://a.example/ws', ['GET /ws HTTP/1.1', 'Host: a.example', 'Origin: https://evil.example'], ['HTTP/1.1 403 Forbidden']), 'R-09', 'websocket')).toEqual(['R-09.ok']);
+  });
+  it('R-05：Origin を送っていない cors-preflight の OPTIONS は、プリフライトを許可しなかったとは言えない', () => {
+    expect(of(v('cors-preflight', 'https://a.example/api/me', ['OPTIONS /api/me HTTP/2', 'Host: a.example'], ['HTTP/2 204']), 'R-05', 'cors-preflight')).toEqual(['R-05.na']);
+    expect(of(v('cors-preflight', 'https://a.example/api/me', ['OPTIONS /api/me HTTP/2', 'Host: a.example', 'Origin: https://evil.example'], ['HTTP/2 204']), 'R-05', 'cors-preflight')).toEqual(['R-05.ok']);
+  });
+  it('R-06：自サイトの Origin への ACAO は、Origin によって変わる値かが分からない', () => {
+    expect(of(v('top', 'https://a.example/', ['GET / HTTP/2', 'Host: a.example', 'Origin: https://a.example'], ['HTTP/2 200', 'access-control-allow-origin: https://a.example']), 'R-06', 'top')).toEqual(['R-06.na']);
+    expect(of(v('top', 'https://a.example/', ['GET / HTTP/2', 'Host: a.example', 'Origin: https://evil.example'], ['HTTP/2 200', 'access-control-allow-origin: https://evil.example']), 'R-06', 'top')).toEqual(['R-06.1']);
+  });
+});
+
+describe('本文のない応答（304・Content-Length: 0）は「本文を採取していない」にしない', () => {
+  const one = (label: string, url: string, head: string, item: string) =>
+    evaluate(`#TARGET url=${url} label=${label}\n${head}\n\n`).findings.filter(f => f.item === item).map(f => f.ruleId);
+  it('E-13：キャッシュした JS の 304 は適用外。本文を採っていない 200 は na', () => {
+    expect(one('t', 'https://a.example/app.js', 'HTTP/2 304', 'E-13')).toEqual([]);
+    expect(one('t', 'https://a.example/app.js', 'HTTP/2 200\ncontent-type: text/javascript', 'E-13')).toEqual(['E-13.na']);
+  });
+  it('E-06：?callback= の 204・Content-Length: 0 は JSONP ではない', () => {
+    expect(one('t', 'https://a.example/api?callback=cb', 'HTTP/2 204', 'E-06')).toEqual([]);
+    expect(one('t', 'https://a.example/api?callback=cb', 'HTTP/2 200\ncontent-type: application/javascript\ncontent-length: 0', 'E-06')).toEqual(['E-06.ok']);
+  });
+  it('E-04：空の robots.txt は合格、空の security.txt は②', () => {
+    expect(one('t', 'https://a.example/robots.txt', 'HTTP/2 200\ncontent-type: text/plain\ncontent-length: 0', 'E-04')).toEqual(['E-04.ok']);
+    expect(one('t', 'https://a.example/.well-known/security.txt', 'HTTP/2 200\ncontent-type: text/plain\ncontent-length: 0', 'E-04')).toEqual(['E-04.2']);
+  });
+  it('T-07・T-01：Content-Length: 0 の応答は、反映していないので判定する', () => {
+    expect(one('host-inj', 'https://a.example/', 'HTTP/2 200\ncontent-type: text/html\ncontent-length: 0', 'T-07')).toEqual(['T-07.ok']);
+    expect(one('trace', 'https://a.example/', 'HTTP/1.1 200 OK\ncontent-type: message/http\ncontent-length: 0', 'T-01')).toEqual(['T-01.ok']);
+  });
+});
+
+describe('拡張子・Content-Type・プロトコルの名前', () => {
+  it('E-13：クエリの .js（?name=lib.js）の JSON の応答を JS とみなさない', () => {
+    const r = evaluate(target('https://a.example/api/export?name=lib.js', 'HTTP/2 200\ncontent-type: application/json\n\n{"a":1}'));
+    expect(r.findings.filter(f => f.item === 'E-13')).toEqual([]);
+  });
+  it('古いフォントの型（application/font-woff）も静的リソース（sensitive=1 がなければ H-12① にしない）', () => {
+    const r = evaluate(target('https://a.example/fonts/f', `HTTP/2 200\ncontent-type: application/font-woff\nset-cookie: SESSIONID=${'a1B2'.repeat(8)}; Secure; HttpOnly`));
+    expect(r.findings.filter(f => f.item === 'H-12').map(f => f.ruleId)).not.toContain('H-12.1');
+  });
+  it('H-16①：Via の S-HTTP は製品の版ではない', () => {
+    expect(ids(target('https://a.example/', HTML + 'via: S-HTTP/1.3 proxy')).filter(i => i.startsWith('H-16'))).toEqual(['H-16.ok']);
+  });
+  it('T-09：旧バージョンのプローブがないときは、手元の OpenSSL のせいにしない', () => {
+    const r = evaluate('#TARGET url=https://www.example.com/ label=tls\n#TLSPROBE v=tls1_2 ok=1\n#TLSPROBE v=tls1_3 ok=1\n');
+    expect(r.findings.find(f => f.ruleId === 'T-09.na')?.evidence).toContain('#TLSPROBE がない');
   });
 });

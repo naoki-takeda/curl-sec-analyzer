@@ -1,6 +1,5 @@
 // parser/target.ts：ターゲットの共通の処理（ラベル・判定に使う応答のホップ・HTTPS か・機密か・採取時刻・Set-Cookie の上限）
 import type { HttpResponse, ParseWarning, ResponseKind, Target } from '../model';
-import { looksLikeSessionName, parseSetCookie } from './setCookie';
 
 /** 読む本文の上限（curl の貼り付け・HAR とも先頭 64KB まで） */
 export const BODY_LIMIT = 64 * 1024;
@@ -28,6 +27,8 @@ export function uniqueLabels(targets: Target[]): ParseWarning[] {
     `ラベル「${l}」のターゲットが${tos.length + 1}つあります。2つ目以降は ${tos.join('、')} として別に判定しました（横断の判定には最初のものだけを使います）` }));
 }
 
+/** スキームのある URL として読めるか（url= と URL 欄の検査。a.example/r・https:/a.example は読めない） */
+export const HAS_SCHEME = /^[a-z][\w+.-]*:\/\/[^/?#\s]/i;
 /** Location のある 3xx（ブラウザは本文を表示せずに転送先へ移る） */
 export const isRedirectWithLocation = (r?: HttpResponse): boolean => !!r && r.status >= 300 && r.status < 400 && r.headers.has('location');
 
@@ -154,8 +155,11 @@ export function ownChain(t: Target): HttpResponse[] {
   return i > 0 ? c.slice(i) : c;
 }
 
+/** ターゲットの URL（#TARGET の url=、なければ -w の url_effective） */
+export const targetUrl = (t: Target): string | undefined => t.url ?? t.meta.url_effective;
+
 export function isHttps(t: Target): boolean | undefined {
-  const u = t.url ?? t.meta.url_effective;
+  const u = targetUrl(t);
   if (u) return /^https:\/\//i.test(u) || upgradedToHttps(t);   // スキームは大文字小文字を区別しない（HTTPS://…）
   // ALPN の行は、curl 7.83 より前は「ALPN, server accepted to use h2」、以降は「ALPN: server accepted h2」。Windows の Schannel 版の curl は
   // 「SSL connection using」の行を出さないので、ALPN の行が HTTPS の手がかりになる
@@ -197,46 +201,11 @@ export function capturedAt(t: Target): number {
 }
 
 export function hostOf(t: Target): string | undefined {
-  const u = t.url ?? t.meta.url_effective;
+  const u = targetUrl(t);
   try { return u ? new URL(u).host : undefined; } catch { return undefined; }
 }
 
 /** そのURL自身の最初の応答のステータス（分からなければ0） */
 export const firstStatus = (t: Target): number => ownChain(t)[0]?.status ?? 0;
-/**
- * ログアウトの応答が失敗（4xx・5xx）しているか。GET の /logout に 405 を返すアプリなどでは、ログアウトしていないので、
- * C-12（ログアウト後の無効化・Cookie の削除）と H-15 を判定しない
- */
-export const logoutFailed = (t: Target): boolean => {
-  const s = firstStatus(t);
-  return s >= 400 || (s >= 200 && s < 300 && logoutConfirmPage(t));
-};
-const LOGOUT_WORD = /log[-_ ]?out|sign[-_ ]?out|log[-_ ]?off|ログアウト|サインアウト/i;
-/**
- * ログアウトの確認画面（GET では「ログアウトしますか」のフォームを返すだけで、POST でログアウトする作り。ASP.NET Core Identity の既定の画面、
- * Spring Security の既定のログアウトの確認画面）。ログアウトしていないので、C-12①（高）と H-15 を判定しない。次のすべてに当たるもの：
- * - セッションCookie らしい名前の Cookie を消しも発行し直しもせず、Clear-Site-Data もない（AWSALB のような毎回の Cookie は見ない）
- * - 本文に、送信先（action）に logout・signout・logoff の語がある POST のフォームがあり、その中にログアウトのボタンの文言がある
- *   （action のないフォームや購読のフォームを置くだけで本物のログアウトの C-12① を na に隠せないよう、送信先と文言の両方を見る）
- * - パスワード欄（ログアウトのあとのログインの画面）と、ASP.NET WebForms の __VIEWSTATE（ページ全体を囲むフォーム）がない
- * タグは indexOf で切り出して線形の時間で読む（正規表現の先読みで読むと、<form の繰り返しで3乗の時間がかかる）
- */
-function logoutConfirmPage(t: Target): boolean {
-  const chain = ownChain(t);
-  if (chain.some(r => r.headers.has('clear-site-data') || (r.headers.get('set-cookie') ?? []).some(c => looksLikeSessionName(parseSetCookie(c).name)))) return false;
-  const body = finalResponse(t)?.body ?? '';
-  if (/type\s*=\s*["']?password/i.test(body) || /__VIEWSTATE/i.test(body)) return false;
-  // 位置は low の中のもの（toLowerCase で長さの変わる文字（İ）があるので、body を切り出さない。下の正規表現は大文字小文字を区別しない）
-  const low = body.toLowerCase();
-  for (let i = low.indexOf('<form'), n = 0; i >= 0 && n < 50; i = low.indexOf('<form', i + 5), n++) {
-    const end = low.indexOf('>', i); if (end < 0 || end - i > 2000) continue;
-    const tag = low.slice(i, end);
-    const method = tag.match(/\bmethod\s*=\s*["']?(\w+)/)?.[1];
-    const action = tag.match(/\baction\s*=\s*["']?([^"'\s>]*)/)?.[1] ?? '';
-    if (method !== 'post' || !LOGOUT_WORD.test(action)) continue;
-    const close = low.indexOf('</form', end);
-    const inner = low.slice(end + 1, close < 0 ? end + 4000 : Math.min(close, end + 4000));
-    if (LOGOUT_WORD.test(inner.replace(/<[^>]{0,500}>/g, ' ')) || /value\s*=\s*["'][^"']{0,40}(?:log\s*out|sign\s*out|ログアウト)/i.test(inner)) return true;
-  }
-  return false;
-}
+/** ログアウトの語（パス・送信先・ボタンの文言） */
+export const LOGOUT_WORD = /log[-_ ]?out|sign[-_ ]?out|log[-_ ]?off|ログアウト|サインアウト/i;

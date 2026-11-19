@@ -14,6 +14,7 @@ import { allowedItems } from './labels';
 import { applySuppressions } from './suppress';
 import { excludeItems, overrideSeverity, withProfile } from './profile';
 
+/** API 応答で重要度を「情報」に下げる HTML 向けの項目（第0章 0.3） */
 const HTML_ONLY_ITEMS = new Set(['H-03', 'H-04', 'H-05', 'H-06', 'H-07', 'H-09', 'H-10', 'H-11', 'H-14']);
 
 /**
@@ -121,7 +122,10 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   // ターゲットごとの文脈・許可・URL・キーは一度だけ作る（ルール数 × ターゲット数の時間をかけない）。
   // 差分・例外の突き合わせのキーは、マスクと切り離して engine/targetKey.ts で作る
   const keys = targetKeys(targets);
-  const per = targets.map((t, i) => ({ t, url: t.url ? showText(t.url) : undefined, keyUrl: t.url ? urlKey(t.url) : undefined, targetKey: keys[i], host: hostOf(t), allow: allowedItems(t.label),
+  // showText は重い（マスクと許可リストを繰り返す）。証跡・推奨・URL は同じ文字列が多い（数万件の指摘でも数千種類）ので、結果を使い回す
+  const cache = new Map<string, string>();
+  const shown = (s: string) => { let v = cache.get(s); if (v === undefined) cache.set(s, v = showText(s)); return v; };
+  const per = targets.map((t, i) => ({ t, url: t.url ? shown(t.url) : undefined, keyUrl: t.url ? urlKey(t.url) : undefined, targetKey: keys[i], host: hostOf(t), allow: allowedItems(t.label),
                                        ctx: contextOf(t, maps, opt.profile) }));
   for (const rule of rules) {                                // ルールごとに全ターゲット（出力の順序）
     for (const { t, url, keyUrl, targetKey, host, allow, ctx } of per) {
@@ -141,7 +145,7 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
       for (const f of kept) {   // ②⑤
         // 推奨対応も許可リストを通す（C-09 の推奨対応には入力の Cookie の名前が入るので、証跡で伏せた名前を画面・エクスポートに出さない）。
         // 決まった文言は変わらないことを tests/regression/review26.test.ts で確かめる
-        const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: showText(f.evidence), recommendation: showText(f.recommendation) };
+        const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: shown(f.evidence), recommendation: shown(f.recommendation) };
         if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') { g.severity = 'info'; g.apiInfo = true; }   // ⑥
         findings.push(g);
       }
@@ -150,6 +154,6 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   const x = crossContext(targets);
   for (const rule of [...hostRules, ...crossRules])           // ③④
     // 横断・ホスト単位のルールの na は、その条件だけが入力不足（ほかの条件はターゲット単位で判定しているかもしれない）。カバレッジで示すため印を付ける
-    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: showText(f.evidence), recommendation: showText(f.recommendation), ...(f.status === 'na' ? { partial: true } : {}) });
+    for (const f of safeRun(rule, () => rule.runCross?.(x), '-')) findings.push({ ...f, evidence: shown(f.evidence), recommendation: shown(f.recommendation), ...(f.status === 'na' ? { partial: true } : {}) });
   return findings;
 }

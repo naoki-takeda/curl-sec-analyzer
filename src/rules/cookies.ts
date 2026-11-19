@@ -2,8 +2,9 @@
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
 import { cookieDate, isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
-import { baseLabel, firstStatus, hostnameOf, logoutFailed, siteResponses } from '../parser/target';
-import { LOGOUT_FAILED_REC, mk } from './util';
+import { baseLabel, firstStatus, hostnameOf, siteResponses, targetUrl } from '../parser/target';
+import { logoutFailed } from './html';
+import { LOGOUT_FAILED_REC, cacheDirectives, directiveNames, mk, noResponse } from './util';
 
 /** ターゲットと同じサイトの応答（-L のホップを含む。parser/target.ts の siteResponses）から、削除用でない Set-Cookie を取り出す */
 function cookiesOf(ctx: RuleContext): SetCookie[] {
@@ -33,11 +34,14 @@ export const cookieEvidence = (c: SetCookie) => {
   return `${cookieName(c)}=${maskValue(c.value)}${attrs}`;
 };
 
+/** 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ応答に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない） */
+function withoutChunkMarkers<T>(list: T[], cookie: (x: T) => SetCookie): T[] {
+  const names = new Set(list.map(x => cookie(x).name));
+  return list.filter(x => !(isChunkMarker(cookie(x)) && names.has(`${cookie(x).name}C1`)));
+}
 /** Cookie ごとの判定を集める。指摘が1件もなければ .ok を1件返す。Set-Cookie がなければ適用外（空配列） */
 function perCookie(rule: Rule, ctx: RuleContext, judge: (c: SetCookie) => Finding | undefined, subset = (_: SetCookie) => true): Finding[] {
-  // 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ応答に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない）
-  const all = cookiesOf(ctx); const names = new Set(all.map(c => c.name));
-  const cs = all.filter(c => !(isChunkMarker(c) && names.has(`${c.name}C1`))).filter(subset);
+  const cs = withoutChunkMarkers(cookiesOf(ctx), c => c).filter(subset);
   if (!cs.length) return [];
   const fails = cs.map(judge).filter((f): f is Finding => !!f);
   return fails.length ? fails : [mk(rule, ctx, 'ok', 'info', 'pass', cs.map(cookieName).join(', '), '')];
@@ -90,11 +94,10 @@ export const cookieDomain: Rule = { id: 'C-04', title: 'Domain・Path', appliesT
     if (ctx.isHttps === false) return [];                // HTTP応答のCookieは C-10 で扱う（C-01・C-06 と同じ）
     // Cookie ごとに、それを発行したホップのホストと比べる。-L で a.example から www.a.example に転送し、www が
     // Domain=www.a.example で発行した Cookie を、ターゲットの URL のホスト（a.example）と比べて①にしないため
-    const targetHost = hostnameOf(ctx.target.url ?? ctx.target.meta.url_effective);
+    const targetHost = hostnameOf(targetUrl(ctx.target));
     const all = siteResponses(ctx.target).flatMap(r => { const host = hostnameOf(r.url) ?? targetHost;
       return (r.headers.get('set-cookie') ?? []).map(raw => ({ c: parseSetCookie(raw), host })); }).filter(x => !isDeletion(x.c, ctx.now));
-    const names = new Set(all.map(x => x.c.name));
-    const cs = all.filter(x => !(isChunkMarker(x.c) && names.has(`${x.c.name}C1`)));   // 分割の印は数えない（perCookie と同じ）
+    const cs = withoutChunkMarkers(all, x => x.c);
     if (!cs.length) return [];
     const fails = cs.flatMap(({ c, host }) => {
       const d = c.attrs.get('domain');
@@ -215,7 +218,7 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
   basis: ['OWASP Session Mgmt CS'],
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'logout') return [];            // ①は横断ルール（logout と after-logout）
-    if (!ctx.final) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(logoutDeletesCookie, ctx)];
     if (logoutFailed(ctx.target)) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const del = siteResponses(ctx.target).flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
     // Clear-Site-Data: "cookies"（か "*"）で消すログアウトは、名前を挙げずにすべての Cookie を消す（H-15 と同じ扱い）
@@ -244,11 +247,12 @@ export const cookieSharedCache: Rule = { id: 'C-13', title: 'Set-Cookieと共有
       if (!cs.length) continue;
       any = true;
       const cc = (r.headers.get('cache-control') ?? []).join(', ').toLowerCase();
+      const dirs = directiveNames(cacheDirectives(r.headers.get('cache-control') ?? []));
       // no-store・private があれば共有キャッシュは保存しない（no-store, s-maxage=0 のような組み合わせも共有キャッシュには残らない）
-      const shared = /\bpublic\b|s-maxage/.test(cc) && !/\bno-store\b|\bprivate\b/.test(cc);
+      const shared = (dirs.has('public') || dirs.has('s-maxage')) && !dirs.has('no-store') && !dirs.has('private');
       if (!shared) continue;
       if (cs.some(c => looksLikeSession(c, ctx.now))) out.push(mk(cookieSharedCache, ctx, 1, 'high', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答は Cache-Control: no-store（少なくとも private）にする'));
-      else if (/\bpublic\b/.test(cc)) out.push(mk(cookieSharedCache, ctx, 2, 'low', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答を public にしない'));
+      else if (dirs.has('public')) out.push(mk(cookieSharedCache, ctx, 2, 'low', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答を public にしない'));
     }
     if (!any) return [];
     return out.length ? out : [mk(cookieSharedCache, ctx, 'ok', 'info', 'pass', '共有キャッシュの指定なし', '')];

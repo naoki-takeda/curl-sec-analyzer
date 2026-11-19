@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { analyzed, fakeWorker, setWorkerMode } from './helpers';
 
 test('サンプルを判定でき、外部へのリクエストが発生しない', async ({ page }) => {
   const external: string[] = [];
@@ -156,6 +157,7 @@ test('?lang= に ja・en 以外を指定しても判定できる（en-US は英�
 test('判定のあとに読み込んだ設定ファイルのエラーが消えない', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
   await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await expect(page.getByRole('status')).toHaveText(/例外ファイルの一部を読み込めませんでした：JSONとして読めません/);
 });
@@ -344,7 +346,7 @@ test('例外に登録したあと、判定し直した結果の見出しにフ�
   await page.getByLabel('理由（必須）').fill('検証環境のため');
   await page.getByRole('button', { name: '登録する' }).click();
   // 登録すると同期的に「判定しています…」になるので、件数のメッセージを待てば、Worker の結果で描き直したあと
-  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました/);
+  await analyzed(page);
   await expect(page.locator('#app h2:focus')).toHaveCount(1);
   expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('H2');
 });
@@ -352,7 +354,7 @@ test('例外に登録したあと、判定し直した結果の見出しにフ�
 test('判定中は結果のファイルを保存できず、判定中に入力を直すと判定を止める', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
-  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました/);
+  await analyzed(page);
   await expect(page.locator('[data-export]').first()).toBeEnabled();
   // 判定するを押した同じタスクの中で見る（Worker の結果が届く前）
   const busy = await page.evaluate(() => {
@@ -360,7 +362,7 @@ test('判定中は結果のファイルを保存できず、判定中に入力�
     return [...document.querySelectorAll<HTMLButtonElement>('[data-export]')].every(b => b.disabled) && document.querySelector('[aria-label="判定結果"]')?.getAttribute('aria-busy') === 'true';
   });
   expect(busy).toBe(true);
-  await expect(page.getByRole('status')).toHaveText(/件のターゲットを判定しました/);
+  await analyzed(page);
   await expect(page.locator('[data-export]').first()).toBeEnabled();
   // 入力を表示して直し、判定するを押した同じタスクの中で入力を変える
   await page.getByRole('button', { name: '入力を表示' }).click();
@@ -373,4 +375,51 @@ test('判定中は結果のファイルを保存できず、判定中に入力�
   await page.waitForTimeout(2000);
   await expect(page.locator('#input')).toBeVisible();
   await expect(page.getByRole('status')).toHaveText(/判定を止めました/);
+});
+
+test('Web Worker を作れない・Worker がエラーになるブラウザでは、判定できないことを知らせ、結果を残さない', async ({ page }) => {
+  await fakeWorker(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  const status = page.getByRole('status'); const shown = page.getByRole('region', { name: '判定結果' }).getByText('指摘（項目×条件）');
+  await analyzed(page);
+  await setWorkerMode(page, 'throw');                              // コンストラクタの例外
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(status).toHaveText(/判定を始められなかったか/);
+  await expect(shown).toHaveCount(0);
+  await setWorkerMode(page, 'error');                              // あとから来るエラー（blob: の Worker を止める設定など）
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(status).toHaveText(/判定を始められなかったか/);
+  await expect(shown).toHaveCount(0);
+  await expect(page.locator('[aria-label="判定結果"]')).toHaveAttribute('aria-busy', 'false');
+});
+
+test('HAR の Worker を作れない・Worker がエラーになるときは、読み込めないと知らせる', async ({ page }) => {
+  await fakeWorker(page);
+  await page.goto('/');
+  const status = page.getByRole('status');
+  for (const mode of ['throw', 'error'] as const) {
+    await setWorkerMode(page, mode);
+    await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+    await expect(status).toHaveText(/^HARを読み込めませんでした。ブラウザが Web Worker を使えない/);
+  }
+  await expect(page.getByText('HARのエントリ一覧')).toHaveCount(0);
+});
+
+test('HAR を外すと、フォーカスを「ファイルを開く」に移す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.getByRole('button', { name: 'HARを外す' }).click();
+  await expect(page.getByRole('button', { name: 'ファイルを開く' })).toBeFocused();
+});
+
+test('判定する前の HAR は、設定ファイルを読み込んでも判定しない（ホストとラベルを確かめてから判定する）', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  const status = page.getByRole('status');
+  await expect(status).toHaveText(/件のリクエストを読み込みました/);
+  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
+  await expect(page.getByText('組織プロファイル：x')).toBeAttached();   // 設定の欄は閉じている
+  await expect(status).toHaveText(/件のリクエストを読み込みました/);
+  await expect(page.getByRole('heading', { name: /指摘/ })).toHaveCount(0);
 });

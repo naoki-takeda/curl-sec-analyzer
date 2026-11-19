@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { summarizeAt, summarizeCommand } from '../src/export/cmdSummary';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { urlKey } from '../src/engine/targetKey';
 import { FC_MULT } from './helpers';
 
@@ -126,10 +126,6 @@ describe('実施コマンドの要約の性質', () => {
     }), RUNS);
   });
 
-  it('コマンドのID（コマンド生成器・HAR が書くもの）はそのまま', () => {
-    for (const s of ['C4', 'C11・C12・C23', 'HAR', '-', 'C1・C2']) expect(summarizeCommand(s)).toBe(s);
-  });
-
   it('長い入力でも時間が入力の長さの2乗にならない', { tags: ['perf'] }, () => {
     const t = performance.now();
     for (const unit of ['_-daaaaa', '_-HAuthorization:', '_-Hz:a', 'Cookie:a…(1 chars)_', '"', "'", 'https://a.example/_', '_-sSu', 'a_b=', 'A_', 'a_', '_a', 'A1_'])
@@ -150,13 +146,5 @@ describe('実施コマンドの要約の性質', () => {
       const small = time(make(4000)), large = time(make(16000));
       expect(large, make(2).slice(0, 40)).toBeLessThan(small * 8 + 100);
     }
-  });
-});
-
-describe('実施日時の要約', () => {
-  it('日時の形だけをそのまま出し、それ以外は ****', () => {
-    for (const s of ['2026-10-13', '2026-10-13T10:00', '2026-10-13T10:00:05', '2026-10-13T10:00:05.123Z', '2026-10-13T10:00:05+09:00', '2026-10-13 10:00']) expect(summarizeAt(s)).toBe(s);
-    for (const s of ['token=abc', '2026-10-13T10:00_secret', 'yesterday']) expect(summarizeAt(s)).toBe('****');
-    expect(summarizeAt('')).toBe('');
   });
 });

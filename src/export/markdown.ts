@@ -16,7 +16,7 @@ import { recommendationEn } from '../recommendationsEn';
 const noAutolink = (s: string) => s.replace(/(?<![A-Za-z0-9])(https?|ftp)(?=:\/\/)/gi, '$1&#8203;').replace(/(?<![A-Za-z0-9])(www)(?=\.)/gi, '$1&#8203;').replace(/@/g, '&#8203;@');
 const cell = (v: unknown) => noAutolink(String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[|[\]!`\\]/g, '\\$&').replace(/\r\n?|\n/g, ' '));
 
-export interface ReportExtras { profile?: Profile; diff?: { rows: DiffRow[]; baselineAt: string; rulesetWarning?: string; profileWarning?: string }; }
+interface ReportExtras { profile?: Profile; diff?: { rows: DiffRow[]; baselineAt: string; rulesetWarning?: string; profileWarning?: string }; }
 
 export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppression[], generatedAt = new Date(), extra: ReportExtras = {}): string {
   const en = getLang() === 'en';

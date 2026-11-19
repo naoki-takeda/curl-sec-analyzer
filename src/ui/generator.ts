@@ -8,7 +8,7 @@ import { BTN, button, download, el, labelFor } from './dom';
 const draft = { values: new Map<string, string>(), danger: false, output: '', open: false };
 export function commandGenerator() {
   const T = tr().gen;
-  const fields: [keyof CommandOptions, string][] = [['host', 'www.example.com'], ['apex', 'example.com'], ['apiPath', '/api/me'],
+  const fields: [Exclude<keyof CommandOptions, 'dangerous'>, string][] = [['host', 'www.example.com'], ['apex', 'example.com'], ['apiPath', '/api/me'],
     ['loginPath', '/login'], ['mypagePath', '/mypage'], ['logoutPath', '/logout'], ['staticPath', '/assets/app.js'], ['wsPath', '/ws']];
   const inputs = new Map<string, HTMLInputElement>();
   const grid = el('div', 'grid gap-x-3 gap-y-2 sm:grid-cols-2');

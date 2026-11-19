@@ -153,3 +153,13 @@ describe('存在しない条件番号', () => {
     expect(messageEn('severity：「H-01.9」は条件番号がH-01にありません（1〜4）')).toBe('severity: "H-01.9" is not a condition of H-01 (1 to 4)');
   });
 });
+
+describe('組織プロファイルの読み込み', () => {
+  it('プロファイルの項目があるかを返す（既定の値と同じ値と、誤りが混ざっていても、プロファイルのファイルとみなす）', () => {
+    expect(parseProfile('{"sessionMaxAgeHours":24,"exclude":"T-12"}').recognized).toBe(true);
+    expect(parseProfile('{"suppressions":[]}').recognized).toBe(false);
+  });
+  it('name が文字列でなければ知らせる', () => {
+    expect(parseProfile('{"name":1}').errors).toEqual(['name は文字列にしてください']);
+  });
+});

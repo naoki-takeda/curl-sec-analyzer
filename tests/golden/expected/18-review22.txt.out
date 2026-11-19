@@ -85,7 +85,7 @@ unauth-api | A-07.ok | info | pass | キー2種に秘密情報・内部属性ら
 unauth-me | A-01.1 | high | fail | 認証なしで HTTP 200
 unauth-me | A-02.ok | info | pass | URL・Location・本文にトークンなし
 unauth-me | A-07.1 | high | fail | キー: user.password_digest（値は表示しない）
-www.example.com | T-09.na | info | na | 旧バージョンの接続可否が分からない（手元のOpenSSLが非対応）
+www.example.com | T-09.na | info | na | 旧バージョンの接続可否が分からない（旧バージョン（tls1・tls1_1）の #TLSPROBE がない）
 www.example.com | T-10.ok | info | pass | 弱い暗号1種は拒否 / DES-CBC3-SHA は手元のOpenSSLが非対応で試していない
 
 ## coverage
@@ -96,7 +96,7 @@ H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定�
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=2
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-08 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（204・304 は対象外）
+H-08 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）
 H-09 | evaluated | fails=2
 H-10 | evaluated | fails=2
 H-11 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
@@ -138,7 +138,7 @@ T-05 | evaluated | fails=0
 T-06 | missing-input | fails=0 | next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す
 T-07 | missing-input | fails=0 | 必要なラベル: host-inj
 T-08 | missing-input | fails=0 | 必要なラベル: crlf
-T-09 | missing-input | fails=0 | 旧バージョンに対応した環境で C12 を実行する
+T-09 | missing-input | fails=0 | C12（プロトコルごとの接続の確認）を採取する
 T-10 | evaluated | fails=0
 T-11 | missing-input | fails=0 | 必要なラベル: tls
 T-12 | evaluated | fails=0

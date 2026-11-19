@@ -18,7 +18,7 @@ import { cancelHarLoad, loadHar, renderHar } from './ui/har';
 import { commandGenerator } from './ui/generator';
 import { joinMessages } from './messagesEn';
 
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_MB = 5; const MAX_BYTES = MAX_MB * 1024 * 1024;
 const app = document.querySelector<HTMLDivElement>('#app')!;
 refs.dialog = el('dialog', 'm-auto w-[min(32rem,92vw)] rounded-md border border-line bg-surface p-0 text-ink backdrop:bg-black/40');
 Object.assign(actions, { analyze, cancelAnalysis, isAnalyzing: () => !!analyzing, say, renderSettings, openGenerator, loadSample });
@@ -28,11 +28,8 @@ const qLang = new URLSearchParams(location.search).get('lang')?.toLowerCase() ??
 setLang(/^(ja|en)(-|$)/.test(qLang) ? qLang.slice(0, 2) as Lang : (navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en'));
 // 他のサイトに埋め込まれたときは、入力欄を出さない（クリックジャッキング対策。メタCSPでは frame-ancestors が効かないため。ツール設計3）
 if (window.top !== window.self) {
-  const open = el('a', 'text-primary underline underline-offset-4', getLang() === 'en' ? 'Open this tool directly' : 'このツールを直接開く');
-  open.href = location.href; open.target = '_blank'; open.rel = 'noopener noreferrer';
-  app.replaceChildren(el('div', 'p-6',
-    el('p', 'font-bold', getLang() === 'en' ? 'This tool cannot be used inside another site.' : 'このツールは、他のサイトに埋め込んだ状態では使えません。'),
-    el('p', 'mt-2 text-sm', getLang() === 'en' ? 'To protect what you paste, open it in its own tab.' : '貼り付ける内容を守るため、単独のタブで開いてください。'), el('p', 'mt-2', open)));
+  const T = tr().framed;
+  app.replaceChildren(el('div', 'p-6', el('p', 'font-bold', T.title), el('p', 'mt-2 text-sm', T.note), el('p', 'mt-2', link(location.href, T.open))));
 } else {
   buildShell();
 }
@@ -48,9 +45,9 @@ function buildShell() {
   refs.urlInput = el('input', 'w-full rounded-md border border-line bg-surface px-3 py-2 font-mono text-[13px]');
   refs.urlInput.id = 'url'; refs.urlInput.type = 'url'; refs.urlInput.placeholder = 'https://www.example.com/'; refs.urlInput.value = state.draft.url;
   refs.urlInput.addEventListener('input', inputChanged);
-  refs.message = el('p', 'min-h-6 text-sm text-sev-medium', state.draft.message); refs.message.setAttribute('role', 'status');
+  refs.message = el('p', 'min-h-6 text-sm text-sev-medium'); refs.message.setAttribute('role', 'status');
   // 結果欄は aria-live にしない（再描画のたびに数百行を読み上げてしまう）。判定の結果は、件数だけを役割 status の欄（refs.message）で知らせる
-  refs.results = el('section', 'min-w-0'); refs.results.setAttribute('aria-label', getLang() === 'en' ? 'Results' : '判定結果');
+  refs.results = el('section', 'min-w-0'); refs.results.setAttribute('aria-label', T.resultsLabel);
   refs.harBox = el('div', '');
   refs.settingsStatus = el('ul', 'mt-2 space-y-0.5 text-sm text-muted');
   refs.inputNote = el('div', 'hidden rounded-md border border-line bg-surface p-3 text-sm text-muted');
@@ -60,8 +57,8 @@ function buildShell() {
   const fileIn = hidden('.txt,.log,.har,text/plain,application/json', openFile);
   // 設定ファイル（例外・組織プロファイル）も、貼り付けと同じ大きさまでにする（大きなファイルで画面を止めない）
   const supIn = hidden('.json,application/json', async f => {
-    if (f.size > MAX_BYTES) { say(() => tr().settingsTooLarge(MAX_BYTES / 1024 / 1024)); return; }
-    const { list, errors } = parseSuppressions(await f.text());
+    const text = await readSettings(f, MAX_BYTES); if (text === undefined) return;
+    const { list, errors } = parseSuppressions(text);
     // 1件も読めなかった（形式の違うファイル）ときは、登録済みの例外を残す（画面で登録しただけの例外を消さない）
     if (list.length || !errors.length) state.suppressions = list;
     // * を含むものは、以前の形式のキーでもパターンとして照合する（engine/suppress.ts の matches）ので、登録し直しを促さない
@@ -69,11 +66,10 @@ function buildShell() {
     refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors, getLang())) : legacy ? t.legacyHarKeys(legacy) : ''; });
   });
   const profIn = hidden('.json,application/json', async f => {
-    if (f.size > MAX_BYTES) { say(() => tr().settingsTooLarge(MAX_BYTES / 1024 / 1024)); return; }
-    const { profile: p, errors } = parseProfile(await f.text());
-    // 形式の違うファイル（どの設定も読めず、エラーがある）では、読み込み済みのプロファイルを残す（既定の設定に置き換えない。例外ファイルと同じ）
-    const known = p && (Object.keys(p.severity).length || p.exclude.length || p.sessionCookieNames.length || p.trustedScriptOrigins.length || p.name || p.sessionMaxAgeHours !== 24);
-    const kept = !!state.profile && !(p && (known || !errors.length));
+    const text = await readSettings(f, MAX_BYTES); if (text === undefined) return;
+    const { profile: p, errors, recognized } = parseProfile(text);
+    // 形式の違うファイル（組織プロファイルの項目がなく、エラーがある）では、読み込み済みのプロファイルを残す（既定の設定に置き換えない。例外ファイルと同じ）
+    const kept = !!state.profile && !(p && (recognized || !errors.length));
     if (p && !kept) state.profile = p;
     // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）。残したプロファイルでは作り直さない
     // （判定に使うプロファイルと食い違わないため）
@@ -83,8 +79,8 @@ function buildShell() {
   });
   const baseIn = hidden('.json,application/json', async f => {
     // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超えるので、貼り付けと同じ上限では自分のエクスポートを読めない）
-    if (f.size > HAR_MAX_BYTES) { say(() => tr().settingsTooLarge(HAR_MAX_BYTES / 1024 / 1024)); return; }
-    const { baseline: b, error, skipped } = parseBaseline(await f.text());
+    const text = await readSettings(f, HAR_MAX_BYTES); if (text === undefined) return;
+    const { baseline: b, error, skipped } = parseBaseline(text);
     if (b) state.baseline = b;
     const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
     refresh(() => { const t = tr(); return error ? joinMessages([error], getLang()) : skipped ? t.baselineSkipped(skipped) : legacy ? t.legacyHarKeys(legacy) : ''; });
@@ -110,9 +106,9 @@ function buildShell() {
           labelFor('url', T.urlLabel, 'mt-3 mb-1 block text-sm text-muted'), refs.urlInput,
           el('div', 'mt-3 flex flex-wrap items-center gap-2',
             button(T.analyze, PRIMARY, analyze),
-            button(T.openFile, BTN, () => fileIn.click()),
+            Object.assign(button(T.openFile, BTN, () => fileIn.click()), { id: 'open-file' }),
             button(T.sample, BTN, loadSample),
-            button(T.clear, 'rounded-md px-3 py-2 text-muted underline-offset-4 hover:underline', () => { refs.input.value = ''; cancelAnalysis(); cancelHarLoad(); state.har = null; renderHar(); say(''); state.last = null; state.view.inputHidden = false; applyInputVisibility(); renderEmpty(); refs.input.focus(); }),
+            button(T.clear, 'rounded-md px-3 py-2 text-muted underline-offset-4 hover:underline', clearAll),
             fileIn, supIn, profIn, baseIn),
           refs.message,
           refs.genDetails,
@@ -131,18 +127,33 @@ function buildShell() {
   renderSettings(); renderHar(); applyInputVisibility();
   if (state.last) render(); else renderEmpty();
 }
-function keepDraft() { state.draft = { input: refs.input.value, url: refs.urlInput.value, message: refs.message.textContent ?? '' }; }
+/** 設定ファイルを読む。上限を超えたら、そのファイルの上限を知らせて undefined を返す */
+async function readSettings(f: File, limit: number): Promise<string | undefined> {
+  if (f.size > limit) { say(() => tr().settingsTooLarge(limit / 1024 / 1024)); return undefined; }
+  return f.text();
+}
+/** 入力・HAR・結果を消す（設定ファイルは残す） */
+function clearAll() {
+  refs.input.value = ''; cancelAnalysis(); cancelHarLoad(); state.har = null; renderHar(); say();
+  state.last = null; state.view.inputHidden = false; applyInputVisibility(); renderEmpty(); refs.input.focus();
+}
+function keepDraft() { state.draft = { input: refs.input.value, url: refs.urlInput.value }; }
 // 状態のメッセージ（件数、入力がない、読み込みのエラーなど）は、文言を作る関数で受け取る。言語を切り替えたら、その言語で出し直す
-// （文字列のまま残すと、英語の画面に日本語のメッセージが残る）
-let current: (() => string) | undefined;
-function say(m: Message) { current = typeof m === 'function' ? m : undefined; refs.message.textContent = typeof m === 'function' ? m() : m; }
-function saySummary(s: [number, number, number]) { say(() => tr().analyzed(...s)); }
-/** 設定を読み込んだあとに判定し直す。読み込みのエラーは判定のあとに表示する（analyze は最初に表示を消すため、先に出すと消えてしまう） */
-async function refresh(msg: () => string = () => '') {
+// （文字列のまま残すと、英語の画面に日本語のメッセージが残る）。引数なしで消す
+let current: Message | undefined;
+function say(m?: Message) { current = m; refs.message.textContent = m ? m() : ''; }
+/**
+ * 設定を読み込んだあとに判定し直す。読み込みのエラーは判定のあとに表示する（analyze は最初に表示を消すため、先に出すと消えてしまう）。
+ * 判定の結果を表示できなかった（失敗・中止・置き換わった）ときは、判定のメッセージを消さずに読み込みのエラーを後ろに足す
+ */
+async function refresh(msg: Message = () => '') {
   renderSettings();
-  const again = !!(state.last || state.har || analyzing);
-  if (again) await analyze();
-  if (msg() || !again) say(msg);
+  // 判定する前の HAR は判定しない（ホストとラベルを確かめてから「判定する」を押す）。読み込みのエラーがなければ HAR の案内を残す
+  if (!(state.last || analyzing)) { if (msg() || !state.har) say(msg); return; }
+  const shown = await analyze();
+  if (!msg()) return;
+  const prev = current;
+  say(shown || !prev ? msg : () => `${prev()} ${msg()}`);
 }
 function renderSettings() {
   const T = tr();
@@ -173,7 +184,7 @@ function openGenerator() {
 }
 async function openFile(f: File) {
   if (/\.har$/i.test(f.name) || isHar(await f.slice(0, 400).text())) { loadHar(f); return; }
-  if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge); return; }
+  if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge(MAX_MB)); return; }
   refs.input.value = await f.text(); analyze();
 }
 // 判定の世代と、判定中の Worker・その Promise の解決。判定し直したり、消去・HAR を外すを押したりしたら、前の Worker を止め、前の結果は
@@ -197,49 +208,55 @@ function inputChanged() {
   cancelAnalysis(); say(() => tr().analysisCancelled);
 }
 /**
- * 入力を判定して表示する。判定は Web Worker で行う（数万件のターゲットの HAR などで画面を止めない）。Worker は HAR の読み込みと同じく
- * blob: URL で作る（ページの CSP の connect-src 'none' を引き継ぐ。ui/har.ts）。表示まで終わったら解決する（判定のあとに出すメッセージのため）。
- * 解決する値は、この判定の結果を表示したか（止められた・置き換わった・判定できなかったときは false。描き直した結果にフォーカスを移すため）
+ * 入力を判定して表示する。判定は Web Worker で行う（数万件のターゲットの HAR などで画面を止めない。blob: URL で作る理由は csp.config.ts）。
+ * 表示まで終わったら解決する（判定のあとに出すメッセージのため）。解決する値は、この判定の結果を表示したか（止められた・置き換わった・
+ * 判定できなかった・応答がなかったときは false。描き直した結果にフォーカスを移すため）
  */
 function analyze(): Promise<boolean> {
-  say('');
+  say();
   const text = refs.input.value;
   const fail = (m: () => string) => { cancelAnalysis(); say(m); state.last = null; renderEmpty(); };
   if (!text.trim() && !state.har) { fail(() => tr().emptyInput); return Promise.resolve(false); }
   // 判定できなかったときは前の結果を消す（残すと、言語の切り替えなどで別の入力の結果が表示・出力される）
-  if (new Blob([text]).size > MAX_BYTES) { fail(() => tr().tooLarge); return Promise.resolve(false); }
+  if (new Blob([text]).size > MAX_BYTES) { fail(() => tr().tooLarge(MAX_MB)); return Promise.resolve(false); }
   const req: AnalyzeRequest = { text, url: refs.urlInput.value, har: state.har ? { imp: state.har.imp, hosts: state.har.hosts } : undefined,
     suppressions: state.suppressions, profile: state.profile };
   const settings = { suppressions: state.suppressions, profile: state.profile, baseline: state.baseline };
   cancelAnalysis();
-  const w = new AnalyzeWorker(); const gen = analyzeGen;
+  // Worker を作れない・送れない・結果を受け取れない（ブラウザの設定、メモリ不足、ツールの不具合）ときは、入力の形式の問題（判定の途中の例外。
+  // Worker が {ok:false} で返す）とは分けて知らせる。作れないときは、Vite の包みが data: URL で作り直し、それを CSP が止めると onerror になる
+  let w: Worker;
+  try { w = new AnalyzeWorker(); } catch { fail(() => tr().workerFailed); return Promise.resolve(false); }
+  const gen = analyzeGen;
   say(() => tr().analyzing); setBusy(true);
   return new Promise<boolean>(resolve => {
     analyzing = { worker: w, settle: resolve, text, url: req.url };
     const done = () => { w.terminate(); if (analyzing?.worker === w) { analyzing = undefined; setBusy(false); } };
+    const broken = () => { done(); if (gen === analyzeGen) fail(() => tr().workerFailed); resolve(false); };
     w.onmessage = (e: MessageEvent<{ ok: boolean; result?: AnalyzeResult }>) => {
       done();
       if (gen !== analyzeGen) { resolve(false); return; }   // 古い判定の結果
       // 判定の途中の例外（想定外の入力）で、前の入力の結果を表示・出力したままにしない
       let shown = false;
       if (!e.data.ok || !e.data.result) fail(() => tr().analysisFailed);
-      else { try { show(e.data.result, text, settings); shown = true; } catch { fail(() => tr().analysisFailed); } }
+      else { try { shown = show(e.data.result, text, settings); } catch { fail(() => tr().analysisFailed); } }
       resolve(shown);                                   // 表示まで終わってから解決する
     };
-    w.onerror = () => { done(); if (gen === analyzeGen) fail(() => tr().analysisFailed); resolve(false); };
-    w.postMessage(req);
+    w.onerror = w.onmessageerror = broken;
+    try { w.postMessage(req); } catch { broken(); }
   });
 }
-/** 判定の結果を表示する */
-function show({ targets, warnings, findings, cov }: AnalyzeResult, text: string, settings: NonNullable<typeof state.last>['settings']) {
-  if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return; }
+/** 判定の結果を表示する。応答が1つもなければ結果を消して false を返す */
+function show({ targets, warnings, findings, cov }: AnalyzeResult, text: string, settings: NonNullable<typeof state.last>['settings']): boolean {
+  if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return false; }
   state.last = { targets, warnings, findings, cov, settings, diff: settings.baseline ? diff(settings.baseline.findings, findings) : undefined };
   if (text.trim()) state.view.inputHidden = true;            // 判定できたら、生の出力を隠す
   applyInputVisibility();
   render();
   // 件数は画面の集計（項目×条件で一意に数える。ui/results.ts と同じ）に合わせる。ターゲットごとの指摘を数えると、画面と違う数を読み上げる
-  const rows = overall(findings);
-  saySummary([targets.length, rows.length, countBySeverity(rows).high]);
+  const rows = overall(findings); const high = countBySeverity(rows).high;
+  say(() => tr().analyzed(targets.length, rows.length, high));
   if (matchMedia('(max-width: 1023px)').matches)
     refs.results.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth' });
+  return true;
 }

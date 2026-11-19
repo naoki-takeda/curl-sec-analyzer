@@ -1,6 +1,6 @@
 // parser/input.ts：#TARGET 形式の貼り付けを解析する（-i、-D -、-v、-L、%{header_json}、#META、#BODY、#PROBE、#TLSPROBE、#CIPHERPROBE）
 import type { HttpResponse, ParseResult, ParseWarning, Target } from '../model';
-import { assignHopUrls, baseLabel, BODY_LIMIT, cookieCapWarnings, isRedirectWithLocation, pushCookies, uniqueLabels } from './target';
+import { HAS_SCHEME, assignHopUrls, baseLabel, BODY_LIMIT, cookieCapWarnings, isRedirectWithLocation, pushCookies, uniqueLabels } from './target';
 import { autoAuthScheme, cookieNames, JWT_IN_TEXT, sentAuthOf, splitSetCookie } from './setCookie';
 
 // curl と同じ緩さで読む：HTTP/ の大文字小文字を区別しない、理由句の前の空白がなくてもよい（HTTP/1.1 200OK）、コードは先頭の3桁（curl は
@@ -15,12 +15,12 @@ const CONNECTING = /^Connecting to \S+\s*$/;
 // プロキシを使うと、最初の行が「* Uses proxy env variable https_proxy == …」になる
 const VERBOSE_HINT = /^\*\s+(Connected to|Established connection to|Trying|SSL connection|ALPN|Host |Uses proxy env variable )/;
 // 改行のない本文（手で書いた curl -i の JSON・HTML）の直後にくっついたマーカー（{"id":1}#META at=…）。分けないと、マーカーが
-// 前の本文に吸い込まれて黙って消える。#META（と #TARGET の at=・cmd= など）は、本文がたまたま含むことのまずない JSON・HTML の閉じ（} ] >）の
-// 直後だけを分ける（#TARGET の url=・label= は下の STUCK_TARGET が分ける）
-const STUCK_MARKER = /([}\]>])(#(?:TARGET|META)[ \t]+(?:url|label|at|cmd|response_code)=)/g;
+// 前の本文に吸い込まれて黙って消える。#META は、本文がたまたま含むことのまずない JSON・HTML の閉じ（} ] >）の直後だけを分ける
+// （#TARGET は下の STUCK_TARGET が分ける）
+const STUCK_MARKER = /([}\]>])(#META[ \t]+(?:at|cmd|response_code)=)/g;
 // #TARGET は、どの文字の直後でも分ける（Express の res.sendStatus(401) の「Unauthorized」、text/plain の 404 の本文のように、改行のない本文は
 // } ] > 以外でも終わる）。ただし、直前が空白・引用符のもの（本文の文中の「… #TARGET url=」、set -x の「+ echo '#TARGET …'」）は分けない
-const STUCK_TARGET = /([^\n\s'"`])(#TARGET[ \t]+(?:url|label)=)/g;
+const STUCK_TARGET = /([^\s'"`])(#TARGET[ \t]+(?:url|label)=)/g;
 // curl の進捗表示（-s を付けない実行で 2>&1 にしたもの）。見出しの行と数字の行は読み飛ばし、応答の行の前にくっついた部分は取り除く
 // （遅い応答では、進捗表示とステータス行が同じ行に出る）。
 // 欄の並び：% Total、Total、% Received、Received、% Xferd、Xferd、Dload、Upload、時刻の欄（0〜3個）、Speed。% の欄は 0〜100。
@@ -73,7 +73,7 @@ const hasData = (t: Target) =>
   t.responses.length + t.probes.length + t.tlsProbes.length + t.cipherProbes.length + t.openssl.length > 0;
 /** この応答のあとに次の応答が続きうるか（転送・1xx・認証のやり直し）。200 の本文の中のステータス行らしき行では分けない */
 const nextHopAfter = (status: number) => status < 200 || (status >= 300 && status < 400) || status === 401 || status === 407;
-const newResponse = (sm: RegExpMatchArray): HttpResponse => ({ httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), rawNames: [], kind: 'final' });
+const newResponse = (sm: RegExpMatchArray): HttpResponse => ({ httpVersion: sm[1], status: +sm[2], reason: sm[3], headers: new Map(), kind: 'final' });
 /** 本文に1行を足す。本文は先頭64KBまで（1行が長い本文（圧縮したHTMLなど）も途中で切る） */
 const appendBody = (r: HttpResponse, line: string) => {
   const room = BODY_LIMIT - (r.body?.length ?? 0);
@@ -94,7 +94,7 @@ export function parseInput(input: string): ParseResult {
   let jsonBytes = 0;
   // 読み取り中の JSON の括弧の深さと、文字列の中か（括弧が閉じたときだけ解析する。} で終わる行ごとに全体を解析し直すと、閉じない括弧の続く入力で遅い）
   const js = { depth: 0, inStr: false, esc: false };
-  const sentNames = new WeakMap<Target, Set<string>>();   // 送った Cookie の名前（重なりを除くため）
+  let sentSeen: Set<string> | undefined;              // 今のターゲットで送った Cookie の名前（重なりを除くため）
   const pendingJson: HttpResponse[] = [];            // ステータスがまだない %{header_json} の応答（あとの #META response_code= で補う）
   let vBody = false;                                  // -v の受信ヘッダの終端（< の空行）のあと。次の「< HTTP/」の行までは本文として読み飛ばす
   let connectReq = false;                             // -v で「> CONNECT」を送った（プロキシのトンネル）。その応答のあとは本文がない
@@ -113,7 +113,7 @@ export function parseInput(input: string): ParseResult {
   // 作ったり分けたりできない（印のないマーカーで偽の login を作れば、C-09①（高）を合格にできる）。印のない手書きの入力は、印なしで読む。
   // 印は、入力の最初の #TARGET の行からだけ取る（設計書のとおり）。印のある行ならどれでも取ると、手書きの入力で、診断対象のサーバが本文に書いた
   // 「#TARGET … run=<乱数>」で印を有効にし、利用者の本物のマーカーをすべて本文として読ませられる
-  const firstTarget = normalized.match(/(?:^|\n)#TARGET[ \t]([^\n]*)/)?.[1];
+  const firstTarget = normalized.match(/(?:^|\n)#TARGET\b([^\n]*)/)?.[1];   // 属性のない #TARGET も、MARKER_RE と同じくマーカー
   const runId = firstTarget !== undefined ? attrs(firstTarget).run?.match(/^[0-9a-f]{16,64}$/)?.[0] : undefined;
   const lines = runId
     // 印のある入力では、くっついたマーカーも印のあるものだけを分ける（行の中のマーカーの位置で分け、印のある部分だけを新しい行にする。
@@ -154,7 +154,7 @@ export function parseInput(input: string): ParseResult {
       // （トレーラはブラウザの本文ではない。トレーラにパスワード欄を書いて、ログアウト後の画面をログインのフォームに見せられないように）
       if (tag === 'BODY') { if (runId) for (const r of t.responses) r.body = undefined; inRaw = true; rawBody = t.responses[t.responses.length - 1]; continue; }   // 直前の応答（ヘッダだけ。-L では最後のホップ）の本文が続く
       if (tag === 'TARGET') {
-        flush(); t = newTarget(a); pendingJson.length = 0; firstLine = 'pending'; sawUnreadable = false; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
+        flush(); t = newTarget(a); sentSeen = undefined; pendingJson.length = 0; firstLine = 'pending'; sawUnreadable = false; if (a.sensitive !== undefined && t.sensitive === undefined) badSensitive.push(t);
         // 書き間違い（lable=）や受け付けない値（label=login/x、kind=page）は、sensitive= と同じく知らせる（黙って既定にすると、予約したラベルの
         // 横断の判定（C-09 など）が動かない理由が分からない）。値は出さない（ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
         const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
@@ -225,7 +225,7 @@ export function parseInput(input: string): ParseResult {
         const added: string[] = [];
         if (ck) {
           const names = t.sentCookieNames ?? (t.sentCookieNames = []);
-          let seen = sentNames.get(t); if (!seen) { seen = new Set(names); sentNames.set(t, seen); }
+          const seen = sentSeen ??= new Set(names);
           for (const n of cookieNames(ck[1])) if (!seen.has(n)) { seen.add(n); names.push(n); added.push(n); }
         }
         if (auv) { t.sentAuthorization = true; if (autoAuthScheme(auv[1])) t.sentAutoAuth = true; }
@@ -307,7 +307,7 @@ export function parseInput(input: string): ParseResult {
       continue;
     }
     const i = line.indexOf(':'); if (i <= 0) continue;
-    const raw = line.slice(0, i).trim(); last = raw.toLowerCase(); cur.rawNames.push(raw);
+    const raw = line.slice(0, i).trim(); last = raw.toLowerCase();
     const val = line.slice(i + 1).trim();
     // 値を push(...) に広げない（長い Set-Cookie の行でスタックがあふれる）
     const list = cur.headers.get(last) ?? cur.headers.set(last, []).get(last)!;
@@ -371,7 +371,7 @@ function headerJson(text: string, code?: string): HttpResponse | null | undefine
   for (const [k, v] of entries)
     if (k.toLowerCase() === 'set-cookie') { const list: string[] = []; dropped += pushCookies(list, (v as string[]).flatMap(splitSetCookie)); headers.set('set-cookie', list); }
     else headers.set(k.toLowerCase(), v as string[]);
-  return { httpVersion: '', status: Number(code) || 0, reason: 'header_json', headers, rawNames: [...headers.keys()], kind: 'final', ...(dropped ? { droppedCookies: dropped } : {}) };
+  return { httpVersion: '', status: Number(code) || 0, reason: 'header_json', headers, kind: 'final', ...(dropped ? { droppedCookies: dropped } : {}) };
 }
 
 const MARK_START = /#(?:TARGET|META|PROBE|TLSPROBE|CIPHERPROBE)[ \t]/g;
@@ -408,7 +408,7 @@ function collectWarnings(targets: Target[], unparsed: number, emptyTargets: stri
   for (const t of targets) if (!t.url && !t.meta.url_effective)
     w.push({ kind: 'unknown-url', label: t.label, detail: `ターゲット「${t.label}」のURLが分かりません。HTTPSかどうかを使う項目は判定できません（#TARGET に url= を付けてください）` });
   // url= はあるが、スキームのある URL として読めない（a.example/r、https:/a.example）。HTTPS かどうかを使う項目が黙って適用外になる
-  else if (t.url && !/^[a-z][\w+.-]*:\/\/[^/?#\s]/i.test(t.url))
+  else if (t.url && !HAS_SCHEME.test(t.url))
     w.push({ kind: 'unknown-url', label: t.label, detail: `ターゲット「${t.label}」の url= を URL として読めません。HTTPSかどうかを使う項目は判定できません（https:// から書いてください）` });
   // ターゲットごとに1つにまとめ、どのプローブかを書く
   for (const t of targets) {

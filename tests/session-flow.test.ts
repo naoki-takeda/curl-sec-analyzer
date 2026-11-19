@@ -214,3 +214,29 @@ describe('主のセッションIDの名前・期限の Cookie', () => {
     expect(evaluate(s(1) + s(2) + s(3)).findings.filter(f => f.item === 'C-07' && f.target === 'session-sample-*' && f.status === 'fail').length).toBeGreaterThan(0);
   });
 });
+
+describe('C-12 のログイン画面の見分け', () => {
+  const MYPAGE = (body: string) => ['#TARGET url=https://www.example.com/mypage label=mypage sensitive=1', AT, 'HTTP/2 200', 'content-type: text/html', '', body, ''].join('\n');
+  const LOGIN_FORM = '<form method="post" action="/login"><input name="user"><input type="password" name="pw"></form>';
+  it('フォームの部品がカスタム要素（<form-field>）でも、ログインのフォームとして読む', () => {
+    const custom = '<form method="post" action="/login"><form-field><input name="user"></form-field><form-field><input type="password" name="pw"></form-field></form>';
+    const r = ids(LOGOUT(DELETED) + AFTER(custom), 'C-12');
+    expect(r).toContain('C-12.ok');
+    expect(r).not.toContain('C-12.1');
+  });
+  it('ログイン後のページの CSS・JavaScript の「type=password」の文字は、パスワード欄に数えない', () => {
+    const mp = MYPAGE('<style>input[type=password]{width:10em}</style><script>document.querySelector(\'input[type="password"]\')</script><h1>My page</h1>');
+    const r = ids(mp + LOGOUT(DELETED) + AFTER(LOGIN_FORM), 'C-12');
+    expect(r).toContain('C-12.ok');
+    expect(r).not.toContain('C-12.1');
+  });
+});
+
+describe('ログアウトの確認画面のパスワード欄', () => {
+  it('CSS の input[type=password] の文字をパスワード欄とみなさず、確認画面として C-12①（高）を判定しない', () => {
+    const confirm = LOGOUT('HTTP/2 200\ncontent-type: text/html', '<style>input[type=password]{width:10em}</style><form method="post" action="/logout"><button>ログアウト</button></form>');
+    const r = evaluate(confirm + AFTER('<h1>My page</h1>'));
+    expect(r.findings.filter(f => f.item === 'C-12').map(f => f.ruleId).every(x => x === 'C-12.na')).toBe(true);
+    expect(r.findings.filter(f => f.item === 'H-15').map(f => f.ruleId)).toEqual(['H-15.na']);
+  });
+});

@@ -9,7 +9,9 @@ import { toMarkdown } from '../src/export/markdown';
 import { toJson } from '../src/export/json';
 import { toCsv } from '../src/export/csv';
 import { harTargets, importHar } from '../src/parser/har';
-import { maskText, TOKEN_PARAM_NAMES, SESSION_PARAM_NAMES } from '../src/mask';
+import { cookieEvidence } from '../src/rules/cookies';
+import { parseSetCookie } from '../src/parser/setCookie';
+import { maskText, maskValue, TOKEN_PARAM_NAMES, SESSION_PARAM_NAMES } from '../src/mask';
 
 // それぞれ固有の文字列にして、どこから漏れたかを特定できるようにする
 const S = {
@@ -137,5 +139,18 @@ describe('深い入れ子のパラメータと数値の秘密', () => {
   });
   it('pin・otp に似た別の名前と、真偽値は伏せない', () => {
     for (const s of ['pin: true', 'opt: 482913', 'spinner: 3', 'pinned: 12', 'pin_lat: 35123', 'map_pin: 7', 'https://a.example/x?pin2=7', '{"code":404}']) expect(maskText(s), s).toBe(s);
+  });
+});
+
+describe('maskValue・cookieEvidence・maskText の基本', () => {
+  it('値の長さに応じて先頭だけ残す', () => {
+    expect(maskValue('abc')).toBe('…(3 chars)');
+    expect(maskValue('0123456789abcdef')).toBe('01…(16 chars)');
+  });
+  it('Cookie・クエリ・JWT・URLの認証情報を隠す', () => {
+    expect(cookieEvidence(parseSetCookie('sid=1234567890123; Secure'))).toBe('sid=12…(13 chars); Secure');
+    expect(maskText('https://a.example/cb?code=SECRETCODE123&x=1')).toBe('https://a.example/cb?code=SE…(13 chars)&x=1');
+    expect(maskText('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2ln')).not.toContain('eyJzdWIi');
+    expect(maskText('https://user:pass@a.example/')).toBe('https://user:****@a.example/');
   });
 });

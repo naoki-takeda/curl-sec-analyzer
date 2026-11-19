@@ -6,8 +6,7 @@ import { readFileSync } from 'node:fs';
 // Vite の設定の読み込みに対応するため、ローカルの TypeScript には拡張子を付ける
 import { CSP } from './csp.config.ts';
 
-// 本番ビルドのときだけメタCSPを挿入する（開発サーバはHMRのためにインラインスクリプトを使うので付けない）。
-// 指定の中身と理由は csp.config.ts にある
+// 本番ビルドのときだけメタCSPを挿入する。指定の中身と、開発サーバに付けない理由は csp.config.ts にある
 const metaCsp = (): Plugin => ({
   name: 'meta-csp',
   apply: 'build',
@@ -54,9 +53,7 @@ export default defineConfig({
         `tailwindcss（MIT）\n${readFileSync('node_modules/tailwindcss/LICENSE', 'utf8')}`].join('\n\n') } } })],
   build: { target: 'es2022', sourcemap: false },
   // タイムゾーンを固定する。#META at= はタイムゾーンを持たず手元の時刻として読むので、CI（UTC）と手元（JST）で期限の時間が変わる。
-  // ゴールデンテストの期待結果は JST で作ってある。
-  // 時間の上限を確かめるテストには perf のタグ（{ tags: ['perf'] }）を付け、npm test では、ほかのテストが終わってから、ファイルを並べずに
-  // 別に流す（package.json の test。同時に流すと CPU を取り合い、上限を超えることがある）。describe に付けると、その中のテストがすべて対象になる
+  // ゴールデンテストの期待結果は JST で作ってある。perf のタグの使い方は CONTRIBUTING.md
   test: { environment: 'node', env: { TZ: 'Asia/Tokyo' }, include: ['tests/**/*.test.ts'],
     tags: [{ name: 'perf', description: '時間の上限を確かめるテスト（npm test では、ほかのテストのあとに、ファイルを並べずに流す）' }] },
 });

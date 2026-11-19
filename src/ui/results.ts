@@ -53,7 +53,7 @@ export function render() {
     state.last.diff ? diffBlock(state.last.diff) : null,
     // 件数は、章で絞り込んだ表の行数と合わせる
     heading(T.findings, findingsCount(chapterRows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(chapterRows.filter(r => r.severity === 'info').length), chapterFilter())),
-    rows.length ? overallTable(chapterRows.filter(r => state.view.showInfo || r.severity !== 'info')) : el('p', 'text-muted', T.noFindings),
+    rows.length ? overallTable(chapterRows) : el('p', 'text-muted', T.noFindings),
     heading(T.perTarget, T.count(targets.length), focusable(button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); }), 'show-all')),
     targetSummary(targets, byTarget),
     ...targets.map(t => targetBlock(t, byTarget.get(t.label) ?? [])),
@@ -61,7 +61,7 @@ export function render() {
     coverageBlock(cov),
   ];
   refs.results.replaceChildren(...parts.filter((p): p is Node => p instanceof Node));
-  if (focusKey) refs.results.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.focus();
+  if (focusKey) refs.results.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focusKey)}"]`)?.focus();
 }
 /** 描き直したあとにフォーカスを戻す部品の印 */
 const focusable = <T extends HTMLElement>(n: T, key: string): T => { n.dataset.focus = key; return n; };
@@ -85,7 +85,7 @@ function ledger(c: Record<Severity, number>) {
     ...SEVERITIES.map(s => el('div', `border-l-[6px] ${SEV_BORDER[s]} bg-surface px-4 py-3`,
       el('div', `num text-4xl font-bold leading-none ${c[s] ? SEV_TEXT[s] : 'text-muted'}`, String(c[s])),
       el('div', 'mt-1 text-sm text-muted', T.severity(sevLabel(s))))));
-  wrap.setAttribute('aria-label', SEVERITIES.map(s => `${T.severity(sevLabel(s))} ${c[s]}`).join(', '));
+  wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-label', SEVERITIES.map(s => `${T.severity(sevLabel(s))} ${c[s]}`).join(', '));
   return wrap;
 }
 function exportBar() {
@@ -125,9 +125,11 @@ function chapterFilter() {
   sel.addEventListener('change', () => { state.view.chapter = Number(sel.value); render(); });
   return sel;
 }
-function overallTable(rows: ReturnType<typeof overall>) {
+/** 章で絞り込んだ行の表。「情報」を隠して行が残らないときは、章に指摘がないとは書かない（見出しに隠した件数を出している） */
+function overallTable(chapterRows: ReturnType<typeof overall>) {
   const T = tr();
-  if (!rows.length) return el('p', 'text-muted', T.noFindingsInChapter);
+  const rows = chapterRows.filter(r => state.view.showInfo || r.severity !== 'info');
+  if (!rows.length) return el('p', 'text-muted', chapterRows.length ? T.nothingToShow : T.noFindingsInChapter);
   return table(T.tables.findings, [T.cols.severity, T.cols.item, T.cols.title, T.cols.targets], rows.map(r =>
     el('tr', '', sevCell(r.severity), td('whitespace-nowrap num', `${r.item}${circled(r.condition)}`), titleCell(r.item, r.title), td('', r.targets.join(', ')))));
 }
