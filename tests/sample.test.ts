@@ -28,7 +28,7 @@ describe('サンプル入力の通し確認（MVP）', () => {
     expect(all).not.toContain('cmVmOiByZWZzL2hlYWRzL21haW4K');   // プローブの中身（パターン名だけを出す）
   });
 
-  it('診断カバレッジ：入力がない項目は理由付きで「入力不足」、未実装は「未対応」', () => {
+  it('診断カバレッジ：入力がない項目は理由付きで「入力不足」、未実装の項目はない', () => {
     const cov = coverage(findings, IMPLEMENTED);
     const by = (id: string) => cov.find(c => c.item === id)!;
     expect(by('H-01').status).toBe('evaluated');

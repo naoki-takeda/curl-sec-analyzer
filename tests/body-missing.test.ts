@@ -6,10 +6,8 @@ import { mergeNa } from '../src/engine/summarize';
 import { IMPLEMENTED } from '../src/rules/ruleset';
 import { recommendationEn } from '../src/recommendationsEn';
 import { NO_BODY_REC } from '../src/rules/util';
-import { evaluate } from './helpers';
+import { AT, evaluate, GEN_OPTS, RUN } from './helpers';
 
-const AT = '#META at=2026-11-01T10:00:00';
-const RUN = '0123456789abcdef';
 const PRE = ['#TARGET url=https://a.example/login label=pre-login', AT, 'HTTP/2 200', 'content-type: text/html',
   'set-cookie: JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', ''];
 const c09 = (input: string) => evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login');
@@ -55,7 +53,7 @@ describe('A1 C-09：本文を採取していない 2xx のログインは、①�
 });
 
 describe('A1 生成スクリプト：login は本文も採取する', () => {
-  const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous: false });
+  const s = generateScript(GEN_OPTS);
   const loginLine = s.split('\n').find(l => l.includes('--data @login.txt') && !l.includes('s$i.txt'))!;
   it('ヘッダと本文を分けて取り、#BODY の印のあとに本文を出す', () => {
     expect(loginLine).toContain('-D "$hdr" -o "$body"');
@@ -108,12 +106,11 @@ describe('A2 画面：同じ理由の na を1行にまとめる', () => {
 });
 
 describe('A2 カバレッジ：ターゲットごとの na の件数と理由を添える', () => {
-  const implemented = IMPLEMENTED;
   const input = [
     '#TARGET url=https://a.example/ label=page', AT, 'HTTP/2 200', 'content-type: text/html', '', '<p>hi</p>', '',
     '#TARGET url=https://a.example/about label=about', AT, 'HTTP/2 200', 'content-type: text/html', '', '',
     '#TARGET url=https://a.example/faq label=faq', AT, 'HTTP/2 200', 'content-type: text/html', '', ''].join('\n');
-  const cov = coverage(evaluate(input).findings, implemented);
+  const cov = coverage(evaluate(input).findings, IMPLEMENTED);
   it('本文のある HTML で判定済みの E-07 に、本文のない2件を示す', () => {
     const e07 = cov.find(c => c.item === 'E-07')!;
     expect(e07.status).toBe('evaluated');
@@ -121,7 +118,7 @@ describe('A2 カバレッジ：ターゲットごとの na の件数と理由を
   });
   it('ほかの項目に任せた na（強制モードのCSPがない（H-03で判定））は入力不足に数えない', () => {
     const csp = '#TARGET url=https://a.example/x label=x\n' + AT + "\nHTTP/2 200\ncontent-type: text/html\ncontent-security-policy: script-src 'self'; object-src 'none'; base-uri 'none'\n\n<p>x</p>\n";
-    const h07 = coverage(evaluate(`${input}${csp}`).findings, implemented).find(c => c.item === 'H-07')!;
+    const h07 = coverage(evaluate(`${input}${csp}`).findings, IMPLEMENTED).find(c => c.item === 'H-07')!;
     expect(h07.reasons.join('/')).not.toContain('一部のターゲット');
   });
   it('件数の注記は英訳できる', () => {

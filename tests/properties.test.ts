@@ -12,10 +12,10 @@ import { summarizeCommand } from '../src/export/cmdSummary';
 import { legacyHarKey, targetKeys, urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { analyze } from './golden/analyze';
+import { FC_MULT, leaks } from './helpers';
 
 // 回数は FC_RUNS 倍にできる（手元で多く回して探すとき。CI は既定の回数）
-const MULT = Number(process.env.FC_RUNS) || 1;
-const RUNS = { numRuns: 300 * MULT };
+const RUNS = { numRuns: 300 * FC_MULT };
 
 // ---- 入力の部品 ----
 /** 秘密のトークン（英大文字・小文字・数字をすべて含む16〜40文字）。キーでもマスクでも、どこに置いても出てはいけない形 */
@@ -27,7 +27,6 @@ const token = fc.stringMatching(/^[A-Za-z0-9]{16,40}$/).filter(t => /\d/.test(t)
  */
 const randomToken = fc.noBias(token);
 /** トークンが出ていないか：8文字の窓のどれも出力に含まれない（画面のマスクが残す先頭の4文字は窓より短い） */
-const leaks = (out: string, t: string) => { for (let i = 0; i + 8 <= t.length; i++) if (out.includes(t.slice(i, i + 8))) return t.slice(i, i + 8); return undefined; };
 const word = fc.constantFrom('reset', 'login', 'api', 'v2', 'users', 'AdminDashboard', 'docs', 'index.html', 'app.js', '2026-annual-report-v2', 'x64', '123', 'search');
 const paramName = fc.constantFrom('q', 'token', 'code', 'state', 'page', 'sort', 'lang', 'redirect_uri', 'next', 'id', 'access_token', 'utm_source', 'offset', 'type',
   'user[password]', 'api%5Fkey', 'filter.name', 'X-Amz-Signature', 'ids[]');
@@ -127,7 +126,7 @@ describe('マスク（mask.ts）の性質', () => {
     fc.assert(fc.property(fc.array(piece, { maxLength: 8 }), ps => {
       const once = maskText(ps.join(''));
       expect(maskText(once)).toBe(once);
-    }), { numRuns: 1000 * MULT });
+    }), { numRuns: 1000 * FC_MULT });
   });
 
   it('切り詰め（clip）は秘密を出さず、伏せた値の印の途中で切らない', () => {
@@ -186,7 +185,7 @@ describe('#META cmd= のコマンド（summarizeCommand）の性質', () => {
       const i = s.indexOf('https://a.example/login');
       if (c.sep === ' ' && i > 0 && !s.slice(i).includes('@') && !/[?&]/.test(s.slice(0, i)) &&/(?:^|[\s_])(?:curl|curl\.exe|\\curl\.exe)[\s_]$|[\s_]-H[\s_](?:Authorization|Cookie):[\s_]$|[\s_]-(?:sS|L|k|i|v)[\s_]$|--(?:compressed|http1\.1)[\s_]$|(?:POST|10|ua\/1\.0|\*\/\*|out\.txt|%\{http_code\})[\s_]$/.test(s.slice(0, i)))
         expect(out, `${s}\n→ ${out}`).toContain('https://a.example/login');
-    }), { numRuns: 1000 * MULT });
+    }), { numRuns: 1000 * FC_MULT });
   });
 
   it('もう一度かけても変わらない', () => {
@@ -217,7 +216,7 @@ describe('判定の結果の性質', () => {
       const result = (xs: typeof bs) => analyze(text(xs)).findings
         .map(f => `${f.ruleId} | ${(f.targetKey ?? f.target).replace(/#\d+$/, '').trim()} | ${f.status} | ${f.severity}`).sort();
       expect(result(shuffled)).toEqual(result(bs));
-    }), { numRuns: 200 * MULT });
+    }), { numRuns: 200 * FC_MULT });
   // 単独で約1.5秒。ほかのテストと並べて流すと既定の5秒を超えることがあった（第48回。4000回試しても反例はなかった）
   }, 30_000);
 });

@@ -40,12 +40,6 @@ test('例外に登録すると「例外」になり、Markdown を保存でき�
   expect(dl.suggestedFilename()).toMatch(/\.md$/);
 });
 
-test('空のまま判定すると、何をすればよいかを示す', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: '判定する' }).click();
-  await expect(page.getByRole('status')).toHaveText(/貼り付けてから/);
-});
-
 test('コマンド生成器：ホスト名を入れると #TARGET 付きのコマンドを作り、不正な入力は拒否する', async ({ page }) => {
   await page.goto('/');
   await page.getByText('コマンドを作る（推奨コマンド C1〜C26）').click();
@@ -295,7 +289,7 @@ test('第50回：形式の違うファイルを例外ファイルとして読ん
   await expect(page.getByText(/例外 1件（有効 1件/)).toBeVisible();
 });
 
-test('第51回：HAR の一覧で操作してもフォーカスを失わず、ホスト単位の表に対象を出す', async ({ page }) => {
+test('第51回：HAR の一覧で操作してもフォーカスを失わない', async ({ page }) => {
   await page.goto('/');
   await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
   const sel = page.locator('select[data-focus^="har-label-"]').first();

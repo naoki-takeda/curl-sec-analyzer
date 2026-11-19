@@ -11,9 +11,9 @@ import { showText } from '../src/shownText';
 import { summarizeCommand } from '../src/export/cmdSummary';
 import { urlKey } from '../src/engine/targetKey';
 import type { Finding } from '../src/model';
+import { ms } from './helpers';
 
 const N = 64 * 1024;
-const ms = (f: () => unknown) => { const t = performance.now(); f(); return performance.now() - t; };
 const fill = (p: string) => p.repeat(Math.ceil(N / p.length)).slice(0, N);
 
 /** 繰り返しの形（正規表現の位置ごとの読み直し・閉じのない区切り・入れ子を起こしやすいもの） */

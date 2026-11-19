@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluate, fixture, sampleText, target } from './helpers';
+import { AT, evaluate, fixture, sampleText, target } from './helpers';
 
 const HTML = 'HTTP/2 200\ncontent-type: text/html\n';
 const ids = (input: string) => evaluate(input).ids('t');
@@ -125,8 +125,7 @@ describe('第48回：ルールの誤検知', () => {
 
 // 第49回のレビュー（判定ルール）
 describe('第49回：ルールの誤検知・見逃し', () => {
-  const AT49 = '#META at=2026-11-01T10:00:00';
-  const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/x label=t\n${AT49}\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('t');
+  const api = (body: string) => evaluate(`#TARGET url=https://www.example.com/api/x label=t\n${AT}\nHTTP/2 200\ncontent-type: application/json\n\n${body}\n`).ids('t');
   it('A-07①：API の検証の規則・autocomplete の値・エラーの項目の値を、パスワードの露出とみなさない（本物は今までどおり）', () => {
     for (const b of ['{"rules":{"email":"required|email","password":"required|min:8|max:64"}}', '{"autocomplete":{"password":"current-password"}}', '{"errors":{"password":"TOO_SHORT"}}']) {
       expect(api(b), b).not.toContain('A-07.1');
@@ -136,17 +135,17 @@ describe('第49回：ルールの誤検知・見逃し', () => {
   it('H-03①：<template>・<noscript>・スクリプトの文字列の中の meta の CSP は効かない', () => {
     for (const head of ['<template><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; object-src \'none\'"></template>',
       '<script>var t=\'<meta http-equiv="Content-Security-Policy" content="default-src none">\';</script>']) {
-      expect(evaluate(`#TARGET url=https://www.example.com/ label=page\n${AT49}\n${HTML}\n<head>${head}</head><body><p>x</p></body>\n`).ids('page'), head).toContain('H-03.1');
+      expect(evaluate(`#TARGET url=https://www.example.com/ label=page\n${AT}\n${HTML}\n<head>${head}</head><body><p>x</p></body>\n`).ids('page'), head).toContain('H-03.1');
     }
   });
   it('H-01・H-02：http で採取して www へ転送した apex は、www の HSTS で判定しない', () => {
-    const r = evaluate(`#TARGET url=http://example.com/ label=apex\n${AT49}\nHTTP/1.1 301 Moved\nlocation: https://www.example.com/\n\nHTTP/2 200\ncontent-type: text/html\nstrict-transport-security: max-age=63072000; includeSubDomains; preload\n\n<p>x</p>\n`).ids('apex');
+    const r = evaluate(`#TARGET url=http://example.com/ label=apex\n${AT}\nHTTP/1.1 301 Moved\nlocation: https://www.example.com/\n\nHTTP/2 200\ncontent-type: text/html\nstrict-transport-security: max-age=63072000; includeSubDomains; preload\n\n<p>x</p>\n`).ids('apex');
     expect(r.filter(x => x.startsWith('H-01') || x.startsWith('H-02'))).toEqual(expect.arrayContaining(['H-01.na']));
     expect(r).not.toContain('H-01.ok');
     expect(r).not.toContain('H-02.ok');
   });
   it('E-10：同じ名前の属性が2つあれば、最初の値で判定する（ブラウザと同じ）', () => {
-    const form = (a: string, b: string) => evaluate(`#TARGET url=https://www.example.com/login label=page\n${AT49}\n${HTML}\n<form method="post" action="${a}" action="${b}"><input type="password" name="pw"></form>\n`).ids('page');
+    const form = (a: string, b: string) => evaluate(`#TARGET url=https://www.example.com/login label=page\n${AT}\n${HTML}\n<form method="post" action="${a}" action="${b}"><input type="password" name="pw"></form>\n`).ids('page');
     expect(form('https://www.example.com/session', 'http://www.example.com/session')).not.toContain('E-10.1');
     expect(form('http://www.example.com/session', 'https://www.example.com/session')).toContain('E-10.1');
   });

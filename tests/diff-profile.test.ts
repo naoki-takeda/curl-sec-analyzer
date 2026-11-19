@@ -1,12 +1,11 @@
-// 前回との差分・組織プロファイル・例外の照合（engine/diff.ts・profile.ts・suppress.ts）。第48回のレビューで見つかったもの
+// 前回との差分・組織プロファイル・例外の照合（engine/diff.ts・profile.ts・suppress.ts）
 import { describe, expect, it } from 'vitest';
 import { diff } from '../src/engine/diff';
 import { parseProfile } from '../src/engine/profile';
 import { parseInput } from '../src/parser/input';
 import { runAll } from '../src/engine/run';
-import { evaluate } from './helpers';
+import { AT, evaluate } from './helpers';
 
-const AT = '#META at=2026-11-01T10:00:00';
 const top = (host: string, hsts: boolean) => `#TARGET url=https://${host}/ label=top\n${AT}\nHTTP/2 200\ncontent-type: text/html\n${hsts ? 'strict-transport-security: max-age=63072000; includeSubDomains\n' : ''}\n<p>x</p>\n`;
 const kinds = (rows: ReturnType<typeof diff>, ruleId: string) => rows.filter(r => r.ruleId === ruleId).map(r => r.kind);
 

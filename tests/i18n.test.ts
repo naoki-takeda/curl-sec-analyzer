@@ -68,7 +68,7 @@ describe('診断カバレッジの英訳', () => {
   it('サンプルの診断カバレッジの理由は、すべて英訳できる', async () => {
     const { coverage } = await import('../src/engine/coverage');
     const { IMPLEMENTED } = await import('../src/rules/ruleset');
-    const reasons = coverage(evaluate(sampleText()).findings, IMPLEMENTED).flatMap(c => c.reasons).filter(r => !/^v0\.|^MVP|^手動/.test(r));
+    const reasons = coverage(evaluate(sampleText()).findings, IMPLEMENTED).flatMap(c => c.reasons);
     expect([...new Set(reasons)].filter(r => /[ぁ-んァ-ヶ一-龠]/.test(recommendationEn(r)))).toEqual([]);
   });
 });

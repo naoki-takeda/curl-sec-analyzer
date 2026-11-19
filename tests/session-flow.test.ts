@@ -1,9 +1,9 @@
-// ログイン・ログアウトの流れの判定（C-07②・C-09①・C-12①・H-15）。第48回のレビューで見つかった誤検知
+// ログイン・ログアウトの流れの判定（C-07②・C-09①・C-12①・H-15）
 import { describe, expect, it } from 'vitest';
-import { evaluate } from './helpers';
+import { AT, evaluate, GEN_OPTS, itemIds, RUN } from './helpers';
 import { NO_BODY_REC } from '../src/rules/util';
 
-const AT = '#META at=2026-11-01T10:00:00';
+const c09 = (input: string) => itemIds(input, 'C-09', 'pre-login/login');
 const ids = (input: string, item: string) => evaluate(input).findings.filter(f => f.item === item && f.target !== 'pre-login' && f.target !== 'login').map(f => f.ruleId);
 const LOGOUT = (head: string, body = '') => ['#TARGET url=https://www.example.com/logout label=logout', AT, head, '', body, ''].join('\n');
 const AFTER = (body = '') => ['#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1', AT, 'HTTP/2 200', 'content-type: text/html; charset=utf-8', '', body, ''].join('\n');
@@ -32,7 +32,6 @@ describe('第48回：C-09①・C-07② の比べる Cookie', () => {
   const PRE = ['#TARGET url=https://www.example.com/login label=pre-login', AT, 'HTTP/2 200', 'content-type: text/html',
     'set-cookie: JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly',
     'set-cookie: __Secure-next-auth.callback-url=https%3A%2F%2Fwww.example.com%2Fmypage; Path=/; Secure; HttpOnly', '', ''].join('\n');
-  const c09 = (input: string) => evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId);
   it('値が URL の Cookie（callback-url）を同じ値で送り直しても、セッションIDを新しくしていれば合格', () => {
     const login = ['#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /mypage',
       'set-cookie: JSESSIONID=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly',
@@ -60,7 +59,7 @@ describe('第48回：C-09①・C-07② の比べる Cookie', () => {
 describe('第48回：生成スクリプトの logout・after-logout', () => {
   it('logout は -v のまま本文も出し、after-logout は本文も取る', async () => {
     const { generateScript } = await import('../src/commands');
-    const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous: false });
+    const s = generateScript(GEN_OPTS);
     const lines = s.split('\n');
     const logout = lines[lines.findIndex(l => l.includes('label=logout')) + 2];
     // -v の行（送った Cookie の名前）は標準エラー、本文はファイルに取り、#BODY の印のあとに出す（-v の出力に本文を混ぜると、パーサは本文を読まない）
@@ -72,7 +71,6 @@ describe('第48回：生成スクリプトの logout・after-logout', () => {
 });
 
 describe('第48回（束3〜5のレビュー）', () => {
-  const RUN = '0123456789abcdef';
   it('本物のログアウトの画面（WebForms・action のないフォーム・購読のフォーム）を確認画面とみなさず、C-12① を隠さない', () => {
     for (const body of ['<form method="post" action="./Logout.aspx"><input type="hidden" name="__VIEWSTATE" value="x"><p>ログアウトしました</p></form>',
       '<p>ログアウトしました</p><form method="post"><input name="user"><input type="password" name="pw"></form>', '<p>Bye</p><form method="post"><input name="email"><button>Subscribe</button></form>']) {
@@ -133,20 +131,20 @@ describe('第49回：ログイン・ログアウトとセッション Cookie', (
       'set-cookie: JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; HttpOnly', 'set-cookie: visitor_ref=abcdefghijklmnopqrstuvwxyz012345; Path=/', '', '',
       '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /mypage',
       'set-cookie: JSESSIONID=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; HttpOnly', 'set-cookie: visitor_ref=abcdefghijklmnopqrstuvwxyz012345; Path=/', '', ''].join('\n');
-    expect(evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.ok']);
+    expect(c09(input)).toEqual(['C-09.ok']);
   });
   it('C-09：送っただけの JSESSIONID を再発行せず、別の Cookie だけを発行したログインは na', () => {
     const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, '* Connected to www.example.com (192.0.2.1) port 443', '> GET /login HTTP/2',
       '> Cookie: JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', '>', '< HTTP/2 200', '< content-type: text/html', '<', '',
       '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /mypage', 'set-cookie: auth_token=ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ; Path=/; Secure; HttpOnly', '', ''].join('\n');
-    expect(evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.na']);
+    expect(c09(input)).toEqual(['C-09.na']);
   });
   it('C-09：login の応答がプロキシの CONNECT の応答だけ（curl が失敗した）なら na', () => {
     const R = '0123456789abcdef', at = `#META at=2026-11-01T10:00:00 run=${R}`;
     const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${R}`, at, 'HTTP/1.1 200 Connection established', '', 'HTTP/2 200',
       'set-cookie: sessionid=Q2x8AAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
       `#TARGET url=https://www.example.com/login label=login run=${R}`, at, 'HTTP/1.1 200 Connection established', '', `#BODY run=${R}`, '', ''].join('\n');
-    expect(evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.na']);
+    expect(c09(input)).toEqual(['C-09.na']);
   });
   it('nginx の負荷分散の Cookie（route）をセッション Cookie とみなさない', () => {
     const s = (i: number) => `#TARGET url=https://www.example.com/login label=session-sample-${i}\n${AT}\nHTTP/2 302\nlocation: /\nset-cookie: route=8f14e45fceea167a5a36dedd4bea2543; Path=/\n\n`;
@@ -158,7 +156,6 @@ describe('第49回：ログイン・ログアウトとセッション Cookie', (
 
 describe('第50回：暗号化した Cookie と解析用の Cookie', () => {
   const lv = (iv: string, value = 'U2Vzc2lvbklEZml4ZWRWYWx1ZUFBQUFBQUFBQUFBQUFBQUFB') => Buffer.from(JSON.stringify({ iv, value, mac: 'a'.repeat(64), tag: '' })).toString('base64');
-  const c09 = (input: string) => evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId);
   it('C-09：Laravel の暗号化したセッションCookie は、値が変わっても再発行したとはみなさない（na）', () => {
     const input = ['#TARGET url=https://www.example.com/login label=pre-login', AT, 'HTTP/2 200', `set-cookie: laravel_session=${lv('MTIzNDU2Nzg5MDEyMzQ1Ng==')}; path=/; secure; httponly; samesite=lax`, '', '',
       '#TARGET url=https://www.example.com/login label=login', AT, 'HTTP/2 302', 'location: /home', `set-cookie: laravel_session=${lv('OTg3NjU0MzIxMDk4NzY1NA==')}; path=/; secure; httponly; samesite=lax`, '', ''].join('\n');
@@ -188,7 +185,6 @@ describe('第50回：暗号化した Cookie と解析用の Cookie', () => {
 });
 
 describe('第51回：主のセッションIDの名前・期限の Cookie', () => {
-  const c09 = (input: string) => evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId);
   it('C-09①：__Host-sid・connect.sid を同じ値で送り直し、別の Cookie を発行しただけのログインは①', () => {
     for (const name of ['__Host-sid', 'connect.sid']) {
       const v = 'a'.repeat(64);

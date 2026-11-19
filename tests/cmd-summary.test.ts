@@ -6,9 +6,9 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { summarizeAt, summarizeCommand } from '../src/export/cmdSummary';
 import { urlKey } from '../src/engine/targetKey';
+import { FC_MULT } from './helpers';
 
-const MULT = Number(process.env.FC_RUNS) || 1;
-const RUNS = { numRuns: 500 * MULT };
+const RUNS = { numRuns: 500 * FC_MULT };
 
 const PROGRAMS = ['curl', 'wget', 'http', 'https', 'xh', 'xhs', 'httpie', 'openssl', 'nc', 'ncat', 'nmap', 'sslscan', 'testssl', 'testssl.sh', 'grep', 'jq', 'sed', 'awk',
   'head', 'tail', 'cat', 'echo', 'printf', 'base64', 'timeout', 'sudo', 'env', 'powershell', 'pwsh', 'invoke-webrequest', 'iwr', 'invoke-restmethod', 'irm', 'dig',
@@ -28,7 +28,7 @@ const words = (out: string) => out.split('・').flatMap(c => c.split(' ')).filte
 
 /**
  * 乱数の秘密：英大文字・小文字・数字を含む12〜32文字と、base64url（「-」「_」を含む。JWT の署名やセッションIDの形）の16〜43文字。
- * 出力に6文字の窓が1つでもあれば漏れ（「_」で区切って読むので、base64url の秘密はかけらに分かれる。かけらが出ないことも確かめる）
+ * 出力に窓（base64url の秘密は6文字、英数字だけの秘密は8文字。両端が - _ の窓は除く）が1つでもあれば漏れ（「_」で区切って読むので、base64url の秘密はかけらに分かれる。かけらが出ないことも確かめる）
  */
 const alnum = fc.noBias(fc.stringMatching(/^[A-Za-z0-9]{12,32}$/).filter(t => /\d/.test(t) && /[a-z]/.test(t) && /[A-Z]/.test(t)));
 const b64url = fc.noBias(fc.stringMatching(/^[A-Za-z0-9_-]{16,43}$/).filter(t => /\d/.test(t) && /[a-z]/.test(t) && /[A-Z]/.test(t) && /[-_]/.test(t)));
