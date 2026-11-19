@@ -225,7 +225,7 @@ export function parseInput(input: string): ParseResult {
           for (const n of cookieNames(ck[1])) if (!seen.has(n)) { seen.add(n); names.push(n); added.push(n); }
         }
         if (auv) { t.sentAuthorization = true; if (autoAuthScheme(auv[1])) t.sentAutoAuth = true; }
-        if (ck || au) { t.sentAuth = t.sentAuth || sentAuthOf(au, added); for (const tok of h.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) t.sentTokens.push(tok); }
+        if (ck || au) { t.sentAuth = t.sentAuth || sentAuthOf(au, added); for (const tok of h.match(/(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) t.sentTokens.push(tok); }
         continue;
       }
       if (/^>\s*$/.test(line)) continue;               // 送信ヘッダの終端

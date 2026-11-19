@@ -69,7 +69,8 @@ function toResponse(e: HarEntry): HttpResponse {
 }
 
 const withoutHash = (u: string) => { const i = u.indexOf('#'); return i >= 0 ? u.slice(0, i) : u; };
-const JWT_IN_HEADER = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
+// 始まりは直前が英数字・ハイフンでないところだけ（\b は「-eyJ」の繰り返しで2乗の時間になる）
+const JWT_IN_HEADER = /(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]*/g;
 /** 名前のあるヘッダだけ（配列でない headers、名前のない要素・null を含む HAR でも TypeError にしない） */
 const named = (hs: (HarHeader | null | undefined)[] | undefined): HarHeader[] => (Array.isArray(hs) ? hs : []).filter((h): h is HarHeader => typeof h?.name === 'string');
 /** Authorization・Cookie のリクエストヘッダにある JWT（A-03 が curl の -v と同じく送った JWT もデコードできるように） */

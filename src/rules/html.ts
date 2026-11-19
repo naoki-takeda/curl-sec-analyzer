@@ -281,8 +281,9 @@ const SECRETS: [string, { test(s: string): boolean }][] = [
   ['秘密鍵', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
   ['Slackトークン', /\bxox[baprs]-[0-9A-Za-z-]{10,}/],
   ['GitHubトークン', /\bgh[pousr]_[0-9A-Za-z]{36,}\b/],
-  // ブラウザに渡す前提の JWT（Supabase の anon key。ペイロードの role が anon）は除く（行レベルのセキュリティで守る公開のキー）
-  ['JWT', { test: (s: string) => [...s.matchAll(/\beyJ[\w-]{10,}\.(eyJ[\w-]{10,})\.[\w-]{10,}/g)].some(m => !publicJwt(m[1])) }],
+  // ブラウザに渡す前提の JWT（Supabase の anon key。ペイロードの role が anon）は除く（行レベルのセキュリティで守る公開のキー）。
+  // 始まりは直前が英数字・ハイフンでないところだけ（\b は「-eyJ」の繰り返しで2乗の時間になる）
+  ['JWT', { test: (s: string) => [...s.matchAll(/(?<![\w-])eyJ[\w-]{10,}\.(eyJ[\w-]{10,})\.[\w-]{10,}/g)].some(m => !publicJwt(m[1])) }],
   // ブラウザで使う前提の SDK の呼び出しの中の apiKey（Algolia の docsearch・algoliasearch の検索専用のキー、Bugsnag・Sentry などの通知用のキー）は除く。
   // 属性の中の JSON（Inertia の data-page="{&quot;api_key&quot;:…}"）と、JS の文字列の中の JSON（JSON.parse("{\"api_key\":…}")）は、
   // 引用符を戻してからも見る

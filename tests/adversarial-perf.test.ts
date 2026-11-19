@@ -31,7 +31,10 @@ const PATTERNS = ['<!--', '<!-- x', '<script ', '<a href="', '<form ', '<input t
   '?password=a;', ';a', '&aaaaaaaaaa', 'xpass=', 'password":["',
   '"password":[[', 'password: [a, ', ';a a ', '%22password%22%3A%5B', 'password":[{"v":"',
   // 第51回：配列の空の要素、オブジェクトの値、CSP の ;、エスケープした //
-  '"password":["",', '"password":{"v":"', ';script-src ', 'a:\\/\\/b:'];
+  '"password":["",', '"password":{"v":"', ';script-src ', 'a:\\/\\/b:',
+  // 第54回：ハイフンのあとの eyJ（\b は - と e の間でも一致するので、位置ごとに並びの終わりまで読み直す）、値の中の ; の並び、同じ深さの %40、生の区切りでつないだエンコードの並び
+  '-eyJ', '-eyJa.', '-eyJaaaaaaaaaa.eyJ', '?password=a;;', ';;;;;;;;Secure', 'a;;',
+  'https%3A%2F%2Fa%3Ab%40', '%40a', '%3A%40', '%31-', '%31%31-', '%E3%81%8A.', '1%31 ', '%3D1-', '%2F%2Fa%3Ab@', '%2540'];
 
 describe('2乗の時間にならない', { tags: ['perf'] }, () => {
   it.each(PATTERNS)('本文・ヘッダに「%s」の繰り返し', p => {
@@ -80,6 +83,37 @@ describe('第49回：HAR の転送のつなぎ方が2乗の時間にならない
     ];
     const har = JSON.stringify({ log: { entries } });
     expect(ms(() => importHar(har)), 'importHar').toBeLessThan(4000);
+  });
+});
+
+describe('第54回：送ったヘッダの JWT の読み取りが2乗の時間にならない', { tags: ['perf'] }, () => {
+  it.each(['-eyJ', '-eyJa.', '-eyJaaaaaaaaaa.eyJ'])('-v の Authorization・Cookie に「%s」の繰り返し', p => {
+    const v = fill(p);
+    const input = ['#TARGET url=https://a.example/ label=page', '* Connected to a.example (192.0.2.1) port 443', '> GET / HTTP/2', '> Host: a.example',
+      `> Authorization: Bearer ${v}`, `> Cookie: a=${v}`, '>', '< HTTP/2 200', '< content-type: text/html', '<', ''].join('\n');
+    const { targets } = parseInput(input);
+    expect(targets[0].responses.length, '-v として読む').toBe(1);
+    expect(ms(() => runAll(parseInput(input).targets)), `parse+runAll ${p}`).toBeLessThan(1500);
+  });
+  it.each(['-eyJ', '-eyJa.'])('HAR の Authorization・Cookie に「%s」の繰り返し', async p => {
+    const { importHar } = await import('../src/parser/har');
+    const v = fill(p);
+    const har = JSON.stringify({ log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z',
+      request: { method: 'GET', url: 'https://a.example/', headers: [{ name: 'Authorization', value: `Bearer ${v}` }, { name: 'Cookie', value: `a=${v}` }] },
+      response: { status: 200, httpVersion: 'HTTP/2', headers: [], content: { mimeType: 'text/html', text: '' } } }] } });
+    expect(ms(() => importHar(har)), `importHar ${p}`).toBeLessThan(1500);
+  });
+});
+
+describe('第54回（2回目の束のレビュー）：%25 を重ねた数字の並びが2乗の時間・スタックのあふれにならない', { tags: ['perf'] }, () => {
+  it('ターゲットの URL と証跡に、%25 を数万段重ねた数字', () => {
+    const v = '1-%' + '25'.repeat(32000) + '31';
+    expect(ms(() => showText(v)), 'showText').toBeLessThan(1500);
+    const input = [`#TARGET url=https://a.example/?x=${v} label=page`, 'HTTP/2 200', 'content-type: text/html', '', '<html></html>', ''].join('\n');
+    expect(ms(() => runAll(parseInput(input).targets)), 'parse+runAll').toBeLessThan(4000);
+  });
+  it('エンコードしたユーザー情報のあとの @ の繰り返し', () => {
+    expect(ms(() => showText('?r=https%3A%2F%2Fa%3A' + 'b@'.repeat(32000))), 'showText').toBeLessThan(1500);
   });
 });
 

@@ -356,3 +356,78 @@ describe('第51回：配列の空の要素・CSP の ;・エスケープした /
     expect(showText("password: {value: 'Hunter2Spring'}")).toContain('{value: ');
   });
 });
+
+describe('第54回：値の中の ; の並び', () => {
+  it('; の並び（;;）のあとも値として伏せる', () => {
+    for (const x of ['https://a.example/?password=hunter2;;Winter2024', '?password=a;;Winter2024', 'password=hunter2;;;Winter2024', '?password=hunter2;;Winter2024&x=1'])
+      expect(showText(x), x).not.toContain('Winter2024');
+    expect(showText('?password=hunter2;;Winter2024&x=1')).toMatch(/&x=1$/);
+  });
+  it('; の並びのあとが名前=・Cookie の属性・空白・パス・CSP のディレクティブ・終わりなら、値はそこまで', () => {
+    expect(showText('?password=hunter2;;x=1')).toMatch(/;;x=1$/);
+    expect(showText('password=hunter2;;Secure')).toMatch(/;;Secure$/);
+    expect(showText('password=hunter2;; Path=/')).toMatch(/;; Path=\/$/);
+    expect(showText('?password=hunter2;;/path')).toMatch(/;;\/path$/);
+    expect(showText('?password=hunter2;;script-src')).toMatch(/;;script-src$/);
+    expect(showText('?password=hunter2;;')).toMatch(/;;$/);
+  });
+});
+
+describe('第54回：エンコードした URL のユーザー情報の同じ深さの %40、区切りの違うエンコードした番号', () => {
+  it('パスワードの中の同じ深さの %40 も、ホストの前の最後の %40 まで伏せる', () => {
+    for (const x of ['?redirect=https%3A%2F%2Falice%3AWinter%40Tokyo%40evil.example%2Fcb', '?redirect=https%3A%2F%2Falice%3AWinter%40Tokyo%40Osaka%40evil.example',
+      '?redirect=https%253A%252F%252Falice%253AWinter%2540Tokyo%2540evil.example', '?redirect=https%3A%2F%2Fbob%40corp%3AWinter%40Tokyo%40idp.example'])
+      expect(showText(x), x).not.toMatch(/Tokyo|Osaka|Winter/);
+    expect(showText('?redirect=https%3A%2F%2Falice%3AWinter%40Tokyo%40evil.example%2Fcb')).toMatch(/%40evil\.example%2Fcb$/);
+  });
+  it('パス・クエリの %40 はユーザー情報に含めない', () => {
+    expect(showText('?redirect=https%3A%2F%2Falice%3Apw%40host.example%2Fusers%2Fbob%40x.example')).toMatch(/%40host\.example%2Fusers%2Fbob%40x\.example$/);
+    expect(showText('?redirect=https%3A%2F%2Falice%3Apw%40evil.example%3Fx%3D%40y')).toMatch(/%40evil\.example%3Fx%3D%40y$/);
+    expect(showText('?redirect=https%3A%2F%2Fhost.example%3A8443%2Fusers%2Fbob%40x.example')).toBe('?redirect=https%3A%2F%2Fhost.example%3A8443%2Fusers%2Fbob%40x.example');
+  });
+  it('全体をエンコードした番号は、生の - _ + . の区切りでも伏せる', () => {
+    for (const sep of ['-', '_', '+', '.']) {
+      const x = `?card=${['%34%31%31%31', '%31%31%31%31', '%31%31%31%31', '%31%31%31%31'].join(sep)}`;
+      expect(showText(x), x).not.toContain('%31%31%31%31');
+    }
+    expect(showText('?ssn=%31%32%33-%34%35-%36%37%38%39')).not.toContain('%36%37%38%39');
+  });
+  it('区切りでつないだエンコードした日本語・記号は残す', () => {
+    for (const x of ['/%E3%81%8A%E7%9F%A5-%E3%82%89%E3%81%9B', '/a%2Fb.%2Fc', 'x%20-%20y', '?q=%E3%81%8A.%E3%81%8B+%E3%81%8C'])
+      expect(showText(x), x).toBe(x);
+  });
+});
+
+describe('第54回（束のレビュー）：空白・続く区切り・生とエンコードの混在の番号、生の @ で終わるエンコードしたユーザー情報', () => {
+  it('生の空白・2文字以上の区切りでつないだ、全体をエンコードした番号を伏せる', () => {
+    for (const x of ['?q=%34%31%31%31 %31%31%31%31 %31%31%31%31 %31%31%31%31', '?x=%34%31%31%31--%31%31%31%31--%31%31%31%31--%31%31%31%31',
+      '?x=%34%31%31%31-_%31%31%31%31-_%31%31%31%31-_%31%31%31%31'])
+      expect(showText(x), x).not.toMatch(/%31%31%31%31|%34%31%31%31/);
+  });
+  it('生の数字とエンコードした数字の混ざった番号を伏せる', () => {
+    for (const x of ['?x=4111-%31%31%31%31-%31%31%31%31-1111', '?x=4%31%31%31-1%31%31%31-1%31%31%31-1%31%31%31', '?card%3D4111%2D%31%31%31%31%2D1111%2D1111'])
+      expect(showText(x), x).not.toMatch(/1111|%31%31/);
+  });
+  it('番号の形でない数字の並び（日付・IP アドレス・版・電話番号）は残す', () => {
+    for (const x of ['/d/%32%30%32%36-%31%31-%31%38', 'Mozilla%2F5.0 (Windows NT 10.0)', '192.168.100.200', 'v1.2%2E3', '?ip=%31%39%32.%31%36%38.%31.%31', 'tel: %30%33-%31%32%33%34-%35%36%37%38'])
+      expect(showText(x), x).toBe(x);
+  });
+  it('エンコードしたスキームのユーザー情報は、生の @ や深さの違う %40 で終わっても伏せる', () => {
+    for (const x of ['?redirect=https%3A%2F%2Falice%3AWinter2024@evil.example', '?redirect=https%253A%252F%252Falice%253AWinter%2540Tokyo%40evil.example',
+      '?redirect=https%3A%2F%2Falice%3AWinter%2540Tokyo%40evil.example'])
+      expect(showText(x), x).not.toMatch(/Winter|Tokyo/);
+    expect(showText('?redirect=https%3A%2F%2Falice%3Apw@host.example%2Fx%40y')).toMatch(/@host\.example%2Fx%40y$/);
+    expect(showText('?redirect=https%3A%2F%2Fhost.example%2Fusers@x')).toBe('?redirect=https%3A%2F%2Fhost.example%2Fusers@x');
+  });
+});
+
+describe('第54回（2回目の束のレビュー）：パスワードの中の生の @', () => {
+  it('エンコードしたスキームのユーザー情報のパスワードに生の @ が2つ以上あっても、最後の @ まで伏せる', () => {
+    for (const x of ['?r=https%3A%2F%2Falice%3AWin@ter%40Tokyo%40evil.example', '?r=https%3A%2F%2Falice%3AWin@ter@evil.example',
+      '?r=https%3A%2F%2Falice%3ASummer2024@Winter2024%40evil.example', '?r=%2F%2Falice%3AWin@ter%40evil.example'])
+      expect(showText(x), x).not.toMatch(/Win|ter|Tokyo|Summer/);
+  });
+  it('%25 を重ねて3回戻しても % が残る数字の並びは伏せる', () => {
+    expect(showText('1-%' + '25'.repeat(10) + '31-%31%31')).not.toContain('2525');
+  });
+});

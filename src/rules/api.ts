@@ -158,8 +158,9 @@ export const jwtClaims: Rule = { id: 'A-03', title: 'JWTの中身', appliesTo: '
     const found = new Set<string>(ctx.target.sentTokens);
     const idTokens = new Set<string>();   // id_token の欄・Cookie の値として返した JWT
     for (const r of ctx.target.responses) {
-      for (const v of r.headers.get('set-cookie') ?? []) for (const m of v.match(/\beyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) found.add(m);
-      for (const m of (r.body ?? '').match(/\beyJ[\w-]+\.eyJ[\w-]+\.[\w-]*/g) ?? []) found.add(m);
+      // JWT の始まりは直前が英数字・ハイフンでないところだけ（\b は「-eyJ」の繰り返しの各位置から並びの終わりまで読み直し、2乗の時間になる）
+      for (const v of r.headers.get('set-cookie') ?? []) for (const m of v.match(/(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) found.add(m);
+      for (const m of (r.body ?? '').match(/(?<![\w-])eyJ[\w-]+\.eyJ[\w-]+\.[\w-]*/g) ?? []) found.add(m);
       for (const v of [r.body ?? '', ...(r.headers.get('set-cookie') ?? [])]) for (const m of v.matchAll(ID_TOKEN_FIELD)) idTokens.add(m[1]);
     }
     const jwts = [...found].flatMap(token => { const d = decodeJwt(token); return d ? [{ ...d, token }] : []; });

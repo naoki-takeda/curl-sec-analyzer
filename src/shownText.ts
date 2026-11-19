@@ -69,8 +69,26 @@ const KEEP = String.raw`…\(\d+ chars\)|(?<![\w-])(?:sha256-[A-Za-z0-9+/]{43}=|
 // 1234%205678%209012 を短いかけらに分けて残さない）
 const JOIN = String.raw`(?:[-_+]|%(?:25)*(?:2[BbFf0DdEe]|3[Dd]))+`;
 // パーセントエンコードした文字の並び（%2F。二重エンコードの %252F も）。語の一部として読まず（%2Fv1 を語 2Fv1 と読まない）、並びとして escapeRun で
-// 見る（1つずつを区切りとして残すと、エンコードしたバイナリ・暗号文 ?d=%8F%1A%C3%77… がそのまま残る）
-const ESCAPES = String.raw`(?:%(?:25)*[0-9A-Fa-f]{2})+`;
+// 見る（1つずつを区切りとして残すと、エンコードしたバイナリ・暗号文 ?d=%8F%1A%C3%77… がそのまま残る）。生の - _ + . でつないだ並びも1つとして
+// 見る（全体をエンコードした番号 %34%31%31%31-%31%31%31%31-… を、戻すと4桁の数字になる並びごとに残さない）
+const ESCAPE = String.raw`(?:%(?:25)*[0-9A-Fa-f]{2})+`;
+const ESCAPES = String.raw`${ESCAPE}(?:[-_+.]+${ESCAPE})*`;
+// 生の数字とエンコードした数字（%31・%2531）を、生の区切り（- _ + . 空白）かエンコードした区切り（%20・%2D・%2E・%2B）でつないだ並び
+// （4111-%31%31%31%31-…、%34%31%31%31 %31%31%31%31 …）。語ごと・エンコードの並びごとに見ると4桁ずつ残るので、戻してから番号として見る。
+// 始まりは語の外か、数字でないエンコードした文字（%3D）の直後だけ（数字の並びの途中から試し直さないので線形時間）
+const DIGIT = String.raw`(?:\d|%(?:25)*3\d)`;
+const DIGIT_JOIN = String.raw`(?:[-_+. ]|%(?:25)*(?:20|2[BbDdEe]))`;
+const MIXED_DIGITS = new RegExp(String.raw`(?:(?<![A-Za-z0-9%])|(?<=%(?!3\d)[0-9A-Fa-f]{2}))${DIGIT}+(?:${DIGIT_JOIN}+${DIGIT}+)+`, 'g');
+/** 生とエンコードの混ざった数字の並びを戻して、番号の形（カード番号・社会保障番号・12桁以上の区切った数字）なら伏せる */
+const maskMixedDigits = (s: string): string => s.replace(MIXED_DIGITS, m => {
+  if (!m.includes('%')) return m;   // 生の数字だけの並びは、下の語の並びの規則（allowRun）とマスクに任せる（IP アドレスなどを変えない）
+  let d = m;
+  for (let i = 0; i < 3 && d.includes('%'); i++) { try { d = decodeURIComponent(d); } catch { return `…(${m.length} chars)`; } }
+  // 3回戻しても % が残る（%25 を重ねた）ものは伏せる。戻したものを allowText に渡すと、同じ並びをまた3段ずつ戻す再帰になり、
+  // 2乗の時間とスタックのあふれになる
+  if (d.includes('%')) return `…(${m.length} chars)`;
+  return maskText(d) !== d || allowText(d) !== d ? `…(${m.length} chars)` : m;
+});
 const WORDS = new RegExp(`(${ESCAPES})|(${KEEP})|[A-Za-z0-9]+(?:${JOIN}[A-Za-z0-9]+)*`, 'g');
 const JOIN_SPLIT = new RegExp(`(${JOIN})`);
 // 暗号の略語（CBC・GCM・DHE・ADH・SRP）。まれな2文字の並びが多いが、番号のかけらとみなさない（ECDHE-RSA-RC4-SHA を伏せない）
@@ -112,7 +130,7 @@ function allowRun(run: string): string {
 }
 
 /** 残してよい形の語だけを残す（それ以外は「…(N chars)」） */
-export const allowText = (s: string): string => s.replace(WORDS, (w: string, esc: string | undefined, keep: string | undefined) => (esc ? escapeRun(esc) : keep ? w : allowRun(w)));
+export const allowText = (s: string): string => maskMixedDigits(s).replace(WORDS, (w: string, esc: string | undefined, keep: string | undefined) => (esc ? escapeRun(esc) : keep ? w : allowRun(w)));
 
 /**
  * パーセントエンコードした文字の並び。3つまで（区切りの %2F・%3D、1文字の日本語）はそのまま残す。4つ以上は戻して見て、読める文字
@@ -126,7 +144,8 @@ function escapeRun(run: string): string {
   if (!/^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]*$/u.test(d) || /\uFFFD/.test(d)) return `…(${run.length} chars)`;
   // 戻すと名前や形で伏せる値になるもの（全体をエンコードしたカード番号 %34%31%31%31%20…）は伏せる
   if (maskText(d) !== d) return `…(${run.length} chars)`;
-  return (d.match(/[A-Za-z0-9]+/g) ?? []).every(allowedWord) ? run : `…(${run.length} chars)`;
+  // 語ごとに見たうえで、生の文字列と同じく並びとしても見る（戻した 4111_1111_… を4桁の語ごとに残さない）
+  return (d.match(/[A-Za-z0-9]+/g) ?? []).every(allowedWord) && allowText(d) === d ? run : `…(${run.length} chars)`;
 }
 
 /**
