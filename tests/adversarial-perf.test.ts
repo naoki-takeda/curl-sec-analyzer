@@ -126,3 +126,21 @@ describe('第50回：Set-Cookie の多い応答の判定が長くならない', 
     expect(ms(() => runAll(parseInput(input).targets)), 'parse+runAll').toBeLessThan(4000);
   });
 });
+
+describe('ルールの本文の走査が2乗の時間にならない', { tags: ['perf'] }, () => {
+  const page = (label: string, url: string, body: string) => [`#TARGET url=${url} label=${label}`, '#META at=2026-11-01T10:00:00', 'HTTP/2 200', 'content-type: text/html', '', body, ''].join('\n');
+  it.each(['<form>', '<form></form>', '<form><input type=password>', '<form method=post><input type=hidden name=a></form>'])('E-09・E-10・E-12：本文に「%s」の繰り返し', p => {
+    const input = page('page', 'https://a.example/', fill(p));
+    expect(ms(() => runAll(parseInput(input).targets)), p).toBeLessThan(1500);
+  });
+  it('E-01①：本文に「jdbc:oracle:thin:u/」の繰り返し', () => {
+    const input = page('error-500', 'https://a.example/x', fill('jdbc:oracle:thin:u/'));
+    expect(ms(() => runAll(parseInput(input).targets)), 'E-01').toBeLessThan(1500);
+  });
+  it('C-12①：after-logout の本文のスクリプトに長い語の代入', () => {
+    const shell = (s: string) => `<div id="root"></div><script>${s}</script>`;
+    // 代入（a = {}）があるとスクリプトの中身を STATE_DATA で読む。長い語の各位置から名前を読み直すと2乗の時間になる
+    const input = [page('logout', 'https://a.example/logout', ''), page('after-logout', 'https://a.example/mypage', shell(`var a = {}; ${'user'.repeat(16000)}`))].join('');
+    expect(ms(() => runAll(parseInput(input).targets)), 'C-12').toBeLessThan(1500);
+  });
+});

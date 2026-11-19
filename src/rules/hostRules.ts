@@ -2,21 +2,24 @@
 import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { probePattern } from './probes';
 import { hasCertificate, nameMatches, parseOpenssl, type TlsInfo } from '../parser/openssl';
-import { capturedAt } from '../parser/target';
+import { hostnameOf } from '../parser/target';
 import { PROBE_UNREACHED_REC } from './util';
+import { cf } from './cross';
 
-const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
-  ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
-     target: host, host, evidence, recommendation, references: rule.basis });
+const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string) =>
+  cf(rule, host, cond, severity, status, evidence, recommendation, host);
 
+/** 旧バージョン（TLS 1.1 以前）。-v の「SSL connection using SSLv3」も */
+const OLD = /^(ssl3|sslv3|tls1(?:\.0)?|tls1\.1|tls1_1|tls1_0|tlsv1(?:\.0)?|tlsv1\.1)$/i;
+const isOld = (v: string) => OLD.test(v.replace(/\s/g, ''));
 /**
  * そのホストに TLS で接続できたと分かるか：新しいバージョン（1.2・1.3）か弱くない暗号のプローブで接続できた、curl -v で合意した、
  * openssl の出力に証明書がある。プロキシ経由の環境では curl はつながっても openssl（s_client）はつながらず、すべてのプローブが失敗する。
  * そのとき「旧バージョン・弱い暗号は拒否された」と合格にすると、高の条件を確かめずに合格にする
  */
 const reachedTls = (ts: Target[], negotiated: number): boolean => negotiated > 0
-  || ts.some(t => t.tlsProbes.some(p => p.result === 'accepted' && !OLD.test(p.version.replace(/\s/g, ''))) || t.cipherProbes.some(p => p.result === 'accepted'))
-  || ts.some(t => t.openssl.length > 0 && (() => { const i = parseOpenssl(t.openssl); return !!i && hasCertificate(i); })());
+  || ts.some(t => t.tlsProbes.some(p => p.result === 'accepted' && !isOld(p.version)) || t.cipherProbes.some(p => p.result === 'accepted'))
+  || opensslCaptures(ts).some(c => hasCertificate(c.info));
 const UNREACHED_TLS_REC = 'openssl が対象に届く環境（プロキシを通さない端末、-proxy の指定）で C12・C23 を実行し直す';
 /**
  * ターゲットの -v の情報行のうち、そのホストへの接続のもの。-L で別のホスト（外部の SSO、apex から www）に移ると、そのホストの
@@ -24,17 +27,15 @@ const UNREACHED_TLS_REC = 'openssl が対象に届く環境（プロキシを通
  * どのホストへの接続かをたどる（外部の SSO の TLS 1.1 を対象のホストの T-09① にしない）。「Connected to」はプロキシへの接続でも
  * 出るので使わない（プロキシ経由の採取で、対象のホストの TLS を失う）
  */
-const hostnameOf = (h: string) => h.replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
 function ownInfo(t: Target, host: string): string[] {
-  const want = hostnameOf(host); let cur = want; const out: string[] = [];
+  const want = hostnameOf(`https://${host}`); let cur = want; const out: string[] = [];
   for (const l of t.info) {
     const m = l.match(/^Issue another request to this URL: '([^']+)'/);
-    if (m) { try { cur = hostnameOf(new URL(m[1]).host); } catch { /* 読めない URL なら、いまのホストのまま */ } }
+    if (m) cur = hostnameOf(m[1]) ?? cur;              // 読めない URL なら、いまのホストのまま
     if (cur === want) out.push(l);
   }
   return out;
 }
-const OLD = /^(ssl3|sslv3|tls1(?:\.0)?|tls1\.1|tls1_1|tls1_0|tlsv1(?:\.0)?|tlsv1\.1)$/i;   // -v の「SSL connection using SSLv3」も
 export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appliesTo: 'any', scope: 'host',
   basis: ['Mozilla Server Side TLS', 'IPA TLS暗号設定ガイドライン'],
   runCross(x) {
@@ -44,19 +45,20 @@ export const tlsVersion: Rule = { id: 'T-09', title: 'TLSバージョン', appli
       // OpenSSL は TLS 1.0 を「TLSv1」と出す
       const negotiated = ts.flatMap(t => ownInfo(t, host)).map(l => l.match(/SSL connection using (TLSv1(?:\.\d)?|SSLv3)\b/)?.[1]).filter((v): v is string => !!v);
       if (!probes.length && !negotiated.length) continue;         // TLSの情報がないホストは適用外
+      const oldProbes = probes.filter(p => isOld(p.version));
       // 同じバージョンのプローブが2回あっても（サンプルと採取を一緒に入れたとき）、証跡には1回だけ書く
-      const accepted = probes.filter(p => p.result === 'accepted' && OLD.test(p.version.replace(/\s/g, '')));
+      const accepted = oldProbes.filter(p => p.result === 'accepted');
+      const errored = oldProbes.filter(p => p.result === 'error');
       // C4 で旧バージョンを合意した場合も、そのバージョンで接続できたので①にする（②の「TLS 1.3 非対応」だけにしない）
-      const oldNegotiated = [...new Set(negotiated.filter(v => OLD.test(v)))];
+      const oldNegotiated = [...new Set(negotiated.filter(isOld))];
       if (accepted.length || oldNegotiated.length) out.push(hf(tlsVersion, host, 1, 'high', 'fail',
         [accepted.length ? `接続できた旧バージョン: ${[...new Set(accepted.map(p => p.version))].join(', ')}` : '', oldNegotiated.length ? `合意したバージョン: ${oldNegotiated.join(', ')}` : ''].filter(Boolean).join('、'),
         'TLS 1.2 と 1.3 だけを有効にする'));
       // 旧バージョンの一部が ok=err（手元の OpenSSL が非対応）なら、そのバージョンは試していないので合格にしない（設計書：ok=err は na。
       // tls1=err・tls1_1=0 では TLS 1.0 を確かめていない）
-      else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected')
-        && probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'error'))
-        out.push(hf(tlsVersion, host, 'na', 'info', 'na', `旧バージョンの一部の接続可否が分からない（手元のOpenSSLが非対応: ${[...new Set(probes.filter(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'error').map(p => p.version))].join(', ')}）`, '旧バージョンに対応した環境で C12 を実行する'));
-      else if (probes.some(p => OLD.test(p.version.replace(/\s/g, '')) && p.result === 'rejected'))
+      else if (oldProbes.some(p => p.result === 'rejected') && errored.length)
+        out.push(hf(tlsVersion, host, 'na', 'info', 'na', `旧バージョンの一部の接続可否が分からない（手元のOpenSSLが非対応: ${[...new Set(errored.map(p => p.version))].join(', ')}）`, '旧バージョンに対応した環境で C12 を実行する'));
+      else if (oldProbes.some(p => p.result === 'rejected'))
         out.push(reachedTls(ts, negotiated.length) ? hf(tlsVersion, host, 'ok', 'info', 'pass', '旧バージョンは拒否された', '')
           : hf(tlsVersion, host, 'na', 'info', 'na', 'どのバージョンでも接続できなかった（旧バージョンを拒否したのか、openssl が対象に届かないのかが分からない）', UNREACHED_TLS_REC));
       else if (probes.length) out.push(hf(tlsVersion, host, 'na', 'info', 'na', '旧バージョンの接続可否が分からない（手元のOpenSSLが非対応）', '旧バージョンに対応した環境で C12 を実行する'));
@@ -174,10 +176,10 @@ export const certificate: Rule = { id: 'T-11', title: '証明書', appliesTo: 'a
       if (!cap) continue;
       const { t: src, info } = cap;
       if (!hasCertificate(info)) { out.push(hf(certificate, host, 'na', 'info', 'na', '証明書の情報がない（ハンドシェイクに失敗した可能性）', 'C11 の出力にエラーがないか確認して採取し直す')); continue; }
-      // 期限は採取した時刻（#META at）を基準にする。古い出力を読み直しても、採取時の状態で判定する。#META at がなければ判定した時刻
-      // （応答の Date は使わない。Date は診断対象のサーバが書くので、過去の Date（CDN のキャッシュの古い応答を含む）で、期限の近い・切れた
-      // 証明書を合格にできてしまう。Cookie の期限（C-05）とは逆に、過去の基準が甘い向きになる）
-      const now = src.meta.at ? capturedAt(src) : Date.now();
+      // 期限は採取した時刻（#META at）を基準にする。古い出力を読み直しても、採取時の状態で判定する。#META at がない・読めなければ判定した時刻
+      // （応答の Date は使わない（capturedAt は使わない）。Date は診断対象のサーバが書くので、過去の Date（CDN のキャッシュの古い応答を含む）で、
+      // 期限の近い・切れた証明書を合格にできてしまう。Cookie の期限（C-05）とは逆に、過去の基準が甘い向きになる）
+      const at = Date.parse(src.meta.at ?? ''); const now = Number.isNaN(at) ? Date.now() : at;
       // 証跡には、読めた日時の形の部分だけを、書いてあるとおりに出す（日時のあとに書いた文字（認証情報など）を出さない。形を変えると、
       // 日付だけの値やタイムゾーン付きの値が、見る人の時刻でずれる）
       const atShown = src.meta.at?.trim().match(AT_SHOWN)?.[0];

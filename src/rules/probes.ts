@@ -27,8 +27,7 @@ const PROBE_PATTERNS: [string, string, RegExp, RegExp][] = [
   // コメント（#）で始めてもよいが、コメントだけのもの（security-txt-comment）は本当の security.txt かが分からない（どのパスにも
   // 「# …」の平文を返すサーバもある）ので、E-04 は na にする。見るのはファイルの先頭の # だけ（行の始めの # では、CSS の #app{ を含む HTML に一致する）
   ['security-txt',  'E-04', /\/security\.txt$/,      /^(?:Contact|Expires|Encryption|Acknowledgments|Preferred-Languages|Canonical|Policy|Hiring):/im],
-  ['security-txt-comment', 'E-04', /\/security\.txt$/, /(?<![\s\S])#/],
-  ['robots',        'E-04', /\/robots\.txt$/,        /^(User-agent|Disallow|Allow|Sitemap):/im],
+  ['security-txt-comment', 'E-04', /\/security\.txt$/, /^#/],
   // XSSI 対策の前置き（)]}' の行）を付けたソースマップも認める（ブラウザの開発ツールは読む）。
   // "version":3 か、ソースマップに特有のキーがあるときだけ（"version"・"file" だけでは、どのパスにも {"version":"2.1.0"} を返す API と区別できない）
   ['source-map',    'E-13', /\.map$/,                /^(?:\)\]\}'[^\n]*\n)?\s*\{[\s\S]*?(?:"version"\s*:\s*3\b|"(?:sources|sourceRoot|sourcesContent|mappings|names|sections)"\s*:)/]];

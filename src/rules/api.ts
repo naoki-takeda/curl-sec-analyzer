@@ -1,9 +1,12 @@
 // rules/api.ts：第6章 WebAPI（A-01〜A-03、A-07〜A-11。A-04〜A-06は手動確認）
-import type { CrossContext, Finding, Rule, RuleContext } from '../model';
+import type { CrossContext, Finding, HttpResponse, Rule, RuleContext } from '../model';
 import { baseLabel, finalResponse, responseKind, sameDocumentHop } from '../parser/target';
+import { JWT_IN_TEXT } from '../parser/setCookie';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { NO_BODY_REC, graphqlError as graphqlErrorOf, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, notSecretFormat, notSecretText } from './util';
+import { NO_BODY_REC, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, notSecretFormat, notSecretText } from './util';
 import { loginForm } from './html';
+import { cf } from './cross';
+import { b64urlJson } from './jwt';
 
 export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', appliesTo: 'any', scope: 'target',
   basis: ['OWASP REST Security CS', 'OWASP Secure Headers'],
@@ -34,15 +37,20 @@ export const API_TOP10: Record<string, string> = {
   'A-07': 'API3:2023', 'A-08': 'API8:2023', 'A-09': 'API8:2023', 'A-10': 'API8:2023', 'A-11': 'API5:2023・API9:2023',
 };
 
-// 同じページへの転送（末尾の / への 307 など）はたどった先のステータスで見る。たどれないときは 0（判定しない）にして、呼び出し側で na にする
-const status = (ctx: RuleContext) => { const { hop, unfollowed } = sameDocumentHop(ctx.target); return unfollowed ? 0 : hop?.status ?? ctx.final?.status ?? 0; };
-const UNFOLLOWED = (ctx: RuleContext) => sameDocumentHop(ctx.target).unfollowed;
+/**
+ * A-01・A-08・A-11 が判定に使う応答（r）とステータス。同じページへの転送（末尾の / への 307 など）はたどった先（hop）で見る。
+ * たどれない（-L なし）ときは unfollowed で、呼び出し側で na にする
+ */
+const judged = (ctx: RuleContext) => {
+  const { hop, unfollowed } = sameDocumentHop(ctx.target); const r = hop ?? ctx.final;
+  return { hop, r, unfollowed, status: r?.status ?? 0 };
+};
+const UNFOLLOWED_EV = '同じページへの転送（末尾の / など）。転送先を採取していない';
 /**
  * API の URL に HTML の画面を 200 で返したか（どのパスにも index.html を返す SPA、ログイン画面）。A-01・A-11 では、データを返したかが
  * 分からないので①②にしない（E-05 の HTML の 200 と同じ考え方）。ログインのフォームなら、認証を求めたのと同じ
  */
-const htmlPage = (ctx: RuleContext): 'login' | 'html' | 'unknown' | undefined => {
-  const r = sameDocumentHop(ctx.target).hop ?? ctx.final;
+const htmlPage = (r: HttpResponse | undefined): 'login' | 'html' | 'unknown' | undefined => {
   const ct = r?.headers.get('content-type')?.[0] ?? ''; const b = r?.body ?? '';
   // HTML の画面とみなすのは、本文が HTML の形のものだけ。Content-Type が text/html でも、本文が JSON・CSV・平文のもの（PHP の既定の
   // Content-Type のまま返す API）は HTML の画面ではない
@@ -56,10 +64,6 @@ const htmlPage = (ctx: RuleContext): 'login' | 'html' | 'unknown' | undefined =>
   if (!/<!doctype html|<html\b/i.test(head) && !(htmlCt && /^\s*<(?!\?xml\b)/i.test(b))) return undefined;
   return loginForm(b) ? 'login' : 'html';
 };
-/** 判定に使う応答（同じページへの転送をたどった先）の本文。データのない JSON・GraphQL のエラー（util.ts）をこの本文で見る */
-const hopBody = (ctx: RuleContext) => (sameDocumentHop(ctx.target).hop ?? ctx.final)?.body;
-const emptyJson = (ctx: RuleContext): boolean => noDataJson(hopBody(ctx));
-const graphqlError = (ctx: RuleContext) => graphqlErrorOf(hopBody(ctx));
 
 /**
  * A-01③：HTTP の応答で Basic 認証を求めているか。-L の転送をたどり、URL が http のホップの WWW-Authenticate だけを見る
@@ -87,30 +91,30 @@ export const unauthAccess: Rule = { id: 'A-01', title: '未認証アクセス', 
     if (basic) return [mk(unauthAccess, ctx, 3, 'high', 'fail', `HTTPで WWW-Authenticate: ${basic}`, 'Basic認証はHTTPSだけで受け付ける')];
     if (!ctx.target.label.startsWith('unauth-')) return [];   // ①②は認証情報を付けずに送ったターゲット（unauth-*）だけ
     if (ctx.target.sentAuth) return [mk(unauthAccess, ctx, 'na', 'info', 'na', '認証情報（Cookie・Authorization）を送っている', 'unauth-* は認証情報を付けずに採取する')];
-    const s = status(ctx);
-    if (UNFOLLOWED(ctx)) return [mk(unauthAccess, ctx, 'na', 'info', 'na', '同じページへの転送（末尾の / など）。転送先を採取していない', '-L を付けて、転送先まで採取し直す')];
+    const { hop, r, unfollowed, status: s } = judged(ctx);
+    if (unfollowed) return [mk(unauthAccess, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, '-L を付けて、転送先まで採取し直す')];
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!s) return [mk(unauthAccess, ctx, 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     if (s >= 200 && s < 300) {
-      const page = htmlPage(ctx);
+      const page = htmlPage(r);
       // ログインのフォームがあっても合格にはしない（ゲスト用のログイン欄と利用者のデータを並べる画面がある）
       if (page === 'unknown') return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（text/html。本文を採取していないので、データを返したかは分からない）`, NO_BODY_REC)];
       if (page) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（HTML の画面${page === 'login' ? '。ログインのフォームを含む' : '。どのパスにも同じ画面を返す SPA の可能性'}。データを返したかは分からない）`, 'API の URL（JSON を返すもの）で採取し直す')];
       // GraphQL は認証のエラーも 200 で返す（{"errors":[{"extensions":{"code":"UNAUTHENTICATED"}}],"data":{"me":null}}）。データを返していない
-      const gql = graphqlError(ctx);
+      const gql = graphqlError(r?.body);
       if (gql === 'denied') return [mk(unauthAccess, ctx, 'ok', 'info', 'pass', `HTTP ${s}（GraphQL の認証エラー。データは null）`, '')];
       if (gql) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（GraphQL のエラー。データは null で、認証で断られたかは分からない）`, '認証が必要なクエリ（me など）で採取し直す')];
       // データのない JSON（{}・[]・null・値がすべて null のもの。NextAuth の未認証の /api/auth/session は {} を返す）は、保護データを返していない
-      if (emptyJson(ctx)) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（データのない JSON。保護データを返したかは分からない）`, '認証が必要なデータを返す API の URL で採取し直す')];
+      if (noDataJson(r?.body)) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（データのない JSON。保護データを返したかは分からない）`, '認証が必要なデータを返す API の URL で採取し直す')];
       // 本文のない応答（204、content-length: 0）はデータを返していない。本文を採取していない（-o /dev/null）なら、データを返したかが分からない
-      if (!hopBody(ctx)?.trim()) {
+      if (!r?.body?.trim()) {
         const empty = s === 204 || header(ctx, 'content-length')[0]?.trim() === '0';
         return [mk(unauthAccess, ctx, 'na', 'info', 'na', empty ? `HTTP ${s}（本文のない応答。データを返していない）` : `HTTP ${s}（本文を採取していないので、データを返したかは分からない）`,
           empty ? '認証が必要なデータを返す API の URL で採取し直す' : NO_BODY_REC)];
       }
       return [mk(unauthAccess, ctx, 1, 'high', 'fail', `認証なしで HTTP ${s}`, '未認証のリクエストには 401 と WWW-Authenticate を返す（保護すべきデータかを確認する）')];
     }
-    if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${sameDocumentHop(ctx.target).hop?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
+    if (s >= 300 && s < 400) return [mk(unauthAccess, ctx, 2, 'low', 'fail', `HTTP ${s} → ${hop?.headers.get('location')?.[0] ?? ''}`, 'APIはログイン画面へ転送せず 401 を返す')];
     // 合格は、認証を求めた・断られた応答（401・403）と、メソッドで断られた応答（405）だけ。404（URL の誤りの可能性）と 5xx（認証の前に
     // 落ちた可能性）、400・429 などは、認証で守られているかが分からない（A-08 と同じ考え方）
     if (s !== 401 && s !== 403 && s !== 405) return [mk(unauthAccess, ctx, 'na', 'info', 'na', `HTTP ${s}（認証で守られているかは分からない）`, '存在する API の URL で、認証情報を付けずに採取し直す')];
@@ -143,11 +147,10 @@ export const tokenExposure: Rule = { id: 'A-02', title: 'トークンの露出',
     return out.length ? out : [mk(tokenExposure, ctx, 'ok', 'info', 'pass', 'URL・Location・本文にトークンなし', '')];
   } };
 
-const b64url = (s: string) => { try { return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=')), c => c.charCodeAt(0)))) as Record<string, unknown>; } catch { return undefined; } };
 /** JWT の header と payload をデコードする（署名は検証しない。値は画面に出さない） */
 export function decodeJwt(token: string): { header: Record<string, unknown>; payload: Record<string, unknown> } | undefined {
   const [h, p] = token.split('.');
-  const header = h ? b64url(h) : undefined, payload = p ? b64url(p) : undefined;
+  const header = h ? b64urlJson(h) : undefined, payload = p ? b64urlJson(p) : undefined;
   return header && payload ? { header, payload } : undefined;
 }
 const ID_TOKEN_FIELD = /["']?\bid_token["']?\s*[:=]\s*["']?(eyJ[\w-]+\.eyJ[\w-]+\.[\w-]*)/g;
@@ -158,8 +161,9 @@ export const jwtClaims: Rule = { id: 'A-03', title: 'JWTの中身', appliesTo: '
     const found = new Set<string>(ctx.target.sentTokens);
     const idTokens = new Set<string>();   // id_token の欄・Cookie の値として返した JWT
     for (const r of ctx.target.responses) {
-      // JWT の始まりは直前が英数字・ハイフンでないところだけ（\b は「-eyJ」の繰り返しの各位置から並びの終わりまで読み直し、2乗の時間になる）
-      for (const v of r.headers.get('set-cookie') ?? []) for (const m of v.match(/(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]*/g) ?? []) found.add(m);
+      // JWT の始まりは直前が英数字・ハイフンでないところだけ（\b は「-eyJ」の繰り返しの各位置から並びの終わりまで読み直し、2乗の時間になる）。
+      // 本文では、ペイロードも eyJ で始まるものだけを JWT とする
+      for (const v of r.headers.get('set-cookie') ?? []) for (const m of v.match(JWT_IN_TEXT) ?? []) found.add(m);
       for (const m of (r.body ?? '').match(/(?<![\w-])eyJ[\w-]+\.eyJ[\w-]+\.[\w-]*/g) ?? []) found.add(m);
       for (const v of [r.body ?? '', ...(r.headers.get('set-cookie') ?? [])]) for (const m of v.matchAll(ID_TOKEN_FIELD)) idTokens.add(m[1]);
     }
@@ -194,7 +198,7 @@ const SECRET_KEY_NAME = /^(?:[spr]k_(?:live|test)_|whsec_|gh[pousr]_|xox[abprs]-
 const mixed = (p: string) => /[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p);
 const secretKeyName = (k: string) => SECRET_KEY_NAME.test(k) || /^(?:sk-(?:proj|live|test|svcacct)-|glpat-|npm_|AIza)/.test(k)
   || k.split(/[-_.]/).some(p => p.length >= 16 && mixed(p)) || (k.length >= 20 && mixed(k));
-export const safeKey = (k: string) => (/^[A-Za-z0-9_$][\w$.-]{0,127}$/.test(k) && !secretKeyName(k) ? k : '*');
+const safeKey = (k: string) => (/^[A-Za-z0-9_$][\w$.-]{0,127}$/.test(k) && !secretKeyName(k) ? k : '*');
 /** JSONのキーを「a.b[0].c」の形で列挙する */
 export function jsonKeys(v: unknown, prefix = '', out: string[] = [], depth = 0): string[] {
   if (depth > 20 || out.length > 2000) return out;
@@ -216,7 +220,7 @@ function shownPaths(v: unknown, raw = '', shown = '', out = new Map<string, stri
  * 値が「秘密情報らしい文字列」のキー（配列の番号は [] にそろえる）。空白や ASCII 以外の文字を含む文字列は画面の文言（i18n の
  * {"password":"パスワード"} など）とみなし、null・数値・真偽値・オブジェクトも値を露出していないので除く
  */
-export function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(), depth = 0): Set<string> {
+function secretValuedKeys(v: unknown, prefix = '', out = new Set<string>(), depth = 0): Set<string> {
   if (depth > 20 || out.size > 2000) return out;
   if (Array.isArray(v)) v.slice(0, 50).forEach(x => secretValuedKeys(x, `${prefix}[]`, out, depth + 1));
   else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
@@ -278,11 +282,11 @@ const SECRET_KEY = { test: (path: string): boolean => {
 const stateWord = (v: string) => /^(?:true|false|yes|no|on|off|[01]|none|null|nil|empty|set|unset|not[-_ ]?set|configured|unconfigured|enabled|disabled|required|optional|present|missing|active|inactive|pending|changed|unchanged|valid|invalid|expired)$/i.test(v);
 // __ で始まるキーは内部属性とみなす。ただし GraphQL の __typename と Mongoose の __v（版の番号）は、ライブラリが必ず付けるもので内部情報ではない
 const INTERNAL_KEY = /(^|[._[\]])(is_?admin|is_?super(user)?|is_?staff|role_?id|internal_\w+|_internal\w*|debug\w*|salt|password_?salt|__(?!(?:typename|v)$)\w+)$/i;
-export const excessiveData: Rule = { id: 'A-07', title: '過剰なデータ露出', appliesTo: 'any', scope: 'target',
+export const excessiveData: Rule = { id: 'A-07', title: '過剰なデータ露出', appliesTo: 'api', scope: 'target',
   basis: ['OWASP API Security Top 10 2023: API3'],
   run(ctx) {
     const f = ctx.final;
-    if (!f?.body || ctx.responseKind !== 'api') return [];
+    if (!f?.body) return [];
     let data: unknown;
     try { data = JSON.parse(f.body); } catch { return [mk(excessiveData, ctx, 'na', 'info', 'na', 'JSONを解析できない（64KBを超えて切れた可能性）', '')]; }
     const keys = jsonKeys(data).map(k => k.replace(/\[\d+\]/g, '[]'));
@@ -302,8 +306,8 @@ export const requestContentType: Rule = { id: 'A-08', title: 'リクエストの
   basis: ['OWASP API Security Top 10 2023: API8', 'OWASP CSRF Prevention CS'],
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'ctype') return [];
-    const s = status(ctx);
-    if (UNFOLLOWED(ctx)) return [mk(requestContentType, ctx, 'na', 'info', 'na', '同じページへの転送（末尾の / など）。転送先を採取していない', '-L を付けて、転送先まで採取し直す')];
+    const { unfollowed, status: s } = judged(ctx);
+    if (unfollowed) return [mk(requestContentType, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, '-L を付けて、転送先まで採取し直す')];
     if (!s) return [mk(requestContentType, ctx, 'na', 'info', 'na', '応答がない', '')];
     // 認証・認可・パスで断られた応答（401・403・404）は、Content-Type を確かめるところまで届いていない
     if (s === 401 || s === 403 || s === 404) return [mk(requestContentType, ctx, 'na', 'info', 'na', `HTTP ${s}（Content-Type を確かめる前に断られた）`, '認証情報を付けて、存在する API の URL で採取し直す')];
@@ -322,19 +326,20 @@ export const methodControl: Rule = { id: 'A-11', title: 'メソッド制御・�
   run(ctx) {
     const l = ctx.target.label;
     if (!l.startsWith('method-') && !l.startsWith('old-')) return [];
-    const s = status(ctx);
-    if (UNFOLLOWED(ctx)) return [mk(methodControl, ctx, 'na', 'info', 'na', '同じページへの転送（末尾の / など）。転送先を採取していない', '-L を付けて、転送先まで採取し直す')];
+    const { r, unfollowed, status: s } = judged(ctx);
+    if (unfollowed) return [mk(methodControl, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, '-L を付けて、転送先まで採取し直す')];
     if (!s) return [mk(methodControl, ctx, 'na', 'info', 'na', '応答がない', '')];
     const ok2xx = s >= 200 && s < 300;
     // HTML の画面の 200（SPA の index.html・ログイン画面）は、そのメソッド・旧版の API が動いたかが分からない
-    const page = ok2xx ? htmlPage(ctx) : undefined;
+    const page = ok2xx ? htmlPage(r) : undefined;
     if (page === 'unknown') return [mk(methodControl, ctx, 'na', 'info', 'na', `HTTP ${s}（text/html。本文を採取していないので、API が処理したかは分からない）`, NO_BODY_REC)];
     if (page) return [mk(methodControl, ctx, 'na', 'info', 'na', `HTTP ${s}（${page === 'login' ? 'ログイン画面' : 'HTML の画面。どのパスにも同じ画面を返す SPA の可能性'}。API が処理したかは分からない）`, 'API の URL（JSON を返すもの）で採取し直す')];
     // 合格にするのは、メソッド・版そのものを断った応答だけ（メソッドは 405・501、旧版は 404・410）。401・403（認証で断られた。認証の内側で
     // 動くかは分からない）、3xx（ログイン画面への転送など）、そのほかの 4xx・5xx は na（A-08 の 401・403・404 と同じ考え方）
+    const allow = ctx.final?.headers.get('allow');
     if (l.startsWith('method-')) return ok2xx
       ? [mk(methodControl, ctx, 1, 'medium', 'fail', `想定外のメソッドが HTTP ${s}`, '使わないメソッドは 405 と Allow を返す（権限の確認も行う）')]
-      : s === 405 || s === 501 ? [mk(methodControl, ctx, 'ok', 'info', 'pass', `HTTP ${s}${ctx.final?.headers.get('allow') ? ` / Allow: ${ctx.final.headers.get('allow')![0]}` : ''}`, '')]
+      : s === 405 || s === 501 ? [mk(methodControl, ctx, 'ok', 'info', 'pass', `HTTP ${s}${allow ? ` / Allow: ${allow[0]}` : ''}`, '')]
       : [mk(methodControl, ctx, 'na', 'info', 'na', `HTTP ${s}（メソッドを断ったかは分からない）`, A11_REC)];
     return ok2xx
       ? [mk(methodControl, ctx, 2, 'medium', 'fail', `旧版のAPIが HTTP ${s}`, '廃止した版は 410 か 404 にする（API一覧で管理する）')]
@@ -350,11 +355,10 @@ export const errorFormat: Rule = { id: 'A-10', title: 'エラー形式', applies
     // ブラウザ向けのHTMLのエラーページ（error-url など）は対象外（情報の露出は E-01 で判定）。unauth-* の 401 なども含めない
     // 付け直したラベル（error-api#2）は除く。横断の判定には最初のものだけを使う（parser/target.ts の uniqueLabels）
     const errs = x.targets.filter(t => { const f = finalResponse(t); return t.label.startsWith('error-') && !/#\d+$/.test(t.label) && f && f.status >= 400 && responseKind(t, f) !== 'html'; });
-    const base = { item: 'A-10', title: errorFormat.title, target: 'error-*', references: errorFormat.basis };
-    if (errs.length < 2) return [{ ...base, ruleId: 'A-10.na', severity: 'info', status: 'na', evidence: '', recommendation: '必要なラベル: error-*（APIのエラー応答を2つ以上）' }];
+    if (errs.length < 2) return [cf(errorFormat, 'error-*', 'na', 'info', 'na', '', '必要なラベル: error-*（APIのエラー応答を2つ以上）')];
     const types = new Map<string, string[]>();
     for (const t of errs) { const ct = normCt(finalResponse(t)!.headers.get('content-type')?.[0] ?? ''); types.set(ct, [...(types.get(ct) ?? []), t.label]); }
     return types.size > 1
-      ? [{ ...base, ruleId: 'A-10.1', condition: 1, severity: 'info', status: 'fail', evidence: [...types].map(([k, v]) => `${k}: ${v.join(', ')}`).join(' / '), recommendation: 'エラー応答を1つの形式（例：application/problem+json）にそろえる' }]
-      : [{ ...base, ruleId: 'A-10.ok', severity: 'info', status: 'pass', evidence: `${[...types.keys()][0]}（${errs.length}件）`, recommendation: '' }];
+      ? [cf(errorFormat, 'error-*', 1, 'info', 'fail', [...types].map(([k, v]) => `${k}: ${v.join(', ')}`).join(' / '), 'エラー応答を1つの形式（例：application/problem+json）にそろえる')]
+      : [cf(errorFormat, 'error-*', 'ok', 'info', 'pass', `${[...types.keys()][0]}（${errs.length}件）`, '')];
   } };

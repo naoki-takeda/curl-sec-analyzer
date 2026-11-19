@@ -330,3 +330,48 @@ describe('ヘッダ・Cookie・CORS・転送の判定の細部', () => {
     expect(r('\naccess-control-allow-credentials: true')).toEqual(['R-07.ok']);
   });
 });
+
+describe('HTML本文のタグ・コメントの読み取り（E-07〜E-10・E-12）', () => {
+  const page = (body: string) => ids(target('https://a.example/', `${HTML}\n\n${body}`));
+  it('カスタム要素（<form-field>・<img-slider>・<script-loader>）を <form>・<img>・<script> と読まない', () => {
+    const r = page('<form-field method="get" action="http://a.example/x"><input type="password"></form-field><img-slider src="http://cdn.example/a.jpg"></img-slider>'
+      + '<script-loader src="https://cdn.other.example/x.js"></script-loader>');
+    expect(r).not.toContain('E-10.1'); expect(r).not.toContain('E-10.2');
+    expect(r).not.toContain('E-07.2');
+    expect(r).not.toContain('E-08.1');
+    expect(page('<form method="get"><input type="password"></form>')).toContain('E-10.2');
+  });
+  it('<textarea>・<title> の中のタグは要素にならないので数えない。<script> の中（document.write）は数える', () => {
+    const r = page('<title><img src="http://x.example/a.png"></title><textarea><img src="http://x.example/a.png"><form method=get><input type=password></form><script src="https://cdn.other.example/x.js"></script></textarea>');
+    expect(r).not.toContain('E-07.2'); expect(r).not.toContain('E-10.2'); expect(r).not.toContain('E-08.1');
+    expect(page(`<script>document.write('<script src="http://x.example/a.js"></scr' + 'ipt>')</script>`)).toContain('E-07.1');
+  });
+  it('E-09②：コメントはブラウザと同じく切り出す（「<!-->」は空のコメント、「--!>」で閉じる、<script> の文字列の「<!--」はコメントではない）', () => {
+    expect(page('<!--><p>Debug the staging server</p><!-- ok -->')).not.toContain('E-09.2');
+    expect(page('<script>var s="<!--"</script><p>Debug panel</p><!-- hi -->')).not.toContain('E-09.2');
+    expect(page('<!-- a --!><p>Debug panel</p><!-- b -->')).not.toContain('E-09.2');
+    expect(page('<!-- FIXME later --!><p>x</p>')).toContain('E-09.2');
+  });
+  it('E-09②：内部URLは URL の中の URL も見る。ループバックは 127.0.0.0/8 全体。ユーザー情報のある URL は証跡に出さない', () => {
+    expect(page('<a href="https://a.example/go?to=http://10.0.0.5/admin">x</a>')).toContain('E-09.2');
+    expect(page('<a href="http://127.0.1.1:8080/">x</a>')).toContain('E-09.2');
+    expect(page('<a href="https://cdn.example.com/a.js">x</a><a href="https://edge01.local.example-cdn.net/">y</a>')).not.toContain('E-09.2');
+  });
+});
+
+describe('E-04・E-05・T-11 の細部', () => {
+  const at = (url: string, head: string) => evaluate(`#TARGET url=${url} label=t\n${AT}\n${head}\n`).findings.filter(f => f.item === 'E-04');
+  it('E-04：空の「Expires:」で次の行を値にしない。「Disallow:」の値は同じ行だけ', () => {
+    const r = at('https://a.example/.well-known/security.txt', 'HTTP/2 200\ncontent-type: text/plain\n\nContact: mailto:sec@a.example\nExpires:\nPolicy: https://a.example/policy');
+    expect(r.map(f => [f.ruleId, f.evidence])).toEqual([['E-04.2', 'Contact: あり / Expires: なし']]);
+    expect(at('https://a.example/robots.txt', 'HTTP/2 200\ncontent-type: text/plain\n\nUser-agent: *\nDisallow:\n/admin/ is not a rule').map(f => f.ruleId)).toEqual(['E-04.ok']);
+    expect(at('https://a.example/robots.txt', 'HTTP/2 200\ncontent-type: text/plain\n\nUser-agent: *\nDisallow: /admin/').map(f => f.ruleId)).toEqual(['E-04.1']);
+  });
+  it('T-11：#META at が読めないときは、応答の Date ではなく判定した時刻を基準にする', () => {
+    // 応答の Date（2024-01-01）を基準にすると、notAfter（2025-06-01）まで1年以上あり合格になる
+    const e = evaluate(['#TARGET url=https://www.example.com/ label=tls', '#META at=yesterday', 'HTTP/2 200', 'date: Mon, 01 Jan 2024 00:00:00 GMT', '', 'CONNECTED(00000003)',
+      'New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384', 'Verify return code: 0 (ok)', 'notAfter=Jun  1 00:00:00 2025 GMT', ''].join('\n'));
+    expect(e.targets[0].responses[0]?.headers.get('date')).toBeTruthy();
+    expect(e.findings.filter(f => f.item === 'T-11').map(f => f.ruleId)).toContain('T-11.1');
+  });
+});

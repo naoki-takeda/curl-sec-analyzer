@@ -4,7 +4,7 @@ import { errorFormat, excessiveData, jsonHeaders, jwtClaims, methodControl, requ
 import { cookieDomain, cookieHttpOnly, cookieLifetime, cookieOverHttp, cookiePrefix, cookieSameSite, cookieSecure,
          cookieSharedCache, cookiePartitioned, defaultCookieName, logoutDeletesCookie, sessionIdStrength, sessionInUrl } from './cookies';
 import { corsExpose, corsNull, corsPartial, corsPreflight, corsReflect, corsVary, corsWildcard, timingAllowOrigin, websocketOrigin } from './cors';
-import { CROSS_RULES } from './cross';
+import { apexHsts, fixedNonce, logoutInvalidation, sessionFixation, sessionPredictable } from './cross';
 import { cacheControl, clearSiteData, clickjacking, contentType, crossOriginIsolation, cspDeprecated, cspObjectBase, cspPresence,
          cspScript, deprecatedHeaders, hsts, hstsPreload, nosniff, permissionsPolicy, productInfo, referrerPolicy, xpcdp } from './headers';
 import { certificate, cipherSuites, knownFiles, tlsVersion } from './hostRules';
@@ -28,7 +28,7 @@ export const TARGET_RULES: Rule[] = [
   errorDetail, dirListing, robotsSecurityTxt, apiDocsAdmin, jsonp, mixedContentRule, sriRule, htmlSecrets, passwordForm, downloadResponse, csrfToken, sourceMap,
 ];
 export const HOST_RULES: Rule[] = [tlsVersion, cipherSuites, certificate, knownFiles];
-export const ALL_CROSS_RULES: Rule[] = [...CROSS_RULES, errorFormat];
+export const ALL_CROSS_RULES: Rule[] = [sessionFixation, sessionPredictable, logoutInvalidation, apexHsts, fixedNonce, errorFormat];
 
 /** 診断カバレッジの「実装済みの項目」：ルールセットに登録したルールの項目IDから作る */
 export const IMPLEMENTED = new Set([...TARGET_RULES, ...HOST_RULES, ...ALL_CROSS_RULES].map(r => r.id));

@@ -1,18 +1,19 @@
 // rules/cross.ts：ターゲット横断ルール（C-07②、C-09①、C-12①、H-02③、H-04⑤）
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHop, isHttps, logoutFailed, ownChain, sameDocument, siteResponses } from '../parser/target';
+import { capturedAt, chainOf, finalResponse, firstStatus, hostOf, isHttps, logoutFailed, ownChain, sameDocumentHop, siteResponses, trimPath } from '../parser/target';
 import { MAIN_SESSION, isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, notSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
 import { LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
 import { LOGIN_PATH, loginForm, metaCspFromHtml } from './html';
 
-const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string): Finding =>
+/** 横断・ホスト単位のルールの指摘（target はラベルかホスト。ホスト単位のルールは host も付ける） */
+export const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string, host?: string): Finding =>
   ({ ruleId: `${rule.id}.${cond}`, item: rule.id, condition: typeof cond === 'number' ? cond : undefined, title: rule.title, severity, status,
-     target, evidence, recommendation, references: rule.basis });
+     target, ...(host === undefined ? {} : { host }), evidence, recommendation, references: rule.basis });
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
 // 対象のサイトの応答だけを見る（C-01〜C-07 と同じ siteResponses。-L でたどった外部の IdP の Cookie（idp_session）を、アプリの再発行とみなさない）
-const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.now(); return (t ? siteResponses(t) : []).flatMap(r => r.headers.get('set-cookie') ?? [])
+const sessionCookies = (t: Target) => { const now = capturedAt(t); return siteResponses(t).flatMap(r => r.headers.get('set-cookie') ?? [])
   .map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, now) && looksLikeSession(c, now) && !isChunkMarker(c)); };   // 値を比べるので、分割の印は除く
 
 const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
@@ -28,10 +29,15 @@ const spaShell = (b: string): boolean => /<div\b[^>]{0,200}\bid\s*=\s*["']?(?:ro
   && /^(?:loading|読み込み中|ロード中)?[.…]*$/i.test(visibleText(b.replace(/<noscript\b[\s\S]{0,2000}?<\/noscript>/gi, '')));
 /** ルートの要素（root・app・__next・__nuxt・q-app）の、データを入れる属性（data-user・:user・v-bind:user。data-v-・data-testid・data-reactroot は除く） */
 const ROOT_ATTR = /<div\b(?=[^>]{0,200}\bid\s*=\s*["']?(?:root|app|__next|__nuxt|q-app)\b)[^>]{0,200}\s(?:data-(?!v-|testid\b|reactroot\b)[\w-]+|:[\w-]+|v-bind:[\w-]+)\s*=/i;
-/** 利用者・状態のデータらしい中身（"user":・"email":・"currentUser":、state・store・props の名前への代入）。設定（window.__ENV__ = {"API_URL":…}・dataLayer = []）は除く */
-const STATE_DATA = /["']?\b(?:user(?:name|_?id)?|current_?user|email|account|profile|customer|member|viewer|me|session|auth(?:enticated|_?user)?|props|state|store)\b["']?\s*:|\b\w*(?:state|store|user|props|session)\w*\s*=\s*(?:[{[]|JSON\.parse)/i;
-/** STATE_DATA の1つ目の選択肢（"user": のような名前） */
-const STATE_KEY = /["']?\b(?:user(?:name|_?id)?|current_?user|email|account|profile|customer|member|viewer|me|session|auth(?:enticated|_?user)?)\b["']?\s*:/;
+/** 利用者のデータらしい名前（"user":・"email":・"currentUser":） */
+const USER_KEY = String.raw`["']?\b(?:user(?:name|_?id)?|current_?user|email|account|profile|customer|member|viewer|me|session|auth(?:enticated|_?user)?`;
+/** 代入の { [ の中の、利用者のデータらしい名前 */
+const STATE_KEY = new RegExp(String.raw`${USER_KEY})\b["']?\s*:`, 'gi');
+/**
+ * 利用者・状態のデータらしい中身（USER_KEY と props・state・store の名前、state・store・user・props・session を含む名前への代入）。
+ * 設定（window.__ENV__ = {"API_URL":…}・dataLayer = []）は除く。代入の名前の長さには上限を付ける（長い語の各位置から読み直して2乗の時間にしない）
+ */
+const STATE_DATA = new RegExp(String.raw`${USER_KEY}|props|state|store)\b["']?\s*:|\b\w{0,64}(?:state|store|user|props|session)\w{0,64}\s*=\s*(?:[{[]|JSON\.parse)`, 'gi');
 /** 値が null・false・空 */
 const EMPTY_VALUE = /^(?:null|false|undefined|""|''|\[\s*\]|\{\s*\})(?![\w$])/;
 /**
@@ -39,20 +45,20 @@ const EMPTY_VALUE = /^(?:null|false|undefined|""|''|\[\s*\]|\{\s*\})(?![\w$])/;
  * サーバが利用者を持っていないことを示すので、データとしない）
  */
 function stateData(body: string): boolean {
-  const re = new RegExp(STATE_DATA.source, 'gi');
-  for (let m = re.exec(body), n = 0; m && n < 200; m = re.exec(body), n++) {
+  let n = 0;
+  for (const m of body.matchAll(STATE_DATA)) {
+    if (n++ >= 200) break;
     const rest = body.slice(m.index + m[0].length, m.index + m[0].length + 20).trimStart();
     const opened = m[0].trimEnd().slice(-1);
     if (opened === '{' || opened === '[') {
       // 代入の { [ の中（2000文字まで）に利用者のデータらしい名前があれば、その値で見る（Redux・Vuex の SSR の __INITIAL_STATE__ = {"user":null}
       // は利用者のいない殻）。名前がなければ、空でないものをデータとする
       const inner = body.slice(m.index + m[0].length, m.index + m[0].length + 2000);
-      const keys = [...inner.matchAll(new RegExp(STATE_KEY.source, 'gi'))].slice(0, 50);
-      if (keys.length ? keys.some(k => !EMPTY_VALUE.test(inner.slice(k.index! + k[0].length, k.index! + k[0].length + 20).trimStart())) : !/^[}\]]/.test(rest)) return true;
+      const keys = [...inner.matchAll(STATE_KEY)].slice(0, 50);
+      if (keys.length ? keys.some(k => !EMPTY_VALUE.test(inner.slice(k.index + k[0].length, k.index + k[0].length + 20).trimStart())) : !/^[}\]]/.test(rest)) return true;
       continue;
     }
     if (/^JSON\.parse/i.test(m[0].slice(-10)) || !EMPTY_VALUE.test(rest)) return true;
-    if (m[0].length === 0) re.lastIndex++;
   }
   return false;
 }
@@ -124,7 +130,6 @@ function mfaStep(login: Target): string | undefined {
   const at = segs.findIndex(step);
   return at >= 0 && segs.slice(at + 1).every(x => !settings.test(x)) ? p : undefined;
 }
-const trimSlash = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
 /**
  * 2xx・3xx でもログインに失敗した応答（理由の文言を返す）。失敗ならセッションIDを再発行しないのは当然なので C-09① にしない。
  * - 失敗とみなす転送先：?error などのクエリ（Spring Security の /login?error）、同じホストのログインらしいパス（LOGIN_PATH。SSO のコールバックを除く）、
@@ -147,9 +152,9 @@ function loginRejected(login: Target, pre: Target): string | undefined {
     const preUrl = ownChain(pre).at(-1)?.url ?? pre.url;
     try { before = preUrl ? new URL(preUrl) : undefined; } catch { /* なし */ }
     if (to) {
-      const path = trimSlash(to.pathname);
-      const backToSelf = self && (trimSlash(self.pathname) === '/' ? path === '/' && to.search === self.search : path === trimSlash(self.pathname));
-      const backToPre = before && trimSlash(before.pathname) !== '/' && path === trimSlash(before.pathname);
+      const path = trimPath(to.pathname);
+      const backToSelf = self && (trimPath(self.pathname) === '/' ? path === '/' && to.search === self.search : path === trimPath(self.pathname));
+      const backToPre = before && trimPath(before.pathname) !== '/' && path === trimPath(before.pathname);
       // ログインらしいパスは、同じホストで、認可コード・チケットを持たないものだけ（SSO のコールバック /sso/login?code=… はログインの成功）
       const loginLike = LOGIN_PATH.test(path) && (!self || to.host === self.host) && !/[?&](?:code|ticket|SAMLart|state)=/i.test(to.search);
       if (/[?&](?:error|failed|fail|login_error|authfailed)(?:[=&]|$)/i.test(to.search) || loginLike || backToSelf || backToPre) {
@@ -174,13 +179,15 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     const pre = x.byLabel('pre-login'), login = x.byLabel('login');
     if (!pre || !login) return na(sessionFixation, 'pre-login/login', 'pre-login, login');
     const beforeC = sessionCookies(pre), afterC = sessionCookies(login);
-    const before = beforeC.map(c => `${c.name}=${c.value}`);
+    const before = new Set(beforeC.map(c => `${c.name}=${c.value}`));
+    // login で新しい値にしたセッションCookie
+    const changed = afterC.filter(c => !before.has(`${c.name}=${c.value}`));
     // 新しい値のセッションCookie を1つでも発行したとき、同じ値で送り直した次の Cookie は比べない（再発行とみなす）：
     // 期限付きの Cookie（device_token・remember の類）と、名前がセッションらしい Cookie を新しい値にしたときの、名前がセッションらしくない Cookie
     // （visitor_ref）。主のセッションID（MAIN_SESSION：JSESSIONID・laravel_session・sid など）は、期限付きでも必ず比べる
-    const fresh = afterC.some(c => !before.includes(`${c.name}=${c.value}`));
-    const freshSession = afterC.some(c => looksLikeSessionName(c.name) && !before.includes(`${c.name}=${c.value}`));
-    const after = afterC.filter(c => !(fresh && !MAIN_SESSION.test(c.name) && before.includes(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age') || (freshSession && !looksLikeSessionName(c.name))))).map(c => `${c.name}=${c.value}`);
+    const fresh = changed.length > 0;
+    const freshSession = changed.some(c => looksLikeSessionName(c.name));
+    const after = afterC.filter(c => !(fresh && !MAIN_SESSION.test(c.name) && before.has(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age') || (freshSession && !looksLikeSessionName(c.name))))).map(c => `${c.name}=${c.value}`);
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
     if (ls && !(ls >= 200 && ls < 400)) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `ログインに失敗している（HTTP ${ls}）`, LOGIN_FAILED_REC)];
@@ -192,7 +199,7 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // ログイン前のセッションIDは、pre-login で発行したものに加え、pre-login で送ったもの（トップページで発行され、ログイン画面では送るだけ。
     // ブラウザの普通の流れで、HAR ではほぼこの形になる）も数える。送っただけの値は分からないので、login で新しいセッションCookieを発行したかで見る
     const sent = (pre.sentCookieNames ?? []).filter(looksLikeSessionName);
-    if (!before.length && !sent.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'ログイン前にセッションCookieが発行されていない', 'ログイン前にCookieを発行するページで pre-login を採取する')];
+    if (!before.size && !sent.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'ログイン前にセッションCookieが発行されていない', 'ログイン前にCookieを発行するページで pre-login を採取する')];
     const lc = ownChain(login);
     // login の応答がない（プロキシの CONNECT のあとで curl が失敗した）なら、ログインしたかが分からない
     if (!lc.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'login の応答がない', LOGIN_FAILED_REC)];
@@ -200,25 +207,24 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // 発行されるので、再発行したかは分からない
     if (!after.length && lc.length === 1 && /[?&](?:code|ticket|SAMLart)=/i.test(lc[0].headers.get('location')?.[0] ?? ''))
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
-    const reused = !after.length || after.some(a => before.includes(a));
+    const reused = !after.length || after.some(a => before.has(a));
     // 2xx のログインで本文を採取していない（-v -o /dev/null、HAR の本文なし）なら、パスワード欄のある画面を返し直す失敗（loginRejected）と
     // 成功を見分けられない。失敗ならセッションIDを再発行しないのは当然なので、①（高）にせず na にする（3xx は Location で見分けるので判定する）
-    if (reused && lc[0] && lc[0].status >= 200 && lc[0].status < 300 && !lc[0].body?.trim())
+    if (reused && lc[0].status >= 200 && lc[0].status < 300 && !lc[0].body?.trim())
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答が HTTP ${lc[0].status}（本文を採取していないので、ログインに成功したかは分からない）`, NO_BODY_REC)];
     if (reused)
       return [cf(sessionFixation, 'pre-login/login', 1, 'high', 'fail', 'login 応答でセッションIDが再発行されていない', 'ログイン成功時にセッションIDを再発行する')];
-    // pre-login で発行した主のセッションID（名前に sess・sid を含むもの）を、login で新しい値にせず、別の Cookie（auth_token・
-    // ASP.NET Core の .AspNetCore.Identity.Application）だけを発行した。認証を新しい Cookie で持つなら固定化はないが、ログイン前の ID の
-    // セッションに認証を結び付けるなら固定化になる。どちらかは応答からは分からないので、合格にしない（下の kept）
-    const renewed = new Set(afterC.filter(c => !before.includes(`${c.name}=${c.value}`)).map(c => c.name));
     // 値を変えたセッションCookie が、すべて暗号化した Cookie（Laravel の EncryptCookies・ASP.NET Core の Data Protection）で、ログイン前にも
     // 同じ名前があった：暗号化した値は応答ごとに変わるので、セッションIDを再発行したか（Laravel の regenerate()）は値から分からない
-    const changed = afterC.filter(c => !before.includes(`${c.name}=${c.value}`));
     if (changed.length && changed.every(c => encryptedCookie(c.value) && (beforeC.some(b => b.name === c.name && encryptedCookie(b.value)) || (pre.sentCookieNames ?? []).includes(c.name))))
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'セッションCookie が暗号化した値（応答ごとに値が変わる）なので、セッションIDを再発行したかは値から分からない', ENCRYPTED_REC)];
+    // pre-login で発行した主のセッションID（名前に sess・sid を含むもの）を、login で新しい値にせず、別の Cookie（auth_token・
+    // ASP.NET Core の .AspNetCore.Identity.Application）だけを発行した。認証を新しい Cookie で持つなら固定化はないが、ログイン前の ID の
+    // セッションに認証を結び付けるなら固定化になる。どちらかは応答からは分からないので、合格にしない。
     // pre-login で送っただけの主のセッションID（-v・HAR の > Cookie: JSESSIONID=…。ブラウザの普通の流れ）も数える。
     // 送っただけの名前は、解析用・負荷分散などの名前（Hotjar の _hjSession_123・ai_session）を notSessionName で除く
     // （looksLikeSessionName では、classic ASP の ASPSESSIONIDxxxx まで外れる）
+    const renewed = new Set(changed.map(c => c.name));
     const kept = [...new Set([...beforeC.map(c => c.name), ...(pre.sentCookieNames ?? []).filter(n => !notSessionName(n))].filter(n => MAIN_SESSION.test(n) && !renewed.has(n)))];
     if (kept.length)
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答で ${kept.join(', ')} を再発行せず、ほかの Cookie（${[...renewed].join(', ')}）を発行した。どちらで認証しているかは分からない`,
@@ -260,16 +266,16 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
       const last = new Map(sessionCookies(t).map(c => [c.name, c.value]));
       for (const [name, value] of last) byName.set(name, [...(byName.get(name) ?? []), value]);
     }
+    // 署名付きのトークン（JWT・Flask・Django）がすべて同じ値なのは、同じ秒に同じ内容で署名したためでありうる（HS256 は同じ入力から同じ署名になる）。
+    // 署名の鍵がなければ作れないので、推測できる（②（高））とはせず na にする。ただし採取の時刻（#META at）が分かり、60秒より離れているときは②。
+    // #META at は手元の時刻で、トークンの iat はサーバの時刻なので、iat とは比べない。
+    // 署名付きの形は、JWT・itsdangerous と、署名が20文字以上の Django の形（固定の値 guest:1:admin は署名付きではない）
+    const times = samples.map(t => (t.meta.at ? Date.parse(t.meta.at.replace(' ', 'T')) : NaN));
+    const far = times.every(v => !Number.isNaN(v)) && Math.max(...times) - Math.min(...times) > 60e3;
     const out: Finding[] = [];
     for (const [rawName, vals] of byName) {
       if (vals.length < 2) continue;
       const name = rawName || '（名前なし）';   // 値だけの Set-Cookie（rules/cookies.ts の cookieName と同じ表示）
-      // 署名付きのトークン（JWT・Flask・Django）がすべて同じ値なのは、同じ秒に同じ内容で署名したためでありうる（HS256 は同じ入力から同じ署名になる）。
-      // 署名の鍵がなければ作れないので、推測できる（②（高））とはせず na にする。ただし採取の時刻（#META at）が分かり、60秒より離れているときは②。
-      // #META at は手元の時刻で、トークンの iat はサーバの時刻なので、iat とは比べない。
-      // 署名付きの形は、JWT・itsdangerous と、署名が20文字以上の Django の形（固定の値 guest:1:admin は署名付きではない）
-      const times = samples.map(t => (t.meta.at ? Date.parse(t.meta.at.replace(' ', 'T')) : NaN));
-      const far = times.every(v => !Number.isNaN(v)) && Math.max(...times) - Math.min(...times) > 60e3;
       if (new Set(vals).size === 1 && !far && /^(?:(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.[\w-]+|\.?[\w-]+:[\w-]+:[\w-]{20,})$/.test(vals[0])) {
         out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：署名付きのトークンが同じ値（同じ秒に同じ内容で署名した可能性）`, '秒をまたいで session-sample を採取し直す'));
         continue;
@@ -298,18 +304,15 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     if (logoutFailed(lo)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(lo)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const mp = x.byLabel('mypage'), ms = mp ? firstStatus(mp) : 0;
     if (ms && !(ms >= 200 && ms < 300)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログイン後のページ（mypage）が HTTP ${ms}（ログインできていない）`, LOGIN_FAILED_REC)];
-    const first = after.responses.find(isHop)!;
+    const chain = ownChain(after);
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
-    if (!first.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
+    if (!chain[0]?.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
     // 同じページ（末尾の / の違いだけ）への転送はたどって、その先で判定する（Django の APPEND_SLASH、Next.js の trailingSlash、Apache の DirectorySlash。
     // 301 のあとに旧Cookieで 200 になることがある）
-    const chain = after.responses.filter(isHop);
-    let i = 0;
-    while (chain[i]?.kind === 'redirect' && sameDocument(chain[i], after.url)) {
-      if (!chain[i + 1]) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `HTTP ${chain[i].status}（同じページへの転送。転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
-      i++;
-    }
-    const r = chain[i];
+    const { hop, unfollowed } = sameDocumentHop(after);
+    const r = hop!;
+    if (unfollowed) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `HTTP ${r.status}（同じページへの転送。転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
+    const i = chain.indexOf(r);
     const ev = `旧Cookieでの認証後ページが HTTP ${r.status}${i ? `（同じページへの転送のあと）` : ''}`;
     if (r.status >= 200 && r.status < 300) {
       // 旧Cookieで 200 でも、ログインのフォーム（loginForm）を返したなら、セッションは使えていない（転送せずにその場でログイン画面を出すアプリ）。
@@ -334,12 +337,12 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     if (r.status === 401 || r.status === 403) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', ev, '')];
     if (r.status >= 300 && r.status < 400) {
       const loginUrl = x.byLabel('login')?.url; let loginPath: string | undefined;
-      try { loginPath = loginUrl ? trimSlash(new URL(loginUrl).pathname) : undefined; } catch { /* なし */ }
+      try { loginPath = loginUrl ? trimPath(new URL(loginUrl).pathname) : undefined; } catch { /* なし */ }
       // ログイン画面・認証の入り口への転送か。トップ（/）への転送はログイン画面とみなさない（トップが利用者の画面を返すアプリ（/dashboard → /）では、
       // 旧Cookie が使えても / へ転送する。-L でたどった先がログインのフォームか 401・403 なら合格）
       const loginRedirect = (h: typeof r): string | undefined => {
         let to: URL | undefined; try { to = new URL(h.headers.get('location')?.[0] ?? '', h.url ?? after.url ?? 'https://x.invalid/'); } catch { return undefined; }
-        const p = trimSlash(to.pathname);
+        const p = trimPath(to.pathname);
         return LOGIN_PATH.test(p) || (loginPath && loginPath !== '/' && p === loginPath) ? to.pathname : undefined;
       };
       // -L でたどった転送は最後まで見る（/oauth2/authorization/x → IdP の …/openid-connect/auth のように、入り口の転送が続くもの）
@@ -408,5 +411,3 @@ export const fixedNonce: Rule = { id: 'H-04', title: 'CSP：script-src', applies
       ? [cf(fixedNonce, 'csp-sample-*', 5, 'high', 'fail', `応答ごとに同じnonce（${maskValue(fixed[0])}）`, 'nonce は応答ごとに新しい乱数で生成する')]
       : [cf(fixedNonce, 'csp-sample-*', 'ok', 'info', 'pass', `${nonces.length}件の応答のnonceはすべて異なる`, '')];
   } };
-
-export const CROSS_RULES: Rule[] = [sessionFixation, sessionPredictable, logoutInvalidation, apexHsts, fixedNonce];

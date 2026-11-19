@@ -125,3 +125,18 @@ describe('A2 カバレッジ：ターゲットごとの na の件数と理由を
     expect(recommendationEn(someTargets(3))).toBe('Some targets (3) lack input');
   });
 });
+
+describe('E-04：本文を採取していない robots.txt・security.txt の 2xx は na', () => {
+  const e04 = (url: string, head: string) => evaluate(`#TARGET url=${url} label=t\n${AT}\n${head}\n`).findings.filter(f => f.item === 'E-04');
+  it('-I の 200（本文なし）→ na（本文を採取し直す案内）', () => {
+    for (const url of ['https://a.example/robots.txt', 'https://a.example/.well-known/security.txt']) {
+      const r = e04(url, 'HTTP/2 200\ncontent-type: text/plain\n');
+      expect(r.map(f => f.ruleId), url).toEqual(['E-04.na']);
+      expect(r[0].recommendation).toBe(NO_BODY_REC);
+    }
+  });
+  it('2xx でない応答は、本文がなくても今までどおり判定する', () => {
+    expect(e04('https://a.example/robots.txt', 'HTTP/2 404\n').map(f => f.ruleId)).toEqual(['E-04.ok']);
+    expect(e04('https://a.example/.well-known/security.txt', 'HTTP/2 404\n').map(f => f.ruleId)).toEqual(['E-04.2']);
+  });
+});

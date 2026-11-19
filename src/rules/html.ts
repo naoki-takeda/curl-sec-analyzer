@@ -1,13 +1,24 @@
-// rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64KBまで。正規表現による簡易的な走査
+// rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64KBまで。タグとコメントは HTML の字句解析をなぞった走査（scan）で読む
 import type { Finding, Rule, RuleContext } from '../model';
 import { hostOf } from '../parser/target';
 import { isTrustedOrigin } from '../engine/profile';
-import { NO_BODY_REC, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
+import { INTERNAL_HOST, NO_BODY_REC, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
 import { clip } from '../mask';
+import { b64urlJson } from './jwt';
 
-/** evidence：証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
-/** inert：<script> などテキストの要素の中身か <template> の中のタグ（ブラウザは文書の要素として使わない。H-09 の meta の referrer など） */
-export interface Tag { name: string; attrs: Map<string, string>; evidence: string; index: number; inert?: boolean; }
+export interface Tag {
+  name: string; attrs: Map<string, string>; index: number;
+  /** 証跡用のタグの表記（tagEvidence）。元のタグの文字列は、属性に秘密情報を含みうるので持たない */
+  evidence: string;
+  /** <script> などテキストの要素の中身か <template> の中のタグ（ブラウザは文書の要素として使わない。H-03 の meta の CSP、H-09 の meta の referrer） */
+  inert?: boolean;
+  /**
+   * inert のうち、あとから要素になることもないもの（<textarea>・<title>・<style>・<xmp>・<iframe>・<noembed>・<noframes> の中身）。
+   * <script> の中（document.write・x-template）、<template> の中（複製して使う）、<noscript> の中（スクリプトが無効なら要素）は、
+   * 読み込み・送信に使われうるので、E-07・E-08・E-10・E-12 はこれだけを除く
+   */
+  text?: boolean;
+}
 
 /**
  * 証跡に値を出す属性。判定に使う属性（読み込み先・送信先・種類）だけにする。
@@ -15,7 +26,7 @@ export interface Tag { name: string; attrs: Map<string, string>; evidence: strin
  * URL のパラメータのトークンは、このあと engine/run.ts の maskText でマスクする
  */
 const SHOWN_ATTRS = new Set(['src', 'href', 'action', 'data', 'rel', 'method', 'type', 'name', 'content', 'integrity', 'crossorigin', 'as']);
-export function tagEvidence(name: string, attrs: Map<string, string>): string {
+function tagEvidence(name: string, attrs: Map<string, string>): string {
   const parts = [...attrs].map(([k, v]) => (SHOWN_ATTRS.has(k) ? `${k}="${v}"` : v === '' ? k : `${k}="…"`));
   return clip(`<${[name, ...parts].join(' ')}>`, 200);
 }
@@ -25,7 +36,7 @@ export function tagEvidence(name: string, attrs: Map<string, string>): string {
  * （Handlebars は = を &#x3D; にするので、戻さないと ?token&#x3D;… のトークンがマスクされない）
  */
 const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", equals: '=', quest: '?', num: '#', sol: '/', colon: ':', semi: ';' };
-export const decodeEntities = (v: string) => v.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]{2,8}));/g, (all, d: string, h: string, n: string) => {
+const decodeEntities = (v: string) => v.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]{2,8}));/g, (all, d: string, h: string, n: string) => {
   const cp = d ? Number(d) : h ? parseInt(h, 16) : undefined;
   if (cp !== undefined) return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : all;
   return NAMED[n.toLowerCase()] ?? all;
@@ -90,16 +101,19 @@ function tagEndFinder(html: string): (from: number) => number {
   };
 }
 
-/** 開始タグを列挙する（属性名は小文字、値は文字参照を戻したもの） */
-export function tags(html: string, names: string[]): Tag[] {
-  const start = new RegExp(`<(${names.join('|')})\\b`, 'iy');
+/**
+ * 開始タグ（属性名は小文字、値は文字参照を戻したもの）と、コメントの中身の範囲（[始まり, 終わり]）を列挙する。
+ * タグの名前のあとは空白・/・> だけ（\b では、カスタム要素 <form-field>・<img-slider>・<iframe-wrapper> を <form>・<img>・<iframe> と読む）
+ */
+function scan(html: string, names: string[]): { tags: Tag[]; comments: [number, number][] } {
+  const start = names.length ? new RegExp(`<(${names.join('|')})(?=[\\s/>])`, 'iy') : undefined;
   const endOf = tagEndFinder(html);
-  const out: Tag[] = [];
-  // 中身をテキストとして読む要素（中の「<!--」はコメントではない）。<noscript> はスクリプトが有効なブラウザでテキスト。
-  // 名前のあとは空白・/・> だけ（\b では、カスタム要素 <iframe-wrapper> を閉じのない <iframe> と読む）
+  const out: Tag[] = []; const comments: [number, number][] = [];
+  // 中身をテキストとして読む要素（中の「<!--」はコメントではない）。<noscript> はスクリプトが有効なブラウザでテキスト
   const raw = /<(script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)(?=[\s/>])/iy;
   let lower: string | undefined;                       // 閉じタグを探すため。初めて要るときに一度だけ小文字にする（タグごとでは2乗の時間になる）
   let rawEnd = -1;                                     // <script> などの中身（コメントにならない）の終わり
+  let rawText = false;                                 // その中身があとから要素になることもないか（Tag.text）
   let templateEnd = -1;                                // <template> の中身の終わり（中のタグは inert）
   const template = /<template(?=[\s/>])/iy;
   const commentEnd = commentEndFinder(html);
@@ -109,17 +123,21 @@ export function tags(html: string, names: string[]): Tag[] {
     const outside = i > rawEnd;
     if (outside && html.startsWith('<!--', i)) {
       const e = commentEnd(i);
-      if (e >= 0) { i = e; continue; }
+      // 中身は「-->」「--!>」の前まで（「<!-->」「<!--->」は空）
+      if (e >= 0) { comments.push([i + 4, Math.max(i + 4, e - (html[e - 1] === '!' ? 3 : 2))]); i = e; continue; }
     }
     if (outside) {
       raw.lastIndex = i;
       const r = raw.exec(html);
-      if (r) { lower ??= html.toLowerCase(); const close = lower.indexOf(`</${r[1].toLowerCase()}`, i + r[0].length); rawEnd = close < 0 ? html.length : close; }
+      if (r) {
+        lower ??= html.toLowerCase(); const name = r[1].toLowerCase(); const close = lower.indexOf(`</${name}`, i + r[0].length);
+        rawEnd = close < 0 ? html.length : close; rawText = name !== 'script' && name !== 'noscript';
+      }
       template.lastIndex = i;
       if (i > templateEnd && template.test(html)) { lower ??= html.toLowerCase(); const close = lower.indexOf('</template', i + 9); templateEnd = close < 0 ? html.length : close; }
     }
-    start.lastIndex = i;
-    const m = start.exec(html);
+    let m: RegExpExecArray | null = null;
+    if (start) { start.lastIndex = i; m = start.exec(html); }
     if (!m) {
       // ほかの開始タグも読み飛ばす（属性の値の中の「<!--」（<div title="<!--">）をコメントの始まりと読まないため）。
       // <script> などの中身では読み飛ばさない（スクリプトの「a<b」をタグとして読まない）
@@ -132,11 +150,14 @@ export function tags(html: string, names: string[]): Tag[] {
     // 同じ名前の属性は最初の値を使う（HTML の字句解析と同じ）
     for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) { const k = a[1].toLowerCase(); if (!attrs.has(k)) attrs.set(k, decodeEntities(a[2] ?? a[3] ?? a[4] ?? '')); }
     const name = m[1].toLowerCase();
-    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i, ...(!outside || i < templateEnd ? { inert: true } : {}) });
-    i = end;                                         // 属性の中の < をタグの始まりとして読まない（正規表現の matchAll と同じ）
+    out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i,
+      ...(!outside ? { inert: true, ...(rawText ? { text: true } : {}) } : i < templateEnd ? { inert: true } : {}) });
+    i = end;                                         // 属性の中の < をタグの始まりとして読まない
   }
-  return out;
+  return { tags: out, comments };
 }
+/** 開始タグを列挙する */
+export const tags = (html: string, names: string[]): Tag[] => scan(html, names).tags;
 
 /** HTML本文があるか（-i・C2 で取得したもの） */
 export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ctx.final?.body?.trim() ? ctx.final.body : undefined);
@@ -200,7 +221,7 @@ export function metaCspFromHtml(html: string): string[] {
 
 /** 混在コンテンツ：①script・iframe・stylesheet、②img など */
 export function mixedContent(html: string): { active: Tag[]; passive: Tag[] } {
-  const ts = tags(html, ['script', 'iframe', 'link', 'img', 'audio', 'video', 'source', 'embed', 'object', 'form']);
+  const ts = tags(html, ['script', 'iframe', 'link', 'img', 'audio', 'video', 'source', 'embed', 'object']).filter(t => !t.text);
   const isHttp = (v?: string) => !!v && /^http:\/\//i.test(v.trim());
   const active = ts.filter(t => (t.name === 'script' || t.name === 'iframe' || t.name === 'embed' || t.name === 'object') && isHttp(t.attrs.get('src') ?? t.attrs.get('data'))
     || (t.name === 'link' && /stylesheet|preload|modulepreload/i.test(t.attrs.get('rel') ?? '') && isHttp(t.attrs.get('href'))));
@@ -232,7 +253,7 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
     // 外部オリジンの script を配信元（オリジン）ごとにまとめる。組織プロファイルで自社の配信元とした所は対象外
     const byOrigin = new Map<string, { total: number; missing: Tag[] }>();
     let skipped = 0;
-    for (const t of tags(html, ['script'])) {
+    for (const t of tags(html, ['script']).filter(t => !t.text)) {
       const src = t.attrs.get('src');
       if (!src || !/^(https?:)?\/\//i.test(src)) continue;
       let u: URL; try { u = new URL(src, pageUrlOf(ctx) ?? 'https://invalid.invalid/'); } catch { continue; }
@@ -269,15 +290,12 @@ const notSecretValue = (key: string, v: string): boolean =>
   isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v)
   || notSecretFormat(v) || notSecretText(v);
 /** 公開を前提にした JWT（ペイロードの role が anon。Supabase の anon key） */
-const publicJwt = (payload: string): boolean => {
-  try {
-    const j = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '='))) as { role?: unknown };
-    return j.role === 'anon';
-  } catch { return false; }
-};
+const publicJwt = (payload: string): boolean => b64urlJson(payload)?.role === 'anon';
 const PUBLIC_SDK = /\b(?:docsearch|algoliasearch|instantsearch|Bugsnag\.start|bugsnag|Sentry\.init|mixpanel\.init|amplitude\.(?:init|getInstance)|posthog\.init|LogRocket\.init|Rollbar\.init|datadogRum\.init)\s*\([^)]{0,300}$/;
+/** AWS のアクセスキー。大文字だけで、語の境目で区切る（base64 の途中の …zakia… に一致させない。E-01① も使う） */
+export const AWS_KEY = /\bAKIA[0-9A-Z]{16}\b/;
 const SECRETS: [string, { test(s: string): boolean }][] = [
-  ['AWSアクセスキー', /\bAKIA[0-9A-Z]{16}\b/],
+  ['AWSアクセスキー', AWS_KEY],
   ['秘密鍵', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
   ['Slackトークン', /\bxox[baprs]-[0-9A-Za-z-]{10,}/],
   ['GitHubトークン', /\bgh[pousr]_[0-9A-Za-z]{36,}\b/],
@@ -289,13 +307,22 @@ const SECRETS: [string, { test(s: string): boolean }][] = [
   // 引用符を戻してからも見る
   ['キー・シークレットの代入', { test: (s: string) => [s, ...(ESCAPED_QUOTE.test(s) ? [unescapeQuotes(s)] : [])].some(x => [...x.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2]) && !PUBLIC_SDK.test(x.slice(Math.max(0, (m.index ?? 0) - 300), m.index)))) }],
 ];
-// ホスト名の最後で区切る（edge01.local.example-cdn.net の .local. には一致させない）。複数のラベルのホスト名（db.prod.internal）も含める
-const INTERNAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|(?:[\w-]+\.)+(?:internal|local|lan|corp|intra))(?![\w.-])[^\s"'<>]*/gi;
-/** 内部URL。診断した URL 自身のホスト（社内のポータル https://portal.corp/、http://localhost:3000/ の自サイトへのリンク）は除く */
+/**
+ * URL の始まりとホスト（ポートを含む）。ホストまでだけを読む（?to=http://10.0.0.1/ のような URL の中の URL も見る）。
+ * ユーザー情報（user:pass@host）のあるものは見ない（証跡にパスワードを出さない）
+ */
+const URL_AUTHORITY = /https?:\/\/([^\s"'<>/?#\\@]+)(?=[\s"'<>/?#\\]|$)/gi;
+const URL_REST = /[^\s"'<>]*/y;
+/**
+ * 内部URL：ホスト名が内部のホスト（INTERNAL_HOST。ホスト名の最後で区切るので edge01.local.example-cdn.net は除く）のもの。
+ * 診断した URL 自身のホスト（社内のポータル https://portal.corp/、http://localhost:3000/ の自サイトへのリンク）は除く
+ */
 function internalUrl(html: string, own?: string): string | undefined {
-  for (const m of html.matchAll(INTERNAL_URL)) {
-    let host: string | undefined; try { host = new URL(m[0]).host.toLowerCase(); } catch { /* 解釈できなければ内部URLとして出す */ }
-    if (!own || host !== own) return m[0];
+  for (const m of html.matchAll(URL_AUTHORITY)) {
+    let u: URL; try { u = new URL(m[0]); } catch { continue; }
+    if (!INTERNAL_HOST.test(u.hostname) || u.host.toLowerCase() === own) continue;
+    URL_REST.lastIndex = m.index;
+    return URL_REST.exec(html)![0];
   }
   return undefined;
 }
@@ -308,19 +335,15 @@ const DEV_CODE_WORD = /(?<![A-Za-z])(?:TODO|FIXME|XXX|HACK|[Dd]ebug|DEBUG|[Ss]ta
 // （「Tests pass」「tests pass 100%」「pass 2 of 3」は開発用のコメントではない）
 const DEV_WORD = /(?<![A-Za-z])pass(?:\s*[:=]|\d|\s+[A-Za-z][^\s<]*\d)|(?<![A-Za-z])passwords?(?![a-z])(?![\s_-]*(?:field|input|label|form|reset|box|placeholder|strength|hint|toggle|visibility|policy)\b)|パスワード(?!欄|入力|を忘れ|の再設定|の変更|変更|リセット)|本番/i;
 /**
- * 閉じたコメント（<!-- … -->）を1つずつ切り出し、その中だけで開発用の語を探す。一致した語を返す。
- * indexOf で線形に走査する（正規表現1つで書くと、閉じのない <!-- が続く本文でバックトラックが爆発する）。
- * コメントの外（前後のコメントにはさまれた本文）には一致させない
+ * コメントの中だけで開発用の語を探し、一致した語を返す。コメントは scan で切り出す（ブラウザと同じく「<!-->」は空のコメント、「--!>」でも閉じ、
+ * <script> の文字列の中の「<!--」はコメントではない）。コメントの外（前後のコメントにはさまれた本文）には一致させない
  */
 export function devCommentWord(html: string): string | undefined {
-  for (let i = html.indexOf('<!--'); i >= 0;) {
-    const end = html.indexOf('-->', i + 4);
-    if (end < 0) return undefined;
+  for (const [from, to] of scan(html, []).comments) {
     // Knockout の制御のコメント（<!-- ko if: showDebug -->・<!-- /ko -->）は、開発用のコメントではない
-    const c = html.slice(i + 4, end); const m = /^\s*\/?ko\b/.test(c) ? null : c.match(DEV_CODE_WORD) ?? c.match(DEV_WORD);
+    const c = html.slice(from, to); const m = /^\s*\/?ko\b/.test(c) ? null : c.match(DEV_CODE_WORD) ?? c.match(DEV_WORD);
     // 一致した語だけを返す（「pass Summer2024」の値の部分を証跡に出さない）
     if (m) return /^pass/i.test(m[0]) && !/^passwords?$/i.test(m[0]) ? 'pass' : m[0];
-    i = html.indexOf('<!--', end + 3);
   }
   return undefined;
 }
@@ -349,17 +372,28 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     return out.length ? out : [mk(htmlSecrets, ctx, 'ok', 'info', 'pass', '秘密情報・内部情報らしき記述なし', '')];
   } };
 
-/** form ごとに、その中の input を集める */
-function forms(html: string): { form: Tag; inputs: Tag[] }[] {
-  const fs = tags(html, ['form']);
-  return fs.map((f, i) => {
-    // 元の文字列で探す（toLowerCase で長さが変わる文字（İ など）があると、位置がずれる）
-    const endRe = /<\/form\s*>/gi; endRe.lastIndex = f.index;
-    const end = endRe.exec(html)?.index ?? -1;
-    const stop = Math.min(end < 0 ? html.length : end, fs[i + 1]?.index ?? html.length);
-    // input の位置（index）はページ全体での位置にする（E-09 がその位置のタグを取り除く）
-    return { form: f, inputs: tags(html.slice(f.index, stop), ['input']).map(t => ({ ...t, index: t.index + f.index })) };
+type Form = { form: Tag; inputs: Tag[] };
+let formsMemo: { html: string; out: Form[] } | undefined;   // E-09・E-10・E-12 が同じ本文で呼ぶ
+/**
+ * form ごとに、その中（閉じタグか次の form まで）の input を集める。input の位置（index）はページ全体での位置（E-09 がその位置のタグを取り除く）。
+ * 閉じタグは前に進むだけで探す（form ごとに本文の終わりまで探すと、閉じのない <form> の並びで2乗の時間になる）
+ */
+function forms(html: string): Form[] {
+  if (formsMemo?.html === html) return formsMemo.out;
+  const ts = tags(html, ['form', 'input']).filter(t => !t.text);
+  const fs = ts.filter(t => t.name === 'form'), inputs = ts.filter(t => t.name === 'input');
+  // 元の文字列で探す（toLowerCase で長さが変わる文字（İ など）があると、位置がずれる）
+  const closeRe = /<\/form\s*>/gi; let close = -1; let j = 0;
+  const out = fs.map((f, k) => {
+    if (close < f.index) { closeRe.lastIndex = f.index; close = closeRe.exec(html)?.index ?? Infinity; }
+    const stop = Math.min(close, fs[k + 1]?.index ?? html.length);
+    while (j < inputs.length && inputs[j].index < f.index) j++;
+    const own: Tag[] = [];
+    while (j < inputs.length && inputs[j].index < stop) own.push(inputs[j++]);
+    return { form: f, inputs: own };
   });
+  formsMemo = { html, out };
+  return out;
 }
 
 /** フォームの送信先が http か（ページの URL が分からなければ、送信先そのものが http:// で始まるか） */
