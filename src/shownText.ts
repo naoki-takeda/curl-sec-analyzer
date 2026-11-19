@@ -53,11 +53,18 @@ function allowedWord(w: string): boolean {
 // KEEP：語として見ずにそのまま残す部分。伏せた印、CSP・SRI のハッシュ（長さちょうどのもの。mask.ts の HASH_SOURCE）、URL のホスト名、
 // 決まった最上位ドメインのドメイン名
 // - URL のホスト名は、ユーザー情報（user:****@）のあとか、ユーザー情報のない URL の「//」の直後だけ（ユーザー名に置いたトークン
-//   https://<トークン>:x-oauth-basic@api… をホスト名として残さない）
+//   https://<トークン>:x-oauth-basic@api… をホスト名として残さない）。どちらも、後ろに @（エンコードした形を含む。BEFORE_AT）が続くものは残さない
 // - ユーザー情報には ? # / と空白・引用符・<> を含めない（?ref=bob@<トークン> の @ のあとをホスト名とみなさない）。引用符（' "）は、後ろに語の文字か
 //   @ が続くときだけ入れる（mask.ts の URL_CRED と同じ）。伏せた印「…(N chars)」は入ってよい（冪等にするため）。256文字まで（上限がないと、
 //   「@」の多い入力で位置ごとに「//」まで読み戻し、2乗の時間になる）
 const USERINFO = String.raw`(?:[^/\s?#@<>"']|["'](?=[\w@-])|…\(\d+ chars\)){0,256}@`;
+// @ をエンコードした形：パーセントエンコード（%40、多重の %2540）、HTML の文字参照（&#64;・&#x40;・&commat;）、JS のエスケープ（@・\x40・\u{40}）
+const ENCODED_AT = String.raw`(?:%(?:25)*40|&#0*64;|&#[xX]0*40;|&commat;|\\u0040|\\x40|\\u\{0*40\})`;
+// ホスト名らしい並びのあとに続くと、その並びをホスト名として残さないもの：ユーザー情報の終わりの @ と、エンコードした @
+// （https://<トークン>%3Ax%40cdn…・<トークン>:x&#64;cdn… のユーザー名をホスト名として残さない）。エンコードした @ までに、/ ? # と空白・<> と &
+// （クエリの区切り）があれば、ユーザー情報ではないので見ない（?redirect_uri=https://<CDN>&login_hint=alice%40… の CDN のホスト名を伏せない）。
+// 引用符は USERINFO と同じく、後ろに語の文字か @・% が続くときだけ入れる
+const BEFORE_AT = String.raw`(?:${USERINFO}|(?:[^/\s?#@<>"'&]|["'](?=[\w@%-])|…\(\d+ chars\)){0,256}${ENCODED_AT})`;
 // 英小文字のドメイン名（スキームのない CSP のホスト ajax.aspnetcdn.com、Via の app01.prod.example.com）。決まった最上位ドメインのものだけ
 // （/reset/<トークン>.pdf のようなファイル名を残さない）
 const TLD = 'com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost';
@@ -68,10 +75,11 @@ const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:${TLD}
 // 最上位ドメインで終わるものだけを残す（//QwErTy….AsDf… や //AKIA… のようなトークンを残さない）
 const NO_SCHEME = String.raw`(?:^|[\s"'=(,])\/\/`;
 const HOST_NAME = String.raw`(?:[a-z0-9-]{1,63}\.)+(?:${TLD})(?![\w.-])`;
-const KEEP = String.raw`…\(\d+ chars\)|${HASH_SOURCE}|(?<=:\/\/${USERINFO})[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|` +
-  String.raw`(?<=${NO_SCHEME}${USERINFO})${HOST_NAME}|(?<=${NO_SCHEME})${HOST_NAME}(?!${USERINFO})|${DOMAIN}`;
-// ↑ スキームのある URL のホスト名（ユーザー情報のないもの）は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない。
-// 区切り直すと、ホスト名らしい並びのあとに @ がある入力（https://a.a.a…@evil/）で1文字ずつ短くするたびに @ まで読み直し、2乗の時間になる）。
+const KEEP = String.raw`…\(\d+ chars\)|${HASH_SOURCE}|` +
+  String.raw`(?<=:\/\/${USERINFO})(?=(?<userHost>[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+))\k<userHost>(?!${BEFORE_AT})|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${BEFORE_AT})|` +
+  String.raw`(?<=${NO_SCHEME}${USERINFO})${HOST_NAME}(?!${BEFORE_AT})|(?<=${NO_SCHEME})${HOST_NAME}(?!${BEFORE_AT})|${DOMAIN}`;
+// ↑ スキームのある URL のホスト名は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない。区切り直すと、
+// ホスト名らしい並びのあとに @ がある入力（https://a.a.a…@evil/）で1文字ずつ短くするたびに @ まで読み直し、2乗の時間になる）。
 // スキームのないホスト名（HOST_NAME）は、終わりが (?![\w.-]) で1か所に決まるので、区切り直しても @ まで読み直さない
 // JOIN：- _ + でつないだ語の並び（glpat-<トークン>・sk_live_<トークン>・Strict-Transport-Security）は、まとめて見る。パーセントエンコードした
 // + / = 空白 - .（%2B・%2F・%3D・%20・%2D・%2E。二重エンコードを含む）も区切りとする（エンコードした Base64 のトークンや、区切った番号

@@ -448,3 +448,31 @@ describe('スキームのない URL（//ホスト）', () => {
     }
   });
 });
+
+describe('パーセントエンコードした URL のユーザー情報', () => {
+  const T = 'QwErTyUiOpAsDfGhJkLz';
+  it('エンコードした @（%40・%2540）の前のユーザー名を、ホスト名として残さない', () => {
+    for (const s of [`https://${T}%40cdn.example.com/`, `https://${T}%3Ax%40cdn.example.com/`, `https://${T}%2540cdn.example.com/`,
+      `https://${T}%3Ax%252540cdn.example.com/`, `?next=https://${T}%40evil.example/`, ` //qwrtzxkpmnbvcdfgh.example.com%3Ax%40cdn.example.com/`]) {
+      expect(showText(s), s).not.toMatch(/QwErTyUiOp|qwrtzxkpmnbvcdfgh/);
+    }
+  });
+  it('パス・クエリのエンコードした @ では、ホスト名を伏せない', () => {
+    for (const s of ['https://d111111abcdef8.cloudfront.net/a%40b.png', 'https://d111111abcdef8.cloudfront.net?e=a%40b.example', ' //d111111abcdef8.cloudfront.net/a%40b'])
+      expect(showText(s), s).toContain('d111111abcdef8.cloudfront.net');
+  });
+});
+
+describe('HTML・JS で書いた @、引用符、ユーザー情報のあとのホスト名', () => {
+  const T = 'QwErTyUiOpAsDfGhJkLz';
+  it('文字参照・JS のエスケープで書いた @ の前のユーザー名を、ホスト名として残さない', () => {
+    for (const s of [`https://${T}:x&#64;cdn.example.com/`, `https://${T}:x&#x40;cdn.example.com/`, `https://${T}:x&commat;cdn.example.com/`,
+      `"https://${T}:x\u0040cdn.example.com/"`, `"https://${T}:x\x40cdn.example.com/"`, `https://${T}'x%40cdn.example.com/`, `https://${T}"x%40cdn.example.com/`,
+      `https://a@${T}.x%40cdn.example.com/`]) {
+      expect(showText(s), s).not.toMatch(/QwErTyUiOp/);
+    }
+  });
+  it('クエリの & のあとのエンコードした @（OAuth の login_hint）では、ホスト名を伏せない', () => {
+    expect(showText('?redirect_uri=https://d111111abcdef8.cloudfront.net&login_hint=alice%40example.com')).toContain('https://d111111abcdef8.cloudfront.net&');
+  });
+});
