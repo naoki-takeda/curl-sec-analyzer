@@ -1,6 +1,6 @@
 // rules/hostRules.ts：ホスト単位のルール（T-09〜T-11、E-03）。同じホストの全ターゲットをまとめて判定する
 import type { Finding, Rule, Severity, Status, Target } from '../model';
-import { probePattern } from './probes';
+import { HTML_PROBE_PATHS, htmlProbe, probePattern } from './probes';
 import { hasCertificate, nameMatches, parseOpenssl, type TlsInfo } from '../parser/openssl';
 import { hostnameOf } from '../parser/target';
 import { PROBE_UNREACHED_REC } from './util';
@@ -79,16 +79,18 @@ export const knownFiles: Rule = { id: 'E-03', title: '既知ファイル（/.git
       const probes = ts.flatMap(t => t.probes);
       if (!probes.length) continue;
       const own = probes.filter(p => !/\/(robots|security)\.txt$/.test(p.path) && !/\.map$/.test(p.path));   // E-04・E-13 の対象は除く
-      let fails = 0;
+      let fails = 0, html = 0;
       for (const p of own) {
         const hit = probePattern(p.path, p.headB64, p.code);
         if (hit?.item === 'E-03') { fails++; out.push(hf(knownFiles, host, 1, 'high', 'fail', `${p.path}（HTTP ${p.code}、一致したパターン: ${hit.name}）`, 'Webサーバの公開ディレクトリから削除するか、アクセスを拒否する')); }
+        // HTML でない形式のファイルのパスに HTML の画面が返ったら、そのファイルではない（SPA の index.html、共通のエラー画面）
+        else if (p.code === 200 && !HTML_PROBE_PATHS.test(p.path) && htmlProbe(p.headB64)) html++;
         else if (p.code === 200) { fails++; out.push(hf(knownFiles, host, 2, 'info', 'fail', `${p.path}（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）`, '中身を手動で確認する')); }
       }
       // コード 000 は接続できなかった（タイムアウト・名前解決の失敗など）ことを示し、ファイルがないことは分からない。1件でもあれば合格にしない
       const unreached = own.filter(p => !p.code).length;
       if (!fails && unreached) out.push(hf(knownFiles, host, 'na', 'info', 'na', `${own.length}件のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC));
-      else if (!fails && own.length) out.push(hf(knownFiles, host, 'ok', 'info', 'pass', `${own.length}件のパスはいずれも取得できなかった`, ''));
+      else if (!fails && own.length) out.push(hf(knownFiles, host, 'ok', 'info', 'pass', `${own.length}件のパスはいずれも取得できなかった${html ? `（うち${html}件は HTML の画面が返った。どのパスにも同じ画面を返す SPA など）` : ''}`, ''));
     }
     return out;
   } };

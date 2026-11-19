@@ -6,7 +6,7 @@ import { isHttps } from '../src/parser/target';
 import { recommendationEn } from '../src/recommendationsEn';
 import { evaluate } from './helpers';
 
-// 先頭64バイトだけを渡す（C13 と同じ）
+// 先頭64バイトだけを渡す（C13 の .env・.git/HEAD などと同じ。長く採るテキストの形式は tests/probes.test.ts）
 const hit = (path: string, head: string) => probePattern(path, btoa(head.slice(0, 64)), 200)?.name;
 
 describe('プローブ：一般的なキーだけの JSON では一致させない（誤検知）', () => {
@@ -27,7 +27,7 @@ describe('プローブ：一般的なキーだけの JSON では一致させな�
     expect(hit('/assets/app.js.map', '{"version":3,"file":"app.js","sources":["../src/a.ts"]')).toBe('source-map');
     expect(hit('/assets/app.js.map', `)]}'\n{"version":3,"sources":[]}`)).toBe('source-map');
   });
-  it('特有のキーが先頭64バイトより後ろにある package.json は一致しない（E-03② の判定保留になる）', () => {
+  it('特有のキーが採った先頭（64バイトの採取など）より後ろにある package.json は一致しない（E-03② の判定保留になる）', () => {
     expect(hit('/package.json', '{\n  "name": "lodash",\n  "version": "4.17.21",\n  "description": "Lodash modular utilities.",\n  "main": "lodash.js"')).toBeUndefined();
   });
 });

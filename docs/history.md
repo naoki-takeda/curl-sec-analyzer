@@ -1217,3 +1217,17 @@ v1.0 の範囲を実装し、要確認事項（第44回）を確かめたので�
 | 2回目の束のレビュー | フォーカスの E2E が描き直す前に通っていた（中）。消去の E2E が遅い環境で何も確かめずに通りうる。置き換わった判定のあとに古い見出しへフォーカスした（低） | 件数のメッセージを待ってから確かめる。待つ時間を延ばす。`analyze()` は表示したかを返し、表示したときだけフォーカスを移す | `e2e/app.spec.ts`、`src/main.ts`、`src/ui/dialog.ts` |
 | 判断したこと | 設定ファイルを読み込んで判定中に別の判定が始まると、読み込みのエラーは一瞬だけ出て、あとから届く件数で消える（以前はまったく出なかった）。判定中は前の結果の表示・エクスポートを残す（届いた結果で置き換える）。Firefox・WebKit の E2E は手元で起動できないので、CI で確かめる | — | — |
 | 未対応 | 古い curl の、CR だけの行をヘッダの値に含む応答（第48回のまま）。印のある入力で、理由句にコロンのある本物の次のホップ（第50回のまま）。本文が実際に空の応答と HAR の HEAD の na（第56回のまま）。プローブのパターンを実際の応答で確かめること（第44回のまま） | 次回以降 | — |
+
+### 要確認事項の確認（第58回、C13 のプローブの判定パターンを実物で確かめる）
+
+第44回から残していた要確認事項（プローブの判定パターンが先頭64バイトで判別できるか、どのパスにも JSON・HTML を返すサーバで誤検知しないか）を、手元で作れる実物で確かめた。WSL（Ubuntu）には git と python3 しかなく（PHP・Apache・Tomcat・svn・composer はなく、sudo はパスワードが要る）、実物を作るためのダウンロードは利用者が明示して認めなかったので行わなかった。採る長さと、HTML の画面の扱いは、利用者が推奨案を選んだ（2026-11-19）。
+
+| 対象 | 確かめたこと・内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| 実物で確かめたもの | git の HEAD（git init のブランチ・detached・SHA-256 の detached・bare）はすべて一致。中身のある zip は一致し、空の zip（`PK 05 06`。git archive の空のコミットも）は一致しない。ソースマップは node_modules の実物168件がすべて一致。package.json は node_modules の実物189件のうち先頭64バイトで一致したのは62件（33%）で、128バイトで37%、256バイトで62%、512バイトで85%、4KB で93%。npm init の既定の形は64バイトでは一致しない | 下の「採る長さ」。空の zip は中身がないので検出しない（CHANGELOG の既知の限界に書いた） | `tests/probes.test.ts` |
+| SPA の雑音 | どのパスにも同じ index.html を返す実際のサーバ（このツールの `vite preview`）に C13 と同じプローブを送ると、①の誤検知はないが、.git/HEAD・.env・backup.zip など10パスがすべて E-03②（判定保留）として並んだ | HTML の形式でないファイルのパスに HTML の画面（`<!doctype html`・`<html`・`<head`・`<body` で始まる）が返ったら、そのファイルではないとして②にせず、合格の証跡に件数を書く。phpinfo・server-status は本物も HTML なので②のまま。`<!--` は HTML の印にしない（web.xml が使用許諾のコメントで始まる） | `src/rules/probes.ts`、`src/rules/hostRules.ts`、ゴールデン（05-exposure・sample の backup.zip の②が消える） |
+| 採る長さ | 先頭64バイトでは、phpinfo（title は CSS のあと）・server-status・web.xml（使用許諾のコメントのあと）・package.json・composer.json の目印が入らず、ほぼ常に②だった | 生成スクリプトの C13 で、phpinfo・web.xml・package.json・composer.json・security.txt は4KB、server-status は1KB（目印は先頭にあり、後ろはほかの利用者のリクエストの URL の一覧）、ほかは64バイト（.env の秘密の値、マジックバイト）を採る。フィクスチャを採り直した | `src/commands.ts`、`tests/fixtures/generated_local.txt`、設計書 |
+| 束のレビュー | 4KB にしたことで、SPA の HTML の中のカスタム要素 `<web-app>` で web.xml の①（高）、API の JSON の入れ子の `"main"`・`"repositories"` で package.json・composer.json の①、記事の「Requires PHP Version 8.1」で phpinfo の①、HTML の画面の「Contact:」の行で security.txt の合格になった（中・低）。設計書などに64バイトの記述が残った | HTML の画面は phpinfo・server-status のほかはどのパターンにも一致としない。web.xml は先頭（XML 宣言とコメントのあと）に固定する。package.json・composer.json は最上位のキーだけを線形時間で読む。phpinfo・server-status は出力の決まった形に絞る。4KB の out.txt に web.xml の `<context-param>` のパスワードや composer.json の認証付きの URL が残りうることを設計書に書いた | `src/rules/probes.ts`、`tests/probes.test.ts`、設計書、CHANGELOG |
+| 2回目の束のレビュー | 最上位に汎用の語のキーだけがある API の応答（`{"module":"auth","error":…}`）で package.json の①（64バイトのころから）。XML 宣言のほかの処理命令のあとと、名前空間の接頭辞の `<j:web-app>` の web.xml を見逃した（②に落ちる）。設計書の web-xml の行が古かった（低） | main・module・exports・bin は name か version と組のときだけ数える。処理命令を読み飛ばし、接頭辞を認める。設計書を直した | `src/rules/probes.ts`、`tests/probes.test.ts`、設計書 |
+| 確かめていないもの | phpinfo・server-status・web.xml・.svn/entries・composer.json・.DS_Store の実物（作る道具がない）。phpinfo の title の位置（約1.3KB）と mod_status の見出しの位置は、php-src・Apache の出力の順で見積もった | 要確認事項に残す | 設計書（要確認事項） |
+| 未対応 | 古い curl の、CR だけの行をヘッダの値に含む応答（第48回のまま）。印のある入力で、理由句にコロンのある本物の次のホップ（第50回のまま）。本文が実際に空の応答と HAR の HEAD の na（第56回のまま） | 次回以降 | — |

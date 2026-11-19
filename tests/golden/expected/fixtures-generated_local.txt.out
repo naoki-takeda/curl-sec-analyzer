@@ -230,7 +230,7 @@ www.example.com | T-09.ok | info | pass | 旧バージョンは拒否された
 www.example.com | T-10.3 | medium | fail | TLS 1.2で接続できたCBC・静的RSAの暗号: AES128-SHA
 www.example.com | T-10.3 | medium | fail | TLS 1.2で接続できたCBC・静的RSAの暗号: ECDHE-RSA-AES128-SHA
 www.example.com | T-11.1 | high | fail | Verify return code: 18（self-signed certificate）
-www.example.com | T-11.2 | medium | fail | 期限まで20日（notAfter: 2026-12-09、2026-11-19T14:22:20 時点）
+www.example.com | T-11.2 | medium | fail | 期限まで20日（notAfter: 2026-12-09、2026-11-19T14:59:58 時点）
 
 ## coverage
 H-01 | evaluated | fails=14

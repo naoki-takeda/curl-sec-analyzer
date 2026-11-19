@@ -224,7 +224,6 @@ upload | R-04.na | info | na | ACAOなし（Origin を送っていない、ま�
 upload | T-12.ok | info | pass | HTTP/2
 www.example.com | E-03.1 | high | fail | /.env（HTTP 200、一致したパターン: dotenv）
 www.example.com | E-03.1 | high | fail | /.git/HEAD（HTTP 200、一致したパターン: git-head）
-www.example.com | E-03.2 | info | fail | /backup.zip（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）
 
 ## coverage
 H-01 | evaluated | fails=10
@@ -283,7 +282,7 @@ T-12 | evaluated | fails=0
 T-13 | manual | fails=0
 E-01 | evaluated | fails=3
 E-02 | evaluated | fails=1
-E-03 | evaluated | fails=3
+E-03 | evaluated | fails=2
 E-04 | evaluated | fails=0
 E-05 | evaluated | fails=2
 E-06 | evaluated | fails=1

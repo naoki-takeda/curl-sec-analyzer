@@ -125,7 +125,11 @@ export function generateScript(o: CommandOptions): string {
     `for p in /.git/HEAD /.env /.svn/entries /.DS_Store /WEB-INF/web.xml /package.json /composer.json /backup.zip /phpinfo.php /server-status /robots.txt /.well-known/security.txt ${q(`${o.staticPath}.map`)}; do`,
     '  : > "$probe"',
     `  info=$(curl -sS -o "$probe" -w 'code=%{response_code} size=%{size_download} ct=%{content_type}' "$H$p")`,
-    `  printf '#PROBE run=%s path=%s head=%s %s\\n' "$RUN" "$p" "$(head -c 64 "$probe" | base64 | tr -d '\\n')" "$info"`,
+    // 先頭を何バイト採るか。目印が後ろにあるテキストの形式は広く採る（phpinfo の title は CSS のあと、web.xml の <web-app> は使用許諾の
+    // コメントのあと、package.json・composer.json の特有のキーは name・version・description のあと）。server-status は目印が先頭にあり、
+    // 後ろはほかの利用者のリクエストの URL の一覧なので 1KB まで。.env・.git/HEAD などは秘密の値かマジックバイトなので 64 バイトのまま
+    '  case $p in /phpinfo.php|/WEB-INF/web.xml|/package.json|/composer.json|/.well-known/security.txt) n=4096 ;; /server-status) n=1024 ;; *) n=64 ;; esac',
+    `  printf '#PROBE run=%s path=%s head=%s %s\\n' "$RUN" "$p" "$(head -c "$n" "$probe" | base64 | tr -d '\\n')" "$info"`,
     'done', 'rm -f "$probe"');
 
   L.push('', '# ---- 第4章：TLS（C11・C12・C23） ----');
@@ -195,7 +199,7 @@ export function generateScript(o: CommandOptions): string {
  * - -q：利用者の ~/.curlrc を読まない（最初の引数でないと効かない）。.curlrc の header = "Authorization: …" で、認証を付けないはずの
  *   unauth-api（A-01）や CORS の採取にトークンが付いたり、location で -D - の採取が転送をたどったりして、判定が黙って変わるため
  * - --connect-timeout・--max-time：応答しないサーバ（tarpit・WAF）でスクリプトが止まらないようにする。プローブ（/backup.zip など）も
- *   時間で打ち切る（打ち切っても先頭の64バイトとステータスは残る）。WebSocket（C16）は後ろの --max-time 5 が効く
+ *   時間で打ち切る（打ち切っても採った先頭とステータスは残る）。WebSocket（C16）は後ろの --max-time 5 が効く
  */
 const CURL_COMMON = '-q -sS --connect-timeout 10 --max-time 30';
 

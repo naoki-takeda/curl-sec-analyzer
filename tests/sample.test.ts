@@ -11,7 +11,7 @@ describe('サンプル入力の通し確認（MVP）', () => {
   it('ターゲット単位・ホスト単位・横断の指摘がそろう', () => {
     const ids = overall(findings).map(r => r.ruleId);
     expect(ids).toEqual(expect.arrayContaining([
-      'C-01.1', 'C-09.1', 'C-12.1', 'C-12.2', 'H-02.3', 'H-04.1', 'H-15.1', 'R-01.1', 'T-04.4', 'T-09.1', 'E-03.1', 'E-03.2']));
+      'C-01.1', 'C-09.1', 'C-12.1', 'C-12.2', 'H-02.3', 'H-04.1', 'H-15.1', 'R-01.1', 'T-04.4', 'T-09.1', 'E-03.1']));
     expect(countBySeverity(overall(findings)).high).toBeGreaterThanOrEqual(6);
   });
 

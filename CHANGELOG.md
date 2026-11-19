@@ -97,6 +97,10 @@ curl-sec-analyzer の版ごとの変更です。版の付け方は [docs/design.
   - E-01 は、エラーの応答（4xx・5xx）と `error-*` のラベルで本文を採取していないとき、A-07 は API の 2xx で本文を採取していないとき、適用外ではなく na にします。
   - E-09①：OpenID Connect の form_post の hidden の欄を除くとき、属性の値の中の `>` でタグを切っていたため、欄の値のトークンを本文の秘密として数えていました。
   - A-09①：HAR の Content-Type の値の前に空白があると、JSON を text/html で返す応答を見逃していました。
+- C13 のプローブを、実物の応答で確かめて直しました（docs/history.md の第58回）：
+  - 目印が後ろにあるテキストの形式（phpinfo・web.xml・package.json・composer.json・security.txt）は先頭の4KB、server-status は1KB を採ります。ほかは64バイトのままです。package.json は、実物189件のうち64バイトで一致したのが33%でした。
+  - どのパスにも HTML の画面を返すサーバ（SPA など）で、.env・.git/HEAD・backup.zip などを E-03②（判定保留）として並べていました。HTML の画面は、そのファイルではないとして合格にします（phpinfo・server-status は除く）。
+  - 長く採った先頭で誤検知しないよう、web.xml は先頭に固定し、package.json・composer.json は最上位のキーだけを見て、phpinfo・server-status は出力の決まった形に絞りました。
 - 構造とテストを整理しました（docs/history.md の第57回）：
   - 判定を Web Worker で行います。数万件のターゲットの HAR でも画面が止まらず、判定中は「判定しています」と表示します。画面の側はルールを読み込まないので、ページの JS は約 437KB です。
   - `tests/fixtures/generated_local.txt` を、今の生成スクリプトの出力で採り直しました（採り方は `scripts/capture-fixture.sh`）。
@@ -106,8 +110,8 @@ curl-sec-analyzer の版ごとの変更です。版の付け方は [docs/design.
 ### 既知の限界
 
 - E-01（エラーの詳細）と A-07（過剰なデータ露出）は、本文を見るべき応答（E-01 はエラーの応答と `error-*`、A-07 は API の 2xx）で本文を採取していないときだけ na にします。それ以外の本文のない応答は適用外です。
-- プローブの判定パターン（先頭64バイト）は、形式の仕様と典型的な例で確かめたものです。実際の応答では確かめていません。
-  - phpinfo と server-status は、目印が先頭64バイトに現れないので、ほぼ常に E-03②（判定保留）になります。
+- プローブの判定パターンのうち、git の HEAD・zip・package.json・ソースマップと、どのパスにも HTML を返す SPA は実物で確かめました。phpinfo・server-status・web.xml・.svn/entries・composer.json・.DS_Store は、形式の仕様と典型的な例で確かめたものです（手元に実物を作る道具がないため）。
+  - 空の zip（`PK 05 06` で始まる）は backup.zip として検出しません。
 - Windows の標準の curl（Schannel）の `-v` は、TLS の版と暗号を出しません。
   - そのため T-09②（TLS 1.3 非対応）と、合意した暗号による T-10 は判定できません。T-09①・T-10 は、C12・C23（openssl）で判定します。
 - 手で採取した `curl -i` の出力と、印のない openssl の出力は、診断対象のサーバが応答の本文やデータで判定を偽装できます。

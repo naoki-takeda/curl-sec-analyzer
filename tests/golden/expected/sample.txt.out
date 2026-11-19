@@ -115,7 +115,6 @@ top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 top | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 top | T-12.ok | info | pass | HTTP/2
 www.example.com | E-03.1 | high | fail | /.git/HEAD（HTTP 200、一致したパターン: git-head）
-www.example.com | E-03.2 | info | fail | /backup.zip（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）
 www.example.com | T-09.1 | high | fail | 接続できた旧バージョン: tls1_1
 www.example.com | T-10.na | info | na | 合意した暗号（TLSv1.3 / TLS_AES_256_GCM_SHA384）だけでは、弱い暗号を受け入れるか・鍵と署名は分からない
 
@@ -176,7 +175,7 @@ T-12 | evaluated | fails=0
 T-13 | manual | fails=0
 E-01 | evaluated | fails=0
 E-02 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
-E-03 | evaluated | fails=2
+E-03 | evaluated | fails=1
 E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
 E-05 | missing-input | fails=0 | 必要なラベル: （一般）
 E-06 | missing-input | fails=0 | 必要なラベル: （一般）
