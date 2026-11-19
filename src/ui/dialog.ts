@@ -16,13 +16,14 @@ export function openSuppressDialog(f: Finding) {
     [[f.ruleId, T.onlyCond(`${f.item}${circled(f.condition)}`)], [f.item, T.wholeItem(f.item)]], f.ruleId);
   scope.id = 'sup-scope';
   const err = el('p', 'mt-2 min-h-5 text-sm text-sev-high');
-  err.setAttribute('role', 'alert');   // 入力の誤りを読み上げる（WCAG 4.1.3。role も aria-live もなく、読み上げなかった。第50回）
+  err.setAttribute('role', 'alert');   // 入力の誤りを読み上げる（WCAG 4.1.3）
   const save = button(T.save, 'rounded-md bg-primary px-4 py-2 font-bold text-primary-ink', () => {
     if (!reason.value.trim()) { err.textContent = T.needReason; reason.focus(); return; }
     state.suppressions = [...state.suppressions, { ruleId: scope.value, target: f.targetKey ?? f.target, reason: reason.value.trim(), approver: approver.value.trim(), until: until.value }];
-    refs.dialog.close(); actions.renderSettings(); actions.analyze();
-    // 例外に登録したボタンは描き直しで消えるので、結果の最初の見出しにフォーカスを移す（body に落ちて、キーボードで続けられなかった。第50回）
-    const h = refs.results.querySelector<HTMLElement>('h2'); if (h) { h.tabIndex = -1; h.focus(); }
+    refs.dialog.close(); actions.renderSettings();
+    // 例外に登録したボタンは描き直しで消えるので、結果の最初の見出しにフォーカスを移す（body に落とさず、キーボードで続けられるように。WCAG 2.4.3）。
+    // 判定は Web Worker で行うので、描き直したあとに移す（その判定が別の判定に置き換わったら、古い結果の見出しには移さない）
+    actions.analyze().then(shown => { if (!shown) return; const h = refs.results.querySelector<HTMLElement>('h2'); if (h) { h.tabIndex = -1; h.focus(); } });
   });
   refs.dialog.replaceChildren(el('div', 'p-5',
     Object.assign(el('h2', 'text-lg font-bold', T.title), { id: 'sup-title' }),
@@ -30,7 +31,7 @@ export function openSuppressDialog(f: Finding) {
     el('div', 'mt-3', labelFor('sup-scope', T.scope), scope),
     field('sup-reason', T.reason, reason), field('sup-approver', T.approver, approver), field('sup-until', T.until, until), err,
     el('div', 'mt-4 flex justify-end gap-2', button(T.cancel, BTN, () => refs.dialog.close()), save)));
-  // 見出しをダイアログの名前にする（読み上げで、何のダイアログかが分かるように。第48回）
+  // 見出しをダイアログの名前にする（読み上げで、何のダイアログかが分かるように。WCAG 4.1.2）
   refs.dialog.setAttribute('aria-labelledby', 'sup-title');
   refs.dialog.showModal(); reason.focus();
 }

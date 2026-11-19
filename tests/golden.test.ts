@@ -7,6 +7,7 @@
 // - 時刻は固定する（Cookie・証明書の期限を、採取時刻のない入力では判定した時刻で比べるため）
 import { readFileSync, readdirSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ITEMS } from '../src/engine/coverage';
 import { toCsv } from '../src/export/csv';
 import { toJson } from '../src/export/json';
 import { toMarkdown } from '../src/export/markdown';
@@ -29,7 +30,7 @@ const run = (c: { name: string; url: URL }) => (/\.har$/.test(c.name) ? analyze(
  * 画面・エクスポートに出てはいけない値。コーパスの秘密の値には「CANARY」を入れてある（maskValue が残す先頭の4文字より後ろ）。
  * CANARY を Base64 にしたもの（JWT の署名の部分）も見る
  */
-// 小文字のトークン（canary を含む）も見る（小文字と数字だけのトークンが突き合わせのキーに残った、第24回）
+// 小文字のトークン（canary を含む）も見る（小文字と数字だけのトークンは、突き合わせのキーに残りやすい）
 const SECRETS = [/CANARY/, /Q0FOQVJZ/, /c2lnQ0FO/, /canary/];
 
 beforeAll(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW); });
@@ -52,6 +53,12 @@ describe('ゴールデン：秘密の値が画面・エクスポートに出な�
 it('期待結果のファイルは、コーパスの入力と1対1（入力がないまま残った期待結果を、黙って通さない）', () => {
   const expected = readdirSync(new URL('./golden/expected/', import.meta.url)).filter(f => f.endsWith('.out')).sort();
   expect(expected).toEqual(CASES.map(c => `${c.name}.out`).sort());
+});
+
+it('コーパスの指摘の条件番号は、項目の台帳（items.json の conditions）の範囲にある', () => {
+  const n = new Map(ITEMS.map(i => [i.id, i.conditions]));
+  for (const c of CASES) for (const f of run(c).findings)
+    if (typeof f.condition === 'number') expect(f.condition, `${c.name} ${f.ruleId}`).toBeLessThanOrEqual(n.get(f.item)!);
 });
 
 it('コーパスの各ファイルに、少なくとも1つのターゲットがある（読み込めないファイルを黙って比べない）', () => {

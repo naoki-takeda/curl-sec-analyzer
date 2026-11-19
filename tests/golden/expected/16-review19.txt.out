@@ -114,6 +114,7 @@ pre-login | C-13.ok | info | pass | 共有キャッシュの指定なし
 pre-login | H-12.na | info | na | 機密応答かどうか分からない（(ヘッダなし)）
 pre-login/login | C-09.ok | info | pass | ログイン時にセッションIDを再発行している
 robots | A-02.ok | info | pass | URL・Location・本文にトークンなし
+robots | E-01.ok | info | pass | エラーの詳細らしき記述なし
 robots | E-02.ok | info | pass | 一覧表示なし
 robots | E-04.ok | info | pass | robots.txt なし（HTTP 200、HTML の画面。SPA の可能性）
 robots | E-07.ok | info | pass | http:// の資源なし
@@ -147,7 +148,7 @@ top | E-09.2 | low | fail | 開発用コメント（「pass」を含む。中身
 top | H-01.4 | low | fail | max-age=31536000
 top | H-02.2 | info | fail | max-age=31536000
 top | H-03.ok | info | pass | default-src 'self'; frame-ancestors 'none'
-top | H-04.ok | info | pass | script-src 'self'
+top | H-04.ok | info | pass | default-src 'self'
 top | H-05.2 | medium | fail | base-uri がない（default-src にはフォールバックしない）
 top | H-06.ok | info | pass | frame-ancestors 'none'
 top | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし
@@ -171,7 +172,7 @@ H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条
 H-05 | evaluated | fails=1
 H-06 | evaluated | fails=3
 H-07 | evaluated | fails=0
-H-08 | evaluated | fails=4 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（204・304 は対象外）
+H-08 | evaluated | fails=4 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）
 H-09 | evaluated | fails=4
 H-10 | evaluated | fails=4
 H-11 | evaluated | fails=3 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける

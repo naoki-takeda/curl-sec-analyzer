@@ -10,6 +10,7 @@ login.txt
 jar.txt
 old.txt
 s[0-9].txt
+logout-body.txt
 run.sh.local
 *.har
 # テスト用の HAR（example.com に置き換え済み）はコミットする

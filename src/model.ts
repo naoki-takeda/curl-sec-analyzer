@@ -2,12 +2,10 @@
 export type Severity = 'high' | 'medium' | 'low' | 'info';
 export type Status = 'pass' | 'fail' | 'na' | 'suppressed';
 export type ResponseKind = 'html' | 'api' | 'other';
-export const RESERVED_LABELS = ['http', 'apex', 'pre-login', 'login', 'logout', 'after-logout'] as const; // ほかに session-sample-N
 
 export interface HttpResponse {
   httpVersion: string; status: number; reason?: string;
   headers: Map<string, string[]>;   // 名前は小文字
-  rawNames: string[];               // 表示用の元の表記
   body?: string;                    // 先頭64KBまで
   // challenge：curl が認証し直した 401（--digest・--ntlm・--negotiate・--anyauth）。connect にはプロキシの 407 も含む
   kind: 'final' | 'redirect' | 'informational' | 'connect' | 'challenge';
@@ -38,19 +36,19 @@ export interface Target {
 export interface RuleContext {
   target: Target; final?: HttpResponse; chain: HttpResponse[];
   isHttps?: boolean; responseKind: ResponseKind; sensitive?: boolean;
-  hostHsts?: boolean;               // 同じホストでHSTSが有効か（C-01②③が使う。ツール設計2「ルール間の依存」）
+  hostHsts?: boolean;               // 同じホストでHSTSが有効か（C-01②③が使う。engine/run.ts の hostHstsMap）
   hostSessionSameSite?: boolean;    // 同じホストのセッションCookieがすべて SameSite=Lax/Strict か（E-12 が使う。見えなければ undefined）
   profile?: Profile;                // 組織プロファイル（E-08 の自社の配信元など）
   now: number;                      // 期限の判定に使う時刻（採取時刻 #META at、なければ判定した時刻）。parser/target.ts の capturedAt
-  findings: Finding[];
 }
 export interface CrossContext {     // ホスト単位・横断ルール用
   targets: Target[]; byLabel(label: string): Target | undefined; withPrefix(prefix: string): Target[];
-  byHost(): Map<string, Target[]>; findings: Finding[];
+  byHost(): Map<string, Target[]>;
 }
 export type CoverageStatus = 'evaluated' | 'missing-input' | 'manual' | 'not-implemented' | 'excluded';
 export interface ItemInfo {
   id: string; title: string; titleEn: string; chapter: number; manual: boolean; phase: string;   // 必要なラベルは engine/labels.ts の requiredLabels で作る
+  conditions: number;               // NG判定基準の条件の数（①〜。設計書の表の重要度の列と同じ）。組織プロファイル・例外の条件番号の検証に使う
   asvs: string[];                   // 関連する OWASP ASVS 5.0.0 の要件ID（例：3.4.1）。engine/standards.ts
   ipa: string[];                    // 関連する IPA「安全なウェブサイトの作り方」改訂第7版の項番（例：4-(iii)、2.3-1)）
 }
@@ -78,7 +76,7 @@ export interface Finding {
   apiInfo?: boolean;                // API の応答なので、HTML 向けの項目の指摘を情報に下げた（組織プロファイルの重要度で上げ直さない）
   dedupedBy?: string;               // 二重計上を防ぐため、別のルールID（例：A-09.2）で数えたとき。status は na になる
 }
-/** 組織プロファイル（profile.json）：組織ごとの重要度、対象外の項目、セッションCookieの指定 */
+/** 組織プロファイル（profile.json）：組織ごとの重要度、対象外の項目、セッションCookieの指定、自社のスクリプトの配信元 */
 export interface Profile {
   name: string;
   severity: Record<string, Severity>;     // 項目ID（H-10）か条件（H-10.1）→ 重要度
@@ -89,7 +87,7 @@ export interface Profile {
 }
 export interface Rule {
   id: string; title: string; appliesTo: 'html' | 'api' | 'any';
-  scope: 'target' | 'host' | 'cross'; dependsOn?: string[]; basis: string[];
+  scope: 'target' | 'host' | 'cross'; basis: string[];   // scope は登録する一覧（rules/ruleset.ts）と一致させる（tests/rules.test.ts）
   // 返り値の取り決め：評価したら必ず .ok か fail を返す。判定できなければ .na。
   // 空配列は「このターゲットには適用外」の意味にだけ使う（ツール設計2）。
   run?(ctx: RuleContext): Finding[];          // scope: target

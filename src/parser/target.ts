@@ -1,5 +1,8 @@
+// parser/target.ts：ターゲットの共通の処理（ラベル・判定に使う応答のホップ・HTTPS か・機密か・採取時刻・Set-Cookie の上限）
 import type { HttpResponse, ParseWarning, ResponseKind, Target } from '../model';
-import { looksLikeSessionName } from './setCookie';
+
+/** 読む本文の上限（curl の貼り付け・HAR とも先頭 64KB まで） */
+export const BODY_LIMIT = 64 * 1024;
 
 /** 付け直したラベル（http#2 など）の元のラベル。ラベル対応表やラベルで判定を変えるルールは、この元のラベルで判定する */
 export const baseLabel = (label: string) => label.replace(/#\d+$/, '');
@@ -24,35 +27,39 @@ export function uniqueLabels(targets: Target[]): ParseWarning[] {
     `ラベル「${l}」のターゲットが${tos.length + 1}つあります。2つ目以降は ${tos.join('、')} として別に判定しました（横断の判定には最初のものだけを使います）` }));
 }
 
+/** スキームのある URL として読めるか（url= と URL 欄の検査。a.example/r・https:/a.example は読めない） */
+export const HAS_SCHEME = /^[a-z][\w+.-]*:\/\/[^/?#\s]/i;
 /** Location のある 3xx（ブラウザは本文を表示せずに転送先へ移る） */
 export const isRedirectWithLocation = (r?: HttpResponse): boolean => !!r && r.status >= 300 && r.status < 400 && r.headers.has('location');
 
 /** その URL の応答のホップか（1xx、プロキシの応答（CONNECT・407）、curl が認証し直した 401 を除く） */
-export const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
+const isHop = (x: HttpResponse) => x.kind !== 'informational' && x.kind !== 'connect' && x.kind !== 'challenge';
+export const chainOf = (t: Target): HttpResponse[] => t.responses.filter(isHop);
 
 /**
- * 判定に使う応答：-L なら、ターゲットの URL と同じホストの最後のホップ。別のホスト（IdP、legacy.example.net）へ転送した先の応答は、
- * 対象の URL の応答として判定しない（転送先の HSTS のなさで、対象を H-01①（高）にした。HAR の取り込みも別のホストの転送先をつながない）。
- * 同じホストのホップがない（URL が分からない）ときは最後のホップ
+ * 判定に使う応答：-L なら、ターゲットの URL と同じサイトの最後のホップ。別のサイト（IdP、legacy.example.net）へ転送した先の応答は、
+ * 対象の URL の応答として判定しない（転送先の HSTS のなさで対象を H-01①（高）にしない。HAR の取り込みも別のホストの転送先をつながない）。
+ * 同じサイトのホップがない（URL が分からない）ときは最後のホップ
  */
 export const finalResponse = (t: Target): HttpResponse | undefined => {
-  const c = t.responses.filter(isHop);
+  const c = chainOf(t);
   const host = hostnameOf(t.url);
   if (!host) return c.at(-1);
   // 同じサイト（登録ドメイン。apex と www、example.co.jp の下のホスト）への転送はたどる（curl -L で apex から www へ転送する普通の形を、
-  // 301 で判定して H-01①（高）などの誤検知にした）。https のターゲットは https のホップだけ（途中で http に落とした転送の応答は対象の応答ではない）
+  // 301 で判定しない）。https のターゲットは https のホップだけ（途中で http に落とした転送の応答は対象の応答ではない）
   const site = siteOf(host); const https = /^https:/i.test(t.url ?? '');
   return c.filter(r => { const h = hostnameOf(r.url); return !r.url || (!!h && siteOf(h) === site && (!https || /^https:/i.test(r.url))); }).at(-1) ?? c.at(-1);
 };
-const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowerCase() : undefined; } catch { return undefined; } };
+/** URL のホスト名（小文字）。読めなければ undefined */
+export const hostnameOf = (u?: string) => { try { return u ? new URL(u).hostname.toLowerCase() : undefined; } catch { return undefined; } };
 /**
  * ターゲットの URL と同じサイトの応答（URL の分からない応答を含む）。-L で別のサイト（IdP の login.microsoftonline.com）へ転送した先の Set-Cookie・
- * Clear-Site-Data を、対象の Cookie として判定しない（C-01〜C-07・C-11・C-12②・H-15。IdP の Cookie の属性を対象の指摘にし、IdP の Cookie を
- * 消しただけのログアウトを合格にした）。http の同じサイトのホップは含める（C-10 が見る）
+ * Clear-Site-Data を、対象の Cookie として判定しない（C-01〜C-07・C-11・C-12②・H-15。IdP の Cookie の属性を対象の指摘にせず、IdP の Cookie を
+ * 消しただけのログアウトを合格にしない）。http の同じサイトのホップは含める（C-10 が見る）
  */
 export const siteResponses = (t: Target): HttpResponse[] => {
-  // 1xx（103 Early Hints など）とプロキシの応答（CONNECT・407）は除く。ブラウザは 1xx の Set-Cookie・Clear-Site-Data を使わない（103 の Set-Cookie で
-  // C-09 を、103 の削除の Set-Cookie・Clear-Site-Data で C-12②・H-15 を合格にできた。第50回）。プロキシの応答はサイトの応答ではない
+  // 1xx（103 Early Hints など）とプロキシの応答（CONNECT・407）は除く。ブラウザは 1xx の Set-Cookie・Clear-Site-Data を使わない
+  // （103 で C-09・C-12②・H-15 を合格にさせない）。プロキシの応答はサイトの応答ではない
   const rs = t.responses.filter(r => r.kind !== 'informational' && r.kind !== 'connect');
   const host = hostnameOf(t.url);
   if (!host) return rs;
@@ -61,12 +68,12 @@ export const siteResponses = (t: Target): HttpResponse[] => {
 };
 /**
  * 1つの応答で読む Set-Cookie の上限。ブラウザも1つのドメインに約180個までしか保存しない。上限がないと、5MB の Set-Cookie の行で
- * Cookie の項目ごとに数万件の指摘を作り、判定に数十秒かかった（第50回）。超えた分は警告で知らせる
+ * Cookie の項目ごとに数万件の指摘を作り、判定に数十秒かかる。超えた分は警告で知らせる
  */
-export const MAX_SET_COOKIES = 300;
+const MAX_SET_COOKIES = 300;
 /**
- * Set-Cookie の値を一覧に足す。上限を超えたら古いもの（先のもの）を捨てて、後のものを残す（ブラウザも古いものから追い出す。先の300個を
- * 残すと、301個目の Secure なしのセッションCookie を判定せず、C-01① などを合格にした。束のレビュー）。捨てた数を返す
+ * Set-Cookie の値を一覧に足す。上限を超えたら古いもの（先のもの）を捨てて、後のものを残す（ブラウザも古いものから追い出す。
+ * 先のものを残すと、後ろに置いた Secure なしのセッションCookie を判定しない）。捨てた数を返す
  */
 export const pushCookies = (list: string[], vals: string[]): number => {
   let dropped = 0;
@@ -79,14 +86,17 @@ export const cookieCapWarnings = (targets: Target[]): ParseWarning[] => targets.
   const n = t.responses.reduce((a, r) => a + (r.droppedCookies ?? 0), 0);
   return n ? [{ kind: 'too-many-cookies' as const, label: t.label, detail: `ターゲット「${t.label}」：1つの応答の Set-Cookie が${MAX_SET_COOKIES}個を超えたので、先の${n}個を判定に使いませんでした（ブラウザも1つのドメインに約180個までしか保存せず、古いものから捨てます）` }] : [];
 });
-/** 登録ドメインの近似（最後の2つのラベル。co.jp・com.au のような2段の国別ドメインは3つ）。IP アドレスはそのまま */
-const siteOf = (h: string): string => {
-  if (/^[\d.]+$|:/.test(h)) return h;
-  const l = h.split('.');
-  return l.slice(l.length >= 3 && /^[a-z]{2}$/.test(l.at(-1)!) && /^(?:co|ne|or|ac|go|ed|lg|gr|ad|com|net|org|gov|edu)$/.test(l.at(-2)!) ? -3 : -2).join('.');
+/**
+ * ホスト名の「サイト」（登録したドメイン）の目安。公開接尾辞の一覧は持たないので、最後の2つのラベル（example.com）とし、
+ * 国別の第2レベル（co.jp、com.au など）なら3つ（example.co.jp）にする。ポートと IPv6 の角かっこは外し、IP アドレスと1つのラベル（localhost）はそのまま
+ */
+export const siteOf = (host: string): string => {
+  const h = host.toLowerCase().replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  if (/^[\d.]+$/.test(h) || h.includes(':')) return h;
+  const p = h.split('.');
+  if (p.length >= 3 && p.at(-1)!.length === 2 && /^(?:co|or|ne|ac|go|ed|lg|gr|ad|com|net|org|gov|edu)$/.test(p.at(-2)!)) return p.slice(-3).join('.');
+  return p.slice(-2).join('.');
 };
-
-export const chainOf = (t: Target): HttpResponse[] => t.responses.filter(isHop);
 
 /**
  * curl の出力の各ホップに、そのリクエストの URL を付ける（HAR は取り込みで付ける）。ターゲットの URL から Location をたどる。
@@ -108,17 +118,13 @@ export function assignHopUrls(t: Target): void {
  */
 const upgradedToHttps = (t: Target): boolean => {
   if (baseLabel(t.label) === 'http' || !/^http:/i.test(t.url ?? '')) return false;
-  const last = chainOf(t).at(-1)?.url;
-  // 同じサイト（apex と www）の https への転送も含める（finalResponse と同じ。http://example.com → https://www.example.com のよくある形で、
-  // H-・C- の項目が黙って適用外になった）
-  try { return !!last && new URL(last).protocol === 'https:' && siteOf(new URL(last).hostname.toLowerCase()) === siteOf(new URL(t.url!).hostname.toLowerCase()); } catch { return false; }
+  const from = hostnameOf(t.url);
+  // 同じサイト（apex と www）の https への転送も含める（finalResponse と同じ。http://example.com → https://www.example.com のよくある形）
+  try { const last = new URL(chainOf(t).at(-1)?.url ?? ''); return !!from && last.protocol === 'https:' && siteOf(last.hostname) === siteOf(from); } catch { return false; }
 };
 
-/**
- * そのターゲットの URL 自身の応答から始まるチェーン。http から https に転送されたチェーン（HAR はターゲットの URL を https にする。
- * curl は upgradedToHttps）は、最初の https のホップから始める（apex の「自身の応答」や、E-05・E-11 の「そのURLの応答」に http の転送を使わないため）
- */
-const trimPath = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+/** パスの末尾の / を除く（/ だけのパスはそのまま） */
+export const trimPath = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
 /** 転送先が同じページ（同じホストで、パスが末尾の / の違いだけ）か。Django の APPEND_SLASH、FastAPI の redirect_slashes、Apache の DirectorySlash など */
 export function sameDocument(r: HttpResponse, base?: string): boolean {
   try {
@@ -138,6 +144,10 @@ export function sameDocumentHop(t: Target): { hop?: HttpResponse; unfollowed: bo
   return { hop: c[i], unfollowed: false };
 }
 
+/**
+ * そのターゲットの URL 自身の応答から始まるチェーン。http から https に転送されたチェーン（HAR はターゲットの URL を https にする。
+ * curl は upgradedToHttps）は、最初の https のホップから始める（apex の「自身の応答」や、E-05・E-11 の「そのURLの応答」に http の転送を使わないため）
+ */
 export function ownChain(t: Target): HttpResponse[] {
   const c = chainOf(t);
   if (!/^https:/i.test(t.url ?? '') && !upgradedToHttps(t)) return c;
@@ -145,8 +155,11 @@ export function ownChain(t: Target): HttpResponse[] {
   return i > 0 ? c.slice(i) : c;
 }
 
+/** ターゲットの URL（#TARGET の url=、なければ -w の url_effective） */
+export const targetUrl = (t: Target): string | undefined => t.url ?? t.meta.url_effective;
+
 export function isHttps(t: Target): boolean | undefined {
-  const u = t.url ?? t.meta.url_effective;
+  const u = targetUrl(t);
   if (u) return /^https:\/\//i.test(u) || upgradedToHttps(t);   // スキームは大文字小文字を区別しない（HTTPS://…）
   // ALPN の行は、curl 7.83 より前は「ALPN, server accepted to use h2」、以降は「ALPN: server accepted h2」。Windows の Schannel 版の curl は
   // 「SSL connection using」の行を出さないので、ALPN の行が HTTPS の手がかりになる
@@ -159,7 +172,10 @@ export function responseKind(t: Target, r?: HttpResponse): ResponseKind {
   if (t.kind !== 'auto') return t.kind;
   const ct = r?.headers.get('content-type')?.[0]?.toLowerCase() ?? '';
   if (/^application\/(?:[\w.-]+\+)?json\b/.test(ct)) return 'api';
-  if (ct.startsWith('text/html')) return 'html';
+  // XHTML（application/xhtml+xml）もブラウザが描画する HTML の画面。Content-Type のない応答は、ブラウザが本文から HTML と推測するので、
+  // 本文が HTML の始まりのものは HTML とする（other にすると、H-03①（高）・H-06 などの HTML の項目を na も出さずに飛ばす）
+  if (ct.startsWith('text/html') || /^application\/xhtml\+xml\b/.test(ct)) return 'html';
+  if (!ct && /^\s*(?:<!doctype html|<html)\b/i.test(r?.body ?? '')) return 'html';
   return 'other';
 }
 
@@ -174,9 +190,8 @@ export const isSensitive = (t: Target): boolean | undefined => t.sensitive ?? (t
 export function capturedAt(t: Target): number {
   const at = t.meta.at ? Date.parse(t.meta.at) : NaN;   // 「2026-11-12T10:00:00」（タイムゾーンなし）は手元の時刻として読む
   if (!Number.isNaN(at)) return at;
-  // 未来の Date（時計のずれの5分より先）は使わない。Date は診断対象のサーバが書くので、Date: 2030 として、Expires=2031 の Cookie の期限を短く
-  // 見せ、C-05①（中）を合格にできた（1日まで認めると、C-05 の既定の基準の24時間と同じ幅で期限を短く見せられた）。過去の Date は、前に採取した
-  // 出力を読み直したときの正しい基準（期限を長く見せる向きにはならない）
+  // 未来の Date（時計のずれの5分より先）は使わない。Date は診断対象のサーバが書くので、未来の Date で Cookie の期限を短く見せて
+  // C-05①（中）を合格にさせない。過去の Date は、前に採取した出力を読み直したときの正しい基準（期限を長く見せる向きにはならない）
   const now = Date.now();
   for (const r of t.responses) {
     const d = Date.parse(r.headers.get('date')?.[0] ?? '');
@@ -186,45 +201,11 @@ export function capturedAt(t: Target): number {
 }
 
 export function hostOf(t: Target): string | undefined {
-  const u = t.url ?? t.meta.url_effective;
+  const u = targetUrl(t);
   try { return u ? new URL(u).host : undefined; } catch { return undefined; }
 }
 
 /** そのURL自身の最初の応答のステータス（分からなければ0） */
 export const firstStatus = (t: Target): number => ownChain(t)[0]?.status ?? 0;
-/**
- * ログアウトの応答が失敗（4xx・5xx）しているか。GET の /logout に 405 を返すアプリなどでは、ログアウトしていないので、
- * C-12（ログアウト後の無効化・Cookie の削除）と H-15 を判定しない
- */
-export const logoutFailed = (t: Target): boolean => {
-  const s = firstStatus(t);
-  return s >= 400 || (s >= 200 && s < 300 && logoutConfirmPage(t));
-};
-/**
- * ログアウトの確認画面（GET では「ログアウトしますか」のフォームを返すだけで、POST でログアウトする作り。ASP.NET Core Identity の既定の画面、
- * Spring Security の既定のログアウトの確認画面）。ログアウトしていないのに、C-12①（高）と H-15 を判定した（第48回）。次のすべてに当たるもの：
- * - セッションCookie らしい名前の Cookie を消しも発行し直しもせず、Clear-Site-Data もない（AWSALB のような毎回の Cookie は見ない）
- * - 本文に、送信先（action）に logout・signout・logoff の語がある POST のフォームがあり、その中にログアウトのボタンの文言がある
- *   （action のないフォームや購読のフォームを置くだけで、本物のログアウトの C-12① を na に隠せたので、送信先と文言の両方を見る）
- * - パスワード欄（ログアウトのあとのログインの画面）と、ASP.NET WebForms の __VIEWSTATE（ページ全体を囲むフォーム）がない
- * タグは indexOf で切り出して線形の時間で読む（正規表現の先読みで読むと、<form の繰り返しで3乗の時間がかかった）
- */
-const LOGOUT_WORD = /log[-_ ]?out|sign[-_ ]?out|log[-_ ]?off|ログアウト|サインアウト/i;
-function logoutConfirmPage(t: Target): boolean {
-  const chain = ownChain(t);
-  if (chain.some(r => r.headers.has('clear-site-data') || (r.headers.get('set-cookie') ?? []).some(c => looksLikeSessionName(c.split('=')[0].trim())))) return false;
-  const body = (finalResponse(t)?.body ?? '').slice(0, 65536);
-  if (/type\s*=\s*["']?password/i.test(body) || /__VIEWSTATE/i.test(body)) return false;
-  const low = body.toLowerCase();
-  for (let i = low.indexOf('<form'), n = 0; i >= 0 && n < 50; i = low.indexOf('<form', i + 5), n++) {
-    const end = low.indexOf('>', i); if (end < 0 || end - i > 2000) continue;
-    const tag = low.slice(i, end);
-    const method = tag.match(/\bmethod\s*=\s*["']?(\w+)/)?.[1];
-    const action = tag.match(/\baction\s*=\s*["']?([^"'\s>]*)/)?.[1] ?? '';
-    if (method !== 'post' || !LOGOUT_WORD.test(action)) continue;
-    const close = low.indexOf('</form', end);
-    const inner = body.slice(end + 1, close < 0 ? end + 4000 : Math.min(close, end + 4000));
-    if (LOGOUT_WORD.test(inner.replace(/<[^>]{0,500}>/g, ' ')) || /value\s*=\s*["'][^"']{0,40}(?:log\s*out|sign\s*out|ログアウト)/i.test(inner)) return true;
-  }
-  return false;
-}
+/** ログアウトの語（パス・送信先・ボタンの文言） */
+export const LOGOUT_WORD = /log[-_ ]?out|sign[-_ ]?out|log[-_ ]?off|ログアウト|サインアウト/i;

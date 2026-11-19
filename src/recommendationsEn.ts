@@ -1,4 +1,4 @@
-// recommendationsEn.ts：推奨対応の英訳（v0.4：英語UIで推奨対応だけを英訳する）
+// recommendationsEn.ts：推奨対応と、カバレッジの理由に出る na の証跡の英訳（英語UIで使う。判定の証跡そのものは訳さない）
 // キーはルールが返す日本語の文言そのもの。新しい文言を追加したら、ここにも追加する（tests/i18n.test.ts が漏れを検出する）
 export const EXACT: Record<string, string> = {
   // 第1章
@@ -25,11 +25,10 @@ export const EXACT: Record<string, string> = {
   'JSONPを提供するホストを許可リストから外すか、nonce＋strict-dynamic にする': "Remove hosts that serve JSONP from the allowlist, or use a nonce and 'strict-dynamic'",
   "base-uri 'none'（または 'self'）": "base-uri 'none' (or 'self')",
   '非推奨のディレクティブを削除する': 'Remove deprecated directives',
-  'csp_evaluator の指摘に従って修正する（nonce は十分な長さの乱数にする、IPアドレスでの許可や unsafe-hashes を使わない など）': 'Fix the issue reported by csp_evaluator (use a sufficiently long random nonce, avoid IP address sources and unsafe-hashes, etc.)',
+  "csp_evaluator の指摘に従って修正する（nonce は十分な長さの乱数にする、IPアドレスでの許可を使わない、インラインのイベントハンドラをやめて 'unsafe-hashes' を外す など）": "Fix the issue reported by csp_evaluator (use a sufficiently long random nonce, avoid IP address sources, remove inline event handlers and 'unsafe-hashes', etc.)",
   'CSPの構文の誤り（不明なディレクティブ、キーワードの引用符、セミコロン、nonceの文字種）を直す。誤った指定はブラウザに無視される': 'Fix CSP syntax errors (unknown directives, unquoted keywords, missing semicolons, invalid nonce characters). Browsers ignore invalid parts',
   'report-to（Reporting API）を併記する': 'Add report-to (Reporting API) as well',
   'http:// の資源を直すまで upgrade-insecure-requests を付ける': 'Add upgrade-insecure-requests until all http:// resources are fixed',
-  'sensitive=1 を付ける': 'Add sensitive=1',
   'Content-Type を必ず付ける（HTML は text/html; charset=utf-8）': 'Always send Content-Type (text/html; charset=utf-8 for HTML)',
   'バージョン番号を出さない（可能ならヘッダごと削除）': 'Do not expose version numbers (remove the header if possible)',
   '製品名も出さないか、汎用的な値にする': 'Do not expose the product name either, or use a generic value',
@@ -127,7 +126,6 @@ export const EXACT: Record<string, string> = {
   '認証情報を付けて採取し直す（401・403・ログイン画面への転送では、認証の内側で動くかが分からない）':
     'Capture again with credentials (a 401, a 403 or a redirect to the login page does not show whether it works behind authentication)',
   '2段階目（ワンタイムの番号の入力など）まで済ませた応答を login として採取する': 'Capture as login the response after completing the second step (such as entering the one-time code)',
-  '転送先の本文のある応答（認証後ページなど）で採取する': 'Capture the redirect target that has a body (such as the page after login)',
   '存在する API の URL で、認証情報を付けずに採取し直す': 'Capture again with an existing API URL, without credentials',
   "本番ビルドではインラインのソースマップ（webpack の inline-source-map・Vite の sourcemap: 'inline' など）を出さない（sourcesContent に元のソースがあるかは手動で確認）":
     "Do not emit inline source maps in production builds (webpack inline-source-map, Vite sourcemap: 'inline', etc.); check manually whether sourcesContent holds the original source",
@@ -147,7 +145,7 @@ export const EXACT: Record<string, string> = {
   '転送先まで（-L）採取し直す': 'Capture again following the redirect (-L)',
   '認証後に使う WebSocket なら #TARGET に sensitive=1、公開用なら sensitive=0 を付ける': 'If the WebSocket is used after login, add sensitive=1 to #TARGET; if it is public, add sensitive=0',
   'C12（プロトコルごとの接続の確認）を採取する': 'Capture C12 (per-protocol connection checks)',
-  '本文のある応答（200 など）で採取する（204・304 は対象外）': 'Capture a response with a body (such as 200); 204 and 304 are not evaluated',
+  '本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）': 'Capture a response with a body (such as 200); responses without a body (204, 304, redirects, Content-Length: 0) are not evaluated',
   'GraphQL の IDE は本番で無効にするか、認証の内側に置く（introspection は POST して別に確かめる）': 'Disable the GraphQL IDE in production or put it behind authentication (check introspection separately with a POST)',
   'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする': 'Replace the framework default error page with your own (or RFC 9457 problem details)',
   'ディレクトリの一覧表示を無効にする（nginx: autoindex off、Apache: Options -Indexes）': 'Disable directory listing (nginx: autoindex off, Apache: Options -Indexes)',
@@ -210,7 +208,6 @@ Object.assign(EXACT, {
   'HTTPSかどうか判定できない': 'Cannot tell whether HTTPS is used',
   'HSTSがない（H-01で判定）': 'No HSTS (checked by H-01)',
   '強制モードのCSPがない（H-03で判定）': 'No enforced CSP (checked by H-03)',
-  '機密応答かどうか分からない': 'Unknown whether the response is sensitive',
   'ログイン前にセッションCookieが発行されていない': 'No session cookie was set before login',
   'login の応答がない': 'No response to login',
   'ACAO に返った Origin を送って採取し、ACAO が Origin によって変わるかを確かめる': 'Capture again sending the Origin that came back in ACAO, and check whether ACAO changes with the Origin',
@@ -219,7 +216,6 @@ Object.assign(EXACT, {
   'セッションCookie が暗号化した値（応答ごとに値が変わる）なので、セッションIDを再発行したかは値から分からない': 'The session cookie is encrypted (its value changes on every response), so whether the session ID was renewed cannot be told from the value',
   'ログイン前の Cookie だけを送って、ログイン後のページを取得できないか手動で確認する': 'Manually check whether sending only the pre-login cookies still retrieves a signed-in page',
   'サーバ側のセッションIDの作り方（フレームワークの既定の乱数か）を確認する': 'Check how the server generates session IDs (for example, the framework\'s default random generator)',
-  'CSPにnonceがない': 'The CSP has no nonce',
   '本文を取得して（C2）、Contact と Expires があるか確かめる': 'Fetch the body (C2) and check that it has Contact and Expires',
   'CSPのスクリプトのディレクティブにnonceがない': 'The CSP script directives (script-src, script-src-elem, script-src-attr, default-src) have no nonce',
   '比較できるセッションCookieがない': 'No session cookies to compare',

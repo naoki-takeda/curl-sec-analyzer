@@ -3,19 +3,17 @@ import { describe, expect, it } from 'vitest';
 import { generateScript } from '../src/commands';
 import { parseInput } from '../src/parser/input';
 import { parseOpenssl } from '../src/parser/openssl';
-import { evaluate } from './helpers';
+import { evaluate, GEN_OPTS, itemIds, RUN } from './helpers';
 
-const RUN = '0123456789abcdef';
 const AT = `#META at=2026-11-01T10:00:00 run=${RUN}`;
-const ids = (input: string, item: string) => evaluate(input).findings.filter(f => f.item === item).map(f => f.ruleId);
 
-describe('第48回：応答のヘッダの行を、openssl・-v の出力として読まない', () => {
+describe('応答のヘッダの行を、openssl・-v の出力として読まない', () => {
   it('ヘッダに notAfter= と「Verify return code: 0」を書いても、本物の証明書の T-11 を合格にできない', () => {
     const tls = [`#TARGET url=https://www.example.com/ label=tls run=${RUN}`, AT, 'CONNECTED(00000003)', 'New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384',
       'Verify return code: 21 (unable to verify the first certificate)', 'notAfter=Nov 20 00:00:00 2026 GMT', ''];
     const forged = [`#TARGET url=https://www.example.com/mypage label=after-logout run=${RUN}`, `#META at=2026-11-01T10:05:00 run=${RUN}`,
       'HTTP/2 200', 'content-type: text/html', 'notAfter=Dec 31 23:59:59 2099 GMT', 'X509v3 Subject Alternative Name:', 'DNS:www.example.com', 'Verify return code: 0 (ok)', '', ''];
-    const r = ids([...tls, ...forged].join('\n'), 'T-11');
+    const r = itemIds([...tls, ...forged].join('\n'), 'T-11');
     expect(r).not.toContain('T-11.ok');
     expect(r).toContain('T-11.1');
     // 偽の行はヘッダとして残り、openssl の出力にはならない
@@ -26,7 +24,7 @@ describe('第48回：応答のヘッダの行を、openssl・-v の出力とし�
     const input = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT,
       'HTTP/2 200', 'content-type: application/json', '* Connected to api: 1', '> Cookie: sessionid=x: 1', '',
       `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com","role":"admin"}', ''].join('\n');
-    expect(ids(input, 'A-01')).toContain('A-01.1');
+    expect(itemIds(input, 'A-01')).toContain('A-01.1');
   });
   it('tls のラベルの openssl の出力と、本物の curl -v の出力は、これまでどおり読む', () => {
     const tls = parseInput([`#TARGET url=https://www.example.com/ label=tls run=${RUN}`, AT, 'CONNECTED(00000003)', 'notAfter=Dec  1 00:00:00 2026 GMT', ''].join('\n'));
@@ -38,7 +36,7 @@ describe('第48回：応答のヘッダの行を、openssl・-v の出力とし�
   });
 });
 
-describe('第48回：印のない #TARGET のあとの生成スクリプトの出力', () => {
+describe('印のない #TARGET のあとの生成スクリプトの出力', () => {
   it('印による保護が効かないことを警告する', () => {
     const input = ['#TARGET url=https://www.example.com/extra label=extra', 'HTTP/2 200', '', '',
       `#TARGET url=https://www.example.com/ label=page run=${RUN}`, AT, 'HTTP/2 200', 'content-type: text/html', '', ''].join('\n');
@@ -50,15 +48,15 @@ describe('第48回：印のない #TARGET のあとの生成スクリプトの�
   });
 });
 
-describe('第48回：openssl の出力の期限（手書きの入力は、これまでどおり後ろの notAfter を使う）', () => {
+describe('openssl の出力の期限（手書きの入力は、これまでどおり後ろの notAfter を使う）', () => {
   it('切っていない s_client の出力のあとの x509 の出力では、後ろの notAfter が本物（SAN の値の CR は生成スクリプトの tr -d で除く）', () => {
     const info = parseOpenssl(['notAfter=Dec 31 23:59:59 2099 GMT', 'X509v3 Subject Alternative Name:', '    DNS:www.example.com', 'notAfter=Feb  1 00:00:00 2026 GMT'])!;
     expect(info.notAfter?.toISOString().slice(0, 10)).toBe('2026-02-01');
   });
 });
 
-describe('第48回：生成スクリプト', () => {
-  const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous: false });
+describe('生成スクリプト', () => {
+  const s = generateScript(GEN_OPTS);
   it('openssl がない・指定を受け付けないときは、C12・C23 を err（試していない）にする', () => {
     expect(s).toContain("OSSL_ERR='unknown option|no protocols available|no cipher match|invalid command|error with command|ssl_conf_cmd|command not found'");
     // 証明書の検証の行（depth=・verify）を除いてから照合する（subject に「O=unknown option」と書いた証明書で err にさせない）
@@ -67,7 +65,7 @@ describe('第48回：生成スクリプト', () => {
   it('印のある入力で、小文字のステータス行のあとの「* Connected to」を -v の手がかりにしない', () => {
     const input = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'http/1.1 200 OK', '* Connected to: x', '> Cookie: sessionid=abc',
       'HTTP/1.1 200 OK:x', 'content-type: application/json', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com","role":"admin"}', ''].join('\n');
-    expect(ids(input, 'A-01')).toContain('A-01.1');
+    expect(itemIds(input, 'A-01')).toContain('A-01.1');
   });
   it('mixed-run の警告は、URL の ?run= では出さない', () => {
     const input = ['#TARGET url=https://www.example.com/?run=0123456789abcdef0123 label=page', 'HTTP/2 200', '', ''].join('\n');
@@ -80,7 +78,7 @@ describe('第48回：生成スクリプト', () => {
   });
 });
 
-describe('第48回：#META の cmd= の繰り返し', () => {
+describe('#META の cmd= の繰り返し', () => {
   it('cmd= を並べた本文の1行でも、入力の長さに比例する時間で読む', { tags: ['perf'] }, () => {
     const line = `#META ${'cmd=a '.repeat(80_000)}`;   // 約480KB
     const input = [`#TARGET url=https://www.example.com/ label=page run=${RUN}`, AT, 'HTTP/2 200', '', `#BODY run=${RUN}`, line, ''].join('\n');
@@ -88,14 +86,14 @@ describe('第48回：#META の cmd= の繰り返し', () => {
   });
 });
 
-describe('第48回（束2の第2回のレビュー）：-v は、ターゲットの最初の行が curl -v の行のときだけ', () => {
+describe('-v は、ターゲットの最初の行が curl -v の行のときだけ', () => {
   it('2桁のコードなど、読めないステータス行のあとの「* Connected to」でも -v にしない', () => {
     for (const status of ['HTTP/1.1 20 OK', 'HTTP/1.1 +20 OK', ' HTTP/1.1 200 OK']) {
       const input = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, status, '* Connected to: x', '> Cookie: sessionid=abc',
         'HTTP/1.1 200 OK:x', 'content-type: application/json', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com","role":"admin"}', ''].join('\n');
-      // 読めないステータス行のあとのコロンのある「HTTP/1.1 200 OK:x」は、第51回から応答にしない（読めない行で始めて、本物の 200 を
+      // 読めないステータス行のあとのコロンのある「HTTP/1.1 200 OK:x」は応答にしない（読めない行で始めて、本物の 200 を
       // 302・401 に偽装できた）。応答がないので判定はできないが、合格にはしない
-      expect(ids(input, 'A-01'), status).not.toContain('A-01.ok');
+      expect(itemIds(input, 'A-01'), status).not.toContain('A-01.ok');
       expect(parseInput(input).targets[0]?.verbose, status).toBeFalsy();
     }
   });
@@ -106,7 +104,7 @@ describe('第48回（束2の第2回のレビュー）：-v は、ターゲット
   });
 });
 
-describe('第49回：生成スクリプトの出力の読み取り', () => {
+describe('生成スクリプトの出力の読み取り', () => {
   it('pre-login の -v の1行目が curl の WARNING の行でも -v として読み、C-09① を判定する', () => {
     for (const first of ['* WARNING: failed to open cookie file "jar.txt"', '* !!! WARNING !!!']) {
       const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${RUN}`, AT, first,
@@ -120,10 +118,10 @@ describe('第49回：生成スクリプトの出力の読み取り', () => {
   it('ヘッダの途中のステータス行の形の行で、応答を作り直さない（A-01①・C-12① を合格にさせない）', () => {
     const unauth = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 OK', 'Content-Type: application/json',
       'HTTP/1.1 401 Unauthorized: x', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n');
-    expect(ids(unauth, 'A-01')).toContain('A-01.1');
+    expect(itemIds(unauth, 'A-01')).toContain('A-01.1');
     const reason = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 Connection established', 'Content-Type: application/json', '',
       `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n');
-    expect(ids(reason, 'A-01')).toContain('A-01.1');
+    expect(itemIds(reason, 'A-01')).toContain('A-01.1');
   });
   it('-L の次のホップ（空行のあとのステータス行）と、プロキシの CONNECT の応答はこれまでどおり読む', () => {
     const hops = parseInput([`#TARGET url=http://www.example.com/ label=http run=${RUN}`, AT, 'HTTP/1.1 301 Moved', 'Location: https://www.example.com/', '', 'HTTP/2 200', '', ''].join('\n'));
@@ -140,14 +138,14 @@ describe('第49回：生成スクリプトの出力の読み取り', () => {
     expect(r.targets[0].responses).toHaveLength(1);
   });
   it('C14 は実行ごとの乱数をクエリに付けて、共有キャッシュのキーを分ける（採取の印 RUN とは別の乱数）', () => {
-    const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous: false });
+    const s = generateScript(GEN_OPTS);
     expect(s).toMatch(/X-Forwarded-Host: evil\.example' "\$H\/\?csa=\$CB"/);
     expect(s).toMatch(/^CB=\$\(od /m);
     expect(s).toContain('label=host-inj');
   });
   it('採取の印 RUN を、診断対象のサーバに送らない（URL・ヘッダ・送る本文に入れない）', () => {
     for (const dangerous of [false, true]) {
-      const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous });
+      const s = generateScript({ ...GEN_OPTS, dangerous });
       expect(s).not.toMatch(/"\$H[^"\s]*\$RUN/);
       expect(s).not.toMatch(/-H '[^']*\$RUN/);
       expect(s).not.toMatch(/--data[^;\n]*\$RUN/);
@@ -162,7 +160,7 @@ describe('第49回：生成スクリプトの出力の読み取り', () => {
   });
 });
 
-describe('第49回：HAR の転送のつなぎ方', () => {
+describe('HAR の転送のつなぎ方', () => {
   it('302 の転送先として、同じ URL の POST のエントリをつながない（ログインの候補を残す）', async () => {
     const { importHar } = await import('../src/parser/har');
     const e = (method: string, url: string, status: number, headers: { name: string; value: string }[] = []) => ({ startedDateTime: '2026-11-01T00:00:00Z',
@@ -195,32 +193,31 @@ describe('第49回：HAR の転送のつなぎ方', () => {
   });
 });
 
-describe('第50回：トレーラ・1xx・Set-Cookie の上限・プローブの警告', () => {
-  const R = '0123456789abcdef', A = `#META at=2026-11-01T10:00:00 run=${R}`;
+describe('トレーラ・1xx・Set-Cookie の上限・プローブの警告', () => {
   it('chunked のトレーラのステータス行の形の行で、応答を作り直さない（A-01①・H-01① を合格にさせない）', () => {
-    const api = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${R}`, A, 'HTTP/1.1 200 OK', 'Content-Type: application/json', 'Transfer-Encoding: chunked', '',
-      'HTTP/1.1 401 Unauthorized: x', 'X-Fake: 1', '', `#BODY run=${R}`, '{"id":1,"email":"a@example.com"}', ''].join('\r\n');
+    const api = [`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 OK', 'Content-Type: application/json', 'Transfer-Encoding: chunked', '',
+      'HTTP/1.1 401 Unauthorized: x', 'X-Fake: 1', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\r\n');
     const r = evaluate(api);
     expect(r.targets[0].responses.map(x => `${x.status}/${x.kind}`)).toEqual(['200/final']);
     expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId)).toEqual(['A-01.1']);
-    const page = [`#TARGET url=https://www.example.com/ label=page run=${R}`, A, 'HTTP/1.1 200 OK', 'Content-Type: text/html', 'Transfer-Encoding: chunked', '',
-      'HTTP/1.1 200 OK: x', 'Strict-Transport-Security: max-age=31536000', '', `#BODY run=${R}`, '<p>x</p>', ''].join('\n');
+    const page = [`#TARGET url=https://www.example.com/ label=page run=${RUN}`, AT, 'HTTP/1.1 200 OK', 'Content-Type: text/html', 'Transfer-Encoding: chunked', '',
+      'HTTP/1.1 200 OK: x', 'Strict-Transport-Security: max-age=31536000', '', `#BODY run=${RUN}`, '<p>x</p>', ''].join('\n');
     expect(evaluate(page).findings.filter(f => f.item === 'H-01' && f.status === 'fail').map(f => f.ruleId)).toContain('H-01.1');
   });
   it('#BODY の前の行（トレーラ）を本文にしない', () => {
-    const r = parseInput([`#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1 run=${R}`, A, 'HTTP/1.1 200 OK', 'Transfer-Encoding: chunked', '',
-      'X-T: <form><input type="password"></form>', '', `#BODY run=${R}`, '{"id":1}', ''].join('\n'));
+    const r = parseInput([`#TARGET url=https://www.example.com/mypage label=after-logout sensitive=1 run=${RUN}`, AT, 'HTTP/1.1 200 OK', 'Transfer-Encoding: chunked', '',
+      'X-T: <form><input type="password"></form>', '', `#BODY run=${RUN}`, '{"id":1}', ''].join('\n'));
     expect(r.targets[0].responses[0].body).toBe('{"id":1}\n\n');
   });
   it('-L の次のホップ（コロンのないステータス行）はこれまでどおり読む', () => {
-    const r = parseInput([`#TARGET url=http://www.example.com/ label=http run=${R}`, A, 'HTTP/1.1 301 Moved', 'Location: https://www.example.com/', '', 'HTTP/2 200', 'content-type: text/html', '', `#BODY run=${R}`, '<p>x</p>', ''].join('\n'));
+    const r = parseInput([`#TARGET url=http://www.example.com/ label=http run=${RUN}`, AT, 'HTTP/1.1 301 Moved', 'Location: https://www.example.com/', '', 'HTTP/2 200', 'content-type: text/html', '', `#BODY run=${RUN}`, '<p>x</p>', ''].join('\n'));
     expect(r.targets[0].responses.map(x => x.status)).toEqual([301, 200]);
   });
   it('1xx（103 Early Hints）の Set-Cookie で C-09 を合格にしない', () => {
-    const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${R}`, A, 'HTTP/2 200', 'set-cookie: sid=Q2x8AAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
-      `#TARGET url=https://www.example.com/login label=login run=${R}`, A, 'HTTP/1.1 103 Early Hints', 'Set-Cookie: sid=NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNE; Path=/; Secure; HttpOnly', '',
+    const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${RUN}`, AT, 'HTTP/2 200', 'set-cookie: sid=Q2x8AAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
+      `#TARGET url=https://www.example.com/login label=login run=${RUN}`, AT, 'HTTP/1.1 103 Early Hints', 'Set-Cookie: sid=NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNE; Path=/; Secure; HttpOnly', '',
       'HTTP/1.1 302 Found', 'Location: /mypage', '', ''].join('\n');
-    expect(evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.1']);
+    expect(itemIds(input, 'C-09', 'pre-login/login')).toEqual(['C-09.1']);
   });
   it('1つの応答の Set-Cookie は上限まで読み（後のものを残す）、超えた分を知らせる', () => {
     const cs = Array.from({ length: 400 }, (_, i) => `Set-Cookie: c${i}=v; Path=/`);
@@ -230,23 +227,22 @@ describe('第50回：トレーラ・1xx・Set-Cookie の上限・プローブの
     expect(r.warnings.filter(w => w.kind === 'too-many-cookies').map(w => w.detail)).toEqual([expect.stringContaining('100個')]);
   });
   it('対応していないプローブの警告は、ターゲットごとに1つ', () => {
-    const r = parseInput([`#TARGET url=https://www.example.com/ label=tls run=${R}`, A, `#CIPHERPROBE run=${R} c=RC4-SHA ok=err`, `#CIPHERPROBE run=${R} c=DES-CBC3-SHA ok=err`, ''].join('\n'));
+    const r = parseInput([`#TARGET url=https://www.example.com/ label=tls run=${RUN}`, AT, `#CIPHERPROBE run=${RUN} c=RC4-SHA ok=err`, `#CIPHERPROBE run=${RUN} c=DES-CBC3-SHA ok=err`, ''].join('\n'));
     expect(r.warnings.filter(w => w.kind === 'tls-probe-error').map(w => w.detail)).toEqual([expect.stringContaining('RC4-SHA・DES-CBC3-SHA')]);
   });
 });
 
-describe('第50回（束のレビュー）：古い curl のトレーラ・転送のホップのトレーラ・header_json の上限', () => {
-  const R = '0123456789abcdef', A = `#META at=2026-11-01T10:00:00 run=${R}`;
+describe('古い curl のトレーラ・転送のホップのトレーラ・header_json の上限', () => {
   it('chunked の 200 のあとのコロンのないトレーラ（curl 7.82 以前）で応答を作り直さない', () => {
-    const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${R}`, A, 'HTTP/1.1 200 OK', 'Content-Type: application/json', 'Transfer-Encoding: chunked', '',
-      'HTTP/1.1 401 Unauthorized', 'X-Fake: 1', '', `#BODY run=${R}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
+    const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 OK', 'Content-Type: application/json', 'Transfer-Encoding: chunked', '',
+      'HTTP/1.1 401 Unauthorized', 'X-Fake: 1', '', `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
     expect(r.targets[0].responses.map(x => x.status)).toEqual([200]);
     expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId)).toEqual(['A-01.1']);
   });
   it('転送のホップのトレーラのあと、空行なしで続く次のホップを読む', () => {
-    const r = parseInput([`#TARGET url=http://www.example.com/ label=http run=${R}`, A, 'HTTP/1.1 301 Moved', 'Location: http://www.example.com/a', 'Transfer-Encoding: chunked', '',
+    const r = parseInput([`#TARGET url=http://www.example.com/ label=http run=${RUN}`, AT, 'HTTP/1.1 301 Moved', 'Location: http://www.example.com/a', 'Transfer-Encoding: chunked', '',
       'X-T: 1', 'HTTP/1.1 302 Found', 'Location: https://www.example.com/', 'Set-Cookie: sessionid=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; HttpOnly', '', 'HTTP/2 200', '',
-      `#META response_code=200 num_redirects=2 run=${R}`, ''].join('\n'));
+      `#META response_code=200 num_redirects=2 run=${RUN}`, ''].join('\n'));
     expect(r.targets[0].responses.map(x => x.status)).toEqual([301, 302, 200]);
   });
   it('%{header_json} の Set-Cookie も上限まで', () => {
@@ -256,44 +252,43 @@ describe('第50回（束のレビュー）：古い curl のトレーラ・転�
     expect(r.warnings.map(w => w.kind)).toContain('too-many-cookies');
   });
   it('-L でない採取の chunked の 3xx のあとのコロンのないトレーラ（curl 7.82 以前）を、次のホップにしない', () => {
-    const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${R}`, A, 'HTTP/2 200', 'set-cookie: sid=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
-      `#TARGET url=https://www.example.com/login label=login run=${R}`, A, 'HTTP/1.1 302 Found', 'Location: /mypage', 'Transfer-Encoding: chunked', '',
-      'HTTP/1.1 200 OK', 'Set-Cookie: sid=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly', '', `#BODY run=${R}`, 'x', ''].join('\n');
+    const input = [`#TARGET url=https://www.example.com/login label=pre-login run=${RUN}`, AT, 'HTTP/2 200', 'set-cookie: sid=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', '',
+      `#TARGET url=https://www.example.com/login label=login run=${RUN}`, AT, 'HTTP/1.1 302 Found', 'Location: /mypage', 'Transfer-Encoding: chunked', '',
+      'HTTP/1.1 200 OK', 'Set-Cookie: sid=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB; Path=/; Secure; HttpOnly', '', `#BODY run=${RUN}`, 'x', ''].join('\n');
     const r = evaluate(input);
     expect(r.targets.find(t => t.label === 'login')!.responses.map(x => x.status)).toEqual([302]);
     expect(r.findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login').map(f => f.ruleId)).toEqual(['C-09.1']);
   });
 });
 
-describe('第51回：読めないステータス行・curl の失敗の行・openssl の時間の上限', () => {
-  const R = '0123456789abcdef', A = `#META at=2026-11-01T10:00:00 run=${R}`;
+describe('読めないステータス行・curl の失敗の行・openssl の時間の上限', () => {
   it('curl が受け付ける緩いステータス行（200OK・小文字・4桁）を読み、次のコロンのあるステータス行で応答を作り直さない', () => {
     for (const st of ['HTTP/1.1 200OK', 'http/1.1 200 OK', 'Http/1.1 200 OK', 'HTTP/1.1 2000 OK']) {
-      const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${R}`, A, st, 'HTTP/1.1 401 Unauthorized: x', 'Content-Type: application/json', '',
-        `#BODY run=${R}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
+      const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, st, 'HTTP/1.1 401 Unauthorized: x', 'Content-Type: application/json', '',
+        `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
       expect(r.targets[0].responses.map(x => x.status), st).toEqual([200]);
       expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId), st).toEqual(['A-01.1']);
     }
   });
   it('読めないステータス行のあとのコロンのあるステータス行も、応答にしない', () => {
-    const r = parseInput([`#TARGET url=https://www.example.com/mypage label=after-logout run=${R}`, A, 'HTTP/1.1 20 OK', 'HTTP/1.1 302 Found: x', 'Location: /login', '', ''].join('\n'));
+    const r = parseInput([`#TARGET url=https://www.example.com/mypage label=after-logout run=${RUN}`, AT, 'HTTP/1.1 20 OK', 'HTTP/1.1 302 Found: x', 'Location: /login', '', ''].join('\n'));
     expect(r.targets[0]?.responses ?? []).toEqual([]);
   });
   it('curl の失敗の行（WebSocket の 101 のあとの時間切れ）を、解析できない行に数えない', () => {
-    const r = parseInput([`#TARGET url=https://www.example.com/ws label=websocket run=${R}`, A, '* Connected to www.example.com (192.0.2.1) port 443', '> GET /ws HTTP/1.1',
+    const r = parseInput([`#TARGET url=https://www.example.com/ws label=websocket run=${RUN}`, AT, '* Connected to www.example.com (192.0.2.1) port 443', '> GET /ws HTTP/1.1',
       '> Origin: https://evil.example', '>', '< HTTP/1.1 101 Switching Protocols', '< Upgrade: websocket', '<', 'curl: (28) Operation timed out after 5001 milliseconds with 0 bytes received', ''].join('\n'));
     expect(r.warnings.map(w => w.kind)).not.toContain('unparsed-lines');
   });
   it('openssl の s_client には時間の上限を付け、時間切れは err にする', () => {
-    const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous: false });
+    const s = generateScript(GEN_OPTS);
     expect(s).toMatch(/^if timeout --foreground 1 true 2>\/dev\/null; then ossl\(\) \{ timeout --foreground 20 openssl "\$@"; \}$/m);
     expect(s).toMatch(/^else ossl\(\) \{ openssl "\$@"; \}; fi$/m);
     expect(s).not.toMatch(/(?<!ossl )openssl s_client/);
     expect(s.match(/if \[ \$rc -ge 124 \]/g)).toHaveLength(2);
   });
-  it('（束のレビュー）最初のステータス行そのものにコロンがあっても（curl は受け付ける）、応答として読む', () => {
-    const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${R}`, A, 'HTTP/1.1 200 OK: x', 'Content-Type: application/json', '',
-      `#BODY run=${R}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
+  it('最初のステータス行そのものにコロンがあっても（curl は受け付ける）、応答として読む', () => {
+    const r = evaluate([`#TARGET url=https://www.example.com/api/me label=unauth-api run=${RUN}`, AT, 'HTTP/1.1 200 OK: x', 'Content-Type: application/json', '',
+      `#BODY run=${RUN}`, '{"id":1,"email":"a@example.com"}', ''].join('\n'));
     expect(r.findings.filter(f => f.item === 'A-01').map(f => f.ruleId)).toEqual(['A-01.1']);
   });
 });

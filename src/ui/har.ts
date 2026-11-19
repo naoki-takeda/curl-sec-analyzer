@@ -1,59 +1,65 @@
 // ui/har.ts：HARの読み込み（Web Worker）と、エントリ一覧の画面
 import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarChain, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
 import { withProfile } from '../engine/profile';
-import { tr } from '../i18n';
+import { type HarFailure, tr } from '../i18n';
 import { showText } from '../shownText';
 import { BTN, button, el, labelFor, options, table, td } from './dom';
-import HarWorker from '../worker.ts?worker&inline';
+import HarWorker from '../harWorker.ts?worker&inline';
 import { type Message, actions, refs, state } from './state';
 import { renderEmpty } from './results';
 
-// メッセージは文言を作る関数で渡す（言語を切り替えたら、その言語で出し直すため。main.ts の say）
-const say = (m: Message) => actions.say(m);
+const say = (m?: Message) => actions.say(m);
 
-// ---- HAR（v0.3） ----
 // 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外すを押したりしたら、前の読み込みの結果は使わない
-let harLoad = 0;
-export const cancelHarLoad = () => { harLoad++; };
+let harLoad = 0; let harWorker: Worker | undefined;
+export const cancelHarLoad = () => { harLoad++; harWorker?.terminate(); harWorker = undefined; };
 
 export function loadHar(f: File) {
-  if (f.size > HAR_MAX_BYTES) { say(() => tr().har.tooLarge); return; }
+  if (f.size > HAR_MAX_BYTES) { say(() => tr().har.tooLarge(HAR_MAX_BYTES / 1024 / 1024)); return; }
   say(() => tr().har.loading);
-  // Worker は blob: URL で作る（?worker&inline）。別ファイルの Worker には、そのファイルの HTTP 応答の CSP が使われ、
-  // GitHub Pages は CSP ヘッダを返さないため、生の HAR（Cookie・パスワード）を持つ Worker から通信できてしまう。
-  // blob: の Worker はページの CSP（connect-src 'none'）を引き継ぐ。メタCSPの worker-src blob: で許可する
-  const w = new HarWorker(); const gen = ++harLoad;
+  // Worker は blob: URL で作る（ページの CSP を引き継ぐため。csp.config.ts）。作れない・送れない・結果を受け取れないときも失敗と知らせる
+  cancelHarLoad();
+  let w: Worker;
+  try { w = new HarWorker(); } catch { say(() => tr().har.failed('worker')); return; }
+  harWorker = w; const gen = harLoad;
+  const done = () => { w.terminate(); if (harWorker === w) harWorker = undefined; };
+  const failed = (e: HarFailure) => { done(); if (gen === harLoad) say(() => tr().har.failed(e)); };
   w.onmessage = (e: MessageEvent<{ ok: boolean; result?: HarImport; error?: string }>) => {
-    w.terminate();
+    done();
     if (gen !== harLoad) return;                     // 古い読み込みの結果
-    if (!e.data.ok || !e.data.result) { const err = e.data.error; say(() => { const t = tr().har; return t.failed(err === 'JSON' ? t.invalidJson : err ?? '?'); }); return; }
+    if (!e.data.ok || !e.data.result) { const err = e.data.error === 'JSON' ? 'json' : 'format'; say(() => tr().har.failed(err)); return; }
     const imp = e.data.result;
     // Worker の中では組織プロファイルが分からないため、プロファイルがあればセッションCookieの名前を反映して候補を作り直す
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));
     state.har = { imp, hosts: defaultHarHosts(imp), name: f.name };
-    renderHar(); say('');
-    if (state.last) actions.analyze();              // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない
-    if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直してエラーが出たら、そちらを残す
+    renderHar(); say();
+    // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない。判定中（初回を含む）なら、読み込んだ HAR も入れて判定し直す
+    if (state.last || actions.isAnalyzing()) actions.analyze();
+    if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直したときは、判定のメッセージ（判定中・エラー）を残す
   };
-  w.onerror = () => { w.terminate(); if (gen === harLoad) say(() => tr().har.failed('worker')); };
-  f.text().then(t => w.postMessage(t));
+  w.onerror = w.onmessageerror = () => failed('worker');
+  f.text().then(t => { try { w.postMessage(t); } catch { failed('worker'); } }, () => failed('read'));
 }
-/** HAR を外す。判定結果に HAR のターゲットが残らないよう、貼り付けがあれば判定し直し、なければ結果を消す */
+/**
+ * HAR を外す。判定結果に HAR のターゲットが残らないよう、貼り付けがあれば判定し直し、なければ結果を消す。押したボタンは消えるので、
+ * フォーカスは「ファイルを開く」に移す（body に落とさない。WCAG 2.4.3）
+ */
 function removeHar() {
-  cancelHarLoad(); state.har = null; renderHar(); say('');
-  if (!state.last) return;
+  const was = actions.isAnalyzing();
+  cancelHarLoad(); actions.cancelAnalysis(); state.har = null; renderHar(); say();
+  document.querySelector<HTMLButtonElement>('#open-file')?.focus();
+  if (!state.last && !was) return;
   if (refs.input.value.trim()) actions.analyze();
   else { state.last = null; renderEmpty(); }
 }
 
 /**
- * 一覧に出す URL（マスク済み）。チェーンごとに一度だけ作る（描き直すたびに全行の URL を3回ずつマスクし直し、長い URL の多い HAR で
- * 1回の描き直しに何十秒もかかった。第51回）
+ * 一覧に出す URL（マスク済み）。チェーンごとに一度だけ作る（描き直すたびに全行の URL をマスクし直すと、長い URL の多い HAR で遅い）
  */
 const shownUrls = new WeakMap<HarChain, string>();
 /**
  * 予約ラベルを移したエントリと、元のラベル。移したエントリがそのラベルを外したら戻す（Chromium は閉じた select を矢印で動かすたびに change を出す
- * ので、選択肢を見て回るだけで、login・logout のエントリのラベルが次々に har-N になり、戻しても元に戻らなかった。束のレビュー）
+ * ので、選択肢を見て回るだけで、login・logout のエントリのラベルを失わないため）
  */
 const moved = new Map<HarChain, { by: HarChain; label: string }>();
 /** 前に描いた HAR（別の HAR を読んだら、一覧は開いて先頭から表示する） */
@@ -61,8 +67,8 @@ let shownImp: HarImport | undefined;
 const shownUrl = (c: HarChain) => { let v = shownUrls.get(c); if (v === undefined) { v = showText(c.url); shownUrls.set(c, v); } return v; };
 export function renderHar() {
   if (!state.har) { refs.harBox.replaceChildren(); return; }
-  // 一覧は描き直すので、操作した部品のフォーカス・表のスクロール位置・開閉を戻す（チェックボックス・ラベルの選択を変えるたびに、フォーカスが
-  // body に落ち、表が先頭に戻った。第51回）
+  // 一覧は描き直すので、操作した部品のフォーカス・表のスクロール位置・開閉を戻す（チェックボックス・ラベルの選択を変えても、フォーカスを
+  // body に落とさず、表を先頭に戻さない。WCAG 2.4.3）
   const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
   const T = tr().har; const { imp, hosts } = state.har;
   const same = shownImp === imp; shownImp = imp; if (!same) moved.clear();
@@ -76,8 +82,7 @@ export function renderHar() {
   const rows = imp.chains.filter(c => hosts.has(c.host)).map(c => {
     const base = c.suggested.startsWith('har-') || c.suggested.startsWith('error-') ? c.suggested : `har-${c.id + 1}`;
     const sel = options(el('select', 'rounded-md border border-line bg-paper px-2 py-1 text-sm'),
-      // har-N は、予約ラベルをほかのエントリに移したときの戻り先なので、いつも選択肢に入れる（候補が error-N のエントリで選択肢になく、空欄に
-      // なった。第51回）
+      // har-N は、予約ラベルをほかのエントリに移したときの戻り先なので、いつも選択肢に入れる（候補が error-N のエントリでも空欄にしない）
       [...new Set([base, `har-${c.id + 1}`, `error-${c.id + 1}`, ...HAR_LABEL_CHOICES, c.label])].map((v): [string, string] => [v, v]).concat([['__exclude', T.exclude]]),
       c.excluded ? '__exclude' : c.label);
     sel.setAttribute('aria-label', T.labelFor(c.method, shownUrl(c))); sel.dataset.focus = `har-label-${c.id}`;   // 読み上げ用の名前も、画面の表示と同じくマスクする

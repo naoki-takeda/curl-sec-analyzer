@@ -13,7 +13,7 @@
 - [ ] `npm run build` の後、`npm run test:e2e`（本番ビルドのブラウザテスト）が通る
 - [ ] ルール（`src/rules/**`）・パーサ（`src/parser/**`）を変えた場合、対応するテストを追加した
 - [ ] 項目・条件・ラベルを変えた場合、設計書（`docs/design.md`）を更新し、レビューの対応を `docs/history.md` に記録した。版を上げた場合は `CHANGELOG.md` も更新した
-- [ ] 画面の文言を変えた場合、英語の表示（`src/messagesEn.ts`・`src/recommendationsEn.ts`）もそろえた
+- [ ] 画面の文言を変えた場合、英語の表示（`src/i18n.ts`・`src/messagesEn.ts`・`src/recommendationsEn.ts`）もそろえた
 - [ ] 画面を変えた場合、PC 幅とスマホ幅、ライトとダークの両方で表示を確認し、キーボードだけで操作できる
 
 ## プライバシー・セキュリティ

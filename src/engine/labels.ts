@@ -13,7 +13,7 @@ export function labelRow(raw: string): LabelRow {
       ?? ROWS.find(r => r.match === 'default')!;
 }
 
-export interface Allow { name: string; allowsItem(item: string): boolean; allowsFinding(f: Finding): boolean; }
+export interface Allow { allowsItem(item: string): boolean; allowsFinding(f: Finding): boolean; }
 
 /** 項目単位（H-01）と条件単位（T-05.2）の指定を判定する */
 export function allowedItems(label: string): Allow {
@@ -25,25 +25,27 @@ export function allowedItems(label: string): Allow {
     else items.add(item);
   }
   return {
-    name: row.name,
     allowsItem: item => items.has(item) || conds.has(item),
     allowsFinding: f => items.has(f.item) || f.condition === undefined || (conds.get(f.item)?.has(f.condition) ?? false),
   };
 }
 
-/** HARのエントリに付けられるラベルか（v0.3で使う） */
+/** HARのエントリに付けられるラベルか（parser/har.ts が使う） */
 export const allowedForHar = (label: string) => labelRow(label).har;
-
-/** 片方だけあると横断ルールを判定できない予約ラベルの組 [あるラベル, 足りないラベル, 項目] */
-export const RESERVED_HINTS: [string, string, string][] = [
-  ['login', 'pre-login', 'C-09'], ['pre-login', 'login', 'C-09'], ['logout', 'after-logout', 'C-12'], ['after-logout', 'logout', 'C-12'],
-];
 
 /** 横断ルールが必要とするラベル（labels.json の対応表では表せないもの） */
 const CROSS_REQUIRES: Record<string, string[]> = {
   'C-07': ['session-sample-*（2つ以上）'], 'C-09': ['pre-login', 'login'], 'C-12': ['logout', 'after-logout'],
   'H-02': ['apex'], 'H-04': ['csp-sample-*（2つ以上）'], 'A-10': ['error-*（APIのエラー応答を2つ以上）'],
 };
+
+/**
+ * 片方だけあると横断ルールを判定できない予約ラベルの組 [あるラベル, 足りないラベル, 項目]。CROSS_REQUIRES の、ちょうど2つのラベル
+ * （「*」・条件の付かないもの）を求める項目（C-09・C-12）から作る
+ */
+export const RESERVED_HINTS: [string, string, string][] = Object.entries(CROSS_REQUIRES)
+  .filter(([, ls]) => ls.length === 2 && ls.every(l => /^[\w-]+$/.test(l)))
+  .flatMap(([item, [a, b]]) => [[b, a, item], [a, b, item]] as [string, string, string][]);
 
 /**
  * 診断カバレッジで案内する「必要なラベル」。labels.json から作り、横断ルールの分を足す。

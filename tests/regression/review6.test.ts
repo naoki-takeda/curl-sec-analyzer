@@ -69,7 +69,7 @@ describe('HAR の Worker：JSON の誤りの文言（入力の断片を含む）
     const posted: unknown[] = [];
     const self: { onmessage?: (e: MessageEvent<string>) => void; postMessage: (m: unknown) => void } = { postMessage: m => posted.push(m) };
     vi.stubGlobal('self', self);
-    await import('../../src/worker');
+    await import('../../src/harWorker');
     self.onmessage!({ data: '{"log":{"entries":[{"request":{"headers":[{"name":"Authorization","value":Bearer SEKRETbearer9}]}}]}}' } as MessageEvent<string>);
     expect(posted).toEqual([{ ok: false, error: 'JSON' }]);
   });

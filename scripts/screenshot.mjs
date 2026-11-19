@@ -10,7 +10,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, locale: 'ja-JP', colorScheme: 'light' });
   await page.goto('http://localhost:4179/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
-  // 見出しで待つ（状態の欄の「…指摘（項目×条件）26件…」にも同じ文字があり、getByText では2つに当たって止まった）
+  // 見出しで待つ（状態の欄の件数の文にも「指摘（項目×条件）」が入り、getByText では2か所に当たるため）
   await page.getByRole('heading', { name: '指摘（項目×条件）' }).waitFor();
   await page.screenshot({ path: 'docs/screenshot.png' });
   await page.screenshot({ path: 'public/og.png' });      // 共有用の画像（OGP）。ビルドで dist/og.png になる

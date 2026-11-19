@@ -60,7 +60,7 @@ export | E-01.ok | info | pass | エラーの詳細らしき記述なし
 export | H-01.1 | high | fail | (ヘッダなし)
 export | H-02.na | info | na | HSTSがない（H-01で判定）
 export | H-03.ok | info | pass | default-src 'none'; frame-ancestors 'none'
-export | H-04.ok | info | pass | script-src 'none'
+export | H-04.ok | info | pass | default-src 'none'
 export | H-05.2 | info | fail | base-uri がない（default-src にはフォールバックしない）
 export | H-06.ok | info | pass | frame-ancestors 'none'
 export | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし

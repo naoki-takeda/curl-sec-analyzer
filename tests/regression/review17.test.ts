@@ -51,10 +51,12 @@ describe('1・6・7・10・28・29 #META cmd=', () => {
 });
 
 describe('27・33 マスク', () => {
-  it('27 名前が一覧にないパラメータのトークン（?t=・&invite=）を伏せる。普通の値は残す', { tags: ['perf'] }, () => {
+  it('27 名前が一覧にないパラメータのトークン（?t=・&invite=）を伏せる。普通の値は残す', () => {
     expect(maskText('https://www.example.com/magic?t=kyFBQuRU5fxaThYvjaxZry')).not.toContain('kyFBQuRU5fxaThYvjaxZry');
     expect(maskText('https://a.example/x?invite=kyFBQuRU5fxaThYvjaxZry&page=2')).toContain('&page=2');
     expect(maskText('https://a.example/?q=hello_world&sort=asc')).toBe('https://a.example/?q=hello_world&sort=asc');
+  });
+  it('27 パラメータの繰り返しでも時間がかからない', { tags: ['perf'] }, () => {
     expect(ms(() => maskText(`x?${'a=b'.repeat(100000)}`))).toBeLessThan(1500);
   });
   it('33 パラメータの値に入れたエンコードした URL のパスワードを伏せる', () => {

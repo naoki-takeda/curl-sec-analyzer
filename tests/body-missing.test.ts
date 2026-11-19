@@ -6,10 +6,8 @@ import { mergeNa } from '../src/engine/summarize';
 import { IMPLEMENTED } from '../src/rules/ruleset';
 import { recommendationEn } from '../src/recommendationsEn';
 import { NO_BODY_REC } from '../src/rules/util';
-import { evaluate } from './helpers';
+import { AT, evaluate, GEN_OPTS, RUN } from './helpers';
 
-const AT = '#META at=2026-11-01T10:00:00';
-const RUN = '0123456789abcdef';
 const PRE = ['#TARGET url=https://a.example/login label=pre-login', AT, 'HTTP/2 200', 'content-type: text/html',
   'set-cookie: JSESSIONID=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; Path=/; Secure; HttpOnly', '', ''];
 const c09 = (input: string) => evaluate(input).findings.filter(f => f.item === 'C-09' && f.target === 'pre-login/login');
@@ -55,7 +53,7 @@ describe('A1 C-09：本文を採取していない 2xx のログインは、①�
 });
 
 describe('A1 生成スクリプト：login は本文も採取する', () => {
-  const s = generateScript({ host: 'www.example.com', apiPath: '/api/me', loginPath: '/login', mypagePath: '/mypage', logoutPath: '/logout', staticPath: '/app.js', dangerous: false });
+  const s = generateScript(GEN_OPTS);
   const loginLine = s.split('\n').find(l => l.includes('--data @login.txt') && !l.includes('s$i.txt'))!;
   it('ヘッダと本文を分けて取り、#BODY の印のあとに本文を出す', () => {
     expect(loginLine).toContain('-D "$hdr" -o "$body"');
@@ -65,7 +63,7 @@ describe('A1 生成スクリプト：login は本文も採取する', () => {
   });
   it('pre-login は今までどおり -v（送った Cookie の名前を C-09 で使う）', () => {
     const pre = s.split('\n').findIndex(l => l.includes('label=pre-login'));
-    // -b jar.txt は付けない（スクリプトの初めに jar.txt を消すので、-v の1行目に cookie file の警告を出した。第49回）
+    // -b jar.txt は付けない（スクリプトの初めに jar.txt を消すので、-v の1行目に cookie file の警告が出る）
     expect(s.split('\n').slice(pre, pre + 3).join('\n')).toMatch(/curl .*-v -o \/dev\/null -c jar\.txt "\$H"/);
   });
 });
@@ -108,12 +106,11 @@ describe('A2 画面：同じ理由の na を1行にまとめる', () => {
 });
 
 describe('A2 カバレッジ：ターゲットごとの na の件数と理由を添える', () => {
-  const implemented = IMPLEMENTED;
   const input = [
     '#TARGET url=https://a.example/ label=page', AT, 'HTTP/2 200', 'content-type: text/html', '', '<p>hi</p>', '',
     '#TARGET url=https://a.example/about label=about', AT, 'HTTP/2 200', 'content-type: text/html', '', '',
     '#TARGET url=https://a.example/faq label=faq', AT, 'HTTP/2 200', 'content-type: text/html', '', ''].join('\n');
-  const cov = coverage(evaluate(input).findings, implemented);
+  const cov = coverage(evaluate(input).findings, IMPLEMENTED);
   it('本文のある HTML で判定済みの E-07 に、本文のない2件を示す', () => {
     const e07 = cov.find(c => c.item === 'E-07')!;
     expect(e07.status).toBe('evaluated');
@@ -121,10 +118,63 @@ describe('A2 カバレッジ：ターゲットごとの na の件数と理由を
   });
   it('ほかの項目に任せた na（強制モードのCSPがない（H-03で判定））は入力不足に数えない', () => {
     const csp = '#TARGET url=https://a.example/x label=x\n' + AT + "\nHTTP/2 200\ncontent-type: text/html\ncontent-security-policy: script-src 'self'; object-src 'none'; base-uri 'none'\n\n<p>x</p>\n";
-    const h07 = coverage(evaluate(`${input}${csp}`).findings, implemented).find(c => c.item === 'H-07')!;
+    const h07 = coverage(evaluate(`${input}${csp}`).findings, IMPLEMENTED).find(c => c.item === 'H-07')!;
     expect(h07.reasons.join('/')).not.toContain('一部のターゲット');
   });
   it('件数の注記は英訳できる', () => {
     expect(recommendationEn(someTargets(3))).toBe('Some targets (3) lack input');
+  });
+});
+
+describe('E-04：本文を採取していない robots.txt・security.txt の 2xx は na', () => {
+  const e04 = (url: string, head: string) => evaluate(`#TARGET url=${url} label=t\n${AT}\n${head}\n`).findings.filter(f => f.item === 'E-04');
+  it('-I の 200（本文なし）→ na（本文を採取し直す案内）', () => {
+    for (const url of ['https://a.example/robots.txt', 'https://a.example/.well-known/security.txt']) {
+      const r = e04(url, 'HTTP/2 200\ncontent-type: text/plain\n');
+      expect(r.map(f => f.ruleId), url).toEqual(['E-04.na']);
+      expect(r[0].recommendation).toBe(NO_BODY_REC);
+    }
+  });
+  it('2xx でない応答は、本文がなくても今までどおり判定する', () => {
+    expect(e04('https://a.example/robots.txt', 'HTTP/2 404\n').map(f => f.ruleId)).toEqual(['E-04.ok']);
+    expect(e04('https://a.example/.well-known/security.txt', 'HTTP/2 404\n').map(f => f.ruleId)).toEqual(['E-04.2']);
+  });
+});
+
+describe('HAR のテキスト・XML の本文', () => {
+  const har = (mime: string, text: string, status = 500) => JSON.stringify({ log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z',
+    request: { method: 'GET', url: 'https://a.example/x', headers: [] },
+    response: { status, httpVersion: 'HTTP/2', headers: [{ name: 'Content-Type', value: mime }], content: { mimeType: mime, text } } }] } });
+  it('text/plain のスタックトレースは本文として読み、E-01② にする（「本文を採取していない」の na にしない）', async () => {
+    const { analyze } = await import('./golden/analyze');
+    const fs = analyze('', har('text/plain; charset=utf-8', 'Traceback (most recent call last):\n  File "/srv/app/main.py", line 41')).findings.filter(f => f.item === 'E-01');
+    expect(fs.map(f => f.ruleId)).toEqual(['E-01.2']);
+  });
+  it('XML のエラー応答も本文として読む', async () => {
+    const { analyze } = await import('./golden/analyze');
+    const fs = analyze('', har('application/xml', '<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>', 404)).findings.filter(f => f.item === 'E-01');
+    expect(fs.map(f => f.ruleId)).not.toContain('E-01.na');
+  });
+});
+
+describe('HAR で残さない本文', () => {
+  it('SVG と Office の文書（XML を含む種類名）の本文は残さない', async () => {
+    const { importHar } = await import('../src/parser/har');
+    for (const mime of ['image/svg+xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']) {
+      const imp = importHar(JSON.stringify({ log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z', request: { method: 'GET', url: 'https://a.example/x', headers: [] },
+        response: { status: 200, httpVersion: 'HTTP/2', headers: [], content: { mimeType: mime, text: '<svg/>' } } }] } }));
+      expect(imp.chains[0].responses.at(-1)?.body, mime).toBeUndefined();
+    }
+  });
+});
+
+describe('本文がない 2xx の HTML（204・Content-Length: 0）は、本文を採取していない na にしない', () => {
+  it('Content-Length: 0 の 200 → E-07 などは適用外', () => {
+    const { ids } = evaluate('#TARGET url=https://a.example/ label=page\nHTTP/2 200\ncontent-type: text/html\ncontent-length: 0\n\n');
+    expect(ids('page').filter(id => /^E-(?:02|07|08|09|10|12)\./.test(id))).toEqual([]);
+  });
+  it('-o /dev/null で本文を採取していない 200 → na のまま', () => {
+    const { ids } = evaluate('#TARGET url=https://a.example/ label=page\nHTTP/2 200\ncontent-type: text/html\ncontent-length: 1234\n\n');
+    expect(ids('page')).toContain('E-07.na');
   });
 });

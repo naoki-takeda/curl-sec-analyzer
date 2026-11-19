@@ -10,17 +10,7 @@ curl-sec-analyzer の開発に参加するときの決まりです。使い方�
 
 ## 開発環境と検査
 
-Node.js は `.nvmrc` の版を使います（`engines` の下限は 22.12）。
-
-```sh
-npm ci
-npm run lint         # 型チェックと ESLint
-npm test             # 単体テスト（時間を測るテストは最後に別に流す。変更を監視するときは npm run test:watch）
-npm run audit        # 依存の署名の検証と、公開物に含まれる依存の既知の脆弱性の検査
-npm run build
-npx playwright install chromium firefox webkit
-npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build が必要）
-```
+依存のインストール・検査・ビルド・E2E のコマンドは [README.md](README.md) の「開発」にあります。
 
 プルリクエストでは、CI（`.github/workflows/ci.yml`）が同じ検査を実行します。検査の中身は `.github/workflows/checks.yml` にあります。
 
@@ -28,7 +18,7 @@ npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build �
 
 - **描画**：`innerHTML`・`outerHTML`・`insertAdjacentHTML`・`document.write` を使わず、`textContent`・`el()`（`src/ui/dom.ts`）で描画します。`eval` 系も使いません。どちらも ESLint で禁止しています。
 - **ルール**（`src/rules/`）：評価したら必ず `.ok` か fail を返し、判定できなければ `.na` を返します。空配列は「適用外」のときだけに使います。
-- **文言**：画面の文言・推奨対応を足したら、英語（`src/messagesEn.ts`・`src/recommendationsEn.ts`）もそろえます。訳の漏れは `tests/i18n.test.ts` が検出します。
+- **文言**：画面の文言は `src/i18n.ts` の `ja`・`en` の両方に足します（足りないと型チェックで失敗します）。設定ファイル・コマンド生成器のエラーの英訳は `src/messagesEn.ts`、推奨対応と判定不能の理由の英訳は `src/recommendationsEn.ts` に足します。推奨対応の訳の漏れは `tests/i18n.test.ts` が検出します。
 - **ブラウザの保存領域**：localStorage・sessionStorage・IndexedDB・Cookie は使いません（理由は設計書の「ブラウザの保存領域」）。
 - **依存パッケージ**：追加はできるだけ避けます。追加する場合は、理由と、自前で実装しない理由をプルリクエストに書きます。
 
@@ -36,13 +26,14 @@ npm run test:e2e     # 本番ビルドに対する E2E（先に npm run build �
 
 - 実在のシステムから採取した値は使いません。ホスト名は `example.com` などに、Cookie・トークンはダミーの値に置き換えます。
 - `tests/fixtures/*.txt` は、採取したままの改行（サーバの応答ヘッダは CRLF、curl 自身の行は LF）を保ちます。`.gitattributes` で改行を変換しない設定にしています。エディタで保存し直して改行を変えないでください。
+- `tests/fixtures/generated_local.txt` は、コマンド生成器の出力をローカルの HTTPS サーバ（`openssl s_server -WWW`）に向けて実行したものです。生成スクリプトの形を変えたら、`scripts/capture-fixture.sh` で採り直し（Linux・WSL。手順はスクリプトの先頭）、ゴールデンの期待結果の差分を確かめます。外部には接続しません。
 - テスト用の HAR は `tests/fixtures/` か `tests/golden/cases/` に置きます。ほかの場所の `*.har` は `.gitignore` で除外しています。
 
 ## テストの置き場所
 
 - 新しいテストは、`tests/` の直下の領域ごとのファイル（`tests/masking.test.ts`、`tests/body-missing.test.ts` など）に書きます。合うファイルがなければ、領域の名前でファイルを作ります。レビューの回の名前のファイルは作りません。
 - `tests/regression/` は、第2回〜第26回のレビューと積み残しへの対応、MVP〜v0.4 の段階ごとに書いた回帰テストです。中身はそのまま残し、新しいテストは足しません（経緯の記録は `docs/history.md`）。
-- 時間の上限を確かめるテストには `{ tags: ['perf'] }` を付けます（describe に付けると、その中がすべて対象になります）。`npm test` は、ほかのテストが終わってから、perf のテストをファイルを並べずに流します。並べて流すと CPU を取り合い、上限を超えることがあるためです。
+- 時間の上限を確かめるテストには `{ tags: ['perf'] }` を付けます（describe に付けると、その中がすべて対象になります）。`npm test` は、ほかのテストが終わってから、perf のテストをファイルを並べずに流します。並べて流すと CPU を取り合い、上限を超えることがあるためです。`npm run test:watch` は perf のテストを流しません。
 
 ## 回帰テスト（ゴールデン・同値性）
 

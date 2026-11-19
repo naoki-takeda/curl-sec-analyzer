@@ -1,7 +1,7 @@
 // rules/transport.ts：第4章 メソッド・転送・ヘッダインジェクション（T-01、T-04〜T-08、T-12。TLSは rules/hostRules.ts）
 import type { HttpResponse, Rule } from '../model';
-import { NO_BODY_REC, mk } from './util';
-import { baseLabel, sameDocument } from '../parser/target';
+import { INTERNAL_HOST, NO_BODY_REC, TEST_HOST_RE, bodyNotCaptured, mk, noResponse } from './util';
+import { baseLabel, isRedirectWithLocation, sameDocument, trimPath } from '../parser/target';
 import { LOGIN_PATH } from './html';
 
 export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイレクト', appliesTo: 'any', scope: 'target',
@@ -10,7 +10,7 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     const url = ctx.target.url;
     if (!url || !/^http:\/\//i.test(url)) return [];   // URLが http:// のターゲットだけで判定する（スキームの大文字小文字は区別しない）
     const first = ctx.chain[0];
-    if (!first) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!first) return [noResponse(httpsRedirect, ctx)];
     const rec = '同じホストの https:// へ 301 または 308 で転送する';
     const loc = first.headers.get('location')?.[0];
     // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、転送したかどうかも分からない（A-01・C-12・E-05 と同じ）
@@ -19,7 +19,7 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     // 5xx はサーバの不調で、HTTP をどう扱う設定かが分からない
     if (first.status >= 400 && first.status < 500) return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', `HTTP ${first.status}（HTTP のリクエストを拒否）`, '')];
     if (first.status >= 500) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `HTTP ${first.status}（サーバエラー）`, '')];
-    if (first.status < 300 || first.status >= 400 || !loc)
+    if (first.status < 300 || !loc)
       return [mk(httpsRedirect, ctx, 1, 'high', 'fail', `HTTP ${first.status}（転送なし）`, rec)];
     let to: URL;
     try { to = new URL(loc, url); } catch { return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `Location を解釈できない: ${loc}`, '')]; }
@@ -32,8 +32,6 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', ev, '')];
   } };
 
-// ---- 以下 MVP で追加（T-05、T-07②、T-08） ----
-const INTERNAL_HOST = /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost$)|\.(?:internal|local|lan|corp|intra)$/i;
 export const redirectChain: Rule = { id: 'T-05', title: 'リダイレクトチェーン', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG'],
   run(ctx) {
@@ -55,16 +53,15 @@ export const redirectChain: Rule = { id: 'T-05', title: 'リダイレクトチ�
     return out.length ? out : [mk(redirectChain, ctx, 'ok', 'info', 'pass', `${hops.length}回の転送`, '')];
   } };
 
-const HOST_INJ_VALUE = /evil\.example/i;
 export const hostInjection: Rule = { id: 'T-07', title: 'Host・X-Forwarded-Hostヘッダインジェクション', appliesTo: 'any', scope: 'target',
   basis: ['PortSwigger Web Security Academy: Host header', 'OWASP WSTG-INPV-17'],
   run(ctx) {
-    if (!ctx.final) return [mk(hostInjection, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(l => HOST_INJ_VALUE.test(l));
+    if (!ctx.final) return [noResponse(hostInjection, ctx)];
+    const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(l => TEST_HOST_RE.test(l));
     const ok2xx = ctx.final.status >= 200 && ctx.final.status < 300;
-    if (!loc && ok2xx && !ctx.final.body?.trim()) return [mk(hostInjection, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
+    if (!loc && ok2xx && bodyNotCaptured(ctx)) return [mk(hostInjection, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文を採取していない）`, NO_BODY_REC)];
     // スキームのない URL（<script src="//evil.example/app.js">）も、ブラウザは同じスキームの外部ホストとして読み込む
-    const body = ctx.final.body?.match(/(?:https?:)?\/\/[^\s"'<>/]*evil\.example[^\s"'<>]*/i)?.[0];
+    const body = ctx.final.body?.match(new RegExp(String.raw`(?:https?:)?//[^\s"'<>/]*${TEST_HOST_RE.source}[^\s"'<>]*`, 'i'))?.[0];
     if (loc || body) return [mk(hostInjection, ctx, 2, 'medium', 'fail', loc ? `Location: ${loc}` : `本文の絶対URL: ${body}`, '絶対URLは設定値のホスト名から作り、Host・X-Forwarded-Host を信頼しない')];
     return [mk(hostInjection, ctx, 'ok', 'info', 'pass', 'テスト値（evil.example）は応答に現れない', '')];
   } };
@@ -72,21 +69,20 @@ export const hostInjection: Rule = { id: 'T-07', title: 'Host・X-Forwarded-Host
 export const crlfInjection: Rule = { id: 'T-08', title: 'CRLFインジェクション', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG-INPV-15'],
   run(ctx) {
-    if (!ctx.final) return [mk(crlfInjection, ctx, 'na', 'info', 'na', '応答がない', '')];
-    const hit = ctx.target.responses.some(r => (r.headers.get('set-cookie') ?? []).some(v => /^crlf=1\b/i.test(v)) || r.headers.has('x-crlf-test'));
+    if (!ctx.final) return [noResponse(crlfInjection, ctx)];
+    const hit = ctx.target.responses.some(r => (r.headers.get('set-cookie') ?? []).some(v => /^crlf=1\b/i.test(v)));
     return hit ? [mk(crlfInjection, ctx, 1, 'high', 'fail', '注入したヘッダ（Set-Cookie: crlf=1）が応答に現れた', 'ヘッダに出力する値から CR・LF を除去する（フレームワークのAPIでヘッダを設定する）')]
                : [mk(crlfInjection, ctx, 'ok', 'info', 'pass', '注入したヘッダは応答に現れない', '')];
   } };
 
-// ---- 以下 v0.2 で追加（T-01、T-06、T-12） ----
 const RISKY_METHODS = /\b(PUT|DELETE|PATCH|TRACE|TRACK|CONNECT|PROPFIND|PROPPATCH|MKCOL|COPY|MOVE|LOCK|UNLOCK)\b/gi;
 export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG-CONF-06'],
   run(ctx) {
     const f = ctx.final;
-    if (!f) return [mk(methods, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!f) return [noResponse(methods, ctx)];
     if (baseLabel(ctx.target.label) === 'trace') {
-      if (f.status === 200 && !f.body?.trim()) return [mk(methods, ctx, 'na', 'info', 'na', 'HTTP 200（本文を採取していない。反射したかが分からない）', NO_BODY_REC)];
+      if (f.status === 200 && bodyNotCaptured(ctx)) return [mk(methods, ctx, 'na', 'info', 'na', 'HTTP 200（本文を採取していない。反射したかが分からない）', NO_BODY_REC)];
       const reflected = f.status === 200 && /^TRACE \S+ HTTP\//m.test(f.body ?? '');
       return reflected ? [mk(methods, ctx, 1, 'medium', 'fail', `HTTP ${f.status}（リクエストを反射）`, 'TRACE を無効にする（405 か 501 を返す）')]
                        : [mk(methods, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
@@ -98,19 +94,21 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
                         : [mk(methods, ctx, 'ok', 'info', 'pass', `Allow: ${allow}`, '')];
   } };
 
+/** テスト値のホストか（末尾のドット（FQDN の表記 evil.example.）も同じホスト） */
+const EVIL_HOST = new RegExp(String.raw`(?:^|\.)${TEST_HOST_RE.source}\.?$`, 'i');
 const OPEN_REDIRECT_REC = 'next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す';
 /**
  * 転送先の URL が、テスト値（evil.example）を持ったままか（エンコードしたものを含む）。ホスト名をそろえる転送（example.com → www.example.com）や
- * パスの書き換え（/redirect → /en/redirect）はテスト値を次の応答に渡すだけで、転送先を検証したことにはならない（合格にした）
+ * パスの書き換え（/redirect → /en/redirect）はテスト値を次の応答に渡すだけで、転送先を検証したことにはならない
  */
 const carriesTestValue = (loc: string) => {
   let d = loc;
   for (let i = 0; i < 2; i++) { try { d = decodeURIComponent(d); } catch { break; } }
-  return /evil\.example/i.test(d);
+  return TEST_HOST_RE.test(d);
 };
 /**
  * Refresh ヘッダの転送先（HTML Standard の shared declarative refresh steps）。「秒数」のあとの ; か , と「url=」は省略できる
- * （Refresh: 0; https://evil.example/ も転送する。url= があるものだけを見ると、外部への転送を合格にした）。転送先がなければ undefined（読み込み直し）
+ * （Refresh: 0; https://evil.example/ も転送する）。転送先がなければ undefined（読み込み直し）
  */
 export function refreshTarget(v: string): string | undefined {
   const m = v.match(/^\s*[\d.]+\s*(?:[;,]\s*)?([\s\S]*)$/);
@@ -123,30 +121,26 @@ export function refreshTarget(v: string): string | undefined {
 export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレクト', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Unvalidated Redirects CS', 'IPA'],
   run(ctx) {
-    if (!ctx.final) return [mk(openRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
-    // 転送先はブラウザと同じ読み方（WHATWG URL）で解釈する。http・https の URL の「\」は「/」と読まれるので、/\evil.example・https:\\evil.example/・
-    // ///evil.example も外部ホストへの転送になる（正規表現の //evil.example だけでは、よく使われる回避の値を合格にした）
-    // ターゲットの URL が絶対 URL でないとき（url=a.example/r?to=…）は、仮の基準で読む（基準を作れずに例外になり、evil.example への転送を合格にした）
+    if (!ctx.final) return [noResponse(openRedirect, ctx)];
+    // 転送先はブラウザと同じ読み方（WHATWG URL）で解釈する。http・https の URL の「\」は「/」と読まれるので、/\evil.example・
+    // https:\\evil.example/・///evil.example も外部ホストへの転送になる。ターゲットの URL が絶対 URL でないとき（url=a.example/r?to=…）は、
+    // 仮の基準で読む（例外で転送を見逃さない）
     const base = (() => { try { return new URL(ctx.target.url ?? '').href; } catch { return 'https://x.invalid/'; } })();
-    // 末尾のドット（FQDN の表記 evil.example.）も同じホスト
-    const evil = (l: string) => { try { return /(?:^|\.)evil\.example\.?$/i.test(new URL(l.trim(), base).hostname); } catch { return false; } };
+    const evil = (l: string) => { try { return EVIL_HOST.test(new URL(l.trim(), base).hostname); } catch { return false; } };
     const loc = ctx.target.responses.flatMap(r => r.headers.get('location') ?? []).find(evil);
     // Refresh ヘッダ（Refresh: 0; url=https://evil.example/）による転送も見る
     const refresh = ctx.target.responses.flatMap(r => r.headers.get('refresh') ?? []).map(v => refreshTarget(v) ?? '').find(evil);
     if (loc || refresh) return [mk(openRedirect, ctx, 1, 'medium', 'fail', loc ? `Location: ${loc}` : `Refresh: url=${refresh}`, '転送先は許可リスト（または相対パス）に限る')];
-    // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）
-    // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面への転送（next= を持ち越した /login?next=…evil.example。ログインのあとで使う）と、
-    // 同じページへの転送（末尾の /）は、転送先の検証を試していないので na
+    // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）。
+    // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面・認証の入り口への転送（テスト値を持ち越したかによらない。Spring・Devise・
+    // Laravel は保存したリクエストでログインのあとに戻る）と、同じページへの転送（末尾の /）は、転送先の検証を試していないので na
     const tested = (r: HttpResponse) => {
-      // 試していない転送：ログイン画面・認証の入り口への転送（テスト値を持ち越したかによらない。Spring・Devise・Laravel は保存したリクエストで
-      // ログインのあとに戻る）と、同じページへの転送。/home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、
-      // 転送先を検証して止めたので合格
+      // /home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、転送先を検証して止めたので合格
       const loc = r.headers.get('location')?.[0] ?? '';
       let path = ''; try { path = new URL(loc, r.url ?? base).pathname; } catch { /* 解釈できない */ }
-      return !LOGIN_PATH.test(path.length > 1 ? path.replace(/\/+$/, '') : path) && !sameDocument(r, ctx.target.url) && !passedOn(r);
+      return !LOGIN_PATH.test(trimPath(path)) && !sameDocument(r, ctx.target.url) && !passedOn(r);
     };
-    // テスト値を持ったまま、同じ入口（パスの最後の部分が同じ。/redirect → www の /redirect・/en/redirect）へ転送した。転送先の検証はその先で行う。
-    // 別の画面へのテスト値つきの転送（/home?blocked=https%3A%2F%2Fevil.example）は、検証して止めたので試した転送とする
+    // テスト値を持ったまま、同じ入口（パスの最後の部分が同じ。/redirect → www の /redirect・/en/redirect）へ転送した。転送先の検証はその先で行う
     const lastSegment = (u: string, b: string) => { try { return new URL(u, b).pathname.replace(/\/+$/, '').split('/').pop() ?? ''; } catch { return undefined; } };
     const passedOn = (r: HttpResponse) => {
       const loc = r.headers.get('location')?.[0] ?? '';
@@ -157,7 +151,7 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
       const to = refreshTarget(v); if (!to) return false;
       try { const a = new URL(to, r.url ?? base), b = new URL(r.url ?? base); a.hash = ''; b.hash = ''; return a.href !== b.href; } catch { return false; }
     });
-    const redirected = ctx.target.responses.some(r => (r.status >= 300 && r.status < 400 && r.headers.has('location') && tested(r)) || refreshes(r));
+    const redirected = ctx.target.responses.some(r => (isRedirectWithLocation(r) && tested(r)) || refreshes(r));
     const carried = ctx.target.responses.some(r => r.status >= 300 && r.status < 400 && passedOn(r));
     return redirected ? [mk(openRedirect, ctx, 'ok', 'info', 'pass', '外部ホスト（evil.example）へは転送しない', '')]
       : [mk(openRedirect, ctx, 'na', 'info', 'na', carried

@@ -1,5 +1,5 @@
 // 性質のテスト（fast-check）：マスクと突き合わせのキーが守ることを、決めた入力の例ではなく、作った入力の全体で確かめる。
-// 第22回〜第27回のどの回でも、直前の回の修正が、例で確かめていなかった入力で退行を入れた（キーへの秘密の漏れ、#META cmd= のオプションの値の漏れ）。
+// 修正は、例で確かめていない入力で退行を入れやすい（キーへの秘密の漏れ、#META cmd= のオプションの値の漏れ）。
 // 例のテストは、その例しか守らない。ここでは次の性質を、毎回ちがう入力で確かめる：
 // - キー：もう一度かけても変わらない／値を持たない（値を変えてもキーが変わらない）／パスのトークンはキーに入らない／順番で変わらない／
 //   マスク（mask.ts）に依存しない
@@ -12,10 +12,10 @@ import { summarizeCommand } from '../src/export/cmdSummary';
 import { legacyHarKey, targetKeys, urlKey } from '../src/engine/targetKey';
 import { parseInput } from '../src/parser/input';
 import { analyze } from './golden/analyze';
+import { FC_MULT, leaks } from './helpers';
 
 // 回数は FC_RUNS 倍にできる（手元で多く回して探すとき。CI は既定の回数）
-const MULT = Number(process.env.FC_RUNS) || 1;
-const RUNS = { numRuns: 300 * MULT };
+const RUNS = { numRuns: 300 * FC_MULT };
 
 // ---- 入力の部品 ----
 /** 秘密のトークン（英大文字・小文字・数字をすべて含む16〜40文字）。キーでもマスクでも、どこに置いても出てはいけない形 */
@@ -23,11 +23,10 @@ const token = fc.stringMatching(/^[A-Za-z0-9]{16,40}$/).filter(t => /\d/.test(t)
 /**
  * 乱数で作ったトークン（文字を偏りなく選ぶ）。画面のマスクがパスの部分を伏せるかは、語と数字をつないだ名前（MyCompanyLogo2026Final）と
  * 見分けて決めるので、偏った文字の並び（abaaAbabaabaa000…。fast-check はこういう端の値を好んで作る）は名前とみなして残しうる
- * （第26回で「判断が要るもの」とした、10万個に数個の残り）。秘密の置き場所の性質は、実際のトークンの形で確かめる
+ * （10万個に数個の残り）。秘密の置き場所の性質は、実際のトークンの形で確かめる
  */
 const randomToken = fc.noBias(token);
 /** トークンが出ていないか：8文字の窓のどれも出力に含まれない（画面のマスクが残す先頭の4文字は窓より短い） */
-const leaks = (out: string, t: string) => { for (let i = 0; i + 8 <= t.length; i++) if (out.includes(t.slice(i, i + 8))) return t.slice(i, i + 8); return undefined; };
 const word = fc.constantFrom('reset', 'login', 'api', 'v2', 'users', 'AdminDashboard', 'docs', 'index.html', 'app.js', '2026-annual-report-v2', 'x64', '123', 'search');
 const paramName = fc.constantFrom('q', 'token', 'code', 'state', 'page', 'sort', 'lang', 'redirect_uri', 'next', 'id', 'access_token', 'utm_source', 'offset', 'type',
   'user[password]', 'api%5Fkey', 'filter.name', 'X-Amz-Signature', 'ids[]');
@@ -127,7 +126,7 @@ describe('マスク（mask.ts）の性質', () => {
     fc.assert(fc.property(fc.array(piece, { maxLength: 8 }), ps => {
       const once = maskText(ps.join(''));
       expect(maskText(once)).toBe(once);
-    }), { numRuns: 1000 * MULT });
+    }), { numRuns: 1000 * FC_MULT });
   });
 
   it('切り詰め（clip）は秘密を出さず、伏せた値の印の途中で切らない', () => {
@@ -181,12 +180,12 @@ describe('#META cmd= のコマンド（summarizeCommand）の性質', () => {
       for (const [, t] of c.secrets) expect(leaks(out, t), `${s}\n→ ${out}`).toBeUndefined();
       // 秘密を持たない URL は残す（値のないヘッダのあとの URL を、ヘッダの値として伏せない）。前に値を取るオプションがあると、その値になりうるので見ない。
       // 空白で区切ったものだけを見る。「_」で区切った書き方では、URL・ua/1.0 のパスの部分やクエリの値が後ろの引数まで続く
-      // （伏せすぎで、漏れはしない。第28回の「未対応」）。前にクエリのある URL があるときも見ない。
-      // URL のあとに @ があるとき（https://alice:…@a.example/ をあとに置いたもの）は、ユーザー情報の途中で切れた URL と見分けないので伏せる（第33回）
+      // （伏せすぎで、漏れはしない）。前にクエリのある URL があるときも見ない。
+      // URL のあとに @ があるとき（https://alice:…@a.example/ をあとに置いたもの）は、ユーザー情報の途中で切れた URL と見分けないので伏せる
       const i = s.indexOf('https://a.example/login');
       if (c.sep === ' ' && i > 0 && !s.slice(i).includes('@') && !/[?&]/.test(s.slice(0, i)) &&/(?:^|[\s_])(?:curl|curl\.exe|\\curl\.exe)[\s_]$|[\s_]-H[\s_](?:Authorization|Cookie):[\s_]$|[\s_]-(?:sS|L|k|i|v)[\s_]$|--(?:compressed|http1\.1)[\s_]$|(?:POST|10|ua\/1\.0|\*\/\*|out\.txt|%\{http_code\})[\s_]$/.test(s.slice(0, i)))
         expect(out, `${s}\n→ ${out}`).toContain('https://a.example/login');
-    }), { numRuns: 1000 * MULT });
+    }), { numRuns: 1000 * FC_MULT });
   });
 
   it('もう一度かけても変わらない', () => {
@@ -217,7 +216,7 @@ describe('判定の結果の性質', () => {
       const result = (xs: typeof bs) => analyze(text(xs)).findings
         .map(f => `${f.ruleId} | ${(f.targetKey ?? f.target).replace(/#\d+$/, '').trim()} | ${f.status} | ${f.severity}`).sort();
       expect(result(shuffled)).toEqual(result(bs));
-    }), { numRuns: 200 * MULT });
-  // 単独で約1.5秒。ほかのテストと並べて流すと既定の5秒を超えることがあった（第48回。4000回試しても反例はなかった）
+    }), { numRuns: 200 * FC_MULT });
+  // 単独で約1.5秒。ほかのテストと並べて流すと既定の5秒を超えることがあった（4000回試しても反例はなかった）
   }, 30_000);
 });

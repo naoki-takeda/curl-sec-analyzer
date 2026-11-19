@@ -26,7 +26,7 @@ cookies | C-06.1 | info | fail | PHPSESSID=…(6 chars); Secure; HttpOnly; SameS
 cookies | C-06.1 | info | fail | session_id=6ba7…(36 chars); Secure; HttpOnly; SameSite=Lax
 cookies | C-06.2 | low | fail | __host-sid=Zx8f…(29 chars); Secure; HttpOnly; Path=/app
 cookies | C-08.1 | info | fail | PHPSESSID
-cookies | C-11.1 | info | fail | ARRAffinitySameSite=ab…(16 chars); Secure; SameSite=None
+cookies | C-11.ok | info | pass | __host-sid, session_id, pref, tracking, ARRAffinitySameSite, weird, PHPSESSID
 cookies | C-13.1 | high | fail | Cache-Control: public, s-maxage=600
 cookies | E-02.na | info | na | 本文を採取していない
 cookies | E-07.na | info | na | 本文を採取していない
@@ -69,7 +69,7 @@ login | C-06.1 | info | fail | remember_token=9d8c…(30 chars); Max-Age=; Expir
 login | C-07.ok | info | pass | JSESSIONID, remember_token
 login | C-08.1 | info | fail | JSESSIONID
 login | C-09.ok | info | pass | URLにセッションIDなし
-login | C-11.1 | info | fail | __cf_bm=abcd…(30 chars); Path=/; Domain=.example.com; Secure; SameSite=None
+login | C-11.ok | info | pass | JSESSIONID, remember_token, BIGipServerpool_web, __cf_bm
 login | C-13.ok | info | pass | 共有キャッシュの指定なし
 login | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 logout | C-12.ok | info | pass | JSESSIONID=…(0 chars); Max-Age=0; Path=/
@@ -180,7 +180,7 @@ C-07 | evaluated | fails=1
 C-08 | evaluated | fails=3
 C-09 | evaluated | fails=1
 C-10 | evaluated | fails=1
-C-11 | evaluated | fails=2
+C-11 | evaluated | fails=0
 C-12 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 C-13 | evaluated | fails=1
 C-14 | manual | fails=0

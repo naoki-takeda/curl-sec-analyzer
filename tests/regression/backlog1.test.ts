@@ -241,10 +241,12 @@ describe('レビューの指摘（同じ PR の中で見つかったもの）', 
     expect(maskText('https://a.example/posts/nonce-reuse-attacks-explained')).toContain('nonce-reuse-attacks-explained');
     expect(maskText('<div class="nonce-container">')).toContain('nonce-container');
   });
-  it('前の語が _ を含む JWT（x_Bearer_eyJ…、access_token_eyJ…）も伏せる', { tags: ['perf'] }, () => {
+  it('前の語が _ を含む JWT（x_Bearer_eyJ…、access_token_eyJ…）も伏せる', () => {
     const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXZhbHVl';
     expect(maskText(`x_Bearer_${jwt}`)).not.toContain('c2lnbmF0dXJlLXZhbHVl');
     expect(maskText(`access_token_${jwt}`)).not.toContain('c2lnbmF0dXJlLXZhbHVl');
+  });
+  it('前の語が _ を含む JWT の繰り返しでも時間がかからない', { tags: ['perf'] }, () => {
     const t0 = performance.now(); maskText('a_eyJ'.repeat(200000)); expect(performance.now() - t0).toBeLessThan(1000);
   });
   it('JSON の state・oauth_state・数値の pin、二重エンコード・エンコードしていないコロンの JSON も伏せる', () => {

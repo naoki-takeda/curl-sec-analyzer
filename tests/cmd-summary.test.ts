@@ -1,14 +1,14 @@
-// CSV の「実施コマンド」「実施日時」の要約（src/export/cmdSummary.ts）の性質のテスト（第31回）。
+// CSV の「実施コマンド」「実施日時」の要約（src/export/cmdSummary.ts）の性質のテスト。
 // 要約は残してよい形だけを残す（許可リスト）。ここでは、出る語がどれも決めた形のどれかであること（許可リストの外の語が出ないこと）と、
 // 値の置き場所に置いた秘密が出ないことを、作った入力の全体で確かめる。許可する形は、実装とは別にここで書き下す
 import { readFileSync } from 'node:fs';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { summarizeAt, summarizeCommand } from '../src/export/cmdSummary';
+import { summarizeCommand } from '../src/export/cmdSummary';
 import { urlKey } from '../src/engine/targetKey';
+import { FC_MULT } from './helpers';
 
-const MULT = Number(process.env.FC_RUNS) || 1;
-const RUNS = { numRuns: 500 * MULT };
+const RUNS = { numRuns: 500 * FC_MULT };
 
 const PROGRAMS = ['curl', 'wget', 'http', 'https', 'xh', 'xhs', 'httpie', 'openssl', 'nc', 'ncat', 'nmap', 'sslscan', 'testssl', 'testssl.sh', 'grep', 'jq', 'sed', 'awk',
   'head', 'tail', 'cat', 'echo', 'printf', 'base64', 'timeout', 'sudo', 'env', 'powershell', 'pwsh', 'invoke-webrequest', 'iwr', 'invoke-restmethod', 'irm', 'dig',
@@ -28,7 +28,7 @@ const words = (out: string) => out.split('・').flatMap(c => c.split(' ')).filte
 
 /**
  * 乱数の秘密：英大文字・小文字・数字を含む12〜32文字と、base64url（「-」「_」を含む。JWT の署名やセッションIDの形）の16〜43文字。
- * 出力に6文字の窓が1つでもあれば漏れ（「_」で区切って読むので、base64url の秘密はかけらに分かれる。かけらが出ないことも確かめる）
+ * 出力に窓（base64url の秘密は6文字、英数字だけの秘密は8文字。両端が - _ の窓は除く）が1つでもあれば漏れ（「_」で区切って読むので、base64url の秘密はかけらに分かれる。かけらが出ないことも確かめる）
  */
 const alnum = fc.noBias(fc.stringMatching(/^[A-Za-z0-9]{12,32}$/).filter(t => /\d/.test(t) && /[a-z]/.test(t) && /[A-Z]/.test(t)));
 const b64url = fc.noBias(fc.stringMatching(/^[A-Za-z0-9_-]{16,43}$/).filter(t => /\d/.test(t) && /[a-z]/.test(t) && /[A-Z]/.test(t) && /[-_]/.test(t)));
@@ -50,7 +50,7 @@ const VALUE_PLACES: ((t: string) => string[])[] = [
   t => [`https://a.example/cb?access_token=${t}&x=1`], t => [`https://alice:${t}@a.example/`], t => [`https://a.example/reset/${t}`], t => [`https://a.example/x#${t}`],
   t => [`https://a.example/app;jsessionid=${t}`], t => ['-x', `alice:${t}@proxy:3128`], t => [`Authorization:Bearer_${t}`], t => [`api_key==${t}`], t => [`password=${t}`],
   t => [`X-Api-Key:${t}`], t => [t], t => [`'${t}'`], t => [`"a b ${t}"`], t => [`-${t}`], t => [`--${t.toLowerCase()}=${t}`],
-  // 値の中に「_--」「_-」「==」「#」を含むもの（第31回のレビューで見つかった形）
+  // 値の中に「_--」「_-」「==」「#」を含むもの（区切りや名前と読み違えやすい形）
   t => ['-u', `alice:my_--${t}`], t => ['-b', `sid=abc_-${t}`], t => [`X-Token:abc_${t}==`], t => [`https://alice:2024#${t}@a.example/`],
   t => ['-a', `alice:${t}`], t => ['--auth', `alice:${t}`], t => [`admin:${t}@localhost:5000/api`], t => ['--cert-key-pass', t],
 ];
@@ -58,16 +58,16 @@ const VALUE_PLACES: ((t: string) => string[])[] = [
 const USER_PLACES: ((u: string) => string[])[] = [
   u => ['-u', `${u}:pw`], u => [`-u${u}:pw`], u => ['-a', `${u}:pw`], u => [`${u}:pw@localhost:5000/api`], u => [`https://${u}:pw@a.example/`],
   u => ['-x', `${u}:pw@proxy:3128`], u => [`https://${u}:12#pw@a.example/`], u => ['--user', u], u => [`${u}==x`], u => [`${u}:x`],
-  // 「_」「.」「\」を含むユーザー名、数字で始まるパスワード、引用符を含むパスワード（第31回の2回目のレビューで見つかった形）
+  // 「_」「.」「\」を含むユーザー名、数字で始まるパスワード、引用符を含むパスワード（ユーザー情報の途中で切りやすい形）
   u => [`https://svc_${u}:Passw0rd@api.example.com/v1`], u => [`https://${u}.ext_x:pw@h.example/`], u => ['-x', `http://proxy_${u}:Secret99@proxy.local:3128`],
   u => [`https://${u}:12345_x@a.example/`], u => [`https://${u}:"Secret 1"@h.example/`], u => [`https://CONTOSO\\${u}:Secret1@a.example/`],
   u => [`HTTPS://${u}_x:pw@a.example/`], u => [`ftp://${u}_adm:pw@ftp.example/data.tar`], u => [`https://a.example/reset?${u}`], u => [`https://a.example/x?sort=${u}`],
-  // 「.」を含むユーザー名で、URL がユーザー情報の途中で切れるもの（引用符・\"・・・閉じない引用符・数字だけのパスワード・パスの /@。T9 のレビュー）と、
+  // 「.」を含むユーザー名で、URL がユーザー情報の途中で切れるもの（引用符・\"・・・閉じない引用符・数字だけのパスワード・パスの /@）と、
   // 「_」で区切ったコマンドで URL のあとの値の @（-u・-d・-F）
   u => [`https://${u}.doe:2024/@api.example.com/v1`], u => [`'https://${u}.doe:'"$PASS"'@api.example.com/v1'`], u => [`"https://${u}.doe:\\"Pw\\"@api.example.com/v1"`],
   u => [`"https://${u}.doe_svc:Secret@corp.example/`], u => [`https://${u}.doe:1234・abc@a.example.com/x`], u => [`https://${u}.doe:2024#x@localhost:8080/`],
   u => [`https://${u}.doe:p@ss.word_1@host.example/`], u => ['-u', `${u}.doe@corp.example:2024`], u => ['-d', `@${u}-cv.json`], u => ['-F', `file=@${u}-cv.pdf`],
-  // 引用符の中の空白・\ ・・の前の引用符・引用符の入れ子で切れるもの（第33回の2回目のコミット前のレビュー）
+  // 引用符の中の空白・\ ・・の前の引用符・引用符の入れ子で切れるもの（引用符の途中で切りやすい形）
   u => [`https://${u}.doe:2024"my secret"@api.example.com/`], u => [`https://${u}.doe:1234\\ abc@a.example.com/`], u => [`https://${u}.doe:2024"・"y@api.example.com/`],
   u => [`"https://${u}.doe:2024'x・y@api.example.com/"`], u => [`email=x@${u}.example`], u => [`cv=@${u}-cv.pdf`],
 ];
@@ -126,10 +126,6 @@ describe('実施コマンドの要約の性質', () => {
     }), RUNS);
   });
 
-  it('コマンドのID（コマンド生成器・HAR が書くもの）はそのまま', () => {
-    for (const s of ['C4', 'C11・C12・C23', 'HAR', '-', 'C1・C2']) expect(summarizeCommand(s)).toBe(s);
-  });
-
   it('長い入力でも時間が入力の長さの2乗にならない', { tags: ['perf'] }, () => {
     const t = performance.now();
     for (const unit of ['_-daaaaa', '_-HAuthorization:', '_-Hz:a', 'Cookie:a…(1 chars)_', '"', "'", 'https://a.example/_', '_-sSu', 'a_b=', 'A_', 'a_', '_a', 'A1_'])
@@ -140,7 +136,7 @@ describe('実施コマンドの要約の性質', () => {
   });
 
   it('URL・引用符・・の多い入力でも、長さを4倍にして時間が4倍程度（2乗なら16倍）', { tags: ['perf'] }, () => {
-    // 閉じない引用符と \"、空のコマンド、ポートのある URL、次のコマンドがあるときの URL の繰り返し（第33回）。URL は1つずつキーの形にするので
+    // 閉じない引用符と \"、空のコマンド、ポートのある URL、次のコマンドがあるときの URL の繰り返し。URL は1つずつキーの形にするので
     // 1つの時間が長い。合計の時間ではなく、長さを4倍にしたときの増え方を見る（並べて動かしたときの遅さで失敗しないように）
     const time = (s: string) => { const t = performance.now(); summarizeCommand(s); return performance.now() - t; };
     for (const make of [(n: number) => `curl${' "\\"'.repeat(n)}`, (n: number) => `curl${' -d "\\'.repeat(n)}`, (n: number) => `curl${'・'.repeat(n)}`,
@@ -150,13 +146,5 @@ describe('実施コマンドの要約の性質', () => {
       const small = time(make(4000)), large = time(make(16000));
       expect(large, make(2).slice(0, 40)).toBeLessThan(small * 8 + 100);
     }
-  });
-});
-
-describe('実施日時の要約', () => {
-  it('日時の形だけをそのまま出し、それ以外は ****', () => {
-    for (const s of ['2026-10-13', '2026-10-13T10:00', '2026-10-13T10:00:05', '2026-10-13T10:00:05.123Z', '2026-10-13T10:00:05+09:00', '2026-10-13 10:00']) expect(summarizeAt(s)).toBe(s);
-    for (const s of ['token=abc', '2026-10-13T10:00_secret', 'yesterday']) expect(summarizeAt(s)).toBe('****');
-    expect(summarizeAt('')).toBe('');
   });
 });

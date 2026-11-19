@@ -2,7 +2,7 @@
 // - 改行の違い（CRLF、Windows の curl -v の CR CR LF、入力欄が CR CR LF を空行にしたもの）
 // - curl の出力と HAR（ブラウザの記録）
 // 形式ごとの読み方の違い（-v の CR CR LF、HAR の http のホップ、送った Cookie の推定など）は、これまで何度も片方だけの退行になったため。
-// 意図して結果が違うもの（HAR は別のホストへの転送をつながない など）は、ここでは扱わない（KNOWN_DIFFERENCES に理由と一緒に書く）
+// 意図して結果が違うものが出たら、ここでは扱わず、KNOWN_DIFFERENCES に理由と一緒に書く（今はない）
 import { readFileSync, readdirSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { analyze, findingLine, render } from './golden/analyze';

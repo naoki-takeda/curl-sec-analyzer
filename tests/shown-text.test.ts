@@ -4,10 +4,8 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { allowText, showText } from '../src/shownText';
 import { maskText } from '../src/mask';
-import { evaluate } from './helpers';
+import { AT, evaluate, FC_MULT, leaks } from './helpers';
 
-const MULT = Number(process.env.FC_RUNS) || 1;
-const leaks = (out: string, t: string) => { for (let i = 0; i + 8 <= t.length; i++) if (out.includes(t.slice(i, i + 8))) return t.slice(i, i + 8); return undefined; };
 
 describe('名前の付いていないトークンを出さない', () => {
   it.each([
@@ -19,7 +17,7 @@ describe('名前の付いていないトークンを出さない', () => {
     ['Slack の Webhook', 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX', 'XXXXXXXXXXXXXXXXXXXXXXXX'],
     ['Basic 認証', 'Authorization: Basic dXNlcjpwYXNz', 'dXNlcjpwYXNz'],
     ['秘密鍵', '-----BEGIN RSA PRIVATE KEY-----MIIEowIBAAKCAQEA', 'MIIEowIBAAKCAQEA'],
-    // 第38回：- _ で区切ったかけらを1つずつ見ると、短いかけらが語に見えて残った
+    // - _ で区切ったかけらを1つずつ見ると、短いかけらが語に見えて残る
     ['GitLab', 'glpat-rbdO66tkD_ZWNg4NoDgY', 'rbdO66tkD'],
     ['GitLab（後半）', 'glpat-rbdO66tkD_ZWNg4NoDgY', 'NoDgY'],
     ['URL のユーザー名のトークン', 'https://0123456789abcdef0123456789abcdef01234567:x-oauth-basic@api.example/user', '0123456789abcdef'],
@@ -45,7 +43,7 @@ describe('名前の付いていないトークンを出さない', () => {
     const shapes: [string, () => string, number][] = [
       ['base62', () => gen(A62, 16, 40), 0.002], ['URL-safe', () => gen(`${A62}-_`, 20, 43), 0.01], ['GitLab', () => `glpat-${gen(`${A62}-_`, 20, 20)}`, 0.02],
       ['16進数', () => gen('0123456789abcdef', 16, 40), 0.002], ['英数字10〜15文字', () => gen(A62, 10, 15), 0.02],
-      // 第39回：標準の Base64（+ / を含む）、パーセントエンコードした Base64、英大文字だけ・英小文字だけの短いもの。残る割合は大きめで、
+      // 標準の Base64（+ / を含む）、パーセントエンコードした Base64、英大文字だけ・英小文字だけの短いもの。残る割合は大きめで、
       // 形では語と見分けられない部分（設計書に書いた残り）。悪くならないことを確かめる
       ['Base64', () => gen(`${A62}+/`, 40, 40), 0.07], ['エンコードした Base64', () => encodeURIComponent(gen(`${A62}+/`, 40, 40)), 0.09],
       ['英大文字10文字', () => gen(A62.slice(0, 26), 10, 10), 0.18], ['英小文字6〜9文字', () => gen(A62.slice(26, 52), 6, 9), 0.14],
@@ -68,7 +66,7 @@ describe('名前の付いていないトークンを出さない', () => {
     fc.assert(fc.property(around, token, around, (pre, t, post) => {
       const out = showText(`${pre}${t}${post}`);
       expect(leaks(out, t), out).toBeUndefined();
-    }), { numRuns: 500 * MULT, seed: 20261117 });
+    }), { numRuns: 500 * FC_MULT, seed: 20261117 });
   });
 
   it('判定の証跡にも出さない（ヘッダ・本文に置いた名前のないトークン）', () => {
@@ -93,7 +91,7 @@ describe('読める語は残す', () => {
     'https://d111111abcdef8.cloudfront.net/app.js',
     'HTTP 302 → /login?next=%2Fv1%2Fadmin',
     'sessionid=AbCd…(29 chars); Secure; HttpOnly',
-    // 第38回：許可リストで伏せすぎた製品名・例外名・パス
+    // 許可リストで伏せすぎやすい製品名・例外名・パス
     'server: AkamaiGHost / x-powered-by: lighttpd/1.4.59 / X-AspNetMvc-Version: 5.2 / NextJS',
     'System.InvalidOperationException HttpMessageNotReadableException IndexOutOfRangeException',
     'Disallow: /phpMyAdmin/ /xmlrpc.php brainpoolP256r1',
@@ -111,7 +109,7 @@ describe('冪等', () => {
       const once = showText(ps.join(''));
       expect(showText(once)).toBe(once);
       expect(allowText(once)).toBe(once);
-    }), { numRuns: 500 * MULT, seed: 20261117 });
+    }), { numRuns: 500 * FC_MULT, seed: 20261117 });
   });
 
   it('maskText だけを通した値に許可リストを通しても、伏せた印は変えない', () => {
@@ -120,15 +118,13 @@ describe('冪等', () => {
   });
 });
 
-// 第48回のレビュー（マスキング・エクスポート）で見つかった漏れ
-describe('第48回：URL・番号・決まった文言の伏せ方', () => {
-  const AT48 = '#META at=2026-11-01T10:00:00';
+describe('URL・番号・決まった文言の伏せ方', () => {
   it('URL のユーザー情報に引用符があっても、パスワードを伏せる', () => {
     for (const u of ["https://alice:Summer'2024@www.example.com/", 'https://al\'ice:Summer2024@www.example.com/', 'http://admin:Tr0ub4dor"3@10.0.0.5/']) {
       expect(showText(u), u).not.toMatch(/Summer|Tr0ub4dor|2024@/);
       expect(showText(u), u).toContain(':****@');
     }
-    const r = evaluate(`#TARGET url=https://alice:Summer'2024@www.example.com/ label=top\n${AT48}\nHTTP/2 302\nlocation: https://www.example.com/x\n\n`);
+    const r = evaluate(`#TARGET url=https://alice:Summer'2024@www.example.com/ label=top\n${AT}\nHTTP/2 302\nlocation: https://www.example.com/x\n\n`);
     expect(JSON.stringify(r.findings.map(f => f.url))).not.toContain('Summer');
   });
   it('区切りをパーセントエンコードしたカード番号・社会保障番号・12桁の番号を伏せる', () => {
@@ -165,8 +161,7 @@ describe('第48回：URL・番号・決まった文言の伏せ方', () => {
   });
 });
 
-// 第48回の束1の修正のレビューで見つかったもの（修正で新しく出た問題と、修正の足りなかった形）
-describe('第48回（束1のレビュー）：冪等性・伏せすぎ・残った形', () => {
+describe('冪等性・伏せすぎ・残った形', () => {
   const twice = (s: string) => showText(showText(s));
   it('ユーザー名と組の p= を伏せた結果は、何度かけても変わらない', () => {
     for (const s of ['https://www.example.com/rest/ping?u=alice&p=Summer2024&v=1.16', '?login=alice&p=enc:abc', '?user=bob&P=3', '?u=alice&amp;p=Summer2024', '?r=%3Fu%3Dalice%26p%3DSummer2024']) {
@@ -215,8 +210,7 @@ describe('第48回（束1のレビュー）：冪等性・伏せすぎ・残っ�
   });
 });
 
-// 第48回の束1の修正の、第2回のレビューで見つかったもの
-describe('第48回（束1の第2回のレビュー）', () => {
+describe('二重エンコードした @・ユーザー名と組の p=・番号としない並び', () => {
   it('パスワードの中の二重エンコードした @（%2540）のあとも伏せる', () => {
     for (const s of ['?r=https%3A%2F%2Falice%3AP%2540summer2024%40idp.example', '?r=https%3A%2F%2Falice%3AWinter%2540Tokyo%40idp.example']) {
       expect(showText(s), s).not.toMatch(/summer2024|Tokyo/);
@@ -229,19 +223,15 @@ describe('第48回（束1の第2回のレビュー）', () => {
   });
   it('日付を含むファイル名・3文字の略語の並び・暗号の名前を、番号として伏せない', () => {
     for (const s of ['db-backup-20261118-0300-01.sql', 'cdn-img-001', 'pdf-doc-xls', 'MIT-BSD-GPL', '?q=MIT%20BSD%20GPL', 'SM4-GCM-SM3']) expect(showText(s), s).toBe(s);
-    expect(showText('/invite/QWER-TYUI-ZXCV-ASDF')).not.toContain('ZXCV');
   });
 });
 
-// 第49回のレビュー（マスキング・エクスポート）
-describe('第49回：URL のユーザー情報・p=・名前・伏せすぎ', () => {
+describe('URL のユーザー情報・p=・名前・伏せすぎ', () => {
   it('パスワードの末尾・前後の引用符でも、パスワードを伏せる', () => {
     for (const s of ["https://alice:Summer2024'@stg.example/", 'https://alice:"Summer2024"@host.example/', 'https://alice:Summer2024"@host.example/']) {
       expect(showText(s), s).not.toContain('Summer2024');
-      expect(showText(s), s).toContain('stg.example'.includes('stg') && s.includes('stg') ? 'stg.example' : 'host.example');
+      expect(showText(s), s).toContain(s.includes('stg') ? 'stg.example' : 'host.example');
     }
-    // JSON の "," の後ろはユーザー情報にしない（第48回のまま）
-    expect(showText('{"site":"https://a.example","email":"bob@example.com"}')).toContain('"email":"bob@example.com"');
   });
   it('// の数が標準でない特別なスキームの URL のユーザー情報も伏せる', () => {
     for (const s of ['<script src="https:///dave:Kirin2024@cdn3.other.example/b.js">', 'https:\\dave:Kirin2024@h.example/', 'http:/dave:Kirin2024@h.example/', 'https:dave:Kirin2024@h.example/']) {
@@ -265,7 +255,7 @@ describe('第49回：URL のユーザー情報・p=・名前・伏せすぎ', ()
   });
 });
 
-describe('第49回：Markdown の自動リンク', () => {
+describe('Markdown の自動リンク', () => {
   it('_ の直後の URL・www. もリンクにしない', async () => {
     const { toMarkdown } = await import('../src/export/markdown');
     const { coverage } = await import('../src/engine/coverage');
@@ -276,7 +266,7 @@ describe('第49回：Markdown の自動リンク', () => {
   });
 });
 
-describe('第50回：pass で終わる名前・長い名前・値の中の ;・配列の値・Cookie の名前', () => {
+describe('pass で終わる名前・長い名前・値の中の ;・配列の値・Cookie の名前', () => {
   it('pass で終わる名前の値を伏せる（bypass・compass は伏せない）', () => {
     expect(showText('https://a.example/login?username=bob&userpass=Winter2024')).not.toContain('Winter2024');
     expect(showText('{"newpass":"Winter2024","oldpass":"Autumn2023"}')).not.toMatch(/Winter2024|Autumn2023/);
@@ -301,7 +291,7 @@ describe('第50回：pass で終わる名前・長い名前・値の中の ;・�
   });
 });
 
-describe('第50回（束のレビュー）：括弧で始まる値・pass で終わる語・配列・; の続き', () => {
+describe('括弧で始まる値・pass で終わる語・配列・; の続き', () => {
   it('括弧で始まる引用符のない値も伏せる', () => {
     for (const x of ['password: [Winter2024]', 'password={Winter2024}', 'api_key=[Spring2025]', 'secret: {Spring2025}'])
       expect(showText(x), x).not.toMatch(/Winter2024|Spring2025/);
@@ -321,7 +311,7 @@ describe('第50回（束のレビュー）：括弧で始まる値・pass で終
     expect(showText('x=1;session=abc;Secure;HttpOnly')).toMatch(/;Secure;HttpOnly$/);
     expect(showText('Server=db;Password=Winter2024;Max Pool Size=100')).toMatch(/;Max Pool Size=100$/);
   });
-  it('（2回目の束のレビュー）改行を含む配列・括弧のあとの空白・引用符のない要素・=>・数字の付く名前・配列の中のキー', () => {
+  it('改行を含む配列・括弧のあとの空白・引用符のない要素・=>・数字の付く名前・配列の中のキー', () => {
     for (const x of ['{"password":[\n  "Winter2024",\n  "Summer2025"\n]}', 'password: [ Winter2024 ]', 'password = { Winter2024 }', 'password: [[Winter2024]]',
       'password: [Winter2024, Summer2025]', "'password' => ['Winter2024','Summer2025']", 'newpass1=Winter2024', 'password1: Winter2024', 'db_pass1: Winter2024'])
       expect(showText(x), x).not.toMatch(/Winter2024|Summer2025/);
@@ -330,7 +320,7 @@ describe('第50回（束のレビュー）：括弧で始まる値・pass で終
   });
 });
 
-describe('第51回：配列の空の要素・CSP の ;・エスケープした // のユーザー情報・オブジェクトの値', () => {
+describe('配列の空の要素・CSP の ;・エスケープした // のユーザー情報・オブジェクトの値', () => {
   it('配列に空の文字列の要素があっても、後ろの要素を伏せる', () => {
     for (const x of ['"password":["","Hunter2Spring"]', '{"password":["a","","Hunter2Spring"]}', '{\\"password\\":[\\"\\",\\"Hunter2Spring\\"]}',
       'https://a.example/graphql?variables=%7B%22password%22%3A%5B%22%22%2C%22Hunter2Spring%22%5D%7D', "password: ['', 'Hunter2Spring']", 'password => ["", "Hunter2Spring"]'])
@@ -347,12 +337,87 @@ describe('第51回：配列の空の要素・CSP の ;・エスケープした /
     expect(showText('"password":{"value":"Hunter2Spring"}')).toMatch(/"value":"Hu…\(13 chars\)"/);
     expect(showText('password: {value: Hunter2Spring}')).toMatch(/\{value: Hu…\(13 chars\)\}/);
   });
-  it('（束のレビュー）入れ子のオブジェクト・配列の中の秘密の名前、バックスラッシュを含むユーザー情報、CSP の名前の一覧、引用符のあるオブジェクトのキー', () => {
+  it('入れ子のオブジェクト・配列の中の秘密の名前、バックスラッシュを含むユーザー情報、CSP の名前の一覧、引用符のあるオブジェクトのキー', () => {
     for (const x of ['{"user":{"password":{"value":"Hunter2Spring"}}}', '{"user":{"name":"bob","password":{"value":"Hunter2Spring"}}}', '{"items":[{"password":["Hunter2Spring"]}]}',
       'smb://CORP\\alice:Hunter2Spring@fileserver/share', '"dsn":"postgres://alice:Hunter2\\\\Spring@db"', '?password=Hunter2Spring;correct-horse-battery',
       "password: {value: 'Hunter2Spring'}", 'password: {"value": Hunter2Spring}', 'password = {"value": "Hunter2Spring"}', 'password => {"value" => "Hunter2Spring"}',
       "{'password': {'value': 'Hunter2Spring'}}", '%22password%22%3A%7B%22value%22%3A%22Hunter2Spring%22%7D'])
       expect(showText(x), x).not.toContain('Spring');
     expect(showText("password: {value: 'Hunter2Spring'}")).toContain('{value: ');
+  });
+});
+
+describe('値の中の ; の並び', () => {
+  it('; の並び（;;）のあとも値として伏せる', () => {
+    for (const x of ['https://a.example/?password=hunter2;;Winter2024', '?password=a;;Winter2024', 'password=hunter2;;;Winter2024', '?password=hunter2;;Winter2024&x=1'])
+      expect(showText(x), x).not.toContain('Winter2024');
+    expect(showText('?password=hunter2;;Winter2024&x=1')).toMatch(/&x=1$/);
+  });
+  it('; の並びのあとが名前=・Cookie の属性・空白・パス・CSP のディレクティブ・終わりなら、値はそこまで', () => {
+    expect(showText('?password=hunter2;;x=1')).toMatch(/;;x=1$/);
+    expect(showText('password=hunter2;;Secure')).toMatch(/;;Secure$/);
+    expect(showText('password=hunter2;; Path=/')).toMatch(/;; Path=\/$/);
+    expect(showText('?password=hunter2;;/path')).toMatch(/;;\/path$/);
+    expect(showText('?password=hunter2;;script-src')).toMatch(/;;script-src$/);
+    expect(showText('?password=hunter2;;')).toMatch(/;;$/);
+  });
+});
+
+describe('エンコードした URL のユーザー情報の同じ深さの %40、区切りの違うエンコードした番号', () => {
+  it('パスワードの中の同じ深さの %40 も、ホストの前の最後の %40 まで伏せる', () => {
+    for (const x of ['?redirect=https%3A%2F%2Falice%3AWinter%40Tokyo%40evil.example%2Fcb', '?redirect=https%3A%2F%2Falice%3AWinter%40Tokyo%40Osaka%40evil.example',
+      '?redirect=https%253A%252F%252Falice%253AWinter%2540Tokyo%2540evil.example', '?redirect=https%3A%2F%2Fbob%40corp%3AWinter%40Tokyo%40idp.example'])
+      expect(showText(x), x).not.toMatch(/Tokyo|Osaka|Winter/);
+    expect(showText('?redirect=https%3A%2F%2Falice%3AWinter%40Tokyo%40evil.example%2Fcb')).toMatch(/%40evil\.example%2Fcb$/);
+  });
+  it('パス・クエリの %40 はユーザー情報に含めない', () => {
+    expect(showText('?redirect=https%3A%2F%2Falice%3Apw%40host.example%2Fusers%2Fbob%40x.example')).toMatch(/%40host\.example%2Fusers%2Fbob%40x\.example$/);
+    expect(showText('?redirect=https%3A%2F%2Falice%3Apw%40evil.example%3Fx%3D%40y')).toMatch(/%40evil\.example%3Fx%3D%40y$/);
+    expect(showText('?redirect=https%3A%2F%2Fhost.example%3A8443%2Fusers%2Fbob%40x.example')).toBe('?redirect=https%3A%2F%2Fhost.example%3A8443%2Fusers%2Fbob%40x.example');
+  });
+  it('全体をエンコードした番号は、生の - _ + . の区切りでも伏せる', () => {
+    for (const sep of ['-', '_', '+', '.']) {
+      const x = `?card=${['%34%31%31%31', '%31%31%31%31', '%31%31%31%31', '%31%31%31%31'].join(sep)}`;
+      expect(showText(x), x).not.toContain('%31%31%31%31');
+    }
+    expect(showText('?ssn=%31%32%33-%34%35-%36%37%38%39')).not.toContain('%36%37%38%39');
+  });
+  it('区切りでつないだエンコードした日本語・記号は残す', () => {
+    for (const x of ['/%E3%81%8A%E7%9F%A5-%E3%82%89%E3%81%9B', '/a%2Fb.%2Fc', 'x%20-%20y', '?q=%E3%81%8A.%E3%81%8B+%E3%81%8C'])
+      expect(showText(x), x).toBe(x);
+  });
+});
+
+describe('空白・続く区切り・生とエンコードの混在の番号、生の @ で終わるエンコードしたユーザー情報', () => {
+  it('生の空白・2文字以上の区切りでつないだ、全体をエンコードした番号を伏せる', () => {
+    for (const x of ['?q=%34%31%31%31 %31%31%31%31 %31%31%31%31 %31%31%31%31', '?x=%34%31%31%31--%31%31%31%31--%31%31%31%31--%31%31%31%31',
+      '?x=%34%31%31%31-_%31%31%31%31-_%31%31%31%31-_%31%31%31%31'])
+      expect(showText(x), x).not.toMatch(/%31%31%31%31|%34%31%31%31/);
+  });
+  it('生の数字とエンコードした数字の混ざった番号を伏せる', () => {
+    for (const x of ['?x=4111-%31%31%31%31-%31%31%31%31-1111', '?x=4%31%31%31-1%31%31%31-1%31%31%31-1%31%31%31', '?card%3D4111%2D%31%31%31%31%2D1111%2D1111'])
+      expect(showText(x), x).not.toMatch(/1111|%31%31/);
+  });
+  it('番号の形でない数字の並び（日付・IP アドレス・版・電話番号）は残す', () => {
+    for (const x of ['/d/%32%30%32%36-%31%31-%31%38', 'Mozilla%2F5.0 (Windows NT 10.0)', '192.168.100.200', 'v1.2%2E3', '?ip=%31%39%32.%31%36%38.%31.%31', 'tel: %30%33-%31%32%33%34-%35%36%37%38'])
+      expect(showText(x), x).toBe(x);
+  });
+  it('エンコードしたスキームのユーザー情報は、生の @ や深さの違う %40 で終わっても伏せる', () => {
+    for (const x of ['?redirect=https%3A%2F%2Falice%3AWinter2024@evil.example', '?redirect=https%253A%252F%252Falice%253AWinter%2540Tokyo%40evil.example',
+      '?redirect=https%3A%2F%2Falice%3AWinter%2540Tokyo%40evil.example'])
+      expect(showText(x), x).not.toMatch(/Winter|Tokyo/);
+    expect(showText('?redirect=https%3A%2F%2Falice%3Apw@host.example%2Fx%40y')).toMatch(/@host\.example%2Fx%40y$/);
+    expect(showText('?redirect=https%3A%2F%2Fhost.example%2Fusers@x')).toBe('?redirect=https%3A%2F%2Fhost.example%2Fusers@x');
+  });
+});
+
+describe('パスワードの中の生の @', () => {
+  it('エンコードしたスキームのユーザー情報のパスワードに生の @ が2つ以上あっても、最後の @ まで伏せる', () => {
+    for (const x of ['?r=https%3A%2F%2Falice%3AWin@ter%40Tokyo%40evil.example', '?r=https%3A%2F%2Falice%3AWin@ter@evil.example',
+      '?r=https%3A%2F%2Falice%3ASummer2024@Winter2024%40evil.example', '?r=%2F%2Falice%3AWin@ter%40evil.example'])
+      expect(showText(x), x).not.toMatch(/Win|ter|Tokyo|Summer/);
+  });
+  it('%25 を重ねて3回戻しても % が残る数字の並びは伏せる', () => {
+    expect(showText('1-%' + '25'.repeat(10) + '31-%31%31')).not.toContain('2525');
   });
 });

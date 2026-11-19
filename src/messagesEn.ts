@@ -1,6 +1,6 @@
 // messagesEn.ts：画面に出すエラーメッセージ（設定ファイルの読み込み、コマンド生成器の入力）の英訳
 // キーは engine/suppress.ts・engine/profile.ts・engine/diff.ts・commands.ts が返す日本語の文言。新しい文言を足したら、ここにも足す
-// （tests/i18n.test.ts が、不正な入力で出るメッセージに日本語が残らないことを確かめる）
+// （tests/regression/review4.test.ts が、不正な入力で出るメッセージに日本語が残らないことを確かめる）
 const EXACT: Record<string, string> = {
   'JSONとして読めません': 'The file is not valid JSON',
   '配列、または suppressions を持つオブジェクトが必要です': 'Expected an array, or an object with a suppressions array',
@@ -13,11 +13,13 @@ const EXACT: Record<string, string> = {
   'sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）':'sessionMaxAgeHours must be a number of hours from 1 to 9600 (the default of 24 hours is used)',
   'ホスト名は英数字・ハイフン・ドット（必要なら :ポート）だけで書いてください': 'Use only letters, digits, hyphens and dots in the host name (plus :port if needed)',
   'apexドメインの書き方が正しくありません': 'The apex domain is not valid',
+  'name は文字列にしてください': 'name must be a string',
 };
-const FIELD: Record<string, string> = { API: 'API', ログイン: 'Login', 認証後ページ: 'Page after login', ログアウト: 'Logout', 静的リソース: 'Static resource', WebSocket: 'WebSocket' };
+const FIELD: Record<string, string> = { 機密のAPI: 'Sensitive API', ログイン: 'Login', 認証後のページ: 'Page behind login', ログアウト: 'Logout', '静的リソース（JS）': 'Static resource (JS)', WebSocket: 'WebSocket' };
 const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：ruleId が不正です$/, m => `Entry ${m[1]}: invalid ruleId`],
   [/^(\d+)件目：ruleId「(.*)」は項目IDではありません$/s, m => `Entry ${m[1]}: ruleId "${m[2]}" is not a check ID`],
+  [/^(\d+)件目：ruleId「(.*)」は条件番号が(.+)にありません（1〜(\d+)）$/s, m => `Entry ${m[1]}: ruleId "${m[2]}" is not a condition of ${m[3]} (1 to ${m[4]})`],
   [/^例外は(\d+)件までです（(\d+)件のうち、(\d+)件目からは読みません）$/, m => `At most ${m[1]} exceptions are read (the file has ${m[2]}; entries from ${m[3]} on are ignored)`],
   [/^(\d+)件目：target がありません$/, m => `Entry ${m[1]}: target is missing`],
   [/^(\d+)件目：target が長すぎます（(\d+)文字まで）$/, m => `Entry ${m[1]}: target is too long (${m[2]} characters at most)`],
@@ -26,6 +28,7 @@ const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：until は YYYY-MM-DD で書きます$/, m => `Entry ${m[1]}: until must be YYYY-MM-DD`],
   [/^「(.*)」は組織プロファイルの項目ではありません$/s, m => `"${m[1]}" is not a profile setting`],
   [/^severity：「(.*)」は項目IDではありません$/s,m => `severity: "${m[1]}" is not a check ID`],
+  [/^severity：「(.*)」は条件番号が(.+)にありません（1〜(\d+)）$/s, m => `severity: "${m[1]}" is not a condition of ${m[2]} (1 to ${m[3]})`],
   [/^severity：「(.*)」の重要度は high・medium・low・info のいずれか$/s, m => `severity: the severity for "${m[1]}" must be high, medium, low or info`],
   [/^(.+)のパスは \/ で始まる英数字と - \. _ ~ % \/ で書いてください$/, m => `${FIELD[m[1]] ?? m[1]} path: start with / and use only letters, digits and - . _ ~ % /`],
 ];

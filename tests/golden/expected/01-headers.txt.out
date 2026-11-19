@@ -63,7 +63,7 @@ docs | E-09.ok | info | pass | 秘密情報・内部情報らしき記述なし
 docs | H-01.1 | high | fail | max-age=0（max-age=0 は HSTS を解除する指定）
 docs | H-02.2 | info | fail | max-age=0
 docs | H-03.ok | info | pass | default-src 'self'; img-src 'self'
-docs | H-04.ok | info | pass | script-src 'self' / script-src 'self'
+docs | H-04.ok | info | pass | default-src 'self' / script-src 'self'
 docs | H-05.2 | medium | fail | base-uri がない（default-src にはフォールバックしない）
 docs | H-06.1 | medium | fail | X-Frame-Options: SAMEORGIN（不正な値。ブラウザは無視する）
 docs | H-07.ok | info | pass | 非推奨ディレクティブ・構文の誤りなし

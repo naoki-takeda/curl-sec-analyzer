@@ -43,6 +43,7 @@ har-10 | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 har-10 | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 har-10 | T-12.ok | info | pass | HTTP/2
 har-3 | A-02.ok | info | pass | URL・Location・本文にトークンなし
+har-3 | E-04.ok | info | pass | robots.txt に機密パスらしき記述なし
 har-3 | H-01.1 | high | fail | (ヘッダなし)
 har-3 | H-02.na | info | na | HSTSがない（H-01で判定）
 har-3 | H-08.1 | medium | fail | (ヘッダなし)
@@ -230,7 +231,7 @@ T-13 | manual | fails=0
 E-01 | evaluated | fails=0
 E-02 | evaluated | fails=0
 E-03 | missing-input | fails=0 | 必要なラベル: probes
-E-04 | missing-input | fails=0 | 必要なラベル: （一般）, probes
+E-04 | evaluated | fails=0
 E-05 | missing-input | fails=0 | 必要なラベル: （一般）
 E-06 | missing-input | fails=0 | 必要なラベル: （一般）
 E-07 | evaluated | fails=0

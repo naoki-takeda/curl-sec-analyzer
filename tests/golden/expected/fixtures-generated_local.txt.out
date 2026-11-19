@@ -10,6 +10,7 @@ apex | https://example.com/ | key=apex | responses=1
 pre-login | https://www.example.com/login | key=pre-login | responses=1
 mypage | https://www.example.com/mypage | key=mypage | responses=1
 api | https://www.example.com/api/me | key=api | responses=1
+unauth-api | https://www.example.com/api/me | key=unauth-api | responses=1
 cors-reflect | https://www.example.com/api/me | key=cors-reflect | responses=1
 cors-null | https://www.example.com/api/me | key=cors-null | responses=1
 cors-partial | https://www.example.com/api/me | key=cors-partial | responses=1
@@ -27,7 +28,6 @@ logout | https://www.example.com/logout | key=logout | responses=1
 after-logout | https://www.example.com/mypage | key=- | responses=1
 
 ## warnings
-unparsed-lines | どのターゲットにも属さない行が17行ありました（HTTPのステータス行より前の行など）
 orphan-block | #TARGET label=http にデータがありません
 orphan-block | #TARGET label=login にデータがありません
 orphan-block | #TARGET label=session-sample-1 にデータがありません
@@ -37,10 +37,11 @@ orphan-block | #TARGET label=cors-preflight にデータがありません
 orphan-block | #TARGET label=options にデータがありません
 orphan-block | #TARGET label=trace にデータがありません
 orphan-block | #TARGET label=method-override にデータがありません
+orphan-block | #TARGET label=ctype にデータがありません
 tls-probe-error | ターゲット「tls」：手元のOpenSSLが対応していないプローブがあります（RC4-SHA・DES-CBC3-SHA。判定不能）
 
 ## findings
-after-logout | C-12.na | info | na | 旧Cookieでの認証後ページが HTTP 200（本文を採取していないので、旧Cookie が使えたかは分からない）
+after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200
 apex | H-01.1 | high | fail | (ヘッダなし)
 apex | H-02.na | info | na | HSTSがない（H-01で判定）
 api | A-02.ok | info | pass | URL・Location・本文にトークンなし
@@ -213,6 +214,8 @@ top | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 top | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
 top | R-04.na | info | na | ACAOなし（Origin を送っていない、または送ったかが分からない）
 top | T-12.1 | info | fail | HTTP/1.0
+unauth-api | A-01.1 | high | fail | 認証なしで HTTP 200
+unauth-api | A-02.ok | info | pass | URL・Location・本文にトークンなし
 www.example.com | E-03.2 | info | fail | /.DS_Store（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）
 www.example.com | E-03.2 | info | fail | /.env（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）
 www.example.com | E-03.2 | info | fail | /.git/HEAD（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）
@@ -227,7 +230,7 @@ www.example.com | T-09.ok | info | pass | 旧バージョンは拒否された
 www.example.com | T-10.3 | medium | fail | TLS 1.2で接続できたCBC・静的RSAの暗号: AES128-SHA
 www.example.com | T-10.3 | medium | fail | TLS 1.2で接続できたCBC・静的RSAの暗号: ECDHE-RSA-AES128-SHA
 www.example.com | T-11.1 | high | fail | Verify return code: 18（self-signed certificate）
-www.example.com | T-11.2 | medium | fail | 期限まで30日（notAfter: 2026-12-01）
+www.example.com | T-11.2 | medium | fail | 期限まで20日（notAfter: 2026-12-09、2026-11-19T14:59:58 時点）
 
 ## coverage
 H-01 | evaluated | fails=14
@@ -258,7 +261,7 @@ C-08 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, lo
 C-09 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 必要なラベル: pre-login, login
 C-10 | missing-input | fails=0 | 必要なラベル: （一般）, http, pre-login, login, session-sample-*
 C-11 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
-C-12 | evaluated | fails=1 | 一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
+C-12 | evaluated | fails=2
 C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-14 | manual | fails=0
 C-15 | manual | fails=0
@@ -297,7 +300,7 @@ E-10 | missing-input | fails=0 | 必要なラベル: （一般）
 E-11 | missing-input | fails=0 | 必要なラベル: （一般）
 E-12 | missing-input | fails=0 | 必要なラベル: （一般）
 E-13 | evaluated | fails=0
-A-01 | missing-input | fails=0 | 必要なラベル: （一般）, http, unauth-*
+A-01 | evaluated | fails=1
 A-02 | evaluated | fails=0
 A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login
 A-04 | manual | fails=0

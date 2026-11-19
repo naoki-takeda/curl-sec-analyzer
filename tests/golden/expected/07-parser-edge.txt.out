@@ -40,6 +40,7 @@ after | T-12.ok | info | pass | HTTP/2
 csp-sample-* | H-04.na | info | na | 
 error-* | A-10.na | info | na | 
 json-header | A-02.ok | info | pass | URL・Location・本文にトークンなし
+json-header | A-07.na | info | na | 本文を採取していない
 json-header | A-09.3 | info | fail | CSPなし
 json-header | H-01.1 | high | fail | (ヘッダなし)
 json-header | H-02.na | info | na | HSTSがない（H-01で判定）
@@ -267,7 +268,7 @@ A-03 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, lo
 A-04 | manual | fails=0
 A-05 | manual | fails=0
 A-06 | manual | fails=0
-A-07 | evaluated | fails=0
+A-07 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）
 A-08 | missing-input | fails=0 | 必要なラベル: ctype
 A-09 | evaluated | fails=3
 A-10 | missing-input | fails=0 | 必要なラベル: error-*（APIのエラー応答を2つ以上）

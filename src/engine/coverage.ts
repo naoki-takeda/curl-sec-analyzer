@@ -5,7 +5,7 @@ import { requiredLabels } from './labels';
 
 export const ITEMS = items as ItemInfo[];
 export const PARTIAL = '一部の条件（ほかのラベルと比べる条件、ホスト単位の条件）は入力不足';
-/** 機密でない応答（静的リソースなど）だけで判定した項目（H-12 の①（高）を一度も判定していないのに「判定済み・0件」と出ていた） */
+/** 機密でない応答（静的リソースなど）だけで判定した項目の理由（H-12 の①を判定していないのに「判定済み・0件」とだけ見せない） */
 export const LIMITED = '機密応答では判定していない（静的リソース・機密でない応答だけ）';
 /** ターゲットごとの条件が、一部のターゲットで入力不足（本文を採取していないページなど）。件数はターゲットの数 */
 export const someTargets = (n: number) => `一部のターゲット（${n}件）は入力不足`;
@@ -22,14 +22,12 @@ export function coverage(fs: Finding[], implemented: Set<string>, list: ItemInfo
     const done = mine.filter(f => f.status !== 'na' || f.dedupedBy);   // 二重計上の防止で na にしたものは判定済み
     if (done.length) {
       const fails = done.filter(f => f.status === 'fail').length;
-      // ほかのラベルと比べる条件（横断：pre-login/login、logout/after-logout、session-sample-* など）が入力不足で na のときは、判定済みのまま
-      // 理由の欄にそれを示す（login だけで C-09 が「判定済み・0件」と出ると、①（高）を確かめたように見える）
-      // ターゲットの名前（pre-login/login など）で見分けると、C-12①（after-logout）・H-02③（apex）を見逃したので、ルールが付けた印で見る。
-      // 指摘があっても示す（T-09 の②だけで、①（旧バージョン）を確かめていないとき）
+      // 横断・ホスト単位の条件が入力不足（ルールが付けた印 partial）なら、判定済みのまま理由に示す（login だけで C-09 が「判定済み・0件」と
+      // 見えないように）。指摘があっても示す（T-09 の②だけで、①を確かめていないとき）
       const partial = [...new Set(mine.filter(f => f.status === 'na' && !f.dedupedBy && f.partial).map(f => f.recommendation || f.evidence).filter(Boolean))];
       const limited = done.every(f => f.limited) ? [LIMITED] : [];
       // ターゲットごとのルールの na（本文を採取していないページの E-07 など）も、ほかのターゲットで判定していれば判定済みのまま、件数と理由を示す
-      // （本文を採取した HTML が1つあると、本文のない機密のページを調べていないことが見えなかった）
+      // （本文を採取した HTML が1つあっても、本文のない機密のページを調べていないことが見えるように）
       const naTargets = mine.filter(f => f.status === 'na' && !f.dedupedBy && !f.partial && !DELEGATED.test(f.evidence));
       const perTarget = naTargets.length ? [someTargets(new Set(naTargets.map(f => f.target)).size),
         ...new Set(naTargets.map(f => f.recommendation || f.evidence).filter(Boolean))] : [];

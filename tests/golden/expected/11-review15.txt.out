@@ -73,7 +73,7 @@ login | A-02.ok | info | pass | URL・Location・本文にトークンなし
 login | C-01.1 | high | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
 login | C-02.1 | high | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
 login | C-03.1 | medium | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
-login | C-04.ok | info | pass | .AspNetCore.Identity.Application, .AspNetCore.Identity.ApplicationC1
+login | C-04.ok | info | pass | .AspNetCore.Identity.ApplicationC1
 login | C-05.1 | medium | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/（期限 約9287時間、基準 24時間）
 login | C-06.1 | info | fail | .AspNetCore.Identity.ApplicationC1=CfDJ…(45 chars); expires=Tue, 23 Nov 2027 00:00:00 GMT; path=/
 login | C-07.ok | info | pass | .AspNetCore.Identity.ApplicationC1

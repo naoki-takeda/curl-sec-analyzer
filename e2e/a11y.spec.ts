@@ -1,6 +1,7 @@
 // アクセシビリティの自動検査（axe-core）。ベストプラクティスを含む全ルールで、軽微（minor）より重い違反がないことを確かめる
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { analyzed } from './helpers';
 
 async function check(page: Page, name: string) {
   const r = await new AxeBuilder({ page }).analyze();
@@ -13,6 +14,7 @@ test('未入力・判定後・例外のダイアログ・コマンド生成器',
   await page.goto('/');
   await check(page, '未入力');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
   await check(page, '判定後');
   await page.getByRole('region', { name: '判定結果' }).getByRole('button', { name: /「情報」の\d+件も表示/ }).click();
   await check(page, '「情報」を表示');
@@ -26,6 +28,7 @@ test('未入力・判定後・例外のダイアログ・コマンド生成器',
 test('英語UIとHARのエントリ一覧', async ({ page }) => {
   await page.goto('/?lang=en');
   await page.getByRole('button', { name: 'Load sample' }).click();
+  await analyzed(page);
   await check(page, '英語UI');
   await page.goto('/');
   await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
@@ -37,6 +40,7 @@ test('ダークモード', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
   await check(page, 'ダークモード');
 });
 
@@ -47,6 +51,7 @@ test.describe('スマートフォンの画面幅（390px）', () => {
     const pageWidth = () => page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
     await page.goto('/');
     await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+    await analyzed(page);
     let [sw, cw] = await pageWidth();
     expect(sw).toBeLessThanOrEqual(cw);
     await check(page, 'スマートフォン：判定後');
@@ -62,5 +67,6 @@ test.describe('スマートフォンの画面幅（390px）', () => {
 test('パソコンの画面幅では、はみ出していない表の枠に Tab で止まらない', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
   await expect(page.getByRole('region', { name: '指摘の一覧' })).not.toHaveAttribute('tabindex', /.*/);
 });

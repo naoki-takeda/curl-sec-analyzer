@@ -1,21 +1,20 @@
 // 性能と、悪意のある入力・壊れた入力への耐性（時間の制限は、CIの遅いマシンでも落ちないよう目標より余裕を持たせる）
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { readFileSync } from 'node:fs';
 import { parseInput } from '../src/parser/input';
 import { runAll } from '../src/engine/run';
 import { applySuppressions, parseSuppressions, wildcardMatch } from '../src/engine/suppress';
 import { importHar } from '../src/parser/har';
 import { parseProfile } from '../src/engine/profile';
 import { parseBaseline } from '../src/engine/diff';
+import { fixture, ms, sampleText } from './helpers';
 
-const ms = (f: () => unknown) => { const t = performance.now(); f(); return performance.now() - t; };
 const page = (body: string) => `#TARGET url=https://a.example/ label=top\nHTTP/2 200\ncontent-type: text/html\n\n${body}\n`;
 
 describe('性能（設計書の非機能要件）', () => {
   // 上限の6秒を測れるよう、テストのタイムアウト（既定5秒）を延ばす
   it('1MBの通常の出力を解析・判定できる（目標2秒。CIの差を見込んで6秒を上限にする）', { tags: ['perf'], timeout: 15_000 }, () => {
-    const one = readFileSync(new URL('./fixtures/generated_local.txt', import.meta.url), 'utf8');
+    const one = fixture('generated_local.txt');
     const big = one.repeat(Math.ceil(1_000_000 / one.length));
     expect(ms(() => runAll(parseInput(big).targets))).toBeLessThan(6000);
   });
@@ -75,7 +74,7 @@ describe('設定ファイルの組み合わせ（V-1）', () => {
     const { IMPLEMENTED } = await import('../src/rules/ruleset');
     const { toMarkdown } = await import('../src/export/markdown');
     const { toCsv } = await import('../src/export/csv');
-    const { targets } = parseInput(readFileSync(new URL('../src/sample.txt', import.meta.url), 'utf8'));
+    const { targets } = parseInput(sampleText());
     const anyVal = fc.oneof(fc.string(), fc.integer(), fc.constant(undefined), fc.constant(null), fc.array(fc.string(), { maxLength: 2 }));
     const finding = fc.record({ ruleId: fc.oneof(fc.constantFrom('H-01.1', 'C-09.1', 'H-01.ok', 'X'), anyVal), target: fc.oneof(fc.constantFrom('top', 'login'), anyVal),
       status: fc.oneof(fc.constantFrom('fail', 'pass', 'na'), anyVal), severity: fc.oneof(fc.constantFrom('high', 'low'), anyVal), item: fc.oneof(fc.constant('H-01'), anyVal),

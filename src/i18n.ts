@@ -1,9 +1,12 @@
-// i18n.ts：画面の文言（日本語と英語）。推奨対応の英訳は recommendationsEn.ts。判定の証跡と解析警告は日本語のみ
+// i18n.ts：画面の文言（日本語と英語）。推奨対応の英訳は recommendationsEn.ts。判定の証跡・解析警告・CSV は日本語のみ
 import type { CoverageStatus, Severity, Status } from './model';
 import type { DiffKind } from './engine/diff';
+import type { CommandOptions } from './commands';
 import { ITEMS } from './engine/coverage';
 
 export type Lang = 'ja' | 'en';
+/** HAR の読み込みの失敗の種類（json・format は harWorker.ts が返す種類から決める） */
+export type HarFailure = 'json' | 'format' | 'read' | 'worker';
 let lang: Lang = 'ja';
 export const getLang = () => lang;
 export function setLang(l: Lang) {
@@ -28,13 +31,16 @@ const ja = {
   noProfile: '組織プロファイル：なし（既定の重要度）', profileStatus: (name: string) => `組織プロファイル：${name || '（名前なし）'}`,
   legacyHarKeys: (n: number) => `前回の結果・例外のうち${n}件は以前の版（v0.4.30 まで）の形式で記録されているため、今の結果と突き合いません（例外は登録し直し、前回の結果はこの版で出力し直してください）。`,
   noBaseline: '前回の結果：なし', baselineSkipped: (n: number) => `前回の結果のうち${n}件は、形式が正しくないため除外しました（このツールでエクスポートしたJSONを使ってください）。`, baselineStatus: (at: string) => `前回の結果：${at || '日時不明'}`,
-  emptyInput: 'curlの出力を貼り付けてから「判定する」を押してください。', tooLarge: '入力が大きすぎます（上限5MB）。',
-  fileTooLarge: 'ファイルが大きすぎます（上限5MB）。ターゲットを分けて読み込んでください。',
+  emptyInput: 'curlの出力を貼り付けてから「判定する」を押してください。', tooLarge: (mb: number) => `入力が大きすぎます（上限${mb}MB）。`,
+  fileTooLarge: (mb: number) => `ファイルが大きすぎます（上限${mb}MB）。ターゲットを分けて読み込んでください。`,
   settingsTooLarge: (mb: number) => `ファイルが大きすぎます（上限${mb}MB）。このツールで書き出したファイルを選んでください。`,
   profileKept: '（形式の違うファイルなので、読み込み済みの組織プロファイルを使い続けます）',
   suppressedCount: (n: number) => `例外を当てた指摘（項目×条件）：${n}件（重要度別の件数には含めていません。「合格・判定不能・例外も表示」で確認できます）`,
   noResponse: 'HTTPの応答が見つかりませんでした。curl に -i、-D -、-v のいずれかを付けて実行した出力を貼り付けてください。',
   analyzed: (targets: number, fails: number, high: number) => `${targets}件のターゲットを判定しました。指摘（項目×条件）${fails}件（うち重要度「高」${high}件）。`,
+  analyzing: '判定しています…',
+  workerFailed: '判定を始められなかったか、結果を受け取れませんでした。ブラウザが Web Worker を使えない、メモリが足りない、またはツールの不具合の可能性があります。',
+  analysisCancelled: '判定中に入力が変わったので、判定を止めました。もう一度「判定する」を押してください。',
   analysisFailed: '判定の途中でエラーが発生したため、結果を消しました。入力の形式を確認してください（ツールの不具合の可能性があります）。',
   emptyTitle: 'まだ判定していません',
   emptySteps: ['「コマンドを作る」で、対象のホスト名とパスから採取用のスクリプトを作る', '自分の端末でスクリプトを実行し、out.txt を作る（ログインにはテスト用アカウントを使う）', 'out.txt を左に貼り付けるか「ファイルを開く」で読み込み、「判定する」を押す'],
@@ -42,7 +48,6 @@ const ja = {
   inputHidden: (n: number) => `貼り付けた出力（${n}行）は隠しています。パスワードやCookieが含まれるため、画面共有やスクリーンショットに注意してください。`,
   showInput: '入力を表示する', hideInput: '入力を隠す', confirmReplace: '貼り付けた内容をサンプルで置き換えます。よろしいですか？',
   showInfo: (n: number) => `「情報」の${n}件も表示`, hideInfo: '「情報」を隠す',
-  emptyBody: '左に curl の出力を貼り付けて「判定する」を押します。形式を試すには「サンプルを入れる」を押してください。',
   emptyHint: '1つの貼り付けに複数の応答を入れるときは、各応答の前に #TARGET url=… label=… の行を置きます。label で適用する項目が決まります（例：login、logout、cors-…、http、apex、probes、tls）。認証後のページには sensitive=1 を付けます。',
   severity: (s: string) => `重要度「${s}」`, save: '保存（マスク済み）：', csv: 'CSV（第8章の様式）', suppressionsFile: '例外ファイル',
   warnings: '解析の警告', findings: '指摘（項目×条件）', count: (n: number) => `${n}件`, countHidden: (n: number, i: number) => `${n}件（うち「情報」${i}件は非表示）`, allChapters: 'すべての章', filterChapter: '章で絞り込む',
@@ -67,12 +72,14 @@ const ja = {
   missingPair: (a: string, b: string, item: string) => `「${a}」はありますが「${b}」がありません。横断ルール（${item}）を判定できません。`,
   preloadNoApex: 'HSTS に preload がありますが「apex」ラベルのターゲットがありません（H-02③）。',
   englishNote: '',
+  resultsLabel: '判定結果',
+  framed: { title: 'このツールは、他のサイトに埋め込んだ状態では使えません。', note: '貼り付ける内容を守るため、単独のタブで開いてください。', open: 'このツールを直接開く' },
   dlg: { title: '例外に登録', scope: '範囲', onlyCond: (x: string) => `この条件だけ（${x}）`, wholeItem: (x: string) => `この項目すべて（${x}）`, reason: '理由（必須）', approver: '承認者', until: '期限', needReason: '理由を入力してください。', save: '登録する', cancel: 'やめる', note: (t: string, target: string) => `${t}（対象：${target}）。登録した例外は「例外ファイル」で保存し、次回は読み込んで使います。` },
   gen: { title: 'コマンドを作る（推奨コマンド C1〜C26）', note: 'ホスト名とパスを入れると、#TARGET 付きのコマンドを作ります。実行は自分の端末で行い、出力（out.txt）をここに貼り付けます。ログインには login.txt（POST本文）を用意してください。',
-    fields: { host: 'ホスト名', apex: 'apexドメイン（任意）', apiPath: '機密のAPI', loginPath: 'ログイン', mypagePath: '認証後のページ', logoutPath: 'ログアウト', staticPath: '静的リソース（JS）', wsPath: 'WebSocket（任意）' } as Record<string, string>,
+    fields: { host: 'ホスト名', apex: 'apexドメイン（任意）', apiPath: '機密のAPI', loginPath: 'ログイン', mypagePath: '認証後のページ', logoutPath: 'ログアウト', staticPath: '静的リソース（JS）', wsPath: 'WebSocket（任意）' } satisfies Record<Exclude<keyof CommandOptions, 'dangerous'>, string>,
     danger: '検証環境でだけ行う試験（CRLF、メソッド上書き、送信元の偽装、Content-Type）も含める。DELETE など、データを消しうる試験は生成しません', make: 'コマンドを作る', copy: 'コピー', saveSh: 'csa-collect.sh として保存',
     copied: 'コピーしました。', copyFailed: 'コピーできませんでした。選択した状態にしたので、手動でコピーしてください。', output: '生成したコマンド' },
-  har: { loading: 'HARを読み込んでいます…', tooLarge: 'HARが大きすぎます（上限50MB）。対象の操作だけを記録して書き出してください。', failed: (e: string) => `HARを読み込めませんでした（${e}）。`, invalidJson: 'JSONの形式が正しくありません',
+  har: { loading: 'HARを読み込んでいます…', tooLarge: (mb: number) => `HARが大きすぎます（上限${mb}MB）。対象の操作だけを記録して書き出してください。`, failed: (k: HarFailure) => `HARを読み込めませんでした。${{ json: 'JSONの形式が正しくありません。', format: 'HARの形式として読めません。', read: 'ファイルを読めません。', worker: 'ブラウザが Web Worker を使えない、メモリが足りない、またはツールの不具合の可能性があります。' }[k]}`,
     loaded: (name: string, n: number) => `HAR（${name}）から ${n}件のリクエストを読み込みました。対象ホストとラベルを確認して「判定する」を押してください。読み込んだHARファイルは、使い終わったら削除してください。`,
     title: (name: string) => `HARのエントリ一覧（${name}）`, note: 'ラベルはリダイレクトをまとめた単位で付けます。after-logout・session-sample・CORS・TLS・既知ファイルなど細工したリクエストが必要な項目は、curl で別に採取してください。',
     sanitized: 'Cookie・Set-Cookie が含まれていません。ブラウザの設定で機密情報を含めて書き出すと、Cookie の項目も判定できます。', hosts: '対象ホスト：', remove: 'HARを外す', exclude: '除外',
@@ -81,6 +88,8 @@ const ja = {
 };
 type Dict = typeof ja;
 
+/** 英語の複数形の s */
+const s = (n: number) => (n === 1 ? '' : 's');
 const en: Dict = {
   tagline: 'Load curl and openssl output, or a browser HAR file, to check HTTP headers, cookies, CORS, redirects, TLS and API settings.',
   notice1: 'Nothing you load leaves this page (a CSP blocks all network connections).',
@@ -93,25 +102,27 @@ const en: Dict = {
   maskNote: 'Cookie, Authorization and token values and the contents of known files are masked on screen and in exports. Delete output files and HAR files when you are done.',
   settings: 'Settings files', loadSuppressions: 'Load exceptions', loadProfile: 'Load organization profile', profileTemplate: 'Profile template',
   loadBaseline: 'Load previous results (JSON)',
-  noSuppressions: 'No exceptions', suppressionsStatus: (n, a) => `${n} exceptions (${a} active, ${n - a} expired)`,
+  noSuppressions: 'No exceptions', suppressionsStatus: (n, a) => `${n} exception${s(n)} (${a} active, ${n - a} expired)`,
   noProfile: 'Organization profile: none (default severities)', profileStatus: name => `Organization profile: ${name || '(unnamed)'}`,
   legacyHarKeys: n => `${n} entr${n === 1 ? 'y uses' : 'ies use'} the format of an earlier version (v0.4.30 or before), so ${n === 1 ? 'it does' : 'they do'} not match the current results (register the exceptions again, and export the previous results again with this version).`,
-  noBaseline: 'Previous results: none', baselineSkipped: n => `${n} of the previous findings were skipped because their format is invalid (use JSON exported by this tool).`, baselineStatus: at => `Previous results: ${at || 'date unknown'}`,
-  emptyInput: 'Paste curl output, then select Analyze.', tooLarge: 'The input is too large (5 MB limit).',
-  fileTooLarge: 'The file is too large (5 MB limit). Split it by target.',
+  noBaseline: 'Previous results: none', baselineSkipped: n => `${n} of the previous findings ${n === 1 ? 'was' : 'were'} skipped because their format is invalid (use JSON exported by this tool).`, baselineStatus: at => `Previous results: ${at || 'date unknown'}`,
+  emptyInput: 'Paste curl output, then select Analyze.', tooLarge: mb => `The input is too large (${mb} MB limit).`,
+  fileTooLarge: mb => `The file is too large (${mb} MB limit). Split it by target.`,
   settingsTooLarge: mb => `The file is too large (${mb} MB limit). Choose a file exported by this tool.`,
   profileKept: ' (The file is not a profile, so the loaded organization profile is kept.)',
   suppressedCount: n => `Findings (check × condition) covered by exceptions: ${n} (not in the severity counts; select Show passes, N/A and exceptions to see them).`,
   noResponse: 'No HTTP response found. Paste output from curl run with -i, -D - or -v.',
-  analyzed: (targets, fails, high) => `Analyzed ${targets} target${targets === 1 ? '' : 's'}: ${fails} finding${fails === 1 ? '' : 's'}, ${high} high.`,
+  analyzed: (targets, fails, high) => `Analyzed ${targets} target${s(targets)}: ${fails} finding${s(fails)}, ${high} high.`,
+  analyzing: 'Analyzing…',
+  workerFailed: 'The analysis could not start or its result could not be received. The browser may not allow Web Workers, memory may be low, or this may be a bug in the tool.',
+  analysisCancelled: 'The input changed during analysis, so the analysis was stopped. Press Analyze again.',
   analysisFailed: 'An error occurred while analyzing, so the previous results were cleared. Check the input format (this may be a bug in the tool).',
   emptyTitle: 'Nothing analyzed yet',
   emptySteps: ['Build a capture script from the host name and paths with “Build commands”', 'Run the script on your own machine to create out.txt (use a test account for login)', 'Paste out.txt on the left or load it with “Open file”, then select Analyze'],
   openGenerator: 'Go to command builder', trySample: 'Try the sample', emptyHave: 'If you already have curl output or a browser HAR file, paste or load it directly.',
-  inputHidden: n => `Your pasted output (${n} lines) is hidden. It contains passwords and cookies, so take care when sharing your screen or taking screenshots.`,
+  inputHidden: n => `Your pasted output (${n} line${s(n)}) is hidden. It contains passwords and cookies, so take care when sharing your screen or taking screenshots.`,
   showInput: 'Show input', hideInput: 'Hide input', confirmReplace: 'Replace your pasted content with the sample?',
-  showInfo: n => `Show ${n} info findings`, hideInfo: 'Hide info findings',
-  emptyBody: 'Paste curl output on the left and select Analyze. To see the format, select Load sample.',
+  showInfo: n => `Show ${n} info finding${s(n)}`, hideInfo: 'Hide info findings',
   emptyHint: 'To include several responses, put a #TARGET url=… label=… line before each one. The label decides which checks apply (for example login, logout, cors-…, http, apex, probes, tls). Add sensitive=1 to pages behind login.',
   severity: s => `${s} severity`, save: 'Save (masked):', csv: 'CSV (record format)', suppressionsFile: 'Exceptions file',
   warnings: 'Parsing warnings', findings: 'Findings (check × condition)', count: n => `${n}`, countHidden: (n, i) => `${n} (${i} info hidden)`, allChapters: 'All chapters', filterChapter: 'Filter by chapter',
@@ -135,14 +146,16 @@ const en: Dict = {
   diffRulesetWarning: (a, b) => `The previous results used ruleset ${a}; this run uses ${b}. Some changes come from added or changed rules.`,
   missingPair: (a, b, item) => `Label “${a}” is present but “${b}” is missing, so ${item} cannot be checked.`,
   preloadNoApex: 'HSTS includes preload, but there is no target with the “apex” label (H-02③).',
-  englishNote: 'Evidence is currently shown in Japanese. Recommendations are in English.',
+  englishNote: 'Evidence, parsing warnings, the CSV export and the generated script are in Japanese. Recommendations are in English.',
+  resultsLabel: 'Results',
+  framed: { title: 'This tool cannot be used inside another site.', note: 'To protect what you paste, open it in its own tab.', open: 'Open this tool directly' },
   dlg: { title: 'Add exception', scope: 'Scope', onlyCond: x => `This condition only (${x})`, wholeItem: x => `Whole check (${x})`, reason: 'Reason (required)', approver: 'Approver', until: 'Expires', needReason: 'Enter a reason.', save: 'Add exception', cancel: 'Cancel', note: (t, target) => `${t} (target: ${target}). Save exceptions with “Exceptions file” and load them next time.` },
   gen: { title: 'Build commands (recommended commands C1–C26)', note: 'Enter a host name and paths to build commands with #TARGET lines. Run them on your own machine and paste the output (out.txt) here. Prepare login.txt (the login POST body) first.',
     fields: { host: 'Host name', apex: 'Apex domain (optional)', apiPath: 'Sensitive API', loginPath: 'Login', mypagePath: 'Page behind login', logoutPath: 'Logout', staticPath: 'Static resource (JS)', wsPath: 'WebSocket path (optional)' },
     danger: 'Include tests for test environments only (CRLF, method override, IP spoofing, Content-Type). Tests that may delete data, such as DELETE, are never generated', make: 'Build commands', copy: 'Copy', saveSh: 'Save as csa-collect.sh',
     copied: 'Copied.', copyFailed: 'Could not copy. The text is selected so you can copy it manually.', output: 'Generated commands' },
-  har: { loading: 'Loading HAR…', tooLarge: 'The HAR file is too large (50 MB limit). Record only the steps you need.', failed: e => `Could not load the HAR file (${e}).`, invalidJson: 'invalid JSON',
-    loaded: (name, n) => `Loaded ${n} requests from ${name}. Check the hosts and labels, then select Analyze. Delete the HAR file when you are done.`,
+  har: { loading: 'Loading HAR…', tooLarge: mb => `The HAR file is too large (${mb} MB limit). Record only the steps you need.`, failed: k => `Could not load the HAR file. ${{ json: 'It is not valid JSON.', format: 'It is not in the HAR format.', read: 'The file could not be read.', worker: 'The browser may not allow Web Workers, memory may be low, or this may be a bug in the tool.' }[k]}`,
+    loaded: (name, n) => `Loaded ${n} request${s(n)} from ${name}. Check the hosts and labels, then select Analyze. Delete the HAR file when you are done.`,
     title: name => `HAR entries (${name})`, note: 'Labels apply to each redirect chain. Capture after-logout, session samples, CORS, TLS and known files separately with curl.',
     sanitized: 'This HAR has no Cookie or Set-Cookie headers. Export it with sensitive data included to check cookies.', hosts: 'Hosts:', remove: 'Remove HAR', exclude: 'Exclude',
     method: 'Method', status: 'Status', hops: n => ` (${n} hops)`, labelFor: (m, u) => `Label for ${m} ${u}`, sensFor: u => `Sensitivity for ${u}`, auto: y => (y ? 'Auto (yes)' : 'Auto (unknown)') },

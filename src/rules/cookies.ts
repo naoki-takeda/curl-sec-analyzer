@@ -2,11 +2,12 @@
 import type { Finding, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
 import { cookieDate, isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
-import { baseLabel, firstStatus, hostOf, logoutFailed, siteResponses } from '../parser/target';
-import { LOGOUT_FAILED_REC, mk } from './util';
+import { baseLabel, firstStatus, hostnameOf, siteResponses, targetUrl } from '../parser/target';
+import { logoutFailed } from './html';
+import { LOGOUT_FAILED_REC, cacheDirectives, directiveNames, mk, noResponse } from './util';
 
-/** ターゲットの全応答（-L のホップを含む）から、削除用でない Set-Cookie を取り出す */
-export function cookiesOf(ctx: RuleContext): SetCookie[] {
+/** ターゲットと同じサイトの応答（-L のホップを含む。parser/target.ts の siteResponses）から、削除用でない Set-Cookie を取り出す */
+function cookiesOf(ctx: RuleContext): SetCookie[] {
   return siteResponses(ctx.target).flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
 }
 /** 名前のない Cookie（値だけの Set-Cookie）の表示名 */
@@ -33,22 +34,25 @@ export const cookieEvidence = (c: SetCookie) => {
   return `${cookieName(c)}=${maskValue(c.value)}${attrs}`;
 };
 
+/** 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ応答に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない） */
+function withoutChunkMarkers<T>(list: T[], cookie: (x: T) => SetCookie): T[] {
+  const names = new Set(list.map(x => cookie(x).name));
+  return list.filter(x => !(isChunkMarker(cookie(x)) && names.has(`${cookie(x).name}C1`)));
+}
 /** Cookie ごとの判定を集める。指摘が1件もなければ .ok を1件返す。Set-Cookie がなければ適用外（空配列） */
 function perCookie(rule: Rule, ctx: RuleContext, judge: (c: SetCookie) => Finding | undefined, subset = (_: SetCookie) => true): Finding[] {
-  // http のターゲットで見ないのは、Secure（C-01）と __Host-・__Secure- のプレフィックス（C-06）だけ（Secure の有無は C-10 で見る）。HttpOnly・
-  // SameSite・期限・推測可能性は通信路によらない（ASVS 3.3.4）。すべてを適用外にすると、http だけのサイトでセッションCookie の判定が何も出なかった（第49回）
-  if (ctx.isHttps === false && (rule.id === 'C-01' || rule.id === 'C-06')) return [];
-  // 分割の印（.AspNetCore.Cookies=chunks-2）は、同じ応答に中身（…C1）があれば数えない（1つの Cookie を印と中身で2回指摘しない）
-  const all = cookiesOf(ctx); const names = new Set(all.map(c => c.name));
-  const cs = all.filter(c => !(isChunkMarker(c) && names.has(`${c.name}C1`))).filter(subset);
+  const cs = withoutChunkMarkers(cookiesOf(ctx), c => c).filter(subset);
   if (!cs.length) return [];
   const fails = cs.map(judge).filter((f): f is Finding => !!f);
   return fails.length ? fails : [mk(rule, ctx, 'ok', 'info', 'pass', cs.map(cookieName).join(', '), '')];
 }
 
-export const cookieSecure: Rule = { id: 'C-01', title: 'Cookie の Secure 属性', appliesTo: 'any', scope: 'target', dependsOn: ['H-01'],
+export const cookieSecure: Rule = { id: 'C-01', title: 'Secure', appliesTo: 'any', scope: 'target',
   basis: ['MDN HTTP Observatory'],
   run(ctx) {
+    // http のターゲットでは見ない（Secure の有無は C-10 で見る）。HttpOnly・SameSite・期限・推測可能性（C-02・C-03・C-05・C-07 など）は
+    // 通信路によらない（ASVS 3.3.4）ので、http だけのサイトでも判定する
+    if (ctx.isHttps === false) return [];
     return perCookie(cookieSecure, ctx, c => {
       if (c.attrs.has('secure')) return undefined;
       const rec = 'Secure 属性を付ける';
@@ -59,7 +63,7 @@ export const cookieSecure: Rule = { id: 'C-01', title: 'Cookie の Secure 属性
     });
   } };
 
-export const cookieHttpOnly: Rule = { id: 'C-02', title: 'Cookie の HttpOnly 属性', appliesTo: 'any', scope: 'target',
+export const cookieHttpOnly: Rule = { id: 'C-02', title: 'HttpOnly', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS'],
   run(ctx) {
     return perCookie(cookieHttpOnly, ctx,
@@ -67,7 +71,7 @@ export const cookieHttpOnly: Rule = { id: 'C-02', title: 'Cookie の HttpOnly �
       c => looksLikeSession(c, ctx.now));
   } };
 
-export const cookieSameSite: Rule = { id: 'C-03', title: 'Cookie の SameSite 属性', appliesTo: 'any', scope: 'target',
+export const cookieSameSite: Rule = { id: 'C-03', title: 'SameSite', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS', 'MDN HTTP Observatory'],
   run(ctx) {
     return perCookie(cookieSameSite, ctx, c => {
@@ -84,28 +88,28 @@ export const cookieSameSite: Rule = { id: 'C-03', title: 'Cookie の SameSite �
     });
   } };
 
-// ---- 以下 MVP で追加（C-04〜C-10、C-12②、C-13） ----
-// C-04 は、Cookie を発行したホップのホストと比べるため、perCookie を使わない
-
 export const cookieDomain: Rule = { id: 'C-04', title: 'Domain・Path', appliesTo: 'any', scope: 'target',
   basis: ['OWASP Session Mgmt CS', 'RFC 6265'],
   run(ctx) {
-    if (ctx.isHttps === false) return [];                // HTTP応答のCookieは C-10 で扱う（perCookie と同じ）
+    if (ctx.isHttps === false) return [];                // HTTP応答のCookieは C-10 で扱う（C-01・C-06 と同じ）
     // Cookie ごとに、それを発行したホップのホストと比べる。-L で a.example から www.a.example に転送し、www が
     // Domain=www.a.example で発行した Cookie を、ターゲットの URL のホスト（a.example）と比べて①にしないため
-    const targetHost = hostOf(ctx.target)?.replace(/:\d+$/, '');
-    const hopHost = (u?: string) => { try { return u ? new URL(u).hostname : undefined; } catch { return undefined; } };
-    const cs = siteResponses(ctx.target).flatMap(r => { const host = hopHost(r.url) ?? targetHost;
+    const targetHost = hostnameOf(targetUrl(ctx.target));
+    const all = siteResponses(ctx.target).flatMap(r => { const host = hostnameOf(r.url) ?? targetHost;
       return (r.headers.get('set-cookie') ?? []).map(raw => ({ c: parseSetCookie(raw), host })); }).filter(x => !isDeletion(x.c, ctx.now));
+    const cs = withoutChunkMarkers(all, x => x.c);
     if (!cs.length) return [];
     const fails = cs.flatMap(({ c, host }) => {
       const d = c.attrs.get('domain');
       if (typeof d !== 'string' || !host || isInfraCookie(c.name)) return [];   // CDN の Cookie（__cf_bm など）は CDN が Domain を決める
       const dom = d.replace(/^\./, '').toLowerCase();
       if (!dom) return [];                                  // 空の Domain はブラウザが無視する（ホストだけに送られる）
-      if (dom !== host.toLowerCase()) return [mk(cookieDomain, ctx, 1, 'medium', 'fail', `${cookieEvidence(c)}（ホスト ${host}）`, 'Domain 属性を付けない（発行したホストだけに送られる）')];
+      const h = host.toLowerCase();
       // ホストと同じ値でも、Domain を付けるとサブドメインにも送られる（付けなければ発行したホストだけ）
-      return [mk(cookieDomain, ctx, 3, 'low', 'fail', `${cookieEvidence(c)}（ホスト ${host}。サブドメインにも送られる）`, 'Domain 属性を付けない（ホストと同じ値でもサブドメインに送られる）')];
+      if (dom === h) return [mk(cookieDomain, ctx, 3, 'low', 'fail', `${cookieEvidence(c)}（ホスト ${host}。サブドメインにも送られる）`, 'Domain 属性を付けない（ホストと同じ値でもサブドメインに送られる）')];
+      if (h.endsWith(`.${dom}`)) return [mk(cookieDomain, ctx, 1, 'medium', 'fail', `${cookieEvidence(c)}（ホスト ${host}）`, 'Domain 属性を付けない（発行したホストだけに送られる）')];
+      // ホストの親ドメインでない Domain（サブドメイン・別のドメイン）は、ブラウザが Cookie ごと拒否する（RFC 6265 5.3 の手順6）ので、送る範囲は広がらない
+      return [];
     });
     return fails.length ? fails : [mk(cookieDomain, ctx, 'ok', 'info', 'pass', cs.map(x => cookieName(x.c)).join(', '), '')];
   } };
@@ -129,6 +133,7 @@ export const cookieLifetime: Rule = { id: 'C-05', title: 'Expires・Max-Age', ap
 export const cookiePrefix: Rule = { id: 'C-06', title: '__Host-・__Secure-プレフィックス', appliesTo: 'any', scope: 'target',
   basis: ['MDN', 'OWASP Session Mgmt CS'],
   run(ctx) {
+    if (ctx.isHttps === false) return [];   // プレフィックスは Secure が前提（http のターゲットの Secure は C-10 で見る。C-01 と同じ）
     return perCookie(cookiePrefix, ctx, c => {
       const ev = cookieEvidence(c);
       // プレフィックスは大文字小文字を区別しない（RFC 6265bis。今の Chrome・Firefox は __host-sid にも __Host- の条件を求め、満たさなければ拒否する）
@@ -143,25 +148,24 @@ export const cookiePrefix: Rule = { id: 'C-06', title: '__Host-・__Secure-プ�
 
 /** 値の文字種から推定したエントロピー（ビット）。実際の乱数性は分からないため目安 */
 export function estimateBits(raw: string): number {
-  // 値を囲む引用符（sid="…"。RFC 6265 の DQUOTE）と、パーセントエンコード（%2B は1文字）は乱数の量に数えない（数えると、記号を含むとみなして
-  // 64種で数え、20桁の16進数（80bit）を約132bitとして合格にした）
+  // 値を囲む引用符（sid="…"。RFC 6265 の DQUOTE）と、パーセントエンコード（%2B は1文字）は乱数の量に数えない（記号を含むとみなして
+  // 64種で数えると、20桁の16進数（80bit）を約132bitと見積もる）
   let v = raw.replace(/^"(.*)"$/s, '$1');
   try { v = decodeURIComponent(v); } catch { /* 壊れた %XX はそのまま */ }
-  // 区切りの記号（0a1b-2c3d-…、1234.5678.…）は乱数の量に数えない（数えると記号を含むとみなして64種で数え、20桁の16進数（80bit）を合格にした。第49回）
-  // base64url（secrets.token_urlsafe）の - _ は区切りではなく文字そのものなので、16進数のかたまりを区切った形のときだけ外す（外すと、128bit の
-  // base64url を約125bit として C-07①（高）にした。束のレビュー）
+  // 区切りの記号（0a1b-2c3d-…、1234.5678.…）も同じ理由で数えない。base64url（secrets.token_urlsafe）の - _ は区切りではなく文字そのものなので、
+  // 16進数のかたまりを区切った形のときだけ外す（128bit の base64url を少なく見積もらない）
   if (/^[0-9a-f]+(?:[-._:][0-9a-f]+)+$/i.test(v)) v = v.replace(/[-._:]/g, '');
-  // 小文字と数字だけ（ASP.NET_SessionId の base32 など）・大文字と数字だけは36種で数える（62種で数えると、24文字の約120bitを約142bitとして見逃した）
+  // 小文字と数字だけ（ASP.NET_SessionId の base32 など）・大文字と数字だけは36種で数える（62種で数えると、24文字の約124bitを約142bitと見積もる）
   const size = /^[0-9]+$/.test(v) ? 10 : /^[0-9a-f]+$/i.test(v) ? 16 : /^[0-9a-z]+$/.test(v) || /^[0-9A-Z]+$/.test(v) ? 36 : /^[0-9A-Za-z]+$/.test(v) ? 62 : 64;
   return Math.floor(v.length * Math.log2(size));
 }
 /**
  * 時刻から作る UUID の版と、乱数の部分のビット数。v1・v2・v6 は時刻とノード（MAC アドレス）から作り、乱数はクロックシーケンスの14bitだけ。
  * v7 は先頭48bitが時刻で、乱数は74bit。文字種から推定すると、どれも約216bitになり、推測できる値を合格にしてしまう。
- * v4（乱数122bit）は今までどおり文字種で推定する（ASVS の128bitとの差をどう扱うかは別に決める）
+ * v4（乱数122bit）は文字種で推定する（ASVS の128bitとの差の扱いは未決定）
  */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-([0-9a-f])[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-export function timeBasedUuid(v: string): { version: number; bits: number } | undefined {
+function timeBasedUuid(v: string): { version: number; bits: number } | undefined {
   const ver = Number.parseInt(v.match(UUID)?.[1] ?? '', 16);
   return ver === 1 || ver === 2 || ver === 6 ? { version: ver, bits: 14 } : ver === 7 ? { version: 7, bits: 74 } : undefined;
 }
@@ -197,14 +201,13 @@ export const cookieOverHttp: Rule = { id: 'C-10', title: 'HTTP応答でのCookie
   basis: ['MDN'],
   run(ctx) {
     // http のホップすべて（http://…/app → http://…/app/ → https の2つ目のホップで発行した Cookie も平文で送られる）。
-    // 各ホップの URL はパーサ・HAR の取り込みが付ける（parser/target.ts の assignHopUrls）。URL の分からないホップは最初のものだけ
-    // ホップの URL で見る（HAR のターゲットの URL は転送先の https なので、ターゲットの URL で見ると、http のホップで発行した Cookie を見逃し、
-    // curl と HAR で結果が違った。第49回）。URL の分からない最初のホップは、ターゲットの URL で見る
-    // 対象のサイトのホップだけ（-L で別サイトへ転送した先の http のホップの Cookie を、C-10①（高）にした。束のレビュー）
+    // ホップの URL で見る（HAR のターゲットの URL は転送先の https なので、curl と HAR で結果をそろえるため）。各ホップの URL はパーサ・HAR の
+    // 取り込みが付ける（parser/target.ts の assignHopUrls）。URL の分からない最初のホップは、ターゲットの URL で見る。
+    // 対象のサイトのホップだけ（-L で別サイトへ転送した先の http のホップの Cookie は見ない）
     const site = new Set(siteResponses(ctx.target));
     const httpResponses = ctx.chain.filter((r, i) => site.has(r) && /^http:\/\//i.test(r.url ?? (i === 0 ? ctx.target.url ?? '' : '')));
     if (!httpResponses.length) return [];
-    const cs = httpResponses.flatMap(r => r!.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
+    const cs = httpResponses.flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, ctx.now));
     if (!cs.length) return [mk(cookieOverHttp, ctx, 'ok', 'info', 'pass', 'HTTP応答でCookieを発行していない', '')];
     return cs.map(c => looksLikeSession(c, ctx.now) && !c.attrs.has('secure')
       ? mk(cookieOverHttp, ctx, 1, 'high', 'fail', cookieEvidence(c), 'HTTPではCookieを発行せず、まずHTTPSへ転送する')
@@ -215,22 +218,22 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
   basis: ['OWASP Session Mgmt CS'],
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'logout') return [];            // ①は横断ルール（logout と after-logout）
-    if (!ctx.final) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', '応答がない', '')];
+    if (!ctx.final) return [noResponse(logoutDeletesCookie, ctx)];
     if (logoutFailed(ctx.target)) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
     const del = siteResponses(ctx.target).flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
-    // 消したのがセッションCookieらしい名前のものか（Spring Security の既定のログアウトは remember-me だけを消し、セッションCookie は残す）
     // Clear-Site-Data: "cookies"（か "*"）で消すログアウトは、名前を挙げずにすべての Cookie を消す（H-15 と同じ扱い）
     const csd = siteResponses(ctx.target).flatMap(r => r.headers.get('clear-site-data') ?? []).join(',');
     if (/"(?:cookies|\*)"/i.test(csd)) return [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', `Clear-Site-Data: ${csd}`, '')];
+    // 消したのがセッションCookieらしい名前のものか（Spring Security の既定のログアウトは remember-me だけを消し、セッションCookie は残す）
     const sessionDel = del.filter(c => looksLikeSessionName(c.name));
-    // セッションを作り直すログアウト（Laravel の invalidate、Rails の reset_session）は、セッションCookie を消さずに新しい値で発行し直す（②にしていた）。
+    // セッションを作り直すログアウト（Laravel の invalidate、Rails の reset_session）は、セッションCookie を消さずに新しい値で発行し直す（②にしない）。
     // 値を持たないので、新しい値か（期限を延ばしただけの同じ値か）は分からない。合格にも不合格にもせず、古いセッションの無効化は①で確かめる
     const sent = ctx.target.sentCookieNames;
     const reissued = sessionDel.length ? [] : cookiesOf(ctx).filter(c => c.value && looksLikeSessionName(c.name) && (!sent?.length || sent.includes(c.name)));
     if (reissued.length)
       return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `${[...new Set(reissued.map(cookieName))].join(', ')} を削除せずに発行し直した（新しい値かは分からない）`, 'after-logout を採取し、古いセッションCookieが使えないかを C-12① で確かめる')];
     if (del.length && !sessionDel.length)
-      return [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', `削除したのは ${del.map(c => c.name).join(', ')} だけ（セッションCookieらしい名前ではない）`, 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];
+      return [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', `削除したのは ${del.map(cookieName).join(', ')} だけ（セッションCookieらしい名前ではない）`, 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];
     return del.length ? [mk(logoutDeletesCookie, ctx, 'ok', 'info', 'pass', sessionDel.map(cookieEvidence).join(' / '), '')]
                       : [mk(logoutDeletesCookie, ctx, 2, 'low', 'fail', 'ログアウト応答でCookieを削除していない', 'ログアウト応答で Max-Age=0 のSet-Cookieを返し、サーバ側のセッションも破棄する')];
   } };
@@ -244,20 +247,20 @@ export const cookieSharedCache: Rule = { id: 'C-13', title: 'Set-Cookieと共有
       if (!cs.length) continue;
       any = true;
       const cc = (r.headers.get('cache-control') ?? []).join(', ').toLowerCase();
+      const dirs = directiveNames(cacheDirectives(r.headers.get('cache-control') ?? []));
       // no-store・private があれば共有キャッシュは保存しない（no-store, s-maxage=0 のような組み合わせも共有キャッシュには残らない）
-      const shared = /\bpublic\b|s-maxage/.test(cc) && !/\bno-store\b|\bprivate\b/.test(cc);
+      const shared = (dirs.has('public') || dirs.has('s-maxage')) && !dirs.has('no-store') && !dirs.has('private');
       if (!shared) continue;
       if (cs.some(c => looksLikeSession(c, ctx.now))) out.push(mk(cookieSharedCache, ctx, 1, 'high', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答は Cache-Control: no-store（少なくとも private）にする'));
-      else if (/\bpublic\b/.test(cc)) out.push(mk(cookieSharedCache, ctx, 2, 'low', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答を public にしない'));
+      else if (dirs.has('public')) out.push(mk(cookieSharedCache, ctx, 2, 'low', 'fail', `Cache-Control: ${cc}`, 'Set-Cookie を含む応答を public にしない'));
     }
     if (!any) return [];
     return out.length ? out : [mk(cookieSharedCache, ctx, 'ok', 'info', 'pass', '共有キャッシュの指定なし', '')];
   } };
 
-// ---- 以下 v0.3 で追加（C-11） ----
 export const cookiePartitioned: Rule = { id: 'C-11', title: 'Partitioned（CHIPS）', appliesTo: 'any', scope: 'target',
   basis: ['MDN: CHIPS'],
   run(ctx) {
-    return perCookie(cookiePartitioned, ctx, c => (c.attrs.get('samesite')?.toString().toLowerCase() === 'none' && !c.attrs.has('partitioned')
+    return perCookie(cookiePartitioned, ctx, c => (c.attrs.get('samesite')?.toString().toLowerCase() === 'none' && !c.attrs.has('partitioned') && !isInfraCookie(c.name)
       ? mk(cookiePartitioned, ctx, 1, 'info', 'fail', cookieEvidence(c), '第三者として埋め込まれる用途なら Partitioned を付ける（サードパーティCookieの廃止に備える）') : undefined));
   } };
