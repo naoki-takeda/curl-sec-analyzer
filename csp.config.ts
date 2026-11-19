@@ -14,7 +14,8 @@
  *   （.github/pull_request_template.md）。tests/csp.test.ts が主要な指定を検査する。
  *
  * 注意：meta タグでは frame-ancestors（クリックジャッキング対策）と report-uri は効かない。
- * その分は innerHTML の禁止（eslint.config.js）とマスキングで補う（docs/design.md「最大の制約」）。
+ * その分は、埋め込まれたときに入力欄を出さないこと（src/main.ts）、innerHTML の禁止（eslint.config.js）とマスキングで補う
+ * （docs/design.md「最大の制約」）。
  */
 export const CSP_DIRECTIVES: Readonly<Record<string, string>> = {
   'default-src': "'none'",

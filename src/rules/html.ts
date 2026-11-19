@@ -31,14 +31,9 @@ export const decodeEntities = (v: string) => v.replace(/&(?:#(\d{1,7})|#[xX]([0-
   return NAMED[n.toLowerCase()] ?? all;
 });
 
-/** 開始タグを列挙する（属性名は小文字、値は文字参照を戻したもの） */
 /**
- * タグの終わり（引用符の外の >）を探す関数を作る。引用符で囲んだ属性の値の中の > では止めない（onsubmit="… && amt>0"、
- * data-config='{"min":">100"}'）。止めると、残りの値が属性名として証跡に出てしまう（値は伏せられるが、属性名は出る）。
- * 「位置と引用符の状態」ごとに結果を覚え、同じところを二度走査しない。> のない本文（<script の繰り返し）や閉じていない引用符でも、
- * 全体の時間が本文の長さに比例する（正規表現で書くと、タグの始まりごとに末尾まで走査し、本文の長さの2乗の時間がかかる）。長い属性にも上限を付けない
- * 状態はブラウザの字句解析（HTML の tokenizer）の開始タグの部分と同じ。引用符が値を囲むのは、属性名と = のあと（空白を挟んでよい）だけで、
- * 引用符のない値の中の = と引用符（<img src=/x?a="1>）、属性名の前の = （<p =" x>）、= のあとでない引用符（<p class=it's>）は普通の文字。
+ * 開始タグの中の字句解析の状態（HTML の tokenizer の開始タグの部分と同じ）。引用符が値を囲むのは、属性名と = のあと（空白を挟んでよい）だけで、
+ * 引用符のない値の中の = と引用符（<img src=/x?a="1>）、属性名の前の =（<p =" x>）、= のあとでない引用符（<p class=it's>）は普通の文字。
  * ずれると、ほかのタグを読み飛ばすときに本物の > を越え、後ろの <form>・<script> を見逃す
  */
 const enum Q { TagName, BeforeAttr, AttrName, AfterAttr, BeforeValue, Unquoted, Double, Single, AfterQuoted }
@@ -58,20 +53,25 @@ function nextQ(q: Q, c: number): Q {
 }
 /**
  * 位置 lt の「<!--」で始まるコメントの終わり（閉じの > の位置。閉じがなければ -1）を探す関数を作る。「-->」（「<!-->」「<!--->」は空のコメント）と
- * 「--!>」で閉じる（ブラウザと同じ）。前に探した結果を覚え、同じところを探し直さない（閉じのない「<!--」の繰り返しや、遠くにしかない「--!>」で、
- * 位置ごとに本文の終わりまで探し、入力の長さの2乗の時間がかかる）。lt は前に進むだけ（戻ると、覚えた結果が正しくない）
+ * 「--!>」で閉じる（ブラウザと同じ）。前に探した結果を覚えて線形時間にする（閉じのない「<!--」の繰り返しで2乗の時間にしない）。
+ * lt が戻ったときは覚えた結果を捨てる
  */
 function commentEndFinder(html: string): (lt: number) => number {
   const nextOf = (pat: string) => { let at = -2; let none = false; return (k: number) => { if (none) return -1; if (at < k) { at = html.indexOf(pat, k); none = at < 0; } return at; }; };
   let close = nextOf('-->'), bang = nextOf('--!>');
   let last = -1;
   return (lt: number) => {
-    if (lt < last) { close = nextOf('-->'); bang = nextOf('--!>'); }   // 戻ったら覚えた結果を捨てる
+    if (lt < last) { close = nextOf('-->'); bang = nextOf('--!>'); }
     last = lt;
     const a = close(lt + 2), b = bang(lt + 4);
     return a < 0 ? (b < 0 ? -1 : b + 3) : b < 0 ? a + 2 : Math.min(a + 2, b + 3);
   };
 }
+/**
+ * タグの終わり（引用符の外の >）を探す関数を作る。引用符で囲んだ値の中の >（onsubmit="… && amt>0"）では止めない
+ * （止めると、残りの値が属性名として証跡に出る）。「位置と状態」ごとに結果を覚え、> のない本文や閉じていない引用符でも
+ * 全体を線形時間にする（正規表現で書くと2乗の時間になる）。長い属性にも上限を付けない
+ */
 function tagEndFinder(html: string): (from: number) => number {
   const memo = new Int32Array(html.length * 9);    // 0：未走査、-1：閉じない、k+1：位置 k の > で閉じる
   return (from: number) => {
@@ -90,23 +90,22 @@ function tagEndFinder(html: string): (from: number) => number {
   };
 }
 
+/** 開始タグを列挙する（属性名は小文字、値は文字参照を戻したもの） */
 export function tags(html: string, names: string[]): Tag[] {
   const start = new RegExp(`<(${names.join('|')})\\b`, 'iy');
   const endOf = tagEndFinder(html);
   const out: Tag[] = [];
   // 中身をテキストとして読む要素（中の「<!--」はコメントではない）。<noscript> はスクリプトが有効なブラウザでテキスト。
-  // 名前のあとは空白・/・> だけ（\b だと、カスタム要素 <iframe-wrapper> を、閉じのない <iframe> として本文の終わりまでテキストにした）
+  // 名前のあとは空白・/・> だけ（\b では、カスタム要素 <iframe-wrapper> を閉じのない <iframe> と読む）
   const raw = /<(script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)(?=[\s/>])/iy;
-  let lower: string | undefined;                       // 閉じタグを探すため（初めて要るときに一度だけ小文字にする。タグごとに小文字にすると、<script の多い本文で2乗の時間になる）
+  let lower: string | undefined;                       // 閉じタグを探すため。初めて要るときに一度だけ小文字にする（タグごとでは2乗の時間になる）
   let rawEnd = -1;                                     // <script> などの中身（コメントにならない）の終わり
   let templateEnd = -1;                                // <template> の中身の終わり（中のタグは inert）
   const template = /<template(?=[\s/>])/iy;
   const commentEnd = commentEndFinder(html);
   for (let i = html.indexOf('<'); i >= 0; i = html.indexOf('<', i + 1)) {
-    // コメント（<!-- … -->）の中のタグは、ブラウザが読まない（コメントアウトしたフォーム・スクリプトで E-10①（高）・E-07① などを誤って出した）。
-    // <script>・<style>・<textarea>・<title> の中身の「<!--」（var s='<!--'）はコメントではない。閉じのない「<!--」は、コメントとして
-    // 読み飛ばさない（読み飛ばすと、後ろのタグをすべて見逃し、E-08・E-10① を合格にした）。「<!-->」「<!--->」は空のコメント
-    // 「--!>」もコメントを閉じる（ブラウザと同じ）
+    // コメントの中のタグは、ブラウザが読まないので数えない。<script> などの中身の「<!--」（var s='<!--'）はコメントではない。
+    // 閉じのない「<!--」は読み飛ばさない（後ろのタグをすべて見逃さないため）
     const outside = i > rawEnd;
     if (outside && html.startsWith('<!--', i)) {
       const e = commentEnd(i);
@@ -122,7 +121,7 @@ export function tags(html: string, names: string[]): Tag[] {
     start.lastIndex = i;
     const m = start.exec(html);
     if (!m) {
-      // ほかの開始タグも、属性の値の中（<div title="<!--">）を読み飛ばす（値の中の「<!--」をコメントの始まりとして、後ろのフォームを見逃した）。
+      // ほかの開始タグも読み飛ばす（属性の値の中の「<!--」（<div title="<!--">）をコメントの始まりと読まないため）。
       // <script> などの中身では読み飛ばさない（スクリプトの「a<b」をタグとして読まない）
       if (outside && /[a-z]/i.test(html[i + 1] ?? '')) { const e = endOf(i + 1); if (e >= 0) i = e; }
       continue;
@@ -130,7 +129,8 @@ export function tags(html: string, names: string[]): Tag[] {
     const from = i + m[0].length; const end = endOf(from);
     if (end < 0) continue;                           // 閉じていないタグ（ブラウザはタグとして扱わない）
     const attrs = new Map<string, string>();
-    for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) { const k = a[1].toLowerCase(); if (!attrs.has(k)) attrs.set(k, decodeEntities(a[2] ?? a[3] ?? a[4] ?? '')); }   // 同じ名前の属性は最初の値（HTML の字句解析と同じ。後の値を使うと、2つの action で E-10① の判定が逆になった。第49回）
+    // 同じ名前の属性は最初の値を使う（HTML の字句解析と同じ）
+    for (const a of html.slice(from, end).matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) { const k = a[1].toLowerCase(); if (!attrs.has(k)) attrs.set(k, decodeEntities(a[2] ?? a[3] ?? a[4] ?? '')); }
     const name = m[1].toLowerCase();
     out.push({ name, attrs, evidence: tagEvidence(name, attrs), index: i, ...(!outside || i < templateEnd ? { inert: true } : {}) });
     i = end;                                         // 属性の中の < をタグの始まりとして読まない（正規表現の matchAll と同じ）
@@ -142,8 +142,8 @@ export function tags(html: string, names: string[]): Tag[] {
 export const htmlBody = (ctx: RuleContext) => (ctx.responseKind === 'html' && ctx.final?.body?.trim() ? ctx.final.body : undefined);
 /**
  * HTML本文がないときの結果：2xx の HTML 応答で本文を採取していない（-v・-D - -o /dev/null、HAR の本文なし）なら、本文の項目は判定できないので na。
- * それ以外（HTML でない応答、3xx・4xx など）は適用外の []。本文を採取した HTML がほかに1つでもあると項目は「判定済み」になり、
- * [] では本文のないページ（機密のページを含む）を調べていないことが見えなかった（空配列は適用外だけに使う取り決め）
+ * それ以外（HTML でない応答、3xx・4xx など）は適用外の []（空配列は適用外だけに使う。na にしないと、本文を採取した HTML がほかにあるとき、
+ * 本文のないページを調べていないことが見えない）
  */
 export const noHtmlBody = (rule: Rule, ctx: RuleContext): Finding[] => {
   const s = ctx.final?.status ?? 0;
@@ -152,7 +152,7 @@ export const noHtmlBody = (rule: Rule, ctx: RuleContext): Finding[] => {
 };
 /**
  * HTML を返したページの URL とホスト。-L で別のホスト（apex から www など）に転送されたときは、ターゲットの URL ではなく転送先（最後のホップ）。
- * ターゲットのホストと比べると、転送先と同じホストのスクリプト（WordPress の絶対 URL）を第三者のもの（E-08）とし、相対の src も違う基準で解決した
+ * 自サイトのスクリプト（E-08）と相対の URL は、ブラウザと同じくこのページを基準にする
  */
 const pageUrlOf = (ctx: RuleContext) => ctx.final?.url ?? ctx.target.url;
 const pageHostOf = (ctx: RuleContext): string | undefined => {
@@ -163,23 +163,18 @@ const pageHostOf = (ctx: RuleContext): string | undefined => {
 
 /**
  * HTML の <meta http-equiv="Content-Security-Policy"> の CSP（ポリシーごと）。ヘッダを付けられない GitHub Pages・S3 などの配信では普通の形で、
- * ブラウザは強制する。ただし frame-ancestors・report-uri・sandbox は meta では効かないので除く（H-06 のクリックジャッキング対策には使わない）
+ * ブラウザは強制する。ただし frame-ancestors・report-uri・report-to・sandbox は meta では効かないので除く（H-06 のクリックジャッキング対策には使わない）
  */
 export function metaCspPolicies(ctx: RuleContext): string[] {
   const html = htmlBody(ctx);
   return html ? metaCspFromHtml(html) : [];
 }
 /**
- * <head> の中（<body> より前）の meta の CSP だけを読む。ブラウザは <body> の中の meta の CSP を無視するので、それで H-03 を合格にしない。
- * <body> のない断片は全体を見る
- */
-/**
- * <body> の始まり。<head> の中のコメント（<!-- … -->）とスクリプト（<script>…</script>）の中の「<body」は飛ばす
- * （飛ばさないと、そこで <head> が終わったとみなし、あとの meta の CSP を読まなかった）。indexOf で前に進むだけなので、時間は本文の長さに比例する
+ * <body> の始まり（なければ -1）。<head> の中のコメントとスクリプトの中の「<body」は飛ばす。indexOf で前に進むだけなので線形時間
  */
 function bodyStart(html: string): number {
   const lower = html.toLowerCase();
-  const commentEnd = commentEndFinder(lower);        // tags() と同じ閉じ（「--!>」も。違うと、<head> のコメントを「--!>」で閉じた本文の meta の CSP を読んだ）
+  const commentEnd = commentEndFinder(lower);        // コメントの閉じ方は tags() と同じにする（「--!>」も）
   for (let i = 0; i < lower.length;) {
     const lt = lower.indexOf('<', i); if (lt < 0) return -1;
     if (lower.startsWith('<!--', lt)) { const e = commentEnd(lt); if (e < 0) return -1; i = e + 1; continue; }
@@ -189,10 +184,14 @@ function bodyStart(html: string): number {
   }
   return -1;
 }
+/**
+ * <head> の中（<body> より前）の meta の CSP だけを読む。ブラウザは <body> の中の meta の CSP を無視するので、それで H-03 を合格にしない。
+ * <body> のない断片は全体を見る
+ */
 export function metaCspFromHtml(html: string): string[] {
   const end = bodyStart(html);
   const head = end >= 0 ? html.slice(0, end) : html;
-  // <template>・<noscript>・スクリプトの文字列の中の meta（inert）は、ブラウザが要素として使わないので CSP にしない（H-03①（高）を見逃した。第49回）
+  // <template>・<noscript>・スクリプトの文字列の中の meta（inert）は、ブラウザが要素として使わないので CSP にしない
   return tags(head, ['meta']).filter(t => !t.inert && t.attrs.get('http-equiv')?.toLowerCase() === 'content-security-policy')
     .flatMap(t => (t.attrs.get('content') ?? '').split(','))
     .map(p => p.split(';').map(d => d.trim()).filter(d => d && !/^(?:frame-ancestors|report-uri|report-to|sandbox)(?![\w-])/i.test(d)).join('; '))
@@ -240,7 +239,7 @@ export const sriRule: Rule = { id: 'E-08', title: 'HTML本文：第三者スク�
       if (u.host === host) continue;
       if (isTrustedOrigin(u, trusted)) { skipped++; continue; }
       const g = byOrigin.get(u.origin) ?? { total: 0, missing: [] };
-      // 空の integrity=""（空白だけを含む）は、ブラウザが検証しない（integrity なしと同じ。合格にした）
+      // 空の integrity=""（空白だけを含む）は、ブラウザが検証しない（integrity なしと同じ）
       g.total++; if (!t.attrs.get('integrity')?.trim()) g.missing.push(t);
       byOrigin.set(u.origin, g);
     }
@@ -262,15 +261,13 @@ const unescapeQuotes = (s: string) => s
   .replace(/&(?:quot|#0*34|#x0*22);|\\u0022|\\x22|\\"/gi, '"')
   .replace(/&(?:apos|#0*39|#x0*27);|\\u0027|\\x27|\\'/gi, "'");
 /**
- * 秘密ではない値：パス（password:"/users/password/new"）、URL、ドットでつないだ翻訳キー（"auth.password.label"）、テンプレート（{{…}}、${…}）、
- * 英語の画面の文言（A-07 と同じ isLabelText）、セレクタ・項目の名前・エスケープした日本語の文言（notSecretText。第50回）
+ * 秘密ではない値（A-07 と同じ判定）：英語の画面の文言（isLabelText）、ブラウザから使う前提の公開のキー（isPublicClientValue。Google の AIza…、
+ * Stripe の pk_live_…、PaymentIntent の client_secret）、伏せ字、入力の検証の規則・autocomplete の値（notSecretFormat）、
+ * パス（password:"/users/password/new"）・URL・翻訳キー・テンプレート・セレクタ・項目の名前・エスケープした日本語の文言（notSecretText）
  */
 const notSecretValue = (key: string, v: string): boolean =>
-  // パス・URL・翻訳キー・テンプレートは notSecretText と同じ形だけ（大文字を含む /Ab3… で始まる base64 の秘密を除いていた。束のレビュー）
   isLabelText(key, v) || isPublicClientValue(v) || isPlaceholderValue(v)
   || notSecretFormat(v) || notSecretText(v);
-// Google の API キー（AIza…）は、Maps・Firebase などブラウザから使う前提のキー（HTTP リファラーや API の制限で守る）なので、HTML にあっても①にしない。
-// Stripe の公開キー（pk_live_…）、PaymentIntent の client_secret も同じ（A-07 と同じ isPublicClientValue）
 /** 公開を前提にした JWT（ペイロードの role が anon。Supabase の anon key） */
 const publicJwt = (payload: string): boolean => {
   try {
@@ -286,9 +283,9 @@ const SECRETS: [string, { test(s: string): boolean }][] = [
   ['GitHubトークン', /\bgh[pousr]_[0-9A-Za-z]{36,}\b/],
   // ブラウザに渡す前提の JWT（Supabase の anon key。ペイロードの role が anon）は除く（行レベルのセキュリティで守る公開のキー）
   ['JWT', { test: (s: string) => [...s.matchAll(/\beyJ[\w-]{10,}\.(eyJ[\w-]{10,})\.[\w-]{10,}/g)].some(m => !publicJwt(m[1])) }],
-  // ブラウザで使う前提の SDK の呼び出しの中の apiKey（Algolia の docsearch・algoliasearch の検索専用のキー、Bugsnag・Sentry などの通知用のキー）は除く
+  // ブラウザで使う前提の SDK の呼び出しの中の apiKey（Algolia の docsearch・algoliasearch の検索専用のキー、Bugsnag・Sentry などの通知用のキー）は除く。
   // 属性の中の JSON（Inertia の data-page="{&quot;api_key&quot;:…}"）と、JS の文字列の中の JSON（JSON.parse("{\"api_key\":…}")）は、
-  // 引用符を戻してからも見る（生の引用符だけを見ると、どちらも見逃した。第52回）
+  // 引用符を戻してからも見る
   ['キー・シークレットの代入', { test: (s: string) => [s, ...(ESCAPED_QUOTE.test(s) ? [unescapeQuotes(s)] : [])].some(x => [...x.matchAll(ASSIGNED)].some(m => !notSecretValue(m[1], m[2]) && !PUBLIC_SDK.test(x.slice(Math.max(0, (m.index ?? 0) - 300), m.index)))) }],
 ];
 // ホスト名の最後で区切る（edge01.local.example-cdn.net の .local. には一致させない）。複数のラベルのホスト名（db.prod.internal）も含める
@@ -301,19 +298,17 @@ function internalUrl(html: string, own?: string): string | undefined {
   }
   return undefined;
 }
-// 英字の境目で照合する（「_」は境目にする。debug_mode・staging_db も見る。\b は「_」を語の一部とみなした）。password・パスワードは、
-// 画面の部品の説明（<!-- Password field -->、パスワード欄）を除く
-// 開発用の語は大文字・小文字を区別して、後ろに小文字が続かないもの（debugMode・debug_mode は見る。/i で照合すると debugMode の M も
-// 小文字の扱いになって見逃した）
+// 開発用の語：英字の境目で照合する（「_」も境目にする。debug_mode・staging_db も見る。\b は「_」を語の一部とみなす）。
+// 大文字・小文字を区別して、後ろに小文字が続かないもの（debugMode・debug_mode は見る。/i では debugMode の M も小文字と同じに扱う）。
 // キャメルケースの途中（isDebug・useStaging）も見る
 const DEV_CODE_WORD = /(?<![A-Za-z])(?:TODO|FIXME|XXX|HACK|[Dd]ebug|DEBUG|[Ss]taging|STAGING)(?![a-z])|(?<=[a-z])(?:Debug|Staging)(?![a-z])/;
-// password（複数形を含む）だけを見る（pass だけで見ると「Tests pass」「pass the id」を開発用コメントにした）
-// pass は値の代入（pass: …、pass=…）のときだけ
-// 「admin/pass123」「pass admin123」のように、pass のあとに数字か、英字で始まり数字を含む語が続くものも見る（「tests pass 100%」「pass 2 of 3」は除く）
+// password（複数形を含む）・パスワード・本番。画面の部品の説明（<!-- Password field -->、パスワード欄）は除く。
+// pass だけの語は、値の代入（pass: …、pass=…）か、数字・数字を含む語が続くもの（admin/pass123、pass admin123）だけ
+// （「Tests pass」「tests pass 100%」「pass 2 of 3」は開発用のコメントではない）
 const DEV_WORD = /(?<![A-Za-z])pass(?:\s*[:=]|\d|\s+[A-Za-z][^\s<]*\d)|(?<![A-Za-z])passwords?(?![a-z])(?![\s_-]*(?:field|input|label|form|reset|box|placeholder|strength|hint|toggle|visibility|policy)\b)|パスワード(?!欄|入力|を忘れ|の再設定|の変更|変更|リセット)|本番/i;
 /**
  * 閉じたコメント（<!-- … -->）を1つずつ切り出し、その中だけで開発用の語を探す。一致した語を返す。
- * 正規表現1つで「コメントの中の語」を探すと、閉じのない <!-- が続く本文でバックトラックが爆発する（64KBで数分）ため、indexOf で線形に走査する。
+ * indexOf で線形に走査する（正規表現1つで書くと、閉じのない <!-- が続く本文でバックトラックが爆発する）。
  * コメントの外（前後のコメントにはさまれた本文）には一致させない
  */
 export function devCommentWord(html: string): string | undefined {
@@ -322,7 +317,7 @@ export function devCommentWord(html: string): string | undefined {
     if (end < 0) return undefined;
     // Knockout の制御のコメント（<!-- ko if: showDebug -->・<!-- /ko -->）は、開発用のコメントではない
     const c = html.slice(i + 4, end); const m = /^\s*\/?ko\b/.test(c) ? null : c.match(DEV_CODE_WORD) ?? c.match(DEV_WORD);
-    // 一致した語だけを返す。「pass Summer2024」のように値まで一致した部分を返すと、「中身は表示しない」と書いた証跡にパスワードが出た
+    // 一致した語だけを返す（「pass Summer2024」の値の部分を証跡に出さない）
     if (m) return /^pass/i.test(m[0]) && !/^passwords?$/i.test(m[0]) ? 'pass' : m[0];
     i = html.indexOf('<!--', end + 3);
   }
@@ -335,8 +330,8 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     if (!html) return noHtmlBody(htmlSecrets, ctx);
     const out = [];
     // OpenID Connect の response_mode=form_post：IdP は id_token・access_token を hidden の欄に入れて、アプリへ POST する画面を返す。
-    // 利用者のブラウザに渡すのが仕事のトークンなので、その欄の値は秘密情報の露出として数えない（自社の Keycloak などを対象にしたとき）
-    // 除くのはその input のタグだけ（値をページ全体から消すと、値が「A」のとき AWS のキーの A まで消えて見逃した）
+    // 利用者のブラウザに渡すのが仕事のトークンなので、その欄の値は秘密情報の露出として数えない（自社の Keycloak などを対象にしたとき）。
+    // 除くのはその input のタグだけ（値の文字列をページ全体から消すと、ほかの秘密の一部まで消える）
     const posted = forms(html).filter(f => (f.form.attrs.get('method') ?? '').toLowerCase() === 'post')
       .flatMap(f => f.inputs).filter(i => i.attrs.get('type')?.toLowerCase() === 'hidden' && /^(?:id_token|access_token|code|state)$/i.test(i.attrs.get('name') ?? ''))
       .map(i => [i.index, html.indexOf('>', i.index) + 1] as const).filter(([, e]) => e > 0).sort((a, b) => b[0] - a[0]);
@@ -361,7 +356,7 @@ function forms(html: string): { form: Tag; inputs: Tag[] }[] {
     const endRe = /<\/form\s*>/gi; endRe.lastIndex = f.index;
     const end = endRe.exec(html)?.index ?? -1;
     const stop = Math.min(end < 0 ? html.length : end, fs[i + 1]?.index ?? html.length);
-    // input の位置（index）はページ全体での位置にする（フォームの中での位置のままだと、E-09 がページの別の場所を取り除いた）
+    // input の位置（index）はページ全体での位置にする（E-09 がその位置のタグを取り除く）
     return { form: f, inputs: tags(html.slice(f.index, stop), ['input']).map(t => ({ ...t, index: t.index + f.index })) };
   });
 }
@@ -382,7 +377,6 @@ export const passwordForm: Rule = { id: 'E-10', title: 'HTML本文：パスワ�
     for (const { form } of pw) {
       const action = form.attrs.get('action') ?? '';
       // 送信先はページの URL を基準に読む（ブラウザと同じ）。http のページの相対の送信先（/login・空・//host/login）も平文で送る
-      // （http:// で始まるものだけを見ると、http のページのフォームを合格にし、「https・POST」と事実と違う証跡を出した）
       if (sendsInClear(action, pageUrlOf(ctx))) out.push(mk(passwordForm, ctx, 1, 'high', 'fail', form.evidence, 'フォームの送信先を https:// にする'));
       if ((form.attrs.get('method') ?? 'get').toLowerCase() !== 'post') out.push(mk(passwordForm, ctx, 2, 'medium', 'fail', form.evidence, 'パスワードは method="post" で送る（URLに残さない）'));
     }
@@ -410,30 +404,28 @@ export const csrfToken: Rule = { id: 'E-12', title: 'HTML本文：CSRFトーク�
                                         : 'POSTフォームにCSRFトークンを入れる（セッションCookieが見つからないため SameSite は確認できない。実効性の確認は範囲外）'));
   } };
 
-/**
- * ログインのフォーム：フォームごとに見て、パスワード欄が1つで、次のどれでもないもの：
- * - パスワードを決める欄（name・id・autocomplete に new・confirm・確認用の retype・repeat があるもの。autocomplete="new-password"）
- * - name に current_password・old_password がある欄（Devise の user[current_password]、アカウントの削除・メールアドレスの変更の画面。
- *   旧セッションが使えるときに出る再認証の画面）。web.dev が勧めるログイン画面（name="current-password" と autocomplete="current-password"）と、
- *   id だけが currentPassword のログイン画面は除かない
- * そのうえで、ユーザー名の欄（パスワード・ボタン以外の input。2段階のログイン画面の hidden の username も）があるもの。パスワード欄だけの
- * フォームは、autocomplete="current-password" で、フォームの送り先（action）がログインらしいもの（/login・/signin・/session など。sudo・
- * reauth・confirm・verify を除く）だけ（ユーザー名を文字で表示した2段階目の画面。GitHub の sudo モードのような再認証の画面と分けるため）。
- * ページ全体で数えると、ログインと登録のフォームが並ぶ画面（WooCommerce）を外した。
- * input はタグごとに取り出して見る（閉じない「<input 」が並ぶ本文で、入力の長さの2乗の時間がかかった）
- */
 const INPUT_TAG = /<input\b[^>]*(?:>|$)/gi;
 const attr = (tag: string, name: string) => tag.match(new RegExp(String.raw`(?<![\w-])${name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`, 'i'))?.slice(1).find(v => v !== undefined) ?? '';
 const NON_TEXT_INPUT = /^(?:hidden|password|submit|button|checkbox|radio|image|reset|file|range|color)$/i;
 const SETTING_FIELD = /(?:^|[\s_-])(?:new|confirm|confirmation|retype|repeat)(?:[\s_-]|$)|new[-_]?pass|(?:pass(?:word)?|pwd)[-_]?confirm/i;
 /**
- * ログイン画面・認証の入り口のパス（C-09・C-12・T-06 で共有）：/login・/signin・Devise の /users/sign_in・WordPress の /wp-login.php・
- * OIDC の …/openid-connect/auth・/authorize・oauth2-proxy の /oauth2/start・SAML の /saml/login、拡張子の付いたログイン画面（ASP.NET の
- * /Account/Login.aspx、/login.php・.jsp・.do）、Spring Security の /oauth2/authorization/<登録名>、IdP の入り口（Google の /o/oauth2/v2/auth、
- * Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls、SimpleSAMLphp の SSOService.php、Entra ID の /<テナント>/saml2、Okta の /sso/saml、
- * Google の /o/saml2/idp、Auth0 の /samlp/<クライアント>）
+ * ログイン画面・認証の入り口のパス（C-09・C-12・T-06 で共有。パスの最後で一致させる）：/login・/signin・Devise の /users/sign_in・
+ * /wp-login.php・/authorize・oauth2-proxy の /oauth2/start・Spring Security の /oauth2/authorization/<登録名>、拡張子の付いたもの
+ * （/Account/Login.aspx、/login.php・.jsp・.do）、OIDC・SAML の IdP の入り口（…/openid-connect/auth、Google の /o/oauth2/v2/auth・/o/saml2/idp、
+ * Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls、SimpleSAMLphp の SSOService.php、Entra ID の /<テナント>/saml2、
+ * Okta の /sso/saml、Auth0 の /samlp/<クライアント>）
  */
 export const LOGIN_PATH = /\/(?:log-?in|sign[-_]?in|signon|auth\/login|wp-login|authorize|oauth2\/(?:start|auth(?:orize)?)|oauth2\/authorization\/[\w.-]+|o\/oauth2(?:\/v\d)?\/auth|protocol\/openid-connect\/auth|saml2?\/(?:login|sso)|SAML2\/(?:Redirect|POST)\/SSO|adfs\/ls|SSOService|saml2?|sso\/saml|o\/saml2\/idp|samlp)(?:\.(?:php|aspx?|jspx?|do|action|html?|cgi|pl))?\/?$/i;
+/**
+ * ログインのフォームがあるか。フォームごとに見る（ログインと登録のフォームが並ぶ画面（WooCommerce）があるため）。パスワード欄が1つで、次のどれでもないもの：
+ * - パスワードを決める欄（name・id・autocomplete に new・confirm・retype・repeat があるもの。autocomplete="new-password"）
+ * - 再認証の欄（name に current_password・old_password、id に old_password があるもの。Devise の user[current_password]、メールアドレスの変更の画面）。
+ *   ただし web.dev が勧めるログイン画面（name="current-password" と autocomplete="current-password"）と、id だけが currentPassword のものは除かない
+ * そのうえで、ユーザー名の欄（文字を入力する input か、2段階のログイン画面の hidden の username など）があるもの。パスワード欄だけのフォームは、
+ * autocomplete="current-password" で、送信先（action）がログインらしいもの（sudo・reauth・confirm・verify を除く）だけ
+ * （ユーザー名を文字で表示した2段階目の画面を、GitHub の sudo モードのような再認証の画面と分けるため）。
+ * input はタグごとに取り出して見る（閉じない「<input 」が並ぶ本文でも線形時間にするため）
+ */
 export function loginForm(body: string): boolean {
   const chunks = /<form\b/i.test(body) ? body.split(/<form\b/i).slice(1).map(c => c.split(/<\/form\s*>/i)[0]) : [body];
   return chunks.some(f => {
@@ -443,12 +435,9 @@ export function loginForm(body: string): boolean {
     const ac = attr(pw[0], 'autocomplete'), nameId = `${attr(pw[0], 'name')} ${attr(pw[0], 'id')}`;
     if (SETTING_FIELD.test(`${nameId} ${ac}`)) return false;
     const currentPassword = /\bcurrent-password\b/i.test(ac);
-    // current・old の欄は、name か id がちょうど current-password のもの（web.dev が勧めるログイン画面）だけ認める。autocomplete が
-    // current-password なら認めると、Devise の再認証のフォーム（name="user[current_password]" autocomplete="current-password"）をログイン画面とした
-    // name に current_password・old_password があるもの（Devise の user[current_password]、メールアドレスの変更の old_password）だけを除く。
-    // id だけで見ると、id="currentPassword" のログインのフォームまで外した
+    // 再認証の欄を除く。name の current_password は、name がちょうど current-password で autocomplete も current-password のときだけ認める
+    // （Devise の再認証のフォームも autocomplete="current-password" を付ける）。id は old-password・old_password だけを見る
     const pwName = attr(pw[0], 'name');
-    // id の old-password・old_password も再認証の欄（id の current-password・currentPassword は、web.dev が勧めるログイン画面にもあるので除かない）
     if ((/(?:current|old)[-_]?pass/i.test(pwName) && !(currentPassword && /^current-password$/i.test(pwName))) || /old[-_]?pass/i.test(attr(pw[0], 'id'))) return false;
     const user = inputs.some(t => !NON_TEXT_INPUT.test(attr(t, 'type')))
       || inputs.some(t => /^hidden$/i.test(attr(t, 'type')) && /^(?:user(?:name)?|email|login|identifier|j_username)$/i.test(attr(t, 'name')));

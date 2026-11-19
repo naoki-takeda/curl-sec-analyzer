@@ -7,8 +7,7 @@ import { readFileSync } from 'node:fs';
 import { CSP } from './csp.config.ts';
 
 // 本番ビルドのときだけメタCSPを挿入する（開発サーバはHMRのためにインラインスクリプトを使うので付けない）。
-// 指定の中身と理由は csp.config.ts にある。
-
+// 指定の中身と理由は csp.config.ts にある
 const metaCsp = (): Plugin => ({
   name: 'meta-csp',
   apply: 'build',
@@ -54,11 +53,10 @@ export default defineConfig({
         // CSS は Tailwind CSS がビルド時に生成する（preflight などを含む）。JavaScript のバンドルには含まれないため手で記載する
         `tailwindcss（MIT）\n${readFileSync('node_modules/tailwindcss/LICENSE', 'utf8')}`].join('\n\n') } } })],
   build: { target: 'es2022', sourcemap: false },
-  // タイムゾーンを固定する。#META at= はタイムゾーンを持たず手元の時刻として読むので、CI（UTC）と手元（JST）で期限の時間が変わり、
-  // ゴールデンテストが CI でだけ失敗した。期待結果は JST で作ってある
+  // タイムゾーンを固定する。#META at= はタイムゾーンを持たず手元の時刻として読むので、CI（UTC）と手元（JST）で期限の時間が変わる。
+  // ゴールデンテストの期待結果は JST で作ってある。
   // 時間の上限を確かめるテストには perf のタグ（{ tags: ['perf'] }）を付け、npm test では、ほかのテストが終わってから、ファイルを並べずに
-  // 別に流す（package.json の test）。同時に流すと CPU を取り合い、tests/regression/review10.test.ts の CSV の性能テストなどが、単独では
-  // 通るのに上限を超えることがあった（T8）。describe に付けると、その中のテストがすべて対象になる
+  // 別に流す（package.json の test。同時に流すと CPU を取り合い、上限を超えることがある）。describe に付けると、その中のテストがすべて対象になる
   test: { environment: 'node', env: { TZ: 'Asia/Tokyo' }, include: ['tests/**/*.test.ts'],
     tags: [{ name: 'perf', description: '時間の上限を確かめるテスト（npm test では、ほかのテストのあとに、ファイルを並べずに流す）' }] },
 });

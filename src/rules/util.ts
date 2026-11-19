@@ -28,19 +28,18 @@ export const cspPolicies = (ctx: RuleContext): string[] => splitPolicies(header(
 export const isNosniff = (ctx: RuleContext): boolean =>
   header(ctx, 'x-content-type-options').join(',').split(',')[0].trim().toLowerCase() === 'nosniff';
 
-// 静的リソース（JS・CSS・画像・フォント）と、誰にでも同じ内容を返す公開ファイル（robots.txt、sitemap.xml、/.well-known/ の下など）
-// 拡張子はパスの末尾だけで見る（クエリの ?avatar=me.png・?format=x.css で、利用者ごとの API を静的リソースとし、H-12①（高）を見逃さない）
-// 動画・音声・WebAssembly・旧式のフォント（eot）も含める（ログインした HAR で、Cookie を送っただけの mp4・wasm を機密応答として H-12①（高）にした）
+// 静的リソース（JS・CSS・画像・フォント・動画・音声・WebAssembly）と、誰にでも同じ内容を返す公開ファイル（robots.txt、sitemap.xml、
+// /.well-known/ の下など）。拡張子はパスの末尾だけで見る（クエリの ?avatar=me.png・?format=x.css で、利用者ごとの API を静的リソースにしない）
 const STATIC_RE = /\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|map|wasm|mp4|m4v|webm|ogv|mov|mp3|m4a|aac|oga|ogg|opus|wav|flac)$/i;
 const STATIC_CT = /^\s*(?:text\/css|(?:text|application)\/(?:x-)?(?:java|ecma)script|image\/|font\/|video\/|audio\/|application\/wasm\b)/i;
 const PUBLIC_FILE = /\/(?:robots\.txt|sitemap[\w-]*\.xml(?:\.gz)?|favicon\.ico|(?:app-)?ads\.txt|humans\.txt|security\.txt|crossdomain\.xml|browserconfig\.xml|manifest\.json|[\w-]+\.webmanifest)$|\/\.well-known\//i;
 const pathOf = (u: string) => { try { return new URL(u).pathname; } catch { return u.replace(/[?#].*$/s, ''); } };
-// JSONP（?callback=）は Content-Type が JS でも、利用者ごとのデータを返す動的な応答なので、静的リソースとしない
+// JSONP（?callback=）は、拡張子が .js（/api/user.js?callback=）でも Content-Type が JS でも、利用者ごとのデータを返す動的な応答なので、
+// 静的リソースとしない
 const JSONP_PARAM = /[?&](?:callback|jsonp)=/i;
 export const isStaticResource = (ctx: RuleContext): boolean => {
   const u = ctx.target.url ?? '';
   const p = pathOf(u);
-  // JSONP（?callback=）は、拡張子が .js（/api/user.js?callback=）でも、Content-Type が JS でも静的リソースとしない
   return PUBLIC_FILE.test(p) || (!JSONP_PARAM.test(u) && (STATIC_RE.test(p) || STATIC_CT.test(header(ctx, 'content-type')[0] ?? '')));
 };
 /**
@@ -61,11 +60,10 @@ export function parseCsp(v: string): Map<string, string[]> {
   return m;
 }
 
-/** HSTS のディレクティブ（includesubdomains・preload）があるか。H-01・H-02・横断ルール・画面の案内で同じ読み方にする（部分一致にしない） */
 /**
  * HSTS のヘッダを RFC 6797 6.1 のとおりに読む。「;」で分けた各ディレクティブが「名前」か「名前=値」（値はトークンか引用符の文字列）で、
  * 同じディレクティブが2回なく、max-age が数字であるときだけ有効（ブラウザは無効なヘッダを無視する（8.1））。
- * max-age を正規表現で拾うだけでは、カンマ区切り（max-age=31536000, includeSubDomains）・「;」のないもの・max-age の重複を有効とみなした
+ * カンマ区切り（max-age=31536000, includeSubDomains）・「;」のないもの・max-age の重複は無効
  */
 export function parseHsts(v: string | undefined): { valid: boolean; maxAge: number } {
   if (!v) return { valid: false, maxAge: 0 };
@@ -82,8 +80,7 @@ export function parseHsts(v: string | undefined): { valid: boolean; maxAge: numb
   return maxAge === undefined ? { valid: false, maxAge: 0 } : { valid: true, maxAge };
 }
 /**
- * HSTS のディレクティブを「;」で分ける。引用符の文字列（\ のエスケープを含む）の中の「;」では分けない（foo="a;b" を2つに分け、
- * ブラウザが受け付けるヘッダを H-01③（高）にした）
+ * HSTS のディレクティブを「;」で分ける。引用符の文字列（\ のエスケープを含む）の中の「;」では分けない（foo="a;b" は1つのディレクティブ）
  */
 function hstsParts(v: string): string[] {
   const out: string[] = []; let start = 0, q = false;
@@ -96,7 +93,10 @@ function hstsParts(v: string): string[] {
   out.push(v.slice(start));
   return out;
 }
-/** ブラウザが受け付ける（parseHsts で有効な）ヘッダにそのディレクティブがあるか。無効なヘッダはブラウザが無視するので、ないのと同じ */
+/**
+ * ブラウザが受け付ける（parseHsts で有効な）ヘッダにそのディレクティブ（includesubdomains・preload）があるか。無効なヘッダはブラウザが
+ * 無視するので、ないのと同じ。H-01・H-02・横断ルール・画面の案内で同じ読み方にする（部分一致にしない）
+ */
 export const hstsDirective = (v: string | undefined, name: 'includesubdomains' | 'preload'): boolean =>
   !!v && parseHsts(v).valid && hstsParts(v).some(d => d.trim().toLowerCase() === name);
 
@@ -110,11 +110,6 @@ export const LOGIN_FAILED_REC = 'テスト用アカウントでログインで�
 export const NO_BODY_REC = '本文も含めて採取し直す（curl は -v ではなく -i で、-o /dev/null を付けない）';
 /** プローブ（C13）のコードが 000（接続できなかった）のときの推奨。ファイルがあるかどうかは分からないので、合格にしない（E-03・E-04・E-13） */
 export const PROBE_UNREACHED_REC = 'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）';
-/** 本文の上限（パーサが残す先頭64KB）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
-/**
- * データのない JSON の本文（{}・[]・null、値がすべて null・false・空のもの。NextAuth の未認証の /api/auth/session の {}、{"authenticated":false,"user":null}）。
- * 保護データを返していないので、A-01①・C-12①（高）にしない
- */
 const AUTH_FLAG = /^(?:is_?)?(?:authenticated|authorized|logged_?in|signed_?in|auth|ok|success|valid)$/i;
 // false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
 const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
@@ -124,6 +119,10 @@ const parseJson = (body: string | undefined): unknown => {
   if (!/^[{[]|^null$/.test(b)) return undefined;
   try { return JSON.parse(b); } catch { return undefined; }
 };
+/**
+ * データのない JSON の本文（{}・[]・null、値がすべて null・false・空のもの。NextAuth の未認証の /api/auth/session の {}、
+ * {"authenticated":false,"user":null}）と、エラーだけを返した JSON。保護データを返していないので、A-01①・C-12①（高）にしない
+ */
 export const noDataJson = (body: string | undefined): boolean => {
   const j = parseJson(body);
   if (j === undefined) return false;
@@ -140,15 +139,14 @@ export const errorJson = (body: string | undefined): boolean => {
 /**
  * エラーだけを返した JSON（200 で {"success":false,"error":"Unauthorized","message":"Please log in"}）。エラーの項目（error・errors など）か
  * success:false・ok:false があり、ほかの項目がエラーの包みの決まった名前（message・code・status・timestamp など。値は文字・数値・真偽値）だけで、
- * data・result は空のもの。エラーの文言はデータではないので、空でない値があっても保護データとしない（A-01①（高）にした）
+ * data・result は空のもの。エラーの文言はデータではないので、空でない値があっても保護データとしない（A-01①（高）にしない）
  */
 const ERROR_KEYS = /^(?:error|errors|err|fault|error_?(?:code|message|description|type)|errorcode|errormessage)$/i;
 const ENVELOPE_KEYS = /^(?:message|msg|status|status_?code|statuscode|code|success|ok|timestamp|time|path|request_?id|trace_?id|correlation_?id|detail|title|type|instance)$/i;
 const errorEnvelope = (j: Record<string, unknown>, blank: (v: unknown, k?: string) => boolean): boolean => {
   const entries = Object.entries(j);
-  // 状態の番号だけのエラー（{"status":401,"message":"Unauthorized"}・{"code":401,"msg":"not logged in"}・{"status":"fail"}）も含める
-  // ログインの状態を表す名前（authenticated・loggedIn）が false のものも失敗の印（{"authenticated":false,"message":"Not logged in"} を
-  // データとみなし、C-12①・A-01①（高）にした。第49回）
+  // 状態の番号だけのエラー（{"status":401,"message":"Unauthorized"}・{"code":401,"msg":"not logged in"}・{"status":"fail"}）も含める。
+  // ログインの状態を表す名前（authenticated・loggedIn）が false のもの（{"authenticated":false,"message":"Not logged in"}）も失敗の印
   const failed = entries.some(([k, v]) => (ERROR_KEYS.test(k) && !blank(v)) || ((/^(?:success|ok)$/i.test(k) || AUTH_FLAG.test(k)) && v === false)
     || (/^(?:status|status_?code|statuscode|code)$/i.test(k) && ((typeof v === 'number' && v >= 400 && v < 600) || (typeof v === 'string' && /^(?:[45]\d\d|fail(?:ed|ure)?|error|unauthori[sz]ed|forbidden|denied)$/i.test(v)))));
   return failed && entries.every(([k, v]) => ERROR_KEYS.test(k) || (AUTH_FLAG.test(k) && v === false)
@@ -169,6 +167,7 @@ export const graphqlError = (body: string | undefined): 'denied' | 'error' | und
   if (!(d === null || d === undefined || (typeof d === 'object' && Object.values(d as Record<string, unknown>).every(v => v === null)))) return undefined;
   return /UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|not authenticated|unauthori[sz]ed|authentication required|access denied|not logged in|login required/i.test(JSON.stringify(j.errors)) ? 'denied' : 'error';
 };
+/** 本文の上限（パーサが残す先頭64KB）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
 export const bodyTruncated = (ctx: RuleContext) => (ctx.final?.body?.length ?? 0) >= 64 * 1024;
 
 /**
@@ -185,24 +184,24 @@ export const isLabelText = (key: string, v: string): boolean => {
  */
 export const isPublicClientValue = (v: string): boolean =>
   /^(?:pi|seti)_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(v) || /^pk_(?:live|test)_[A-Za-z0-9]+$/.test(v) || /^AIza[0-9A-Za-z_-]{35}$/.test(v)
-  || /^phc_[A-Za-z0-9]{20,}$/.test(v);   // PostHog のプロジェクトのキー（ブラウザから送る公開のキー。第51回）
+  || /^phc_[A-Za-z0-9]{20,}$/.test(v);   // PostHog のプロジェクトのキー（ブラウザから送る公開のキー）
 /**
  * 伏せ字の値（"********"、"***"、"•••"、"[REDACTED]"、Rails の "[FILTERED]"、"<hidden>"）。値を出していないので、秘密情報の露出（A-07①・E-09①）にしない
  */
 export const isPlaceholderValue = (v: string): boolean =>
   /^(?:([*•●xX#.\-_])\1{2,}|[[(<{]?\s*(?:redacted|filtered|hidden|masked|protected|removed|omitted)\s*[\])>}]?)$/i.test(v.trim())
-  // 文書・設定例の仮の値（YOUR_API_KEY_HERE・<your-client-secret>・your-secret-key・INSERT_TOKEN_HERE。開発者向けの文書のページで E-09①（高）にした。第51回）
-  || /^<[^<>]{1,64}>$/.test(v.trim()) || (/^[A-Za-z]+(?:[_-][A-Za-z]+)*$/.test(v) && /(?:^|[_-])(?:your|here|insert|replace|placeholder)(?=[_-]|$)/i.test(v));   // example・sample・dummy は本物のパスワードにも使う（my_example_password。束のレビュー）
+  // 文書・設定例の仮の値（YOUR_API_KEY_HERE・<your-client-secret>・your-secret-key・INSERT_TOKEN_HERE）。
+  // example・sample・dummy は本物のパスワードにも使う（my_example_password）ので含めない
+  || /^<[^<>]{1,64}>$/.test(v.trim()) || (/^[A-Za-z]+(?:[_-][A-Za-z]+)*$/.test(v) && /(?:^|[_-])(?:your|here|insert|replace|placeholder)(?=[_-]|$)/i.test(v));
 
 /**
  * 入力の検証の規則（Laravel・VeeValidate の required|min:8|max:64）。| でつないだ、英字の規則名（引数は数字・英字）だけのもの。
- * ログイン・登録の画面の password:"required|min:8" を、秘密の値の代入（E-09①（高））とした（第48回）
+ * ログイン・登録の画面の password:"required|min:8" を、秘密の値の代入（E-09①（高））にしない
  */
 export const VALIDATION_RULE = /^[a-z_]+(?::[\w,.-]{1,20})?(?:\|[a-z_]+(?::[\w,.-]{1,20})?)+$/i;
 /** HTML の autocomplete の値（current-password・new-password・one-time-code など）。正規表現（^…$）も秘密の値ではない */
 export const AUTOCOMPLETE = /^(?:current-password|new-password|one-time-code|username|email|off|on)$/i;
-/** 秘密の値ではない形（入力の検証の規則・正規表現 ^…$・autocomplete の値）。E-09 と A-07 で共有する（A-07 だけ除いておらず、API の検証の規則を
- * パスワードの露出（高）とした。第49回） */
+/** 秘密の値ではない形（入力の検証の規則・正規表現 ^…$・autocomplete の値）。E-09 と A-07 で共有する（同じ値を片方だけで指摘しない） */
 export const notSecretFormat = (v: string): boolean => VALIDATION_RULE.test(v) || /^\^.*\$$/.test(v) || AUTOCOMPLETE.test(v);
 
 /** 秘密の値の名前の語（項目の名前・セレクタに含まれていれば、その値は秘密ではなく画面の部品・項目を指す） */
@@ -213,19 +212,19 @@ const FIELD_WORD = /^(?:user|users|login|new|current|old|confirm|confirmation|co
 /** JSON でエスケープした ASCII 以外の文字（パ） */
 const ESCAPED_NON_ASCII = /\\u(?!00[0-7])[0-9a-fA-F]{4}/g;
 /**
- * 画面の部品・項目の名前などで、秘密の値ではない形（E-09 と A-07 で共有する。第50回）：
+ * 画面の部品・項目の名前などで、秘密の値ではない形（E-09 と A-07 で共有する）：
  * - パス（/settings/password・/Account/ForgotPassword）と翻訳キー（auth.password.label・user.newPassword）：かけらが語として読め、秘密の語を含むもの
  * - ユーザー情報のない URL と、テンプレート（{{…}}・${…}）
  * - 秘密の語を含む、小文字の CSS のセレクタ（#password-input・.js-password・input[name=password]。値の全体がセレクタの形のもの）
  * - 項目の名前（user_password・loginPassword・password_confirmation）：英字と _ - だけで、語が秘密の語と項目の部品の語（user・login・new・
- *   confirm など）だけのもの（super-secret-key・admin_pass・changeme_password は、ほかの語を含むので秘密の値として扱う。束のレビュー）
+ *   confirm など）だけのもの（super-secret-key・admin_pass・changeme_password は、ほかの語を含むので秘密の値として扱う）
  * - JSON でエスケープした ASCII 以外の文字（PHP の json_encode・Laravel の @json の "パス…"）が2つ以上で、値の半分以上を占めるもの
  * 語として読めないかけらのパス・ドットの形は除かない（base64 の秘密は / で始まることがあり、JWT はドットでつなぐ）
  */
 export const notSecretText = (v: string): boolean => {
   const words = wordsOf(v);
   // パス（/Account/ForgotPassword・/users/password/new?locale=ja）と翻訳キー（auth.passwordLabel）は、かけらがすべて語として読め、秘密の語を
-  // 含むものだけ（base64 の /Ab3… や、合言葉の correct.horse.battery を除かないため。束のレビュー）。URL はユーザー情報（u:pw@）のないものだけ
+  // 含むものだけ（base64 の /Ab3… や、合言葉の correct.horse.battery を除かないため）。URL はユーザー情報（u:pw@）のないものだけ
   const wordy = (s: string) => s.split(/[/._-]+/).filter(Boolean).every(wordLike) && words.some(w => SECRET_WORD.test(w));
   if ((/^\/[\w\-./]*(?:\?[\w=&.-]*)?$/.test(v) && wordy(v.split('?')[0])) || (/^[a-z][\w-]*(?:\.[\w-]+)+$/.test(v) && wordy(v))) return true;
   if (/^https?:\/\/[^/@\s]+(?:[/?#]|$)/i.test(v) || /^(?:\{\{|\$\{)/.test(v)) return true;

@@ -2,7 +2,6 @@
 export type Severity = 'high' | 'medium' | 'low' | 'info';
 export type Status = 'pass' | 'fail' | 'na' | 'suppressed';
 export type ResponseKind = 'html' | 'api' | 'other';
-export const RESERVED_LABELS = ['http', 'apex', 'pre-login', 'login', 'logout', 'after-logout'] as const; // ほかに session-sample-N
 
 export interface HttpResponse {
   httpVersion: string; status: number; reason?: string;

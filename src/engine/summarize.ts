@@ -30,13 +30,13 @@ export const circled = (n?: number) => (n && n >= 1 && n <= 20 ? String.fromCode
 
 /**
  * 判定不能（na）の行のうち、証跡と推奨対応が同じものを1行にまとめる（項目の列に項目IDを並べる）。本文を採取していないページでは、
- * E-02・E-07〜E-10・E-12 が同じ理由の na になり、すべてを表示すると1つのターゲットに6行並んだ
+ * E-02・E-07〜E-10・E-12 が同じ理由の na になるので、1つのターゲットに6行並べない
  */
 export function mergeNa(fs: Finding[]): (Finding & { items?: string[] })[] {
   const out: (Finding & { items?: string[] })[] = []; const byReason = new Map<string, Finding & { items?: string[] }>();
   for (const f of fs) {
     if (f.status !== 'na') { out.push(f); continue; }
-    // ターゲット（ホスト）が違うものはまとめない（ホスト単位・横断の表で、別のホストの判定不能を1行にした。第51回）
+    // ターゲット（ホスト）が違うものはまとめない（ホスト単位・横断の表で、別のホストの判定不能を1行にしない）
     const k = JSON.stringify([f.target, f.evidence, f.recommendation]); const g = byReason.get(k);
     if (!g) { const row = { ...f }; byReason.set(k, row); out.push(row); continue; }
     g.items = [...new Set([...(g.items ?? [g.item]), f.item])];

@@ -57,34 +57,34 @@ export function parseOpenssl(lines: string[]): TlsInfo | undefined {
       pem = undefined;                     // 切れた PEM は使わない
     }
     if (l === '-----BEGIN CERTIFICATE-----') { if (!pemSeen) { pemSeen = true; pem = []; } continue; }
-    // IP アドレスの SAN（IP Address:192.0.2.10）も読む（読まないと、IP アドレスで接続する証明書を、ブラウザが見ない CN で比べてホスト名不一致にした）
+    // IP アドレスの SAN（IP Address:192.0.2.10）も読む（IP アドレスで接続する証明書を、ブラウザが見ない CN で比べない）
     if (sanNext) { for (const m of l.matchAll(/(?:DNS|IP Address):([^,\s]+)/g)) info.sans.push(m[1].toLowerCase()); sanNext = false; continue; }   // push(...) に広げない（長い行でスタックがあふれる）
     let m: RegExpMatchArray | null;
     if ((m = l.match(/^Protocol\s*:\s*(\S+)/))) info.protocol ??= m[1];
-    // 「New, <版>, Cipher is <暗号>」の版は、その暗号を使える最小の版で、合意した版ではない（TLS 1.2 の接続で New, SSLv3, Cipher is AES128-SHA、
-    // New, TLSv1.0, Cipher is ECDHE-RSA-AES128-SHA と出る）。版として使うのは TLS 1.3 の暗号（TLS 1.3 でしか使えない）のときだけで、
-    // それ以外は Protocol の行で読む（OpenSSL 1.1.1・3.0 は TLS 1.3 の接続で Protocol の行を出さない）
+    // 「New, <版>, Cipher is <暗号>」の版は、その暗号を使える最小の版で、合意した版ではない（TLS 1.2 の接続で New, SSLv3, Cipher is AES128-SHA
+    // と出る）。版として使うのは TLS 1.3 の暗号（TLS 1.3 でしか使えない）のときだけで、それ以外は Protocol の行で読む
+    // （OpenSSL 1.1.1・3.0 は TLS 1.3 の接続で Protocol の行を出さない）
     else if ((m = l.match(/^New, (TLSv[\d.]+|SSLv3), Cipher is (\S+)/))) { if (m[1] === 'TLSv1.3') info.protocol ??= m[1]; info.cipher ??= m[2]; }
-    // 失敗したハンドシェイクの「Cipher : 0000」「Cipher : (NONE)」は暗号ではない（0000 を合意した暗号として T-10 の証跡に出した）
+    // 失敗したハンドシェイクの「Cipher : 0000」「Cipher : (NONE)」は暗号ではない
     else if ((m = l.match(/^Cipher\s*:\s*(\S+)/))) { if (/^(?:0+|\(NONE\))$/i.test(m[1])) noCipher = true; else info.cipher ??= m[1]; }
     else if (/^New, \(NONE\), Cipher is \(NONE\)/.test(l)) noCipher = true;
     else if ((m = l.match(/^Verify return code:\s*(\d+)\s*\((.*)\)/))) { info.verifyCode ??= Number(m[1]); info.verifyText ??= m[2]; afterSummary = true; }
-    // notAfter・SAN は、後ろのもの（x509 の出力。s_client のあとに実行する）を使う。s_client のあとにサーバが送ったデータ（手で採取した、切っていない
+    // notAfter・SAN は、後ろのもの（s_client のあとに実行する x509 の出力）を使う。s_client のあとにサーバが送ったデータ（手で採取した、切っていない
     // 出力）は x509 の出力より前に出るので、後ろのものが本物になる
     else if ((m = l.match(/^notAfter=(.+)$/))) info.notAfter = date(m[1]);
     else if ((m = l.match(/^notBefore=(.+)$/))) info.notBefore = date(m[1]);
     else if ((m = l.match(/^subject=.*?CN\s*=\s*([^,/]+)/))) info.subjectCN ??= m[1].trim().toLowerCase();
-    // SAN は最後の X509v3 Subject Alternative Name: の行のものだけ（前のものを足し続けると、サーバが送った「DNS:victim.example」でホスト名の不一致を隠せた）
+    // SAN は最後の X509v3 Subject Alternative Name: の行のものだけ（前のものに足すと、サーバが送った「DNS:victim.example」でホスト名の不一致を隠せる）
     else if (/^X509v3 Subject Alternative Name:/.test(l)) { sanNext = true; sanLine = true; info.sans = []; }
     else if (afterSummary) continue;
     // ここから下（証明書のチェーン・鍵）は、s_client のハンドシェイクの要約（最初の Verify return code: まで）の中にだけ出る。それより後ろの同じ形の行は、
-    // サーバがハンドシェイクのあとに送ったデータ（a:PKEY: で鍵の長さと署名を上書きし、T-10②（高）を合格にできた）
+    // サーバがハンドシェイクのあとに送ったデータなので読まない（a:PKEY: で鍵の長さと署名を上書きさせない）
     else if ((m = l.match(/^v:NotBefore: (.+?); NotAfter: (.+)$/)) && info.chainDepth === 1) { info.notBefore ??= date(m[1]); info.notAfter ??= date(m[2]); }
     else if ((m = l.match(/^(\d+) s:(.*)$/))) { cur = Number(m[1]); info.chainDepth = Math.max(info.chainDepth, cur + 1); info.certs[cur] = { subject: m[2].trim() }; }
     else if ((m = l.match(/^i:(.*)$/)) && info.certs.length) info.certs[info.certs.length - 1].issuer = m[1].trim();
     else if (/no peer certificate available/i.test(l)) info.noPeerCert = true;
     // OpenSSL 3 の -showcerts。鍵の種類には id-ecPublicKey・RSASSA-PSS のようにハイフンを含むものがある。
-    // OpenSSL 3.5 は EC 鍵の長さを出さず、曲線の名前を出す（a:PKEY: EC, (prime256v1); sigalg: …）。読めないと署名がずれ、ルートの SHA-1 を T-10② にした。
+    // OpenSSL 3.5 は EC 鍵の長さを出さず、曲線の名前を出す（a:PKEY: EC, (prime256v1); sigalg: …）。
     // 署名は証明書の番号の位置に入れる（読めない行があっても、ルート証明書の判定（T-10②）がずれないように）
     else if ((m = l.match(/^a:PKEY: ([\w-]+), (?:(\d+) \(bit\)|\(([\w-]+)\)); sigalg: (\S+)/))) {
       const i = cur >= 0 ? cur : info.sigalgs.length;

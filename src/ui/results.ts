@@ -39,19 +39,19 @@ export function render() {
   const rows = overall(findings);
   const byTarget = groupByTarget(findings);   // ターゲットごとに全指摘を絞り込み直すと、ターゲット数×指摘数になる（数千件で数秒）
   const hints = missingLabelHints(targets);
-  // 絞り込み・表示の切り替えの部品は描き直すので、操作した部品にフォーカスを戻す（data-focus で同じ部品を探す。select を矢印で変えると、
-  // 1回でフォーカスが body に落ちた。第50回）
+  // 絞り込み・表示の切り替えの部品は描き直すので、操作した部品にフォーカスを戻す（data-focus で同じ部品を探す。select を矢印で変えても
+  // フォーカスを body に落とさない。WCAG 2.4.3）
   const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
-  // 章で絞り込んだ行（見出しの件数と「情報」の件数を、表の行数と合わせる。束のレビュー）
+  // 章で絞り込んだ行（見出しの件数と「情報」の件数を、表の行数と合わせる）
   const chapterRows = rows.filter(r => !state.view.chapter || chapterOf(r.item) === state.view.chapter);
   const parts: Child[] = [
     ledger(countBySeverity(rows)),
-    // 例外を当てた指摘の件数（重要度別の件数には含めない。ワイルドカードの例外で高が消えても、画面から気づけなかった。第49回）
+    // 例外を当てた指摘の件数（重要度別の件数には含めないので、ワイルドカードの例外で高が消えたことに画面から気づけるように）
     findings.some(f => f.status === 'suppressed') ? el('p', 'mt-2 text-sm text-muted', T.suppressedCount(new Set(findings.filter(f => f.status === 'suppressed').map(f => f.ruleId)).size)) : null,
     exportBar(),
     warnings.length || hints.length ? warningList([...warnings.map(w => w.detail), ...hints]) : null,
     state.last.diff ? diffBlock(state.last.diff) : null,
-    // 件数は、章で絞り込んだ表の行数と合わせる（絞り込む前の全体の件数を出していた。第51回）
+    // 件数は、章で絞り込んだ表の行数と合わせる
     heading(T.findings, findingsCount(chapterRows), el('span', 'flex flex-wrap items-center gap-3', infoToggle(chapterRows.filter(r => r.severity === 'info').length), chapterFilter())),
     rows.length ? overallTable(rows.filter(r => (!state.view.chapter || chapterOf(r.item) === state.view.chapter) && (state.view.showInfo || r.severity !== 'info'))) : el('p', 'text-muted', T.noFindings),
     heading(T.perTarget, T.count(targets.length), focusable(button(state.view.showAll ? T.showFails : T.showAll, LINK, () => { state.view.showAll = !state.view.showAll; render(); }), 'show-all')),
@@ -146,7 +146,7 @@ export const STATUS_ORDER = ['fail', 'suppressed', 'na', 'pass'];
 /** 指摘を先に、重要度の高い順、項目IDの順に並べる */
 export const byImportance = (a: Finding, b: Finding) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
   || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.ruleId.localeCompare(b.ruleId);
-/** withTarget：対象（ホスト・ラベルの組）の列を出す。ホスト単位・横断の表で、どのホストの指摘かが画面から分からなかった（第51回） */
+/** withTarget：対象（ホスト・ラベルの組）の列を出す（ホスト単位・横断の表で、どのホストの指摘かが分かるように） */
 export function findingsTable(fs: Finding[], label: string, withTarget = false) {
   const T = tr();
   const shown = mergeNa(fs.filter(f => state.view.showAll || (f.status === 'fail' && (state.view.showInfo || f.severity !== 'info'))).sort(byImportance));

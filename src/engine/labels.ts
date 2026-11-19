@@ -31,7 +31,7 @@ export function allowedItems(label: string): Allow {
   };
 }
 
-/** HARのエントリに付けられるラベルか（v0.3で使う） */
+/** HARのエントリに付けられるラベルか（parser/har.ts が使う） */
 export const allowedForHar = (label: string) => labelRow(label).har;
 
 /** 片方だけあると横断ルールを判定できない予約ラベルの組 [あるラベル, 足りないラベル, 項目] */

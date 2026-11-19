@@ -1,8 +1,7 @@
 // rules/probes.ts：C13 のプローブ（#PROBE）の判定パターン（ツール設計1「プローブの判定パターン」）。E-03・E-04・E-13 が使う
-// 以前は mask.ts にあったが、マスクとは関係がないので分けた（判定に使うだけで、表示・エクスポートにはパターン名だけを出す）
 
 // #PROBE の head は判定にだけ使い、表示・エクスポートにはパターン名だけを出す。
-// [パターン名, 判定する項目, 対象パス, 先頭64バイトの目安]（ツール設計1「プローブの判定パターン」）
+// [パターン名, 判定する項目, 対象パス, 先頭64バイトの目安]
 // パスと中身の両方が一致したときだけ、その項目のルールが使う（1つのプローブを複数の項目で計上しない）
 const PROBE_PATTERNS: [string, string, RegExp, RegExp][] = [
   // detached HEAD（CI・デプロイで多い）は、コミットの ID（SHA-1 の40桁、SHA-256 の64桁）だけの1行
@@ -14,8 +13,8 @@ const PROBE_PATTERNS: [string, string, RegExp, RegExp][] = [
   // export KEY=…（シェルで読み込む形）と、= の前後の空白（KEY = value）も。小文字の名前は、ほかの平文の応答と見分けにくいので入れない
   ['dotenv',        'E-03', /\/\.env$/,              /^(?:export[ \t]+)?[A-Z_][A-Z0-9_]*[ \t]*=/m],
   ['web-xml',       'E-03', /\/WEB-INF\/web\.xml$/,  /<web-app\b|<!DOCTYPE web-app/i],
-  // package.json・composer.json は、そのファイルに特有のキーか、名前の形（@scope/名前、vendor/名前）が先頭64バイトにあるときだけ。name・version・
-  // type のような一般的なキーだけで一致させると、どのパスにも {"name":"api","version":"1.0"} を返す API で E-03①（高）の誤検知になった。
+  // package.json・composer.json は、そのファイルに特有のキーか、名前の形（@scope/名前、vendor/名前）が先頭64バイトにあるときだけ。
+  // name・version だけでは、どのパスにも {"name":"api","version":"1.0"} を返す API と区別できない。
   // 特有のキーが64バイトより後ろにある本物のファイルは、②（判定保留。中身を手動で確認する）になる
   ['package-json',  'E-03', /\/package\.json$/,      /^\s*\{[\s\S]*?(?:"(?:private|scripts|dependencies|devDependencies|peerDependencies|workspaces|main|module|exports|bin|engines|packageManager)"\s*:|"name"\s*:\s*"@[\w.-]+\/)/],
   ['composer-json', 'E-03', /\/composer\.json$/,     /^\s*\{[\s\S]*?(?:"(?:require|require-dev|autoload|autoload-dev|minimum-stability|prefer-stable|repositories)"\s*:|"name"\s*:\s*"[\w.-]+\/[\w.-]+")/],
@@ -23,18 +22,15 @@ const PROBE_PATTERNS: [string, string, RegExp, RegExp][] = [
   ['backup',        'E-03', /\/backup\.zip$/,        /^PK\x03\x04/],
   ['phpinfo',       'E-03', /\/phpinfo\.php$/,       /phpinfo\(\)|PHP Version/],
   ['server-status', 'E-03', /\/server-status$/,      /Apache Server Status|Server Version:/],
-  // security.txt はコメント（# で始まる行）から始めてよい（先頭の64バイトがコメントだけのものを「ない」とした）。HTML・JSON のエラー画面は # で始まらない
-  // コメントで始まるのは、ファイルの先頭が「#」のときだけ（行の始めの # を見ると、CSS の #app{ を含む HTML の画面まで security.txt とした）
-  // 先頭の64バイトに Contact・Expires がなくコメントだけのもの（security-txt-comment）は、本当の security.txt かが分からない（どのパスにも
-  // 「# …」の平文を返すサーバもある）ので、E-04 は合格にせず na にする
-  // RFC 9116 のフィールドのどれか（Canonical・Policy などで始まり、Contact が64バイトより後ろにあるものを「ない」とした）。
-  // フィールド名は大文字・小文字を区別しない（RFC 9116）
+  // security.txt は、RFC 9116 のフィールドのどれか（大文字・小文字を区別しない）が先頭64バイトの行の始めにあるもの。
+  // Canonical・Policy などで始まり、Contact が64バイトより後ろにあるものもある。
+  // コメント（#）で始めてもよいが、コメントだけのもの（security-txt-comment）は本当の security.txt かが分からない（どのパスにも
+  // 「# …」の平文を返すサーバもある）ので、E-04 は na にする。見るのはファイルの先頭の # だけ（行の始めの # では、CSS の #app{ を含む HTML に一致する）
   ['security-txt',  'E-04', /\/security\.txt$/,      /^(?:Contact|Expires|Encryption|Acknowledgments|Preferred-Languages|Canonical|Policy|Hiring):/im],
   ['security-txt-comment', 'E-04', /\/security\.txt$/, /(?<![\s\S])#/],
   ['robots',        'E-04', /\/robots\.txt$/,        /^(User-agent|Disallow|Allow|Sitemap):/im],
-  // XSSI 対策の前置き（)]}' の行）を付けたソースマップもある（ブラウザの開発ツールは読む。前置きがあると「取得できない」とした）
-  // "version":3（ソースマップの版）か、ソースマップに特有のキーがあるときだけ。"version"・"file" だけで一致させると、どのパスにも
-  // {"version":"2.1.0"} を返す API で E-13①（中）の誤検知になった
+  // XSSI 対策の前置き（)]}' の行）を付けたソースマップも認める（ブラウザの開発ツールは読む）。
+  // "version":3 か、ソースマップに特有のキーがあるときだけ（"version"・"file" だけでは、どのパスにも {"version":"2.1.0"} を返す API と区別できない）
   ['source-map',    'E-13', /\.map$/,                /^(?:\)\]\}'[^\n]*\n)?\s*\{[\s\S]*?(?:"version"\s*:\s*3\b|"(?:sources|sourceRoot|sourcesContent|mappings|names|sections)"\s*:)/]];
 /**
  * プローブのパスと中身が既知のファイルに一致するか。取得できた（HTTP 2xx の）ときだけ一致とする。

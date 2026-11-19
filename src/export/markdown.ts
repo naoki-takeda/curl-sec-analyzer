@@ -9,11 +9,11 @@ import { ASVS_VERSION, IPA_EDITION, IPA_EDITION_EN, asvsLevel, standardsOf, stan
 import { covLabel, diffLabel, getLang, itemTitle, sevLabel } from '../i18n';
 import { recommendationEn } from '../recommendationsEn';
 
-// 証跡には診断対象のHTML（<img src=…> など）がそのまま入る。表示側でタグとして描画されないよう < > を実体参照にする
-// 画像・リンクの記法（![…](…)、[…](…)）とコードの記号もエスケープする。診断対象の応答（server ヘッダなど）に書かれた画像が、
-// レポートを開いたときに外部から読み込まれないようにするため。改行（CR だけの改行も、CommonMark では行の区切り）も空白にし、見出しなどを差し込めないようにする
-// 裸の URL・www.・メールアドレスは、GitHub の Markdown（GFM の自動リンク）がリンクにする。診断対象のサーバが返した Location: https://evil.example/…
-// がレポートの中のリンクになるので、ゼロ幅の空白（&#8203;）を挟んで自動リンクにしない（表示は変わらない）
+// 証跡には診断対象の HTML（<img src=…> など）がそのまま入るので、表示側でタグとして描画されないよう < > を実体参照にする。
+// 画像・リンクの記法（![…](…)、[…](…)）とコードの記号もエスケープする（診断対象の応答に書かれた画像を、レポートを開いたときに外部から読み込まない）。
+// 改行（CR だけの改行も CommonMark では行の区切り）は空白にする（見出しなどを差し込めないように）。
+// 裸の URL・www.・メールアドレスは、GFM の自動リンクがリンクにする（診断対象が返した Location: https://evil.example/… がレポートのリンクになる）ので、
+// ゼロ幅の空白（&#8203;）を挟んで自動リンクにしない（表示は変わらない）
 const noAutolink = (s: string) => s.replace(/(?<![A-Za-z0-9])(https?|ftp)(?=:\/\/)/gi, '$1&#8203;').replace(/(?<![A-Za-z0-9])(www)(?=\.)/gi, '$1&#8203;').replace(/@/g, '&#8203;@');
 const cell = (v: unknown) => noAutolink(String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/[|[\]!`\\]/g, '\\$&').replace(/\r\n?|\n/g, ' '));
 const ORDER = ['high', 'medium', 'low', 'info'];
@@ -22,10 +22,10 @@ export interface ReportExtras { profile?: Profile; diff?: { rows: DiffRow[]; bas
 
 export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppression[], generatedAt = new Date(), extra: ReportExtras = {}): string {
   const en = getLang() === 'en';
-  // 英語のレポートでは、全角の「：、（）」を使わない（Generated：…・High 0、Medium …・（was …）が残った。第50回）
+  // 英語のレポートでは、全角の「：、（）」を使わない
   const COL = en ? ': ' : '：', SEP = en ? ', ' : '、';
   const par = (s: string) => (en ? ` (${s})` : `（${s}）`);
-  // 規格の欄（ASVS 3.4.1・IPA 2.3-1)）は、英語では「, 」で区切り、閉じ括弧で終わる項番（2.3-1)）が「))」にならないよう — でつなぐ（束のレビュー）
+  // 規格の欄（ASVS 3.4.1・IPA 2.3-1)）は、英語では「, 」で区切り、閉じ括弧で終わる項番（2.3-1)）が「))」にならないよう — でつなぐ
   const std = (s: string) => (en ? ` — ${s.replace(/・/g, ', ')}` : `（${s}）`);
   const c = countBySeverity(overall(fs)); const rate = coverageRate(cov);
   const L: string[] = [];
@@ -38,7 +38,7 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
     const s = diffSummary(extra.diff.rows);
     L.push(en ? '## Changes since previous results' : '## 前回との差分', '', `${en ? 'Previous' : '前回'}${COL}${cell(extra.diff.baselineAt) || '-'}`, '');
     if (extra.diff.rulesetWarning) L.push(`> ${cell(extra.diff.rulesetWarning)}`, '');
-    if (extra.diff.profileWarning) L.push(`> ${cell(extra.diff.profileWarning)}`, '');   // 画面にだけ出ていた（第49回）
+    if (extra.diff.profileWarning) L.push(`> ${cell(extra.diff.profileWarning)}`, '');
     L.push(`- ${(['new', 'resolved', 'severity-changed', 'suppressed', 'not-rechecked', 'continuing'] as const).map(k => `${diffLabel(k)} ${s[k]}`).join(SEP)}`, '');
     L.push(`| ${en ? 'Change' : '変化'} | ${en ? 'Severity' : '重要度'} | ${en ? 'Check' : '項目'} | ${en ? 'Target' : 'ターゲット'} |`, '| --- | --- | --- | --- |');
     for (const r of extra.diff.rows.filter(x => x.kind !== 'continuing'))

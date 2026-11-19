@@ -1,4 +1,4 @@
-// engine/profile.ts：組織プロファイル（v0.4）
+// engine/profile.ts：組織プロファイル
 import type { Finding, Profile, Severity } from '../model';
 import { sessionConfig } from '../parser/setCookie';
 import ITEMS from './items.json';
@@ -9,7 +9,7 @@ const ID = /^[HCRTEA]-\d\d(\.\d+)?$/;
 const ITEM_IDS = new Set((ITEMS as { id: string }[]).map(i => i.id));
 export const knownItem = (id: string) => ID.test(id) && ITEM_IDS.has(id.replace(/\.\d+$/, ''));
 const PROFILE_KEYS = ['name', 'severity', 'exclude', 'sessionCookieNames', 'sessionMaxAgeHours', 'trustedScriptOrigins'];
-// 配列にする項目が配列でない（"exclude": "T-12"）なら、黙って空にせずエラーにする（既定の設定のまま判定したことに気づけなかった）
+// 配列にする項目が配列でない（"exclude": "T-12"）なら、黙って空にせずエラーにする（既定の設定のまま判定したことに気づけるように）
 const notArray = (v: unknown) => v !== undefined && !Array.isArray(v);
 
 export function parseProfile(text: string): { profile?: Profile; errors: string[] } {
@@ -35,9 +35,9 @@ export function parseProfile(text: string): { profile?: Profile; errors: string[
   const origins = rawOrigins.filter((x): x is string => typeof x === 'string' && ORIGIN.test(x));
   if (notArray(d.trustedScriptOrigins) || origins.length !== rawOrigins.length) errors.push('trustedScriptOrigins：https://cdn.example.com や *.example.com の形の配列にしてください');
   if (notArray(d.sessionCookieNames) || (Array.isArray(d.sessionCookieNames) && names.length !== d.sessionCookieNames.length)) errors.push('sessionCookieNames：Cookie名（英数字と記号）の配列にしてください');
-  // 数値だけを受け付ける（Number() で変換すると true が1時間、"12"・[12] が12時間になり、書き誤りに気づけなかった）
+  // 数値だけを受け付ける（Number() で変換すると true が1時間、"12"・[12] が12時間になり、書き誤りに気づけない）
   const hours = d.sessionMaxAgeHours === undefined ? 24 : typeof d.sessionMaxAgeHours === 'number' ? d.sessionMaxAgeHours : NaN;
-  const hoursOk = hours >= 1 && hours <= 24 * 400;   // 文言のとおり1以上（0.5 を受け付け、C-05 の基準を30分にした。第50回）
+  const hoursOk = hours >= 1 && hours <= 24 * 400;   // エラーの文言のとおり 1 以上 9600 以下
   if (!hoursOk) errors.push('sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）');
   // エラーにした値は使わない（既定値に戻す）
   return { profile: { name: typeof d.name === 'string' ? d.name.slice(0, 100) : '', severity, exclude, sessionCookieNames: names, sessionMaxAgeHours: hoursOk ? hours : 24, trustedScriptOrigins: origins }, errors };
@@ -62,7 +62,7 @@ export function overrideSeverity(fs: Finding[], p?: Profile): Finding[] {
   if (!p) return fs;
   return fs.map(f => {
     if (f.status !== 'fail' && f.status !== 'suppressed') return f;
-    // API の応答で情報に下げた HTML 向けの指摘（H-10 など）は、上書きで上げない（ひな形の "H-10": "low" で、API の情報の指摘を低に上げた。第48回）
+    // API の応答で情報に下げた HTML 向けの指摘（H-10 など）は、上書きで上げない（ひな形の "H-10": "low" で API の指摘を低に上げない）
     if (f.apiInfo) return f;
     const s = (f.condition !== undefined ? p.severity[`${f.item}.${f.condition}`] : undefined) ?? p.severity[f.item];
     return s && s !== f.severity ? { ...f, severity: s, originalSeverity: f.severity } : f;
@@ -80,8 +80,8 @@ export const profileTemplate = (): string => JSON.stringify({
 
 /**
  * 配信元が自社のものとして登録されているか（https://cdn.example.com・cdn.example.com・*.example.com、ポート付きの cdn.example.com:8443）。
- * ポートを書かない登録は、そのホストのどのポートにも当てはまる。書いた登録は、そのポートだけ（既定のポート :443・:80 は、書かないものと同じ。
- * URL の host は既定のポートを持たないので、https://cdn.example.com:443 の登録がどれにも当たらなかった。*.example.com は :8443 の配信元に当たらなかった）
+ * ポートを書かない登録（*.example.com を含む）は、そのホストのどのポートにも当てはまる。書いた登録は、そのポートだけ（URL の port は
+ * 既定のポートを持たないので、スキームから補って比べる。https://cdn.example.com:443 の登録も当たる）
  */
 export function isTrustedOrigin(url: URL, list: string[] = []): boolean {
   const urlPort = url.port || (url.protocol === 'http:' ? '80' : '443');

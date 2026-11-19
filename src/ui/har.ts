@@ -11,7 +11,6 @@ import { renderEmpty } from './results';
 // メッセージは文言を作る関数で渡す（言語を切り替えたら、その言語で出し直すため。main.ts の say）
 const say = (m: Message) => actions.say(m);
 
-// ---- HAR（v0.3） ----
 // 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外すを押したりしたら、前の読み込みの結果は使わない
 let harLoad = 0;
 export const cancelHarLoad = () => { harLoad++; };
@@ -47,13 +46,12 @@ function removeHar() {
 }
 
 /**
- * 一覧に出す URL（マスク済み）。チェーンごとに一度だけ作る（描き直すたびに全行の URL を3回ずつマスクし直し、長い URL の多い HAR で
- * 1回の描き直しに何十秒もかかった。第51回）
+ * 一覧に出す URL（マスク済み）。チェーンごとに一度だけ作る（描き直すたびに全行の URL をマスクし直すと、長い URL の多い HAR で遅い）
  */
 const shownUrls = new WeakMap<HarChain, string>();
 /**
  * 予約ラベルを移したエントリと、元のラベル。移したエントリがそのラベルを外したら戻す（Chromium は閉じた select を矢印で動かすたびに change を出す
- * ので、選択肢を見て回るだけで、login・logout のエントリのラベルが次々に har-N になり、戻しても元に戻らなかった。束のレビュー）
+ * ので、選択肢を見て回るだけで、login・logout のエントリのラベルを失わないため）
  */
 const moved = new Map<HarChain, { by: HarChain; label: string }>();
 /** 前に描いた HAR（別の HAR を読んだら、一覧は開いて先頭から表示する） */
@@ -61,8 +59,8 @@ let shownImp: HarImport | undefined;
 const shownUrl = (c: HarChain) => { let v = shownUrls.get(c); if (v === undefined) { v = showText(c.url); shownUrls.set(c, v); } return v; };
 export function renderHar() {
   if (!state.har) { refs.harBox.replaceChildren(); return; }
-  // 一覧は描き直すので、操作した部品のフォーカス・表のスクロール位置・開閉を戻す（チェックボックス・ラベルの選択を変えるたびに、フォーカスが
-  // body に落ち、表が先頭に戻った。第51回）
+  // 一覧は描き直すので、操作した部品のフォーカス・表のスクロール位置・開閉を戻す（チェックボックス・ラベルの選択を変えても、フォーカスを
+  // body に落とさず、表を先頭に戻さない。WCAG 2.4.3）
   const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
   const T = tr().har; const { imp, hosts } = state.har;
   const same = shownImp === imp; shownImp = imp; if (!same) moved.clear();
@@ -76,8 +74,7 @@ export function renderHar() {
   const rows = imp.chains.filter(c => hosts.has(c.host)).map(c => {
     const base = c.suggested.startsWith('har-') || c.suggested.startsWith('error-') ? c.suggested : `har-${c.id + 1}`;
     const sel = options(el('select', 'rounded-md border border-line bg-paper px-2 py-1 text-sm'),
-      // har-N は、予約ラベルをほかのエントリに移したときの戻り先なので、いつも選択肢に入れる（候補が error-N のエントリで選択肢になく、空欄に
-      // なった。第51回）
+      // har-N は、予約ラベルをほかのエントリに移したときの戻り先なので、いつも選択肢に入れる（候補が error-N のエントリでも空欄にしない）
       [...new Set([base, `har-${c.id + 1}`, `error-${c.id + 1}`, ...HAR_LABEL_CHOICES, c.label])].map((v): [string, string] => [v, v]).concat([['__exclude', T.exclude]]),
       c.excluded ? '__exclude' : c.label);
     sel.setAttribute('aria-label', T.labelFor(c.method, shownUrl(c))); sel.dataset.focus = `har-label-${c.id}`;   // 読み上げ用の名前も、画面の表示と同じくマスクする

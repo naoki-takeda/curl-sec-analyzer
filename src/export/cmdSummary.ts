@@ -1,14 +1,14 @@
 // export/cmdSummary.ts：CSV の「実施コマンド」「実施日時」に出す #META cmd=・at= の要約（第8章）
-// 残してよい形だけを残す（許可リスト）。秘密らしい場所を推し量って伏せる作り（第30回までの maskCommand）は、直前の回の修正が
-// 次の漏れを入れることを第25回〜第30回で毎回くり返したので、やめた。突き合わせのキー（engine/targetKey.ts）と同じ考え方で、
-// 出す語は次のどれかに限る。それ以外の語（値・ユーザー名・パスワード・ヘッダの値・知らない語）はすべて **** にする：
+// 秘密らしい場所を推し量って伏せるのではなく、残してよい形だけを残す（許可リスト。推し量る作りでは、どの漏れを直しても次の漏れが残る）。
+// 突き合わせのキー（engine/targetKey.ts）と同じ考え方で、出す語は次のどれかに限る。それ以外の語（値・ユーザー名・パスワード・ヘッダの値・
+// 知らない語）はすべて **** にする：
 // - コマンドのID（C1〜C26、HAR、-）。コマンド生成器と HAR の取り込みが書くのはこれだけ
 // - プログラムの名前（一覧にあるもの。パスは除く。C:\Users\<名前>\… の名前を出さない）
 // - シェルの区切り（|・;・&&・> など）
 // - オプションの名前：プログラムごとの一覧にある長いオプションと、決まった文字だけのまとめ書きの短いオプション。値を続けて書いたもの
 //   （-ualice:pw、--user=…）は名前と ****。一覧にない名前は ****（値の中の「_--secret」を名前として出さない）
-// - -H のあとのヘッダの名前（決まった形のもの）と、httpie の項目の名前（一覧にあるもの）。値は ****
-// - HTTP のメソッド、openssl のサブコマンド、環境変数の名前（決まった形のもの）
+// - -H のあとのヘッダの名前（一覧にあるか、決まった接頭辞のもの）と、httpie の項目の名前（一覧にあるもの）。値は ****
+// - HTTP のメソッド、openssl のサブコマンド、環境変数の名前（一覧にあるもの）、timeout の秒数
 // - URL は突き合わせのキーと同じ形（urlKey：パスのトークンは *、クエリは名前だけ）
 // このファイルは mask.ts を読み込まない（tests/cmd-summary.test.ts で確かめる）
 import { urlKey } from '../engine/targetKey';
@@ -72,8 +72,8 @@ const OPENSSL_LONG = longTable(`
   fingerprint sha256 sha1 pubkey serial enddate startdate purpose email hash modulus noverify legacy_renegotiation ct msg state debug prexit reconnect ocsp_uri`);
 /**
  * 短いオプション：[値を取らない文字, 値を取る文字]。まとめ書きは、値を取らない文字だけを4文字まで（同じ文字を2回使わない）並べ、最後に値を取る文字を
- * 1つ置ける。curl のまとめ書きに使うのはよく使う文字だけ（-sSLk・-fsSL・-sSIv）。ほかの値を取らない文字（-O・-J・-R など）は1文字のときだけ。
- * 文字を広げると、値の中の「_-lBA」のようなトークンのかけらをオプションとして出した
+ * 1つ置ける。curl のまとめ書きに使うのはよく使う文字だけ（-sSLk・-fsSL・-sSIv）。ほかの値を取らない文字（-O・-J・-R など）は1文字のときだけ
+ * （文字を広げると、値の中の「_-lBA」のようなトークンのかけらをオプションとして出す）
  */
 const CURL_RARE_FLAGS = 'aBijJlMnOpqRVZ0123456';   // 数字（-0・-4）も1文字のときだけ（-G102SA のようなかけらを出さない）
 const SHORT: Record<Family, [string, string]> = {
@@ -103,41 +103,37 @@ const ENV_NAMES = new Set(words(`HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY FTP_P
 const HTTPIE_PARAMS = new Set(words(`q page per_page limit offset sort order lang format username user email password token api_key apikey access_token client_id
   client_secret grant_type scope redirect_uri code state id name`));
 /**
- * 名前の形（-H のあとのヘッダ、環境変数）：英字の語を - か _ でつなぎ、語の後ろに短い数字を付けてよい。40文字まで。語ごとに24文字まで、
- * 大文字・小文字の入れ替わりは4回まで（突き合わせのキーの keyPiece と同じ。X-Api-Key・HTTPS_PROXY は残し、乱数の英字は残さない）
+ * 名前の形（-H のあとのヘッダ）：英字の語を - か _ でつなぎ、語の後ろに短い数字を付けてよい。40文字まで。語ごとに24文字まで、
+ * 大文字・小文字のかたまりは4つまで（突き合わせのキーの keyPiece と同じ。X-Api-Key は残し、乱数の英字は残さない）
  */
 const NAME_SHAPE = /^(?=.{1,40}$)[A-Za-z]+(?:[0-9][0-9.]{0,3}[A-Za-z]{0,2})?(?:[-_][A-Za-z]+(?:[0-9][0-9.]{0,3}[A-Za-z]{0,2})?)*$/;
 const nameLike = (x: string) => NAME_SHAPE.test(x) && x.split(/[-_.\d]+/).every(p => p.length <= 24 && (p.match(/[a-z]+|[A-Z]+/g) ?? []).length <= 4);
 const MAX = 200;
 
 /**
- * 1つの語。引用符で囲んだもの、URL（「_」を含む）、それ以外。閉じない引用符で残り全部を取らないよう、行の中に限る（"…" の中の \" でも閉じる。
- * \" で閉じないようにすると、閉じない引用符と \" の繰り返しで、引用符ごとに行の終わりまで読み、入力の長さの2乗の時間がかかった）。
- * 空白で区切ったコマンドでは「_」で区切らない（値の Bearer_abc_-iLkvH… を「_」で分けると、かけら -iLkvH をオプションとして出した）。
- * 空白を含まないコマンド（#META の値）だけ、「_」を区切りとする
+ * 1つの語：引用符で囲んだもの、URL、名前に「_」を含む語（環境変数の指定 HTTPS_PROXY=…・httpie の項目 api_key==…・openssl の s_client・-tls1_2）、
+ * それ以外。引用符は行の中で閉じる（閉じない引用符で残り全部を取らない。"…" の中の \" でも閉じる。\" で閉じないと、閉じない引用符と \" の
+ * 繰り返しで2乗の時間になる）。空白で区切ったコマンドでは「_」で区切らない（値の Bearer_abc_-iLkvH… を分けると、かけら -iLkvH をオプションとして
+ * 出す）。空白を含まないコマンド（#META の値）だけ、「_」を区切りとする
  */
 // URL は、空白・引用符・次のオプション（_-）・次の URL・シェルの区切り（_|）・httpie のヘッダとクエリの項目（_Name:・_api_key==）の前まで。
-// 「_name=」では止めない（?access_token=… の「_token=」で止まり、クエリの名前が切れた）。環境変数の指定（HTTPS_PROXY=…・https_proxy=…）と
-// httpie の項目（api_key==…）、openssl の s_client・-tls1_2 は、名前に「_」を含むので1つの語として読む。
-// 繰り返しは長さを区切る（区切らないと、「A_」の繰り返しで語の始まりごとに終わりまで読み、入力の長さの2乗の時間がかかった）
+// 繰り返しは長さを区切る（「A_」の繰り返しで、語の始まりごとに終わりまで読む2乗の時間にしない）
 const URL_SCHEME = String.raw`(?:[hH][tT][tT][pP][sS]?|[wW][sS][sS]?|[fF][tT][pP])`;
 const URL_STOPS = String.raw`-|(?:https?|wss?|ftp):|[|;<>]|&&|[A-Za-z][\w-]{0,40}(?::|==)`;
 /**
- * ユーザー情報（@ まで）。「_」を含むもの（svc_account:…@）も読む。「_」で区切ったコマンドで「_」を含むユーザー情報は、次の引数（_-u_・_-d_・
- * _email=・_cv@・_2>）を越えて読んだものと見分けられないので、URL を **** にする（cutInUserinfo）。越えないように読むと、ユーザー情報の中の「_-x」で
- * 切れて、ユーザー名と数字のパスワードがホストとポートとして出た（curl_https://john.doe:2024_-x@…）
+ * ユーザー情報（@ まで）。URL の残りより先に読み、「_」を含むもの（svc_account:…@）も読む。「_」で区切ったコマンドで「_」を含むユーザー情報は、
+ * 次の引数（_-u_・_-d_・_email=・_cv@・_2>）を越えて読んだものと見分けられないので、URL を **** にする（ambiguousUrl）。越えないように読むと、
+ * ユーザー情報の中の「_-x」で切れて、ユーザー名と数字のパスワードがホストとポートに見える（curl_https://john.doe:2024_-x@…）
  */
 const USERINFO = String.raw`(?:[^\s/?#@]{0,200}@)?`;
 /**
  * 空白を含まないコマンド（#META の値は空白を入れられないので「_」で区切る）では、URL のパスの部分を「_」で終える。「_」で区切った URL のあとの値
- * （login__w-2-bL_…）がパスの続きとして読まれ、キーの形でも英字・数字のかけらが残った。パスに「_」を含む URL（/api/user_info）は
- * /api/user と **** になる。空白で区切ったコマンドでは、パスの「_」も URL の一部として読む
+ * （login__w-2-bL_…）をパスの続きとして読まないため。パスに「_」を含む URL（/api/user_info）は /api/user と **** になる。空白で区切った
+ * コマンドでは、パスの「_」も URL の一部として読み、「_name=」の前で止める（httpie の本文の項目 _password=… をパスとして読まない）。
+ * クエリ（? のあと）では「_name=」で止めない（?access_token=… の名前を「_token=」で切らない。クエリの値はキーに残らない）
  */
 const buildToken = (underscoreForm: boolean) => new RegExp([
   String.raw`"[^"\n]*"`, String.raw`'[^'\n]*'`,
-  // パスの部分では「_name=」の前でも止める（httpie の本文の項目 _password=… を URL のパスとして読み、値のかけらをパスの語として出した）。
-  // クエリ（? のあと）では止めない（?access_token=… の「_token=」で止まり、クエリの名前が切れた。クエリの値はキーに残らない）
-  // ユーザー情報（@ まで）は先に読む（「_」「\」を含むユーザー名 svc_account:…@ で URL が切れ、前半がホストとして出た）
   underscoreForm
     ? String.raw`${URL_SCHEME}:\/\/${USERINFO}[^\s"'?#_]*(?:[?#][^\s"']*?(?=[\s"']|_(?:${URL_STOPS})|$))?`
     : String.raw`${URL_SCHEME}:\/\/${USERINFO}[^\s"'?#]*?(?:(?=[\s"']|_(?:${URL_STOPS}|[A-Za-z][\w-]{0,40}=)|$)|[?#][^\s"']*?(?=[\s"']|_(?:${URL_STOPS})|$))`,
@@ -159,8 +155,8 @@ function* tokenize(s: string, underscoreForm: boolean): Generator<[string, numbe
   while (i < s.length) {
     SEP.lastIndex = i; const sep = SEP.exec(s); if (sep) { i += sep[0].length; continue; }
     TOKEN.lastIndex = i; const t = TOKEN.exec(s);
-    // 閉じていない引用符は区切りとして読み飛ばす（引用符から「_」までを1つの語として URL と読むと、"https://john.doe_svc:…@ のユーザー名を
-    // ホストとして出した。読み飛ばすと、次の位置から URL をユーザー情報ごと読む）
+    // 閉じていない引用符は区切りとして読み飛ばす（次の位置から URL をユーザー情報ごと読む。引用符から「_」までを1つの語として URL と読むと、
+    // "https://john.doe_svc:…@ のユーザー名がホストに見える）
     if (!t || !t[0]) { if (!/["']/.test(s[i])) yield [s[i], i + 1]; i++; continue; }
     i += t[0].length; yield [t[0], i];
   }
@@ -169,11 +165,10 @@ function* tokenize(s: string, underscoreForm: boolean): Generator<[string, numbe
 /**
  * URL のユーザー情報の途中で切れたかもしれない URL（**** にする）：URL の始まりから、コマンドの値（#META cmd= の1つの値）の終わりまでに @ があるもの。
  * ただし、URL の語の中のユーザー情報の @ が1つだけのもの（https://alice:pw@host/）は除く。
- * URL は引用符・\"・\ ・・・改行・閉じない引用符・「_」・200文字を超えるユーザー情報などで、ユーザー情報の途中で切れる。切れると、切れる前のユーザー名と
- * 数字のパスワードがホストとポートに見える（'https://first.last:'"$PASS"'@host/・https://first.last:1234・abc@host/）。切れ方を数え上げて見分ける作りは、
- * 第33回のコミット前のレビューで3回続けて別の切れ方が見つかった。ユーザー情報の終わりの @ は、どこで切れても必ず URL のあとにあるので、@ があるかだけを見る。
- * @ のあとに値を書いた URL（?email=alice@example.com、/@alice、-u alice@corp のあとの URL ではない、前の URL）も **** になる（伏せすぎを選ぶ）。
- * 「_」で区切ったコマンドで「_」を含むユーザー情報も、次の引数（_-u_・_email=・_cv@）を越えて読んだものと見分けられないので **** にする
+ * URL は引用符・\"・\ ・・・改行・閉じない引用符・「_」・200文字を超えるユーザー情報などで、ユーザー情報の途中で切れる。切れると、切れる前の
+ * ユーザー名と数字のパスワードがホストとポートに見える（'https://first.last:'"$PASS"'@host/）。切れ方は数え上げきれないので、どこで切れても
+ * 必ず URL のあとにあるユーザー情報の終わりの @ があるかだけを見る。@ のあとに値を書いた URL（?email=alice@example.com、/@alice、
+ * -u alice@corp の前の URL）も **** になる（伏せすぎを選ぶ）。「_」で区切ったコマンドで「_」を含むユーザー情報も **** にする（USERINFO）
  */
 const ambiguousUrl = (t: string, start: number, end: number, lastAt: number, underscoreForm: boolean): boolean => {
   const u = unquote(t).replace(/^[A-Za-z][\w+.-]*:\/\//, '');
@@ -188,7 +183,7 @@ const programName = (t: string): string => unquote(t).split(/[\\/]/).pop()!.repl
 /**
  * URL：突き合わせのキーの形にする。次のものは ****：
  * - ユーザー情報のパスワードに「/」「\」「?」「#」があり、ホストの前に @ がないもの（https://alice:2024#pw@…）。ホストの部分にユーザー名やパスワードが残る
- * - ホストが「.」を含まないもの（localhost と IP アドレスは除く）。URL がユーザー情報の途中で切れると（引用符を含むパスワード）、ユーザー名がホストとして出た
+ * - ホストが「.」を含まないもの（localhost と IPv6 アドレスは除く）。URL がユーザー情報の途中で切れると（引用符を含むパスワード）、ユーザー名がホストに見える
  * - キーが1つの語として読めない形（「_-」・引用符を含む。もう一度かけたときに変わらないように）
  * クエリは一覧にある名前だけ（ほかの名前は *。値は出さない。突き合わせのキーが残す ?sort=・?type= の値も出さない。値のない ?Sunshine の語と、
  * 「_」で区切ったコマンドでクエリに続いた引数（?x_password=…）を名前として出さない）
@@ -196,10 +191,10 @@ const programName = (t: string): string => unquote(t).split(/[\\/]/).pop()!.repl
 const url = (raw: string): string => {
   const rest = raw.replace(/^[A-Za-z][\w+.-]*:\/\//, '');
   const authority = rest.match(/^[^/\\?#]*/)![0];
-  // ユーザー情報がホストの後ろまで続いたもの（パスワードに / ? # \ があり、@ がホストの前にない）は **** にする。パスの @ は、部分の先頭（/@alice の
-  // ハンドル）だけを URL の文字とする（https://alice.smith:2024/p/w@host.example/ のユーザー名とパスワードの一部を、ホストとパスとして出した）。
-  // クエリ・フラグメントの @ は、あとにホストらしい語と / : ? # \ か終わりが続くもの（?x=y@host.example/）をユーザー情報の続きとする。
-  // ?email=alice@example.com&page=2 は出す（全体を **** にすると、メールアドレスのクエリやハンドルのパスの URL を出さなかった）
+  // ユーザー情報がホストの後ろまで続いたもの：オーソリティに @ がなく、ポートでない「:」があるか、パス・クエリ・フラグメントにユーザー情報の続きの @
+  // があるもの。パスの @ は、部分の先頭（/@alice のハンドル）だけを URL の文字とする（https://alice.smith:2024/p/w@host.example/ をホストとパスとして
+  // 出さない）。クエリ・フラグメントの @ は、あとにホストらしい語と / : ? # \ か終わりが続くもの（?x=y@host.example/）だけを続きとする
+  // （?email=alice@example.com&page=2 は出す）
   const after = rest.slice(authority.length);
   const path = after.match(/^[^?#]*/)![0], tail = after.slice(path.length);
   if (!authority.includes('@') && (/(?:^|[^/])@/.test(path) || /@[\w-]+(?:\.[\w-]+)+(?:[:/?#\\]|$)/.test(tail) || /:[^\d@]/.test(authority.replace(/^\[[^\]]*\]/, '')))) return '****';
@@ -207,8 +202,8 @@ const url = (raw: string): string => {
   const t = q < 0 ? raw : raw.slice(0, q);
   const names = q >= 0 && raw[q] === '?' ? raw.slice(q + 1).split('#')[0].split('&').map(x => x.split('=')[0]).filter(Boolean) : [];
   const query = [...new Set(names.map(n => (QUERY_NAMES.has(n.toLowerCase()) ? n : '*')))].sort().join('&');
-  // パスの部分のうち、一部でも * になったもの（トークンを含む部分）は、全体を * にする（「_」で区切った URL のあとの値がパスの続きとして読まれたときに、
-  // 値の英字のかけら（0-AAaa____*-A_aa の AAaa）を出さないように）
+  // パスの部分のうち、一部でも * になったもの（トークンを含む部分）は、全体を * にする（「_」で区切った URL のあとの値をパスの続きとして読んだときに、
+  // 値の英字のかけら（0-AAaa____*-A_aa の AAaa）を出さない）
   const k = urlKey(t).replace(/^((?:[a-z][\w+.-]*:)?\/\/[^/?#]*)?([^?#]*)/i, (_, origin: string | undefined, path: string) =>
     `${origin ?? ''}${path.split('/').map(seg => (seg.includes('*') ? '*' : seg)).join('/')}`);
   const host = k.match(/^[a-z][\w+.-]*:\/\/([^/?#]*)/i)?.[1] ?? '';
@@ -219,10 +214,10 @@ const url = (raw: string): string => {
 };
 /**
  * -H の値（引用符の中のものを含む）：ヘッダの名前が一覧にあるか、決まった接頭辞（X-・Sec-・Accept-・Content-・If-・CF- など）で始まるものだけ名前を残し、
- * それ以外は ****。形だけで判断すると、値のかけら「_-H」のあとのユーザー名（-H alice:x）をヘッダの名前として出した
+ * それ以外は ****（形だけでは、値のかけら「_-H」のあとのユーザー名 -H alice:x と見分けられない）
  */
 const HEADER_PREFIX = /^(?:x|sec|accept|content|if|access-control-request|cf|cdn|ocp-apim|proxy)-/i;
-// 「_」を含む名前（X-Foo_Bar）は出さない（「_」で区切って読むと、もう一度かけたときに結果が変わった）
+// 「_」を含む名前（X-Foo_Bar）は出さない（「_」で区切って読むと、もう一度かけたときに結果が変わる）
 const headerName = (n: string) => !n.includes('_') && nameLike(n) && (HTTPIE_HEADERS.has(n.toLowerCase()) || (HEADER_PREFIX.test(n) && n.includes('-') && n.length > 2));
 const header = (t: string): string => {
   const inner = unquote(t);
@@ -249,8 +244,7 @@ const shortOption = (t: string, fam: Family): { text: string; takesValue: boolea
 /** 1つのコマンド（・・改行で区切ったもの）を要約する */
 function summarizeOne(raw: string, lastAt: number): string {
   const s = raw.trim();
-  // 空白を含まないコマンド（引用符の中の空白は数えない。数えると、curl_-H_"X-Note: a b"_https://… を空白で区切ったコマンドと読み、「_」で区切らずに
-  // すべて **** にした）
+  // 空白を含まないコマンドか（引用符の中の空白は数えない。curl_-H_"X-Note: a b"_https://… も「_」で区切って読む）
   const underscoreForm = !/\s/.test(s.replace(/"[^"\n]*"|'[^'\n]*'/g, ''));
   // 最後の @ の位置（s の中の位置にする。s は raw の先頭の空白を除いたもの）
   const at = lastAt - (raw.length - raw.trimStart().length);
@@ -268,23 +262,20 @@ function summarizeOne(raw: string, lastAt: number): string {
     if (len > MAX) break;
     if (t === '…') { push('…'); continue; }   // 切り詰めの印（もう一度かけても変わらないように残す）
     if (OPERATOR.test(t)) { push(t); atProgram = true; expect = undefined; continue; }
-    // 前に置くプログラム（sudo・timeout・env・xargs など）のあとの秒数（timeout 10）
-    // 数字を出すのは timeout のあとだけ（sudo 12345 curl の 12345 は何か分からない）
+    // timeout の秒数（timeout 10 curl …）はそのまま出す。ほかの前置きのプログラムのあとの数字は出さない（sudo 12345 curl の 12345 は何か分からない）
     if (atProgram && /^\d{1,5}[smhd]?$/.test(t) && out.length && programName(out[out.length - 1]) === 'timeout') { push(t, false); continue; }
     if (atProgram) {
       // 環境変数の指定（HTTPS_PROXY=… curl）は、一覧にある名前だけ（「_」で区切った curl_<ユーザー名>=… を環境変数の名前として出さない）
       const env = t.match(/^([A-Za-z][A-Za-z0-9_]{0,40})=/);
-      // 一覧にない名前は ****=****（**** にすると、もう一度かけたときにプログラムの名前と区別できず、結果が変わった）
+      // 一覧にない名前は ****=****（**** にすると、もう一度かけたときにプログラムの名前と区別できず、結果が変わる）
       if (env) { push(ENV_NAMES.has(env[1].toUpperCase()) ? `${env[1]}=****` : '****=****', false); continue; }
       if (t === '****=****') { push(t, false); continue; }
-      // プログラムの位置の語は、前の **** とまとめない（まとめると、もう一度かけたときに次の語をプログラムと読んで結果が変わった）
-      // 一覧は自分のキーだけを引く（FAMILY['constructor'] がプロトタイプの関数を拾い、CSV のエクスポートが例外で黙って失敗した）
+      // プログラムの位置の語は、前の **** とまとめない（まとめると、もう一度かけたときに次の語をプログラムと読んで結果が変わる）
+      // 一覧は自分のキーだけを引く（FAMILY['constructor'] でプロトタイプの関数を拾わない）
       prog = programName(t); const f = Object.prototype.hasOwnProperty.call(FAMILY, prog) ? FAMILY[prog] : undefined;
       // 次の語をプログラムとして読むのは、名前を出した前置きのプログラムのあとだけ（**** と出したあとに読むと、もう一度かけたときに **** のあとの
-      // curl をプログラムと読まず、結果が変わった）
+      // curl をプログラムと読まず、結果が変わる）
       push(f ? prog : '****', false); fam = f ?? 'other'; atProgram = !!f && PREFIX_PROGRAMS.has(prog);
-      // timeout の秒数（timeout 10 curl …）はそのまま出す
-      if (prog === 'timeout') expect = undefined;
       continue;
     }
     if (expect) {
@@ -354,7 +345,7 @@ export const summarizeCommand = (s: string): string => {
 
 /**
  * #META at= の値：ありうる日時だけをそのまま出し、それ以外は ****。年は1900〜2099、月・日・時・分・秒と時差（±14時間、分は00・15・30・45）は
- * 範囲の中だけ（形だけを見ると、9999-99-99 や 4111-11-11T11:11:11.111111+1111 のような任意の数字を出した）。秒の小数は3桁までにする
+ * 範囲の中だけ（形だけを見ると、9999-99-99 や 4111-11-11T11:11:11.111111+1111 のような任意の数字を出す）。秒の小数は3桁までにする
  */
 const DATE_TIME = /^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?)?(?:Z|[+-](?:0\d|1[0-4]):?(?:00|15|30|45))?$/;
 export const summarizeAt = (s: string): string => (!s ? '' : DATE_TIME.test(s.trim()) ? s.trim().replace(/(\.\d{3})\d+/, '$1') : '****');

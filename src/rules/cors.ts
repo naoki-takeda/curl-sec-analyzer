@@ -12,7 +12,7 @@ const sameHostOrigin = (ctx: RuleContext): boolean => {
   try { return new URL(o).host.toLowerCase() === host.toLowerCase(); } catch { return false; }
 };
 // ACAO・ACAC が2回以上あれば、ブラウザは値を「, 」でつないだ1つの値として見る（Fetch Standard）。つないだ値は Origin とも * とも一致せず、
-// CORS の検査は失敗する。最初の値だけを見ると、アプリと nginx の add_header が両方付けた応答を、反射（R-01①）と誤判定した
+// CORS の検査は失敗する（アプリと nginx の add_header が両方付けた応答を、最初の値だけで反射（R-01①）としない）
 const acaoOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-origin')?.map(v => v.trim()).join(', ') || undefined;
 // ACAC は値が「true」と完全に一致するときだけ資格情報を許可する（大文字・小文字を区別する。TRUE はブラウザが受け付けない）
 const credOf = (ctx: RuleContext) => ctx.final?.headers.get('access-control-allow-credentials')?.map(v => v.trim()).join(', ') === 'true';
@@ -53,9 +53,9 @@ export function isLookalike(ctx: RuleContext, origin?: string): boolean {
 
 /**
  * -v で採取したのに Origin を送っていない（送信ヘッダは全部見えている）。CORS のミドルウェアの多くは Origin があるときだけ ACAO を返すので、
- * ACAO がないことは「反射しない」「null を許可しない」の根拠にならない（合格にすると、カバレッジも水増しになる）。-i では送信ヘッダが見えないので対象外
+ * ACAO がないことは「反射しない」「null を許可しない」の根拠にならない（合格にすると、カバレッジも水増しになる）。HAR もリクエストのヘッダが
+ * 分かるので -v と同じに扱う。-i では送信ヘッダが見えないので対象外
  */
-// HAR もリクエストのヘッダが分かるので、-v と同じく Origin を送っていないことが分かる（分からないものとして R-06① にした）
 const noOriginSent = (ctx: RuleContext) => (ctx.target.verbose || ctx.target.meta.source === 'har') && !ctx.target.sentOrigin;
 const NO_ORIGIN_REC = 'C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す';
 export const corsReflect: Rule = { id: 'R-01', title: 'Origin反射', appliesTo: 'any', scope: 'target',
@@ -100,7 +100,7 @@ export const corsPartial: Rule = { id: 'R-03', title: '部分一致の不備', a
   basis: ['PortSwigger Web Security Academy: CORS'],
   run(ctx) {
     // 送った Origin が見えない -i の cors-partial（C6 の似せた Origin）は、R-01 のテスト値と同じく、似せた Origin の ACAO を反射とみなす。
-    // ACAO が似せた形でなければ、何を送ったか分からないので na（[] にすると、評価したのに「適用外」になり、R-01 も na で何も判定しなかった）
+    // ACAO が似せた形でなければ、何を送ったか分からないので na（R-01 も na なので、[]（適用外）にすると何も判定しないことが見えない）
     const partialLabel = ctx.target.sentOrigin === undefined && baseLabel(ctx.target.label) === 'cors-partial';
     const acao = acaoOf(ctx);
     const sent = ctx.target.sentOrigin ?? (partialLabel && isLookalike(ctx, acao) ? acao : undefined);
@@ -118,9 +118,9 @@ export const corsWildcard: Rule = { id: 'R-04', title: 'ワイルドカード', 
   run(ctx) {
     if (!ctx.final) return [mk(corsWildcard, ctx, 'na', 'info', 'na', '応答がない', '')];
     const acao = acaoOf(ctx);
-    // Origin を送っていない応答の ACAO のなさは、* を返さないことの証拠にならない（Spring の allowedOrigins("*") など、ミドルウェアの多くは Origin が
-    // あるときだけ ACAO を返す。R-01・R-02 と同じく na。合格にして、カバレッジも水増しした。第50回）。
-    // -i（送ったヘッダが見えない）でも、cors-* のラベル（C6 のとおり Origin を送る）でなければ、送ったとは分からないので同じく na（curl と HAR で結果をそろえる）
+    // Origin を送っていない応答の ACAO のなさは、* を返さないことの証拠にならない（Spring の allowedOrigins("*") など、ミドルウェアの多くは
+    // Origin があるときだけ ACAO を返す）ので、R-01・R-02 と同じく na（合格にするとカバレッジも水増しになる）。-i（送ったヘッダが見えない）でも、
+    // cors-* のラベル（C6 のとおり Origin を送る）でなければ、送ったとは分からないので同じく na（curl と HAR で結果をそろえる）
     if (!acao && !ctx.target.sentOrigin && (noOriginSent(ctx) || !/^cors-/.test(baseLabel(ctx.target.label))))
       return [mk(corsWildcard, ctx, 'na', 'info', 'na', 'ACAOなし（Origin を送っていない、または送ったかが分からない）', NO_ORIGIN_REC)];
     if (acao !== '*') return [mk(corsWildcard, ctx, 'ok', 'info', 'pass', acao ? `ACAO: ${acao}` : '(ACAOなし)', '')];
@@ -138,7 +138,7 @@ export const corsPreflight: Rule = { id: 'R-05', title: 'プリフライト応�
     const methods = ctx.final?.headers.get('access-control-allow-methods')?.join(',');
     const maxAge = ctx.final?.headers.get('access-control-max-age')?.[0];
     // プリフライト応答だけ。cors-preflight のラベル（C8 で許可外の Origin のプリフライトを送ったもの）で Allow-Methods も Max-Age もないなら、
-    // プリフライトを許可しなかったので合格（[] にすると、判定できたのに適用外になり、カバレッジで判定済みに数えなかった。第48回）
+    // プリフライトを許可しなかったので合格（適用外にせず、カバレッジで判定済みに数える）
     if (!ctx.final || (!methods && !maxAge)) return ctx.final && baseLabel(ctx.target.label) === 'cors-preflight'
       ? [mk(corsPreflight, ctx, 'ok', 'info', 'pass', `HTTP ${ctx.final.status}（プリフライトを許可していない）`, '')] : [];
     const out = [];
@@ -166,22 +166,21 @@ export const corsVary: Rule = { id: 'R-06', title: 'Vary: Origin', appliesTo: 'a
     if (vary.split(',').some(s => ['origin', '*'].includes(s.trim()))) return [mk(corsVary, ctx, 'ok', 'info', 'pass', `Vary: ${vary}`, '')];
     // プリフライト（OPTIONS）の応答は HTTP のキャッシュに保存されない（RFC 9110 9.3.7）ので、Vary: Origin は要らない
     if (baseLabel(ctx.target.label) === 'cors-preflight') return [];
-    // 送った Origin と違う ACAO（https://evil.example を送って https://app.example.com が返った）は、Origin によって変わる値かが分からない
-    // （固定の値のこともある。①にした。第50回）。許可した Origin を送って ACAO が変わるかを見る
+    // 送った Origin と違う ACAO（https://evil.example を送って https://app.example.com が返った）は、Origin によって変わる値か、固定の値かが
+    // 分からないので na（許可した Origin を送って ACAO が変わるかを見てもらう）
     if (ctx.target.sentOrigin && !acao.split(/\s*,\s*/).includes(ctx.target.sentOrigin)) return [mk(corsVary, ctx, 'na', 'info', 'na', `ACAO: ${acao}（送った Origin と違う。Origin によって変わる値かが分からない）`, 'ACAO に返った Origin を送って採取し、ACAO が Origin によって変わるかを確かめる')];
-    // Vary がなく、送った Origin が分からない（-i。送信ヘッダの見えない採取）ときは、ACAO が Origin によって変わる値かが分からないので na
-    // ただし ACAO が既知のテスト値（https://evil.example）なら、R-01 と同じく送った Origin を反射した値とみなす（R-01 が反射を指摘しても na にした）
+    // Vary がなく、送った Origin が分からない（-i。送信ヘッダの見えない採取）ときは、ACAO が Origin によって変わる値かが分からないので na。
+    // ただし ACAO が既知のテスト値（https://evil.example）なら、R-01 と同じく送った Origin を反射した値とみなす（R-01 と結果をそろえる）
     if (!ctx.target.verbose && !ctx.target.sentOrigin && ctx.target.meta.source !== 'har' && !TEST_ORIGINS.includes(acao)) return [mk(corsVary, ctx, 'na', 'info', 'na', `ACAO: ${acao}（送った Origin が分からない）`, '-v を付けて、Origin を送って採取し直す')];
     return [mk(corsVary, ctx, 1, 'low', 'fail', `ACAO: ${acao} / Vary: ${vary || '(なし)'}`, 'Origin によって ACAO を変えるなら Vary: Origin を付ける（キャッシュ汚染の防止）')];
   } };
 
 // Set-Cookie・Set-Cookie2 は禁止された応答ヘッダで、Access-Control-Expose-Headers に書いてもスクリプトには公開されない（数えない）
 const SENSITIVE_EXPOSE = /\b(authorization|x-auth[\w-]*|[\w-]*token[\w-]*|x-internal[\w-]*|x-debug[\w-]*)\b/i;
-// 名前に token を含んでも、認証のトークンではないヘッダ（CSRF 対策のトークンは SPA が読むために公開する。ページ送りのトークンも秘密ではない）。
-// token を含む名前だけに使う（X-Debug-Async-Trace、X-Internal-Pagecache-Node のような内部ヘッダまで除かないため）
-// レート制限の項目（x-ratelimit-remaining-tokens など。LLM の API は消費したトークン数を返す）も認証のトークンではない
-// 利用量の項目（X-Tokens-Used、X-Total-Count）も
-// used・count・limit は語として（X-Account-Token の account の count に一致させない）
+// 名前に token を含んでも、認証のトークンではないヘッダ：CSRF 対策のトークン（SPA が読むために公開する）、ページ送りのトークン、
+// レート制限・利用量の項目（x-ratelimit-remaining-tokens・X-Tokens-Used。LLM の API は消費したトークン数を返す）。
+// token を含む名前だけに使う（X-Debug-Async-Trace、X-Internal-Pagecache-Node のような内部ヘッダまで除かないため）。
+// used・count・limit は語として見る（X-Account-Token の account の count に一致させない）
 const NOT_AUTH_TOKEN = /csrf|xsrf|page|next|continuation|cursor|sync|rate-?limit|remaining|usage|(?:^|[-_])(?:used|count|limit)(?:[-_]|$)/i;
 export const corsExpose: Rule = { id: 'R-07', title: 'Access-Control-Expose-Headers', appliesTo: 'any', scope: 'target',
   basis: ['MDN'],
@@ -193,7 +192,6 @@ export const corsExpose: Rule = { id: 'R-07', title: 'Access-Control-Expose-Head
     return [mk(corsExpose, ctx, 'ok', 'info', 'pass', v, '')];
   } };
 
-// ---- 以下 v0.3 で追加（R-08、R-09） ----
 export const timingAllowOrigin: Rule = { id: 'R-08', title: 'Timing-Allow-Origin', appliesTo: 'any', scope: 'target',
   basis: ['W3C Resource Timing', 'MDN'],
   run(ctx) {

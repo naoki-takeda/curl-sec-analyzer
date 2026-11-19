@@ -1,6 +1,7 @@
 // engine/run.ts：評価の順序（ツール設計2）
 // ①ラベル対応表で項目を絞る → ②ターゲット単位 → ③ホスト単位 → ④横断（各スコープ内は dependsOn の順に並べてある）
-// → ⑤条件単位の絞り込み（ターゲット単位の結果）→ ⑥API応答での重要度の引き下げ → ⑦例外の適用
+// → ⑤条件単位の絞り込み（ターゲット単位の結果）→ ⑥API応答での重要度の引き下げ → ⑦組織プロファイルの除外 → ⑧二重減点の除去
+// → ⑨重要度の上書き → ⑩例外の適用（docs/design.md「評価の順序」）
 import type { CrossContext, Finding, Profile, Rule, RuleContext, Suppression, Target } from '../model';
 import { showText } from '../shownText';
 import { targetKeys, urlKey } from './targetKey';
@@ -15,7 +16,7 @@ import { excludeItems, overrideSeverity, withProfile } from './profile';
 const HTML_ONLY_ITEMS = new Set(['H-03', 'H-04', 'H-05', 'H-06', 'H-07', 'H-09', 'H-10', 'H-11', 'H-14']);
 
 /**
- * 二重減点の除去（第0章 0.2「同じ事象は1つの項目でだけ減点」、評価順序の⑦）。
+ * 二重減点の除去（第0章 0.2「同じ事象は1つの項目でだけ減点」、評価順序の⑧）。
  * 同じターゲットで keep が fail のとき、drop の fail は数えない（status を na にし、dedupedBy に keep を残す）
  */
 export const DEDUPE: { keep: string; drop: string; why: string }[] = [
@@ -23,7 +24,7 @@ export const DEDUPE: { keep: string; drop: string; why: string }[] = [
   { keep: 'A-09.3', drop: 'H-03.1', why: 'API応答の CSP なしは A-09③ で数える' },
   { keep: 'A-09.1', drop: 'H-13.2', why: 'JSON を text/html で返す件は A-09① で数える（第0章 0.2）' },
 ];
-export function dedupe(fs: Finding[]): Finding[] {
+function dedupe(fs: Finding[]): Finding[] {
   const fails = new Set(fs.filter(f => f.status === 'fail').map(f => `${f.ruleId}\u0000${f.target}`));
   return fs.map(f => {
     if (f.status !== 'fail') return f;
@@ -33,10 +34,11 @@ export function dedupe(fs: Finding[]): Finding[] {
 }
 
 /** ホストごとにHSTSが有効か（C-01②③の依存先。ログイン関連ターゲットではH-01を実行しないため、ホスト単位で先に求める） */
-export function hostHstsMap(targets: Target[]): Map<string, boolean> {
+function hostHstsMap(targets: Target[]): Map<string, boolean> {
   const m = new Map<string, boolean>();
   for (const t of targets) {
-    // apex は、apex 自身の応答（転送の最初のホップ）で見る（rules/headers.ts の H-01 と同じ）
+    // apex は、ownChain の最初のホップで見る（H-01 の apexHop（rules/headers.ts）とは選び方が違い、http から -L で www へ転送した採取では
+    // www の応答になる）
     const host = hostOf(t); const f = baseLabel(t.label) === 'apex' ? ownChain(t)[0] : finalResponse(t);
     if (!host || isHttps(t) !== true || !f) continue;
     const age = parseHsts(f.headers.get('strict-transport-security')?.[0]).maxAge;   // H-01 と同じ読み方（無効なヘッダは HSTS なし）
@@ -65,16 +67,16 @@ export function hostSameSiteMap(targets: Target[]): Map<string, boolean> {
   return m;
 }
 
-export interface HostMaps { hsts: Map<string, boolean>; sameSite: Map<string, boolean>; }
+interface HostMaps { hsts: Map<string, boolean>; sameSite: Map<string, boolean>; }
 
-export function contextOf(t: Target, findings: Finding[], maps: HostMaps, profile?: Profile): RuleContext {
+function contextOf(t: Target, findings: Finding[], maps: HostMaps, profile?: Profile): RuleContext {
   const final = finalResponse(t); const host = hostOf(t);
   return { target: t, final, chain: chainOf(t), isHttps: isHttps(t), responseKind: responseKind(t, final),
            sensitive: isSensitive(t), hostHsts: host ? maps.hsts.get(host) : undefined,
            hostSessionSameSite: host ? maps.sameSite.get(host) : undefined, profile, now: capturedAt(t), findings };
 }
 
-export function crossContext(targets: Target[], findings: Finding[]): CrossContext {
+function crossContext(targets: Target[], findings: Finding[]): CrossContext {
   return {
     targets, findings,
     byLabel: l => targets.find(t => t.label === l),
@@ -88,10 +90,10 @@ export function crossContext(targets: Target[], findings: Finding[]): CrossConte
   };
 }
 
-export interface RunOptions { rules?: Rule[]; hostRules?: Rule[]; crossRules?: Rule[]; suppressions?: Suppression[]; today?: string; profile?: Profile; }
+interface RunOptions { rules?: Rule[]; hostRules?: Rule[]; crossRules?: Rule[]; suppressions?: Suppression[]; today?: string; profile?: Profile; }
 
 export function runAll(targets: Target[], opt: RunOptions = {}): Finding[] {
-  // ⑦ プロファイルの除外 → 二重減点の除去 → 重要度の上書き → 例外
+  // ⑦ プロファイルの除外 → ⑧ 二重減点の除去 → ⑨ 重要度の上書き → ⑩ 例外
   return withProfile(opt.profile, () => {
     // 機密応答の推定（送ったセッションCookie）は、組織プロファイルのセッションCookieの名前で作り直す（パーサはプロファイルを知らない）
     for (const t of targets) if (t.sentCookieNames || t.sentAuthorization) t.sentAuth = sentAuthOf(!!t.sentAuthorization, t.sentCookieNames ?? []);
@@ -117,8 +119,8 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
   const { rules = TARGET_RULES, hostRules = HOST_RULES, crossRules = ALL_CROSS_RULES } = opt;
   const findings: Finding[] = [];
   const maps: HostMaps = { hsts: hostHstsMap(targets), sameSite: hostSameSiteMap(targets) };
-  // ターゲットごとの文脈・許可・URL・キーは一度だけ作る（ルールごとに作り直すと、ルール数 × ターゲット数の時間がかかる）。
-  // 文脈の findings は同じ配列を指すので、依存先のルールの結果も見える
+  // ターゲットごとの文脈・許可・URL・キーは一度だけ作る（ルール数 × ターゲット数の時間をかけない）。
+  // 文脈の findings は同じ配列を指すので、依存先のルールの結果も見える。
   // 差分・例外の突き合わせのキーは、マスクと切り離して engine/targetKey.ts で作る
   const keys = targetKeys(targets);
   const per = targets.map((t, i) => ({ t, url: t.url ? showText(t.url) : undefined, keyUrl: t.url ? urlKey(t.url) : undefined, targetKey: keys[i], host: hostOf(t), allow: allowedItems(t.label),
@@ -127,19 +129,19 @@ function evaluate(targets: Target[], opt: RunOptions): Finding[] {
     for (const { t, url, keyUrl, targetKey, host, allow, ctx } of per) {
       if (!allow.allowsItem(rule.id)) continue;               // ①
       if (rule.appliesTo === 'html' && ctx.responseKind === 'other') continue;
-      // Location のある 3xx の本文（nginx の 301 の HTML、Rails の「You are being redirected」）は、ブラウザが表示しないので HTML の項目（ヘッダ・描画。
-      // H-03①（高）・H-06①・H-14① など）を判定しない。本文の秘密（E-09）は利用者に届くので判定する（H-08・H-13 も転送を除いている）
+      // Location のある 3xx の本文（nginx の 301 の HTML、Rails の「You are being redirected」）は、ブラウザが表示しないので HTML の項目
+      // （ヘッダ・描画。H-03①・H-06①・H-14① など）を判定しない。本文の秘密（E-09）は利用者に届くので判定する（H-08・H-13 も転送を除いている）
       if (rule.appliesTo === 'html' && rule.id !== 'E-09' && isRedirectWithLocation(ctx.final)) continue;
       if (rule.appliesTo === 'api' && ctx.responseKind !== 'api') continue;
       const raw = safeRun(rule, () => rule.run?.(ctx), t.label);
       const kept = raw.filter(x => allow.allowsFinding(x));
       // ラベルで許可していない条件の指摘（一般ラベルの T-05①）だけが出た：許可した条件（T-05②）は判定して指摘がなかったので、合格として残す
-      // （何も残さないと、すでにあるラベルを「必要なラベル」と案内した。第48回）
-      // 合成するのは、すべての条件を一度に判定するルールだけ（条件ごとに途中で返すルール（E-13）では、判定していない条件まで合格にした）
+      // （何も残さないと、すでにあるラベルを「必要なラベル」と案内してしまう）。合成するのは、すべての条件を一度に判定するルールだけ
+      // （条件ごとに途中で返すルール（E-13）では、判定していない条件まで合格になる）
       if (!kept.length && SYNTH_OK.has(rule.id) && raw.some(x => x.status === 'fail'))
         kept.push({ ...raw[0], ruleId: `${rule.id}.ok`, condition: undefined, severity: 'info', status: 'pass', evidence: 'このラベルで判定する条件には指摘なし', recommendation: '' });
       for (const f of kept) {   // ②⑤
-        // 推奨対応も許可リストを通す（C-09 の推奨対応に、入力の Cookie の名前がそのまま入り、証跡では伏せた名前が画面・エクスポートに出た）。
+        // 推奨対応も許可リストを通す（C-09 の推奨対応には入力の Cookie の名前が入るので、証跡で伏せた名前を画面・エクスポートに出さない）。
         // 決まった文言は変わらないことを tests/regression/review26.test.ts で確かめる
         const g: Finding = { ...f, url, keyUrl, host, targetKey, evidence: showText(f.evidence), recommendation: showText(f.recommendation) };
         if (ctx.responseKind === 'api' && HTML_ONLY_ITEMS.has(g.item) && g.status === 'fail') { g.severity = 'info'; g.apiInfo = true; }   // ⑥

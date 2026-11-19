@@ -11,35 +11,18 @@ const cf = (rule: Rule, target: string, cond: number | 'ok' | 'na', severity: Se
      target, evidence, recommendation, references: rule.basis });
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
-// 対象のサイトの応答だけを見る（C-01〜C-07 と同じ siteResponses）。-L でたどった外部の IdP の Cookie（idp_session）を、アプリが
-// セッションIDを再発行したものとみなし、C-09① を合格にした
+// 対象のサイトの応答だけを見る（C-01〜C-07 と同じ siteResponses。-L でたどった外部の IdP の Cookie（idp_session）を、アプリの再発行とみなさない）
 const sessionCookies = (t?: Target) => { const now = t ? capturedAt(t) : Date.now(); return (t ? siteResponses(t) : []).flatMap(r => r.headers.get('set-cookie') ?? [])
   .map(raw => parseSetCookie(raw)).filter(c => !isDeletion(c, now) && looksLikeSession(c, now) && !isChunkMarker(c)); };   // 値を比べるので、分割の印は除く
 
-/**
- * 2xx・3xx でもログインに失敗した応答。Spring Security の失敗時の転送（302 Location: /login?error）、ログイン画面への転送、
- * パスワード欄のある画面を 200 で返し直すもの（Django、ASP.NET Identity、WordPress）。失敗ならセッションIDを再発行しないのは当然なので C-09① にしない
- */
-// 失敗とみなす転送先：?error などのクエリ、ログインらしいパス（/login・/signin など）、login の URL のパス、pre-login の URL のパス（トップ（/）を除く）。
-// パスは末尾の / を除いて比べ、クエリは比べない（/login?next=%2Fhome から /login への転送は失敗）。ただし login の URL のパスがトップ（/）の
-// ときは、クエリで画面を切り替えるアプリ（/?_task=login と /?_task=mail）なので、クエリまで比べる。
-// pre-login の URL のパスがトップ（/）のときは比べない（HAR では pre-login がトップになることが多く、成功してトップに転送されたのを失敗とみなした）。
-// パスワード欄は、login 自身の応答と、ログインらしいパスへ転送したときの最後の応答で見る（-L でたどったアカウント画面のパスワード変更の欄で、
-// 成功を失敗とみなさない）
-// ログイン画面・認証の入り口のパス：/login・/signin・Devise の /users/sign_in・WordPress の /wp-login.php・OIDC の …/openid-connect/auth・
-// /authorize・oauth2-proxy の /oauth2/start・SAML の /saml/login
-// 拡張子の付いたログイン画面（ASP.NET の /Account/Login.aspx、/login.php・.jsp・.do）と、Spring Security の /oauth2/authorization/<登録名> も含める
-// IdP の入り口（Google の /o/oauth2/v2/auth、Shibboleth の /idp/profile/SAML2/Redirect/SSO、ADFS の /adfs/ls/、SimpleSAMLphp の SSOService.php）も含める。
-// T-06 と共有する（rules/html.ts の LOGIN_PATH。T-06 だけ狭い一覧を持っていて、/login.php・/oauth2/authorization/x への転送を合格にした）
 const PASSWORD_FIELD = /type\s*=\s*["']?password/i;
-/** SPA の画面：ルートの要素（root・app・__next・__nuxt）とスクリプトがあり、スクリプト・スタイル・タグを除いた文字がないか、読み込み中の案内だけの HTML */
-// ページのデータを属性やスクリプトに入れたもの（Inertia の data-page、Next.js の __NEXT_DATA__、__INITIAL_STATE__・__NUXT__・__APOLLO_STATE__）は、
-// サーバが利用者のデータを返しているので殻としない。文字は、ないか「Loading…」「読み込み中」だけのとき（<noscript> の案内を除く）に限る
-// （文字数で見ると、短いサーバ描画のマイページ（マイページ 山田太郎様のご注文）まで殻とみなした）
+/**
+ * SPA の画面：ルートの要素（root・app・__next・__nuxt・q-app）とスクリプトがあり、タグ・スクリプト・スタイルの外の文字がないか、
+ * 「Loading…」「読み込み中」だけの HTML（<noscript> の案内を除く）。文字数では見ない（短いサーバ描画のマイページ（マイページ 山田太郎様のご注文）がある）。
+ * ページのデータを持つ画面は殻としない：既知の状態の名前（Inertia の data-page、Next.js の __NEXT_DATA__、__INITIAL_STATE__・__NUXT__・
+ * __APOLLO_STATE__ など）のほか、一覧で追いきれない名前は形で見る（inlineData のインラインのデータ、ROOT_ATTR のルートの要素のデータの属性）
+ */
 const spaShell = (b: string): boolean => /<div\b[^>]{0,200}\bid\s*=\s*["']?(?:root|app|__next|__nuxt|q-app)\b/i.test(b) && /<script\b/i.test(b)
-  // 状態の名前（__NUXT_DATA__・ng-state・window.Laravel・window.__USER__ など）は一覧で追いきれないので、形で見る：インラインのスクリプトに中身が
-  // あり、オブジェクト・配列・JSON を代入・読み込むもの、type="application/json" のスクリプト、ルートの要素の id・class 以外の属性（data-user・
-  // Vue の :user）があれば、データを持つ画面として殻としない
   && !/\bdata-page\s*=|__NEXT_DATA__|__INITIAL_STATE__|__NUXT|__APOLLO_STATE__|__PRELOADED_STATE__|\bng-state\b/.test(b)
   && !inlineData(b) && !ROOT_ATTR.test(b)
   && /^(?:loading|読み込み中|ロード中)?[.…]*$/i.test(visibleText(b.replace(/<noscript\b[\s\S]{0,2000}?<\/noscript>/gi, '')));
@@ -47,26 +30,22 @@ const spaShell = (b: string): boolean => /<div\b[^>]{0,200}\bid\s*=\s*["']?(?:ro
 const ROOT_ATTR = /<div\b(?=[^>]{0,200}\bid\s*=\s*["']?(?:root|app|__next|__nuxt|q-app)\b)[^>]{0,200}\s(?:data-(?!v-|testid\b|reactroot\b)[\w-]+|:[\w-]+|v-bind:[\w-]+)\s*=/i;
 /** 利用者・状態のデータらしい中身（"user":・"email":・"currentUser":、state・store・props の名前への代入）。設定（window.__ENV__ = {"API_URL":…}・dataLayer = []）は除く */
 const STATE_DATA = /["']?\b(?:user(?:name|_?id)?|current_?user|email|account|profile|customer|member|viewer|me|session|auth(?:enticated|_?user)?|props|state|store)\b["']?\s*:|\b\w*(?:state|store|user|props|session)\w*\s*=\s*(?:[{[]|JSON\.parse)/i;
-/**
- * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64KB で、閉じタグまで）：type="application/json" のスクリプト、
- * オブジェクト・配列の代入、JSON.parse のうち、中身が STATE_DATA に当てはまるもの。ld+json（構造化データ）と設定だけのものはデータとしない
- */
-/**
- * STATE_DATA に当たった名前のうち、値が null・false・空でないものがあるか（window.Laravel = {"csrfToken":…,"user":null} は、サーバが利用者を
- * 持っていないことを示すので、データとしない。データとみなして C-12①（高）にした。第49回）
- */
 /** STATE_DATA の1つ目の選択肢（"user": のような名前） */
 const STATE_KEY = /["']?\b(?:user(?:name|_?id)?|current_?user|email|account|profile|customer|member|viewer|me|session|auth(?:enticated|_?user)?)\b["']?\s*:/;
 /** 値が null・false・空 */
 const EMPTY_VALUE = /^(?:null|false|undefined|""|''|\[\s*\]|\{\s*\})(?![\w$])/;
+/**
+ * STATE_DATA に当たった名前のうち、値が null・false・空でないものがあるか（window.Laravel = {"csrfToken":…,"user":null} は、
+ * サーバが利用者を持っていないことを示すので、データとしない）
+ */
 function stateData(body: string): boolean {
   const re = new RegExp(STATE_DATA.source, 'gi');
   for (let m = re.exec(body), n = 0; m && n < 200; m = re.exec(body), n++) {
     const rest = body.slice(m.index + m[0].length, m.index + m[0].length + 20).trimStart();
     const opened = m[0].trimEnd().slice(-1);
     if (opened === '{' || opened === '[') {
-      // 代入の { [ の中（2000文字まで）に利用者のデータらしい名前があれば、その値で見る（Redux・Vuex の SSR の __INITIAL_STATE__ = {"user":null}。
-      // { のあとが空でないだけでデータとすると、利用者のいない殻を C-12①（高）にした。束のレビュー）。名前がなければ、空でないものをデータとする
+      // 代入の { [ の中（2000文字まで）に利用者のデータらしい名前があれば、その値で見る（Redux・Vuex の SSR の __INITIAL_STATE__ = {"user":null}
+      // は利用者のいない殻）。名前がなければ、空でないものをデータとする
       const inner = body.slice(m.index + m[0].length, m.index + m[0].length + 2000);
       const keys = [...inner.matchAll(new RegExp(STATE_KEY.source, 'gi'))].slice(0, 50);
       if (keys.length ? keys.some(k => !EMPTY_VALUE.test(inner.slice(k.index! + k[0].length, k.index! + k[0].length + 20).trimStart())) : !/^[}\]]/.test(rest)) return true;
@@ -94,6 +73,10 @@ function loginFormAction(b: string): boolean {
   }
   return false;
 }
+/**
+ * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64KB で、閉じタグまで）：type="application/json" のスクリプト、
+ * オブジェクト・配列の代入、JSON.parse のうち、中身が STATE_DATA に当てはまるもの。ld+json（構造化データ）と設定だけのものはデータとしない
+ */
 function inlineData(b: string): boolean {
   const s = b.slice(0, 65536), low = s.toLowerCase();
   for (let i = low.indexOf('<script'); i >= 0; i = low.indexOf('<script', i + 7)) {
@@ -106,7 +89,7 @@ function inlineData(b: string): boolean {
   }
   return false;
 }
-/** タグ・スクリプト・スタイルの外の、空白を除いた文字（40 文字まで）。正規表現で除くと、閉じない <script の続く本文で2乗の時間がかかるので、1回の走査で集める */
+/** タグ・スクリプト・スタイルの外の、空白を除いた文字（40 文字まで）。1回の走査で集める（正規表現で除くと、閉じない <script の続く本文で2乗の時間になる） */
 function visibleText(b: string): string {
   const s = b.slice(0, 65536), low = s.toLowerCase(); let out = '';
   for (let i = 0; i < s.length && out.length < 40;) {
@@ -131,19 +114,26 @@ function mfaStep(login: Target): string | undefined {
   const loc = first && first.status >= 300 && first.status < 400 ? first.headers.get('location')?.[0] : undefined;
   if (!loc) return undefined;
   let p: string; try { p = new URL(loc, login.url ?? 'https://x.invalid/').pathname; } catch { return undefined; }
-  // 最後の部分が2段階目の画面の名前（/mfa、/two_factor_authentication、/2fa）か、2段階目の入力の画面（/two_factor/verify、/mfa/challenge）のときだけ。
-  // パスのどこかに mfa・otp があるだけ（/mfa/setup-reminder、/users/otp_settings。ログインが済んだあとの設定の画面）は含めない
-  // 各部分の拡張子は外して見る（/2fa.php・/Account/TwoFactor.aspx・/two_factor.html を見逃し、①（高）の誤検知にした）
+  // パスの部分のどれかが2段階目の画面の名前（/mfa、/2fa、Fortify の /two-factor-challenge のように語が続くものも）で、そこにもその下の部分にも
+  // 設定の画面の語（setup・settings・reminder・backup・recovery など）がないときだけ（/two_factor/verify、GitHub の /sessions/two-factor/app、
+  // allauth の /accounts/2fa/authenticate/ は含め、/mfa/setup-reminder・/2fa/backup-codes のようなログイン後の設定の画面は含めない）。
+  // 各部分の拡張子は外して見る（/2fa.php・/Account/TwoFactor.aspx）
   const segs = p.replace(/\/+$/, '').split('/').map(x => x.replace(/\.[A-Za-z0-9]{1,5}$/, ''));
-  // 2段階目の画面の名前（two-factor-challenge・mfa-otp-challenge のように語が続くものも）。設定の画面の語（setup・settings・reminder・backup・
-  // recovery など）が続くものと、その下の部分（/2fa/backup-codes）は除く（除外の一覧で見る。完全一致にすると、Fortify の /two-factor-challenge・
-  // GitHub の /sessions/two-factor/app・allauth の /accounts/2fa/authenticate/ を見逃した）
   const settings = /^(?:set-?up|settings?|reminder|recovery|backup|enroll|enable|disable|manage|info|configure|config|preferences)/i;
   const step = (x: string) => { const m = x.match(/^(?:two[-_]?factor|2fa|mfa|otp|totp|webauthn|second[-_]?factor)(?:[-_](.+))?$/i); return !!m && !(m[1] && settings.test(m[1])); };
   const at = segs.findIndex(step);
   return at >= 0 && segs.slice(at + 1).every(x => !settings.test(x)) ? p : undefined;
 }
 const trimSlash = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+/**
+ * 2xx・3xx でもログインに失敗した応答（理由の文言を返す）。失敗ならセッションIDを再発行しないのは当然なので C-09① にしない。
+ * - 失敗とみなす転送先：?error などのクエリ（Spring Security の /login?error）、同じホストのログインらしいパス（LOGIN_PATH。SSO のコールバックを除く）、
+ *   login の URL のパス、pre-login の URL のパス。パスは末尾の / を除いて比べ、クエリは比べない（/login?next=%2Fhome から /login への転送は失敗）。
+ *   login の URL のパスがトップ（/）のときは、クエリで画面を切り替えるアプリ（/?_task=login）があるので、クエリまで比べる。
+ *   pre-login の URL のパスがトップ（/）のときは比べない（HAR では pre-login がトップのことが多く、成功してトップに戻る流れがある）
+ * - パスワード欄のある画面を 200 で返し直すもの（Django、ASP.NET Identity、WordPress）と、200 でエラーだけの JSON を返すもの。
+ *   見るのは login 自身の最初の応答だけ（-L でたどったアカウント画面のパスワード変更の欄で、成功を失敗とみなさない）
+ */
 function loginRejected(login: Target, pre: Target): string | undefined {
   const first = ownChain(login)[0];
   if (!first) return undefined;
@@ -152,8 +142,8 @@ function loginRejected(login: Target, pre: Target): string | undefined {
     let to: URL | undefined, self: URL | undefined, before: URL | undefined;
     try { to = new URL(loc, login.url ?? 'https://x.invalid/'); } catch { /* 解釈できない */ }
     try { self = login.url ? new URL(login.url) : undefined; } catch { /* なし */ }
-    // pre-login の URL は、そのチェーンの最後の応答（ログインのフォームの画面）の URL。最初の URL（/mypage → 302 /login の /mypage）と比べると、
-    // ログインに成功して元のページ（/mypage）に戻る普通の流れを「戻された」とみなした
+    // pre-login の URL は、そのチェーンの最後の応答（ログインのフォームの画面）の URL。最初の URL（/mypage → 302 /login の /mypage）ではない
+    // （ログインに成功して元のページ（/mypage）に戻るのは普通の流れ）
     const preUrl = ownChain(pre).at(-1)?.url ?? pre.url;
     try { before = preUrl ? new URL(preUrl) : undefined; } catch { /* なし */ }
     if (to) {
@@ -170,7 +160,7 @@ function loginRejected(login: Target, pre: Target): string | undefined {
     }
   }
   if (first.status >= 200 && first.status < 300 && PASSWORD_FIELD.test(first.body ?? '')) return `HTTP ${first.status} でパスワード欄のある画面を返した`;
-  // JSON の API のログインが、200 でエラーだけの JSON（{"success":false,"error":"invalid_credentials"}）を返した（①（高）にした。第48回）
+  // JSON の API のログインが、200 でエラーだけの JSON（{"success":false,"error":"invalid_credentials"}）を返した
   if (first.status >= 200 && first.status < 300 && errorJson(first.body)) return `HTTP ${first.status} でエラーの JSON を返した`;
   return undefined;
 }
@@ -185,15 +175,11 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     if (!pre || !login) return na(sessionFixation, 'pre-login/login', 'pre-login, login');
     const beforeC = sessionCookies(pre), afterC = sessionCookies(login);
     const before = beforeC.map(c => `${c.name}=${c.value}`);
-    // 新しい値のセッションCookie を1つでも発行し、同じ値で送り直したのが期限付きの Cookie（device_token・remember の類）だけなら、再発行している
-    // （名前の推定でセッションCookie とみなした長期の Cookie を同じ値で送り直しただけで、①（高）にした）
+    // 新しい値のセッションCookie を1つでも発行したとき、同じ値で送り直した次の Cookie は比べない（再発行とみなす）：
+    // 期限付きの Cookie（device_token・remember の類）と、名前がセッションらしい Cookie を新しい値にしたときの、名前がセッションらしくない Cookie
+    // （visitor_ref）。主のセッションID（MAIN_SESSION：JSESSIONID・laravel_session・sid など）は、期限付きでも必ず比べる
     const fresh = afterC.some(c => !before.includes(`${c.name}=${c.value}`));
-    // 名前がセッションらしい Cookie を新しい値にしたか（visitor_ref だけが新しく、主のセッションCookie（APPCTX）を同じ値で送り直したログインを、
-    // 期限のない名前のない Cookie を除いて合格にした。束のレビュー）
     const freshSession = afterC.some(c => looksLikeSessionName(c.name) && !before.includes(`${c.name}=${c.value}`));
-    // 期限のない Cookie でも、名前がセッションらしくないもの（visitor_ref）は除く（同じ値で送り直しただけで①（高）にした。第49回）。
-    // 除くのは、名前がセッションIDらしくないもの（sessionid・JSESSIONID・laravel_session・sid は、期限付きでも主のセッションIDなので比べる。
-    // 除くと、期限付きの sessionid を再発行せずに auth_token を足しただけのログインを合格にした）
     const after = afterC.filter(c => !(fresh && !MAIN_SESSION.test(c.name) && before.includes(`${c.name}=${c.value}`) && (c.attrs.has('expires') || c.attrs.has('max-age') || (freshSession && !looksLikeSessionName(c.name))))).map(c => `${c.name}=${c.value}`);
     // ログインに失敗した応答（403 など）では、セッションIDを再発行しないのは当然なので判定しない
     const ls = firstStatus(login);
@@ -207,11 +193,11 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     // ブラウザの普通の流れで、HAR ではほぼこの形になる）も数える。送っただけの値は分からないので、login で新しいセッションCookieを発行したかで見る
     const sent = (pre.sentCookieNames ?? []).filter(looksLikeSessionName);
     if (!before.length && !sent.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'ログイン前にセッションCookieが発行されていない', 'ログイン前にCookieを発行するページで pre-login を採取する')];
-    // SSO のコールバック（Location に ?code=・?ticket=）へ転送しただけで、その先を採取していない（-L なし）なら、セッションはコールバックで発行される
-    // ので、再発行したかは分からない
     const lc = ownChain(login);
-    // login の応答がない（プロキシの CONNECT のあとで curl が失敗した）なら、ログインしたかが分からない（応答がないまま①（高）にした。束のレビュー）
+    // login の応答がない（プロキシの CONNECT のあとで curl が失敗した）なら、ログインしたかが分からない
     if (!lc.length) return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'login の応答がない', LOGIN_FAILED_REC)];
+    // SSO のコールバック（Location に ?code=・?ticket=）へ転送しただけで、その先を採取していない（-L なし）なら、セッションはコールバックで
+    // 発行されるので、再発行したかは分からない
     if (!after.length && lc.length === 1 && /[?&](?:code|ticket|SAMLart)=/i.test(lc[0].headers.get('location')?.[0] ?? ''))
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `HTTP ${lc[0].status}（SSO のコールバックへの転送。その先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
     const reused = !after.length || after.some(a => before.includes(a));
@@ -223,18 +209,16 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
       return [cf(sessionFixation, 'pre-login/login', 1, 'high', 'fail', 'login 応答でセッションIDが再発行されていない', 'ログイン成功時にセッションIDを再発行する')];
     // pre-login で発行した主のセッションID（名前に sess・sid を含むもの）を、login で新しい値にせず、別の Cookie（auth_token・
     // ASP.NET Core の .AspNetCore.Identity.Application）だけを発行した。認証を新しい Cookie で持つなら固定化はないが、ログイン前の ID の
-    // セッションに認証を結び付けるなら固定化になる。どちらかは応答からは分からないので、合格にしない（新しい Cookie があるだけで合格にした）
+    // セッションに認証を結び付けるなら固定化になる。どちらかは応答からは分からないので、合格にしない（下の kept）
     const renewed = new Set(afterC.filter(c => !before.includes(`${c.name}=${c.value}`)).map(c => c.name));
     // 値を変えたセッションCookie が、すべて暗号化した Cookie（Laravel の EncryptCookies・ASP.NET Core の Data Protection）で、ログイン前にも
-    // 同じ名前があった：暗号化した値は応答ごとに変わるので、セッションIDを再発行したかは値から分からない（regenerate() を忘れた固定化のある
-    // Laravel のアプリを合格にした。第50回）
+    // 同じ名前があった：暗号化した値は応答ごとに変わるので、セッションIDを再発行したか（Laravel の regenerate()）は値から分からない
     const changed = afterC.filter(c => !before.includes(`${c.name}=${c.value}`));
     if (changed.length && changed.every(c => encryptedCookie(c.value) && (beforeC.some(b => b.name === c.name && encryptedCookie(b.value)) || (pre.sentCookieNames ?? []).includes(c.name))))
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', 'セッションCookie が暗号化した値（応答ごとに値が変わる）なので、セッションIDを再発行したかは値から分からない', ENCRYPTED_REC)];
-    // pre-login で送っただけの主のセッションID（-v・HAR の > Cookie: JSESSIONID=…。ブラウザの普通の流れ）も数える（発行した場合だけを数え、
-    // 送っただけの JSESSIONID を再発行せず auth_token だけを発行したログインを合格にした。第49回）
-    // 送っただけの名前は、解析用・負荷分散などのセッションCookie でない名前を除く（Hotjar の _hjSession_123・ai_session を数え、C-09 を na に
-    // した。第50回）。looksLikeSessionName で絞ると、classic ASP の ASPSESSIONIDxxxx も外して合格にした（束のレビュー）
+    // pre-login で送っただけの主のセッションID（-v・HAR の > Cookie: JSESSIONID=…。ブラウザの普通の流れ）も数える。
+    // 送っただけの名前は、解析用・負荷分散などの名前（Hotjar の _hjSession_123・ai_session）を notSessionName で除く
+    // （looksLikeSessionName では、classic ASP の ASPSESSIONIDxxxx まで外れる）
     const kept = [...new Set([...beforeC.map(c => c.name), ...(pre.sentCookieNames ?? []).filter(n => !notSessionName(n))].filter(n => MAIN_SESSION.test(n) && !renewed.has(n)))];
     if (kept.length)
       return [cf(sessionFixation, 'pre-login/login', 'na', 'info', 'na', `login 応答で ${kept.join(', ')} を再発行せず、ほかの Cookie（${[...renewed].join(', ')}）を発行した。どちらで認証しているかは分からない`,
@@ -242,13 +226,12 @@ export const sessionFixation: Rule = { id: 'C-09', title: 'セッション固定
     return [cf(sessionFixation, 'pre-login/login', 'ok', 'info', 'pass', 'ログイン時にセッションIDを再発行している', '')];
   } };
 
-/** 2つ以上のセッションIDを比べ、固定部分や連番がないかを見る */
-// Flask（itsdangerous）の圧縮したセッション（.eJw… で始まる「.ペイロード.時刻.署名」）も、同じアカウントではペイロードの大部分が共通になる。
-// JWT と同じく署名の部分だけで比べる（全体で比べると「先頭57文字が共通」と C-07②（高）の誤検知になる）
-// Django の署名付きのセッション（django.contrib.sessions.backends.signed_cookies。「ペイロード:時刻:署名」で、圧縮したものは . で始まる）も同じ
+// 署名付きのトークン：JWT、Flask（itsdangerous）の圧縮したセッション（.eJw… で始まる「.ペイロード.時刻.署名」）、
+// Django の signed_cookies（「ペイロード:時刻:署名」。圧縮したものは . で始まる）。m[1]・m[2] が署名の部分
 const JWT_VALUE = /^(?:eyJ[\w-]*\.[\w-]*|\.[\w-]+\.[\w-]+)\.([\w-]*)$|^\.?[\w-]+:[\w-]+:([\w-]+)$/;
+/** 2つ以上のセッションIDを比べ、固定部分や連番がないかを見る（理由の文言を返す） */
 export function predictable(raw: string[]): string | undefined {
-  // JWT は、同じアカウントで発行するとヘッダとクレーム（iat・exp まで）の大部分が共通になる。乱数性は署名の部分だけで比べる。
+  // 署名付きのトークンは、同じアカウントで発行するとペイロード（iat・exp まで）の大部分が共通になるので、署名の部分だけで比べる。
   // 署名がない（alg:none）JWT は A-03① で判定する
   const jwt = raw.every(v => JWT_VALUE.test(v));
   const sig = (v: string) => { const m = v.match(JWT_VALUE)!; return m[1] ?? m[2] ?? ''; };
@@ -281,10 +264,9 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
     for (const [rawName, vals] of byName) {
       if (vals.length < 2) continue;
       const name = rawName || '（名前なし）';   // 値だけの Set-Cookie（rules/cookies.ts の cookieName と同じ表示）
-      // 署名付きのトークン（JWT・Flask・Django）がすべて同じ値なのは、同じ秒に同じ内容で署名したため（HS256 は同じ入力から同じ署名になる）。
-      // 署名の鍵がなければ作れないので、推測できる（②（高））とはしない
-      // 採取の時刻（#META at）が分かり、60秒より離れているときは②（時刻を見ずに na にすると、15分おきに採取した同じ JWT も「同じ秒」とした）。
-      // #META at は手元の時刻で、トークンの iat はサーバの時刻なので、同じ秒かどうかでは比べない（秒をまたいだ採取を②（高）にした）。
+      // 署名付きのトークン（JWT・Flask・Django）がすべて同じ値なのは、同じ秒に同じ内容で署名したためでありうる（HS256 は同じ入力から同じ署名になる）。
+      // 署名の鍵がなければ作れないので、推測できる（②（高））とはせず na にする。ただし採取の時刻（#META at）が分かり、60秒より離れているときは②。
+      // #META at は手元の時刻で、トークンの iat はサーバの時刻なので、iat とは比べない。
       // 署名付きの形は、JWT・itsdangerous と、署名が20文字以上の Django の形（固定の値 guest:1:admin は署名付きではない）
       const times = samples.map(t => (t.meta.at ? Date.parse(t.meta.at.replace(' ', 'T')) : NaN));
       const far = times.every(v => !Number.isNaN(v)) && Math.max(...times) - Math.min(...times) > 60e3;
@@ -292,7 +274,7 @@ export const sessionPredictable: Rule = { id: 'C-07', title: 'セッションID�
         out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：署名付きのトークンが同じ値（同じ秒に同じ内容で署名した可能性）`, '秒をまたいで session-sample を採取し直す'));
         continue;
       }
-      // 暗号化した Cookie（Laravel・ASP.NET Core）は、値が暗号文なので、中のセッションIDの推測可能性は値から分からない（暗号文を比べて合格にした。第50回）
+      // 暗号化した Cookie（Laravel・ASP.NET Core）は、値が暗号文なので、中のセッションIDの推測可能性は値から分からない
       if (vals.every(encryptedCookie)) {
         out.push(cf(sessionPredictable, 'session-sample-*', 'na', 'info', 'na', `${name}：暗号化した Cookie なので、セッションIDの推測可能性は値から分からない`, 'サーバ側のセッションIDの作り方（フレームワークの既定の乱数か）を確認する'));
         continue;
@@ -319,8 +301,8 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     const first = after.responses.find(isHop)!;
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!first.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
-    // 同じページ（末尾の / の違いだけ）への転送はたどって、その先で判定する（Django の APPEND_SLASH、Next.js の trailingSlash、Apache の DirectorySlash）。
-    // 最初の応答が 2xx でなければすべて合格にすると、301 のあとに旧Cookieで mypage が 200 になるのを見逃した
+    // 同じページ（末尾の / の違いだけ）への転送はたどって、その先で判定する（Django の APPEND_SLASH、Next.js の trailingSlash、Apache の DirectorySlash。
+    // 301 のあとに旧Cookieで 200 になることがある）
     const chain = after.responses.filter(isHop);
     let i = 0;
     while (chain[i]?.kind === 'redirect' && sameDocument(chain[i], after.url)) {
@@ -330,24 +312,21 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     const r = chain[i];
     const ev = `旧Cookieでの認証後ページが HTTP ${r.status}${i ? `（同じページへの転送のあと）` : ''}`;
     if (r.status >= 200 && r.status < 300) {
-      // 旧Cookieで 200 でも、ログインのフォームを返したなら、セッションは使えていない（転送せずにその場でログイン画面を出すアプリ）。
-      // ログインのフォームは、パスワード欄が1つで、ユーザー名・メールの欄があり、パスワード変更の欄（new_password など）がないもの。
+      // 旧Cookieで 200 でも、ログインのフォーム（loginForm）を返したなら、セッションは使えていない（転送せずにその場でログイン画面を出すアプリ）。
       // ログイン後のページ（mypage）自身にパスワード欄があるときは、見分けられないので使わない
       const mpBody = mp ? finalResponse(mp)?.body ?? '' : '';
-      // ログイン後のページ（mypage）がないときは、パスワード欄のフォームの送信先がログインらしいパス（または送信先なし）のときだけログイン画面とする
-      // （メールアドレスの変更などで再入力を求めるアカウント画面（action="/account/email"）を「ログイン画面」として合格にした。第49回）
+      // mypage がないときは、パスワード欄のフォームの送信先がログインらしいパス（または送信先なし）のときだけログイン画面とする
+      // （メールアドレスの変更などで再入力を求めるアカウント画面（action="/account/email"）と分けるため）
       if (loginForm(r.body ?? '') && !mp && !loginFormAction(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（パスワード欄のある画面。送信先がログインらしいパスでなく、ログイン後のページ（mypage）もないので、ログイン画面かは分からない）`, 'ログイン後のデータを返すページを label=mypage として採取する')];
       if (loginForm(r.body ?? '') && !PASSWORD_FIELD.test(mpBody)) return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev} でログイン画面（パスワード欄）を返した`, '')];
-      // SPA の画面（<div id="root"> とスクリプトだけで、文字のない HTML）は、どのセッションでも同じものを返すので、旧Cookie が使えたかは分からない
-      // （A-01・A-11・E-05 の HTML の画面と同じ考え方）
-      // データのない JSON（{}・{"user":null}）と GraphQL の認証の拒否は、旧Cookie でデータを返していない（A-01 と同じ判定）。SPA の殻の推奨に従って
-      // API の URL を after-logout にすると、未認証の /api/auth/session の {} を①（高）にした
+      // データのない JSON（{}・{"user":null}。未認証の /api/auth/session）と GraphQL の認証の拒否は、旧Cookie でデータを返していない（A-01 と同じ判定）
       const gql = graphqlError(r.body);
       if (gql === 'denied') return [cf(logoutInvalidation, 'after-logout', 'ok', 'info', 'pass', `${ev}（GraphQL の認証エラー。データは null）`, '')];
       if (gql || noDataJson(r.body)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（データのない JSON。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
-      // 本文を採取していない（-D - -o /dev/null、HAR の本文なし）と、ログインのフォーム・SPA の殻・データのない JSON を見分けられない。
-      // 生成スクリプトの出力でいつもこの形になり、①（高）にした（C-09① の本文のないログインと同じ。第48回）
+      // 本文を採取していない（-D - -o /dev/null、HAR の本文なし）と、ログインのフォーム・SPA の殻・データのない JSON を見分けられない
+      // （C-09① の本文のないログインと同じ）
       if (!r.body?.trim()) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（本文を採取していないので、旧Cookie が使えたかは分からない）`, NO_BODY_REC)];
+      // SPA の画面は、どのセッションでも同じものを返すので、旧Cookie が使えたかは分からない（A-01・A-11・E-05 の HTML の画面と同じ考え方）
       if (spaShell(r.body ?? '')) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（SPA の画面。旧Cookie が使えたかは分からない）`, 'ログイン後のデータを返す API の URL を after-logout として採取し直す')];
       return [cf(logoutInvalidation, 'after-logout', 1, 'high', 'fail', ev, 'ログアウト時にサーバ側のセッションを破棄する')];
     }
@@ -394,26 +373,24 @@ export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'a
     const related = (t: Target) => { const h = hostOf(t)?.replace(/:\d+$/, '').toLowerCase(); return !ah || !h || h === ah || h.endsWith(`.${ah}`); };
     const preload = preloads.find(related);
     if (!preload) return [];
-    // apex 自身の応答（転送の最初のホップ）で見る。-L や HAR で www への転送をたどった最後の応答は www のもの
-    // max-age=0 は HSTS を解除する指定なので、返していないのと同じ（H-01①と同じ）
-    // apex 自身の https の応答で見る。http で採取して https の apex に転送したもの（http://a.example → https://a.example → www）は、その https の
-    // ホップ。https の apex の応答がなければ、HSTS を返すかは分からない（「HSTSを返さない」とは言わない。http の応答の HSTS はブラウザが無視する）
+    // apex 自身の https の応答で見る（-L や HAR で www への転送をたどった最後の応答は www のもの）。http で採取して https の apex に転送したもの
+    // （http://a.example → https://a.example → www）は、その https のホップ。https の apex の応答がなければ、HSTS を返すかは分からない
+    // （http の応答の HSTS はブラウザが無視する）
     const httpsHop = /^https:/i.test(apex.url ?? '') ? ownChain(apex)[0]
       : chainOf(apex).find(r => { try { const u = new URL(r.url ?? ''); return u.protocol === 'https:' && u.hostname.toLowerCase() === ah; } catch { return false; } });
     if (!httpsHop && isHttps(apex) !== undefined) return [cf(apexHsts, 'apex', 'na', 'info', 'na', 'apex の https の応答がない（http の応答の HSTS はブラウザが無視する）', 'apex の https の URL（https://apexドメイン/）で採取する')];
-    // preload を付けた応答のホスト（label=apex で www へ転送した最後の応答なら www。「apex は preload を付けているが」と誤って書いた。第51回）
+    // 証跡に出す、preload を付けた応答のホスト（label=apex で www へ転送した最後の応答なら www）
     const finalHost = (() => { try { return new URL(finalResponse(preload)?.url ?? preload.url ?? '').hostname.toLowerCase(); } catch { return undefined; } })();
     const preloadWho = finalHost && finalHost !== ah ? finalHost : preload.label;
     const v = (httpsHop ?? ownChain(apex)[0])?.headers.get('strict-transport-security')?.[0];
+    // max-age=0 は HSTS を解除する指定なので、返していないのと同じ（H-01①と同じ）
     return v && parseHsts(v).maxAge > 0 ? [cf(apexHsts, 'apex', 'ok', 'info', 'pass', `apex: ${v}`, '')]
              : [cf(apexHsts, 'apex', 3, 'low', 'fail', `${preloadWho} は preload を付けているが、apex がHSTSを返さない`, 'apex ドメインもHSTS（includeSubDomains; preload）を返す')];
   } };
 
-// ヘッダの CSP と、HTML の <head> の <meta> の CSP（H-04 と同じ。meta の CSP の nonce が固定でも⑤）。スクリプトに効くディレクティブ
-// （<script> の要素に効くもの）の nonce だけ。どのディレクティブでも最初の nonce を
-// 比べると、style-src の固定の nonce で⑤（高）を出し、script-src の固定の nonce を見逃した
-// <script> の要素に効くのは、CSP3 のとおり script-src-elem、なければ script-src、なければ default-src（script-src があるときの default-src の
-// nonce は、スクリプトには効かない）。'nonce-' の部分は大文字・小文字を区別しない（値は区別する）
+// ヘッダの CSP と、HTML の <head> の <meta> の CSP の nonce（meta の CSP の nonce が固定でも⑤）。<script> の要素に効くディレクティブの nonce だけを
+// 比べる（style-src の nonce は見ない）。<script> の要素に効くのは、CSP3 のとおり script-src-elem、なければ script-src、なければ default-src。
+// 'nonce-' の部分は大文字・小文字を区別しない（値は区別する）
 const nonceOf = (t: Target) => new Set([...splitPolicies(finalResponse(t)?.headers.get('content-security-policy') ?? []), ...metaCspFromHtml(finalResponse(t)?.body ?? '')]
   .flatMap(v => { const d = parseCsp(v); return d.get('script-src-elem') ?? d.get('script-src') ?? d.get('default-src') ?? []; })
   .map(v => v.match(/^'nonce-([^']+)'$/i)?.[1]).filter((v): v is string => !!v));

@@ -1,5 +1,5 @@
-// parser/har.ts：HAR（HTTP Archive）の取り込み（v0.3。ツール設計1「HAR形式の取り込み」）
-// - request.postData（ログインのパスワードなど）は読まない。本文は HTML と JSON の先頭64KBだけ残す
+// parser/har.ts：HAR（HTTP Archive）の取り込み（ツール設計1「HAR形式の取り込み」）
+// - request.postData（ログインのパスワードなど）は読まない。本文は HTML・JSON・JS の先頭64KBだけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
 import { autoAuthScheme, cookieNames, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
@@ -30,13 +30,13 @@ export interface HarChain {
   at?: string;
   suggested: string; label: string; sensitive?: boolean; excluded: boolean;
 }
-export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; total: number; failed: number; internal?: number; }   // failed：応答のない（status 0）エントリの数
+export interface HarImport { chains: HarChain[]; hosts: string[]; sanitized: boolean; total: number; failed: number; internal?: number; }   // failed：応答のない（status 0 など）エントリの数
 
 export const isHar = (text: string) => /^\s*\{[\s\S]{0,200}"log"\s*:/.test(text);
 
 /** HTTPのバージョン表記（h2、HTTP/2.0、http/1.1 など）を 1.1・2・3 にそろえる */
 export function normalizeVersion(v?: unknown): string {
-  // 文字列でない値（"httpVersion": 2）は文字列にして読む（toLowerCase で例外になり、HAR 全体を読めなかった）
+  // 文字列でない値（"httpVersion": 2）も文字列にして読む（例外で HAR 全体を読めなくしない）
   const s = (typeof v === 'string' ? v : v == null ? '' : String(v)).toLowerCase();
   if (/h3|http\/3/.test(s)) return '3';
   if (/h2|http\/2/.test(s)) return '2';
@@ -46,12 +46,11 @@ export function normalizeVersion(v?: unknown): string {
 
 function toResponse(e: HarEntry): HttpResponse {
   const headers = new Map<string, string[]>(); const rawNames: string[] = []; let dropped = 0;
-  // 名前のある要素だけ（headers が配列でない {}・null のエントリが1件あるだけで、HAR の取り込み全体が TypeError で失敗した）
   for (const h of named(e.response.headers)) {
     if (h.name.startsWith(':')) continue;               // HTTP/2 の疑似ヘッダは除外
     const k = h.name.toLowerCase(); rawNames.push(h.name);
-    // 1つのヘッダに複数の Set-Cookie を改行でつないで書き出すものがある。1件ずつに分けないと、2つ目以降の Cookie を判定せず、
-    // 証跡（値は先頭の name=value だけをマスクする）に生の値が出てしまう
+    // 1つのヘッダに複数の Set-Cookie を改行でつないで書き出すものがあるので、1件ずつに分ける（2つ目以降の Cookie も判定し、
+    // 証跡（値は先頭の name=value だけをマスクする）に生の値を出さない）
     const vals = k === 'set-cookie' ? String(h.value ?? '').split(/\r?\n/).flatMap(splitSetCookie) : [String(h.value ?? '')];
     const list = headers.get(k) ?? headers.set(k, []).get(k)!;
     if (k === 'set-cookie') dropped += pushCookies(list, vals); else for (const x of vals) list.push(x);   // push(...) に広げない（長い Set-Cookie でスタックがあふれる）
@@ -59,8 +58,7 @@ function toResponse(e: HarEntry): HttpResponse {
   if (e.response.redirectURL && !headers.has('location') && e.response.status >= 300 && e.response.status < 400) headers.set('location', [e.response.redirectURL]);
   let body: string | undefined;
   const c = e.response.content;
-  // JS も残す（JSONP の E-06、ソースマップの参照の E-13 が本文で判定する。残さないと「反映されない」「参照なし」と合格にしてしまう）
-  // 本文が文字列でないもの（content.text: 12345）は読まない
+  // JS も残す（JSONP の E-06、ソースマップの参照の E-13 が本文で判定する）。本文が文字列でないもの（content.text: 12345）は読まない
   if (typeof c?.text === 'string' && c.text && /html|json|javascript|ecmascript/i.test(String(c.mimeType ?? ''))) {
     try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 2)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
     body = body?.slice(0, BODY_LIMIT);
@@ -72,9 +70,9 @@ function toResponse(e: HarEntry): HttpResponse {
 
 const withoutHash = (u: string) => { const i = u.indexOf('#'); return i >= 0 ? u.slice(0, i) : u; };
 const JWT_IN_HEADER = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
-/** Authorization・Cookie のリクエストヘッダにある JWT（A-03 が curl の -v と同じく送った JWT もデコードできるように） */
-/** 名前のあるヘッダだけ（名前のない要素や null を含む HAR で、取り込み全体が TypeError で失敗した） */
+/** 名前のあるヘッダだけ（配列でない headers、名前のない要素・null を含む HAR でも TypeError にしない） */
 const named = (hs: (HarHeader | null | undefined)[] | undefined): HarHeader[] => (Array.isArray(hs) ? hs : []).filter((h): h is HarHeader => typeof h?.name === 'string');
+/** Authorization・Cookie のリクエストヘッダにある JWT（A-03 が curl の -v と同じく送った JWT もデコードできるように） */
 const jwtsIn = (hs: HarHeader[]) => [...new Set(hs.filter(h => /^(?:authorization|cookie)$/i.test(h.name)).flatMap(h => String(h.value ?? '').match(JWT_IN_HEADER) ?? []))];
 const hostOfUrl = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
 /** 突き合わせ用の URL（フラグメントを除き、URL として読み直した形） */
@@ -84,7 +82,7 @@ const normalizedUrl = (u: string) => { try { const x = new URL(u); x.hash = ''; 
 export function importHar(text: string): HarImport {
   const har = JSON.parse(text) as { log?: { entries?: unknown } } | null;
   // 型の違う値は、例外で HAR 全体を読めなくしないよう、ここでそろえる（entries がオブジェクト、url が配列、startedDateTime が数値など）。
-  // url が配列だと /^https?:/ の確認を文字列にして通り、画面の showText で例外になって「読み込み中」のまま止まった
+  // url は文字列のものだけ（配列も文字列にすると /^https?:/ を通り、画面で例外になる）
   const raw = har?.log?.entries;
   const all = (Array.isArray(raw) ? raw as HarEntry[] : []).filter(e => typeof e?.request?.url === 'string' && e.response && /^https?:/i.test(e.request.url));
   for (const e of all) {
@@ -93,29 +91,26 @@ export function importHar(text: string): HarImport {
   }
   // status 0 は、ブロック・キャンセル・CORSの失敗などで応答がなかったエントリ。ヘッダがないので判定に使うと誤検知になる
   // ブラウザが内部で作った転送（HSTS・HTTPS-Upgrades の 307 Internal Redirect。Non-Authoritative-Reason ヘッダが付く）も、サーバの応答では
-  // ないので除く（http のラベルで T-04・C-10 を、http で接続していないのに判定した）
+  // ないので除く（http で接続していないのに T-04・C-10 を判定しない）。
   // 印（理由句・ヘッダ）はサーバも返せるので、307 で、ネットワークに出ていない（serverIPAddress がない）ものだけを内部の転送とする
-  // （印だけで除くと、診断対象のサーバがログインの POST や http から https への転送を黙って判定から外せた）
+  // （印だけで除くと、診断対象のサーバがログインの POST や http から https への転送を判定から外せる）
   const internal = (e: HarEntry) => e.response.status === 307 && !String((e as { serverIPAddress?: unknown }).serverIPAddress ?? '').trim()
     && (/internal redirect/i.test(e.response.statusText ?? '') || named(e.response.headers).some(h => /^non-authoritative-reason$/i.test(h.name)));
-  // 状態コードは数値にそろえる（文字列の "304" を書き出すツールがあり、そのままだと 304 の除外や === 401 などの比べ方が効かなかった）
-  // 応答がオブジェクトでないエントリ（"response": 1）は、書き換えずに除く（書き換えると例外になり、HAR 全体を読めなかった）
+  // 状態コードは数値にそろえる（文字列の "304" を書き出すツールがある。304 の除外や === 401 などの比べ方を効かせるため）
+  // 応答がオブジェクトでないエントリ（"response": 1）は、書き換えずに除く（書き換えると例外になる）
   for (const e of all) if (typeof e.response === 'object') { const st = Number(e.response.status); e.response.status = Number.isInteger(st) ? st : 0; }
   const internalCount = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && internal(e)).length;
   const entries = all.filter(e => typeof e.response === 'object' && e.response.status > 0 && !internal(e));
   const used = new Set<number>(); const chains: HarChain[] = [];
-  // 転送先のエントリを URL から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）。
-  // 表のキーも、引くときと同じく URL として読み直した形（new URL().href）にする。書き方の違い（https://a.example:443/、エンコードしていない
-  // /日本）で転送先が見つからず、http から https への転送の連なりが切れた
-  // 転送先のエントリを「メソッド URL」から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかった）。
-  // URL は、引くときと同じく URL として読み直した形（new URL().href）にする（https://a.example:443/、エンコードしていない /日本 で連なりが切れた）。
-  // メソッドもキーに入れる（メソッドの条件で読み飛ばしたエントリが使い済みにならず、転送のたびになめ直して2乗の時間になった。束のレビュー）
+  // 転送先のエントリを「メソッド URL」から引く表（エントリごとに全体を探すと、転送先のない 302 が多い HAR で入力の長さの2乗の時間がかかる）。
+  // URL は、引くときと同じく URL として読み直した形（new URL().href）にする（https://a.example:443/、エンコードしていない /日本 でも連なりを切らない）。
+  // メソッドもキーに入れる（メソッドの違うエントリを転送のたびになめ直さない）
   const methodOf = (x: { request: { method?: unknown } }) => String(x.request.method ?? 'GET').toUpperCase();
   const byUrl = new Map<string, number[]>();
   entries.forEach((x, k) => { const u = `${methodOf(x)} ${normalizedUrl(x.request.url)}`; (byUrl.get(u) ?? byUrl.set(u, []).get(u)!).push(k); });
   // キーごとの一覧（エントリの番号の昇順）から、from より後の最初の使っていないエントリを引く。from より後の位置は二分探索で求め、使い済みの
-  // エントリは「次の候補の位置」をたどって飛ばす（経路を縮める）。先頭の使い済みだけを飛ばす作りでは、from より前の使っていないエントリを
-  // 毎回なめ直し、同じ URL へ転送する 3xx が多い HAR で2乗の時間がかかった（束のレビュー）。使い済みは増えるだけなので、飛ばしてよい
+  // エントリは「次の候補の位置」をたどって飛ばす（経路を縮める。同じ URL へ転送する 3xx が多い HAR でも2乗の時間にしない）。
+  // 使い済みは増えるだけなので、飛ばしてよい
   const skip = new Map<string, Int32Array>();
   const nextOf = (key: string, from: number): number => {
     const list = byUrl.get(key); if (!list) return -1;
@@ -134,7 +129,7 @@ export function importHar(text: string): HarImport {
   };
   /**
    * 転送先のメソッド（fetch の仕様）：303 は HEAD なら HEAD、ほかは GET。301・302 は POST なら GET、ほかは元と同じ。307・308 は元と同じ。
-   * メソッドを見ずにつなぐと、同じ URL の POST /login を GET /mypage → 302 /login の転送先にして、ログインの候補を消した（第49回）
+   * メソッドも合わせてつなぐ（GET /mypage → 302 /login の転送先に、同じ URL の POST /login をつなげてログインの候補を消さない）
    */
   const nextEntry = (href: string, from: number, status: number, m0: string): number => {
     const m = status === 303 ? (m0 === 'HEAD' ? 'HEAD' : 'GET') : (status === 301 || status === 302) && m0 === 'POST' ? 'GET' : m0;
@@ -146,8 +141,7 @@ export function importHar(text: string): HarImport {
     used.add(i);
     const hops = [e];
     let cur = e, ci = i;
-    // Location の先のエントリをつなぐ。ブラウザが転送するのは 301・302・303・307・308 だけ（304 の Location で、あとの 200 を 304 の連なりに
-    // 入れ、その 200 の連なりを消した。束のレビュー）
+    // Location の先のエントリをつなぐ。ブラウザが転送するのは 301・302・303・307・308 だけ（304 などの Location はたどらない）
     while ([301, 302, 303, 307, 308].includes(cur.response.status)) {
       const loc = cur.response.redirectURL || named(cur.response.headers).find(h => h.name.toLowerCase() === 'location')?.value;
       if (!loc) break;
@@ -230,7 +224,8 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
     const upgraded = /^http:/i.test(c.url) && /^https:/i.test(c.finalUrl ?? '');
     const https = upgraded && baseLabel(label) !== 'http';
     const url = https ? c.finalUrl! : c.url;
-    // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ（parser/target.ts の ownChain）
+    // http のホップは応答に残す（そこで発行した Cookie も判定する）。apex の「自身の応答」は、各応答の url から最初の https のホップを選ぶ
+    // （parser/target.ts の ownChain）
     targets.push({ label, url, kind: 'auto', sensitive: c.sensitive, verbose: false,   // 画面で明示したときだけ。Cookie を送っただけの推定は isSensitive が sentAuth から行う
       // 送った認証情報の推定は、組織プロファイルのセッションCookieの名前で作り直す（Worker の中ではプロファイルが分からない）
       responses: c.responses, sentAuth: sentAuthOf(c.sentAuthorization, c.sentCookieNames), sentAuthorization: c.sentAuthorization, sentAutoAuth: c.sentAutoAuth, sentOrigin: c.sentOrigin, sentCookieNames: c.sentCookieNames, sentTokens: c.sentTokens.filter(tok => !tokensSeen.has(tok) && !!tokensSeen.add(tok)), info: [],

@@ -18,13 +18,13 @@ const body = (ctx: RuleContext) => (ctx.final?.body?.trim() ? ctx.final.body : u
  *   資格情報のない jdbc:mysql://db/app は内部のホスト名の露出で、②（中）にする（①は高で、漏れた値の変更を求めるため）
  */
 const CREDENTIALS: RegExp[] = [
-  // 繰り返しには上限を付ける（上限がないと「jdbc:」を繰り返した本文で、出てくるたびに末尾まで調べて2乗の時間になる）。
+  // 繰り返しには上限を付ける（「jdbc:」を繰り返した本文で2乗の時間にしない）。
   // ユーザー名とパスワードに ; ? & を含めない（jdbc:sqlserver://db;user=svc@corp を「ユーザー:パスワード@」とみなさない）。パスワードの / は認める
   /\bjdbc:\w{1,32}:(?:\w{1,32}:){0,3}\/\/[^\s/:@;?&"'<>]{1,256}:[^\s@;?&"'<>]{1,256}@/i,
   /\bjdbc:\w+:[^\s"'<>]{0,300}?[?;&](?:password|pwd)=[^&;\s"'<>]+/i,
   /\bjdbc:oracle:\w+:[^\s/@:"'<>]+\/[^\s@"'<>]+@/i,
-  // ユーザー名とパスワードに引用符・「/」・「@」を含めない（資格情報のない mongodb://db.example.com:27017/app のあとのメールアドレスの @ までを
-  // 「ユーザー:パスワード@」と読み、高の誤検知にした）
+  // ユーザー名とパスワードに引用符・「/」・「@」を含めない（mongodb://db.example.com:27017/app のあとのメールアドレスの @ までを
+  // 「ユーザー:パスワード@」と読まない）
   /mongodb(?:\+srv)?:\/\/[^\s:"'<>/@]{1,256}:[^\s@"'<>/]{1,256}@/i,
   /\b(?:Server|Data Source|Host|User ID|Uid|Database|Initial Catalog)\s*=[^;\n]{0,200};(?:[^;\n]{0,200};){0,10}?\s*(?:Password|PWD|Pwd)\s*=\s*[^;\s]+/,
 ];
@@ -34,37 +34,35 @@ const path = (ctx: RuleContext) => { try { return new URL(ctx.target.url ?? '').
 /** 画面・データの形の Content-Type（HTML・XHTML・JSON・問題の詳細）。静的リソースの拡張子の URL でも、E-01 はこれなら本文を見る */
 const DOC_CT = /^\s*(?:text\/html|application\/(?:xhtml\+xml|(?:problem\+)?json)|[\w.-]+\/[\w.-]+\+json)\b/i;
 
-// E-01② のスタックトレース・SQL・絶対パスなど（下の errorDetail の注記を参照）
+// E-01② のスタックトレース・SQL・絶対パスなど（errorDetail の中の注記を参照）
 const TRACE = /\bat [\w$.<>[\] ]{1,200} \((?:\/|[A-Z]:\\)[^)\n]{1,300}\.[cm]?[jt]sx?:\d+:\d+\)|\bat [\w$.<>[\] ]{1,200} \(node:[\w/]{1,100}:\d+:\d+\)|(?<=(?:^|[\r\n>]|\\n|<br\s*\/?>|[[,]\s*"|"(?:stack|trace|stacktrace|stack_trace|error|err|exception)"\s*:\s*")(?:[ \t]|&nbsp;){0,20}|(?:[Ee]rror|[Ee]xception)\b[^\n"<]{0,200}\s)at (?:\/|[A-Z]:\\)[^\s()"',;]{1,300}\.[cm]?[jt]sx?:\d+:\d+|\bat node:[\w/]{1,100}:\d+:\d+|(?:\/[\w.-]{1,100}){1,20}\.rb:\d+:in\b|\bFile "(?:\/|[A-Z]:\\)[^"\n]{1,300}\.py", line \d+|goroutine \d+ \[running\]|Symfony\\Component\\[\w\\]{1,200}Exception|Traceback \(most recent call last\)|\bat (?:java|javax|org|com|jdk)\.[\w.$]+\([\w.]*(?::\d+)?\)|SQLSTATE\[\w+\]|\bORA-\d{5}|System\.[\w.]{1,200}Exception|Microsoft\.\w+\.\w+Exception|\.php on line \d+|\.php<\/b> on line <b>\d+|Stack trace:\s*#0 |(?:(?<=^|[\r\n]|\\n)[ \t]{1,20})at [A-Z]\w*(?:\.[\w<>`|$]+){2,}\(|(?<![\w.:/~%-])(?<!=\s*["']?)(?<!url\(\s*["']?)(?:\/home|\/var\/www|\/usr\/src|\/srv|\/opt)\/[\w./-]{1,200}\.(?:php|py|rb|js|ts|java)\b|[A-Z]:\\(?:inetpub|Users|Program Files)\\[^\s<"]+/;
 const matchTrace = (s: string) => s.match(TRACE);
 export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース・デバッグ情報', appliesTo: 'any', scope: 'target',
   basis: ['ISOG-J', 'OWASP Error Handling CS'],
   run(ctx) {
-    // JS・CSS などの静的リソースは、エラーの応答ではない（圧縮した JS の文字列に ORA- や例外の名前が含まれていても、エラーの詳細ではない）
-    // 拡張子が静的リソースでも、エラーの応答（4xx・5xx）と、HTML・JSON の画面・データを返したもの（/img/missing.png の 500 のエラーページ）は見る
-    // （URL のパスだけで除くと、静的ファイルの URL のエラーページのスタックトレース・接続文字列（①（高））を見逃した。第52回）
+    // JS・CSS などの静的リソースは、エラーの応答ではない（圧縮した JS の文字列に ORA- や例外の名前が含まれていても、エラーの詳細ではない）。
+    // ただし拡張子が静的リソースでも、エラーの応答（4xx・5xx）と、HTML・JSON を返したもの（/img/missing.png の 500 のエラーページ）は見る
     const doc = (ctx.final?.status ?? 0) >= 400 || DOC_CT.test(header(ctx, 'content-type')[0] ?? '');
     const b = isStaticResource(ctx) && !doc ? undefined : body(ctx);
     if (!b) return [];
     const out = [];
-    // E-09 に任せるのは、そのラベルで E-09 を判定するときだけ（error-* のラベルは E-01 と A-10 だけを判定するので、任せると見逃した）
-    // 組織プロファイルで E-09 を対象外にしたときも任せない（任せると、HTML の AWS のキーをどの項目でも指摘しなかった）
+    // HTML の AWS のキーを E-09 に任せるのは、そのラベルで E-09 を判定し、組織プロファイルで E-09 を対象外にしていないときだけ
+    // （error-* のラベルは E-01 と A-10 だけを判定する。任せた先が判定しないと、どの項目でも指摘しない）
     const e09 = ctx.responseKind === 'html' && allowedItems(ctx.target.label).allowsItem('E-09') && !ctx.profile?.exclude.includes('E-09');
     const cred = CREDENTIALS.some(re => re.test(b)) || (!e09 && AWS_KEY.test(b));
     if (cred)
       out.push(mk(errorDetail, ctx, 1, 'high', 'fail', '接続文字列・認証情報らしき値（値は表示しない）', '汎用のエラーメッセージにし、詳細はサーバのログだけに出す。漏れた値は変更する'));
-    // 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする
-    // ORA- は語の境目から（FLORA-12345 のような品番に一致させない）。絶対パスは URL のパスの一部（https://cdn…/opt/app.js、
-    // src="/srv/main.js"、url(/srv/…)）には一致させない（直前が URL の文字か、属性・url() の始まり）
-    // Node.js（Express の開発用のエラーページ、JSON の stack）の「at 関数 (/パス:行:列)」と node:internal、Go の panic の goroutine、Symfony の例外も見る
-    // Node.js のフレームは、ファイル（.js・.ts など）か node: の行と列まであるものだけ（文章の「at Building A (/floor:3:12)」に一致させない）
-    // 無名のフレーム（at /app/index.js:7:9）と node: のフレーム（at node:internal/main/run_main_module:28:49）も見る。
-    // 無名のフレームは行の始め（JSON の stack の「\n    at」、HTML の <br> と &nbsp;、JSON の配列の要素の始まりを含む）にあり、パスに引用符・カンマを含まないものだけ（スクリプトの文字列
-    // "at /static/js/chunk.js:1:20345" や、JSON の {"tip":"look at /docs","entry":"main.js:1:2"} に一致させない）。
-    // Docker でよく使う /app の下のスタックトレースは、行の形で見る：Rails の「/app/…/x.rb:12:in」、Python の「File "/app/main.py", line 41」、
-    // Node.js の無名のフレーム（上の at /app/index.js:7:9）。/app を絶対パスの一覧に入れると、serviceWorker.register("/app/sw.js")・
-    // {"entry":"/app/main.js"}・文章の「/app/index.js」まで②にした（第23回で外した誤検知が戻った）
-    // JSON の文字列に入れたスタックトレース（Spring の "trace":"…\n\tat com.example…"、エスケープした Python の File \"/app/main.py\"）は、
+    // ②（TRACE と資格情報のない jdbc:）の要点：
+    // - 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする
+    // - ORA- は語の境目から（FLORA-12345 のような品番に一致させない）。絶対パスは URL のパスの一部（https://cdn…/opt/app.js、
+    //   src="/srv/main.js"、url(/srv/…)）には一致させない（直前が URL の文字か、属性・url() の始まり）
+    // - Node.js の「at 関数 (/パス:行:列)」は、ファイル（.js・.ts など）か node: の行と列まであるものだけ（文章の「at Building A (/floor:3:12)」に
+    //   一致させない）。無名のフレーム（at /app/index.js:7:9）は行の始め（JSON の stack の「\n    at」、HTML の <br> と &nbsp;、JSON の配列の要素の
+    //   始まりを含む）にあり、パスに引用符・カンマを含まないものだけ（"at /static/js/chunk.js:1:20345"、{"tip":"look at /docs","entry":"main.js:1:2"}
+    //   に一致させない）。Go の panic の goroutine、Symfony の例外も見る
+    // - Docker でよく使う /app の下は、行の形（Rails の「/app/…/x.rb:12:in」、Python の「File "/app/main.py", line 41」、Node.js の無名のフレーム）
+    //   でだけ見る。/app を絶対パスの一覧に入れない（serviceWorker.register("/app/sw.js")・{"entry":"/app/main.js"} に一致させない）
+    // JSON の文字列に入れたスタックトレース（Spring の "trace":"…\n\tat com.example…"、エスケープした File \"/app/main.py\"）は、
     // エスケープを戻した本文でも照合する
     const unescaped = b.includes('\\') ? b.replace(/\\[nt]/g, ' \n').replace(/\\(["/])/g, '$1') : b;
     const trace = matchTrace(b) ?? (unescaped !== b ? matchTrace(unescaped) : null)
@@ -74,7 +72,7 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る。Rails も同じく、既定のエラーページ
     // （public/404.html・500.html）と開発用の画面の文言で見る（「Ruby on Rails」はブログの記事などにも出る）
     const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Action Controller: Exception caught|<h1>Routing Error<\/h1>|We're sorry, but something went wrong\.|The page you were looking for doesn't exist\.|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|<title>Express<\/title>/i)
-      // nginx・Apache の既定のエラーページは、エラーの応答（4xx・5xx）だけ（同じ署名が既定の 301・302 の本文にもあり、転送のたびに③にした）
+      // nginx・Apache の既定のエラーページは、エラーの応答（4xx・5xx）だけ（同じ署名が既定の 301・302 の本文にもある）
       ?? ((ctx.final?.status ?? 0) >= 400 ? b.match(/<hr><center>nginx(?:\/[\d.]+[^<]{0,40})?<\/center>|<address>Apache(?:\/[\d.]+)?[^<]{0,80} Server at [^<]{0,200}<\/address>/i) : null)
       // Jetty の既定のエラーページ（<title>Error 404 Not Found</title>）は、本文の「HTTP ERROR 404」「Powered by Jetty」と合わせて見る。
       // <title>Error 404 - Page not found | MyShop</title> のような独自のエラーページを既定のページとしない
@@ -134,7 +132,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     // 本文を取得したターゲット（一般のターゲット）。2xx でなければファイルがない（404 のエラーページの本文を、ファイルの中身として読まない）
     const st = ctx.final?.status ?? 0; const got = !st || (st >= 200 && st < 300);
     if (/\/robots\.txt$/.test(p) && (b || !got)) {
-      // 転送（3xx）を -L なしで採取したものは、転送先の robots.txt を見ていない（「なし」として合格にした）
+      // 転送（3xx）を -L なしで採取したものは、転送先の robots.txt を見ていない
       if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, '-L を付けて、転送先まで採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
       // どのパスにも index.html を返す SPA の 200 は、robots.txt ではない（security.txt と同じ扱い）
@@ -152,7 +150,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
         return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `HTML の画面が返った（security.txt ではない。HTTP ${st || '不明'}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
       const ex = b!.match(/^Expires:\s*(.+)$/im)?.[1]; const contact = /^Contact:/im.test(b!);
       if (!contact || !ex) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Contact: ${contact ? 'あり' : 'なし'} / Expires: ${ex ?? 'なし'}`, 'Contact と Expires を書く')];
-      // 読めない Expires（never など）は、期限が書かれていないのと同じ（RFC 9116 は RFC 3339 の日時を求める）。NaN との比べは常に偽なので合格にしていた
+      // 読めない Expires（never など）は、期限が書かれていないのと同じ（RFC 9116 は RFC 3339 の日時を求める）
       if (Number.isNaN(Date.parse(ex.trim()))) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Expires: ${ex}（日時として読めない）`, 'Expires を RFC 3339 の日時（2027-01-01T00:00:00Z）で書く')];
       if (Date.parse(ex) < ctx.now) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `Expires: ${ex}（期限切れ）`, 'Expires を更新する')];
       return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `Expires: ${ex}`, '')];
@@ -160,8 +158,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     return [];
   } };
 
-// パスの区切り（/）で区切った1つの部分として一致させる。部分一致だと /category/actuator-kits や /blog/swagger-tips の
-// ような普通のページまで E-05（①は高）にしてしまう
+// パスの区切り（/）で区切った1つの部分として一致させる（/category/actuator-kits や /blog/swagger-tips は普通のページ）
 const DOC_SEGMENT = /\/(actuator|swagger-ui(?:\.html)?|swagger(?:\.json|\.ya?ml)?|openapi\.(?:json|ya?ml)|api-docs|graphql)(?=\/|$)/i;
 const docSegment = (p: string) => p.match(DOC_SEGMENT)?.[1].toLowerCase();
 /**
@@ -212,7 +209,7 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     }
     // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、拒否されたかどうかも分からない
     if (!f.status) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
-    // 5xx は、公開していないとは言えない（認証の前に落ちた・一時的な障害の可能性。A-01 の 5xx と同じく na。合格にした。第50回）
+    // 5xx は、公開していないとは言えない（認証の前に落ちた・一時的な障害の可能性。A-01 の 5xx と同じく na）
     if (f.status >= 500) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。サーバのエラーで、公開しているかは分からない）`, '時間をおいて採取し直す')];
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     // ①②は「未認証で使える・公開されている」。Cookie・Authorization を送った応答の 200 では、未認証で使えるかは分からない
@@ -221,16 +218,16 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     // S3＋CloudFront）では、/actuator・/swagger-ui/ も同じ画面になる（E-03② と同じ考え方）。actuator と API 仕様（openapi.json など）の本体は JSON・YAML
     const isHtml = /^\s*text\/html/i.test(header(ctx, 'content-type')[0] ?? '') || /^\s*(?:<!doctype html|<html)/i.test(b);
     // 画面の印は、タイトルと、その画面を作る要素・スクリプトだけで見る（<title>Swagger UI</title>、<div id="swagger-ui">、swagger-ui-bundle.js、
-    // <redoc>、<rapi-doc>、@scalar/api-reference）。本文の「Swagger UI」の語だけで見ると、どのパスにも同じ画面を返す SPA の文中の語で②にした
+    // <redoc>、<rapi-doc>、@scalar/api-reference）。本文の「Swagger UI」の語だけでは、SPA の文中の語と区別できない
     const ui = /<title>[^<]{0,100}(?:swagger[- ]ui|redoc|rapidoc|scalar)|\bid\s*=\s*["']?(?:swagger-ui|api-reference)\b|swagger-ui(?:-bundle|-standalone-preset)?(?:\.min)?\.(?:js|css)\b|SwaggerUIBundle|<redoc\b|redoc\.standalone|<rapi-doc\b|@scalar\/api-reference/i.test(b);
     if (isHtml && !(docSegment(p) !== 'actuator' && ui))
       return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}、HTML。${b ? 'その機能の画面と分からない（どのパスにも同じ画面を返す SPA の可能性）' : '本文を採取していない'}）`, b ? `${p} がその機能の画面かを、ブラウザで開いて確かめる` : NO_BODY_REC)];
     // /actuator/health・/actuator/info で、本文が状態だけ（components・details のない {"status":"UP"}、空の {}）のものは、Spring Boot が既定で公開する
-    // 死活監視の応答なので対象外（Kubernetes・負荷分散装置が使う。ほぼすべての Spring Boot の製品で高を出していた）
+    // 死活監視の応答なので対象外（Kubernetes・負荷分散装置が使う）
     if (docSegment(p) === 'actuator' && actuatorDefault(p, b))
       return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `${p}（HTTP ${f.status}、既定で公開される死活監視の応答・一覧）`, '')];
-    // 既定で公開される /actuator/health・info・一覧で本文を採取していない（-D - -o /dev/null・-I・HAR の本文なし）と、状態だけの応答かが分からない
-    // （①（高）にした。第48回）。/actuator/env などは、取得できたこと自体が①
+    // 既定で公開される /actuator/health・info・一覧で本文を採取していない（-D - -o /dev/null・-I・HAR の本文なし）と、状態だけの応答かが分からない。
+    // /actuator/env などは、取得できたこと自体が①
     if (docSegment(p) === 'actuator' && !b.trim() && /\/actuator(?:\/(?:health(?:\/[\w-]+)?|info))?\/?$/i.test(p))
       return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。本文を採取していないので、既定で公開される状態だけの応答かは分からない）`, NO_BODY_REC)];
     if (docSegment(p) === 'actuator') return [mk(apiDocsAdmin, ctx, 1, 'high', 'fail', `${p}（HTTP ${f.status}）`, 'actuator を本番で公開しない（必要なエンドポイントだけを認証の内側で有効にする）')];
@@ -273,8 +270,8 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     // アップロードしたファイルの inline 配信（①、高）にしないため
     if (ownChain(ctx.target).length !== 1 || f.status < 200 || f.status >= 300) return [];
     const ct = header(ctx, 'content-type')[0] ?? ''; const cd = header(ctx, 'content-disposition')[0] ?? '';
-    // アップロードしたファイルの配信らしいURL：アップロード先らしいディレクトリの下で、最後がファイル名（拡張子付き）のもの。
-    // ディレクトリ名だけで判定すると、/media/press-releases/ や /download/ のような普通のHTMLページまで①（高）にしてしまう
+    // アップロードしたファイルの配信らしいURL：アップロード先らしいディレクトリの下で、最後がファイル名（拡張子付き）のもの
+    // （/media/press-releases/ や /download/ のようなディレクトリ名だけのものは普通のHTMLページ）
     const p = path(ctx);
     // サーバ側で動くページ（/download/index.php、/files/list.aspx）と、ディレクトリの index.html は、アップロードしたファイルではないので除く
     const uploadPath = /\/(uploads?|files?|attachments?|media|download)\//i.test(p) && /\/[^/]+\.[a-z0-9]{1,10}$/i.test(p)
@@ -291,7 +288,7 @@ export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード�
     // JSON の API の応答（/api/files/123.json など、パスがアップロード先らしくても）は、ダウンロードではない（DOWNLOAD_CT で +json を除くのと同じ）
     // Content-Type で見る（kind=api を明示したターゲットの SVG・PDF まで除かないため）
     if (/^\s*application\/(?:[\w.-]+\+)?json\b/i.test(ct) && !cd) return [];
-    // 種類（最初のトークン）で見る。値のどこかに attachment があるかで見ると、inline; filename="attachment.html" を見逃した（RFC 6266）
+    // Content-Disposition は種類（最初のトークン）で見る（RFC 6266。inline; filename="attachment.html" は inline）
     if (uploadPath && ACTIVE_CT.test(ct) && !/^\s*attachment\s*(?:;|$)/i.test(cd))
       return [mk(downloadResponse, ctx, 1, 'high', 'fail', `Content-Type: ${ct} / Content-Disposition: ${cd || '(なし)'}`, '利用者がアップロードしたファイルは別オリジンから attachment で配信する')];
     // ビルドした CSS・JS・フォント（Drupal の /sites/default/files/css/…、Next.js の /_next/static/media/…）は、ページが読み込むもので、ダウンロードではない

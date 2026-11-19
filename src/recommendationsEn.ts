@@ -1,4 +1,4 @@
-// recommendationsEn.ts：推奨対応の英訳（v0.4：英語UIで推奨対応だけを英訳する）
+// recommendationsEn.ts：推奨対応と、カバレッジの理由に出る na の証跡の英訳（英語UIで使う。判定の証跡そのものは訳さない）
 // キーはルールが返す日本語の文言そのもの。新しい文言を追加したら、ここにも追加する（tests/i18n.test.ts が漏れを検出する）
 export const EXACT: Record<string, string> = {
   // 第1章

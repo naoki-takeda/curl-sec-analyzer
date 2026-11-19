@@ -40,7 +40,6 @@ if (window.top !== window.self) {
 }
 
 // ---- 画面の骨格 ----
-// ---- 画面の骨格 ----
 function buildShell() {
   const T = tr();
   refs.input = el('textarea', 'block w-full h-[22rem] lg:h-[calc(100vh-26rem)] min-h-64 resize-y rounded-md border border-line bg-surface p-3 font-mono text-[13px] leading-relaxed text-ink');
@@ -59,11 +58,11 @@ function buildShell() {
   refs.genDetails = commandGenerator();
 
   const fileIn = hidden('.txt,.log,.har,text/plain,application/json', openFile);
-  // 設定ファイル（例外・組織プロファイル・前回の結果）も、貼り付けと同じ大きさまでにする（上限がないと、大きなファイルで画面が止まった）
+  // 設定ファイル（例外・組織プロファイル）も、貼り付けと同じ大きさまでにする（大きなファイルで画面を止めない）
   const supIn = hidden('.json,application/json', async f => {
     if (f.size > MAX_BYTES) { say(() => tr().settingsTooLarge(MAX_BYTES / 1024 / 1024)); return; }
     const { list, errors } = parseSuppressions(await f.text());
-    // 1件も読めなかった（形式の違うファイル）ときは、登録済みの例外を残す（画面で登録しただけで書き出していない例外が消えた。第50回）
+    // 1件も読めなかった（形式の違うファイル）ときは、登録済みの例外を残す（画面で登録しただけの例外を消さない）
     if (list.length || !errors.length) state.suppressions = list;
     const legacy = list.filter(s => legacyHarKey(s.target)).length;
     refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.suppressionsFile, joinMessages(errors, getLang())) : legacy ? t.legacyHarKeys(legacy) : ''; });
@@ -71,19 +70,19 @@ function buildShell() {
   const profIn = hidden('.json,application/json', async f => {
     if (f.size > MAX_BYTES) { say(() => tr().settingsTooLarge(MAX_BYTES / 1024 / 1024)); return; }
     const { profile: p, errors } = parseProfile(await f.text());
-    // 形式の違うファイル（どの設定も読めず、エラーがある）では、読み込み済みのプロファイルを残す（既定の設定に置き換わった。例外ファイルと同じ。第51回）
+    // 形式の違うファイル（どの設定も読めず、エラーがある）では、読み込み済みのプロファイルを残す（既定の設定に置き換えない。例外ファイルと同じ）
     const known = p && (Object.keys(p.severity).length || p.exclude.length || p.sessionCookieNames.length || p.trustedScriptOrigins.length || p.name || p.sessionMaxAgeHours !== 24);
     const kept = !!state.profile && !(p && (known || !errors.length));
     if (p && !kept) state.profile = p;
     // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）。残したプロファイルでは作り直さない
-    // （捨てた既定の設定で作り直し、判定に使うプロファイルと食い違った。束のレビュー）
+    // （判定に使うプロファイルと食い違わないため）
     if (p && !kept && state.har) { const chains = state.har.imp.chains; withProfile(p, () => suggestLabels(chains, true)); renderHar(); }
-    // 残したときは、そのことを知らせる（「既定の24時間を使います」などのエラーの文言だけでは、古いプロファイルを使い続けることが分からなかった）
+    // 残したときは、そのことを知らせる（「既定の24時間を使います」などのエラーの文言だけでは、古いプロファイルを使い続けることが分からない）
     refresh(() => { const t = tr(); return errors.length ? t.readErrors(t.loadProfile, joinMessages(errors, getLang())) + (kept ? t.profileKept : '') : ''; });
   });
   const baseIn = hidden('.json,application/json', async f => {
-    // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超える。貼り付けと同じ上限では、自分のエクスポートを読めなかった）
-    if (f.size > HAR_MAX_BYTES) { say(() => tr().settingsTooLarge(HAR_MAX_BYTES / 1024 / 1024)); return; }   // 上限は50MB（「上限5MB」と出ていた。第49回）
+    // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超えるので、貼り付けと同じ上限では自分のエクスポートを読めない）
+    if (f.size > HAR_MAX_BYTES) { say(() => tr().settingsTooLarge(HAR_MAX_BYTES / 1024 / 1024)); return; }
     const { baseline: b, error, skipped } = parseBaseline(await f.text());
     if (b) state.baseline = b;
     const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
@@ -96,7 +95,7 @@ function buildShell() {
         el('div', 'flex flex-wrap items-baseline gap-x-4',
           el('h1', 'text-2xl font-bold tracking-tight', 'curl-sec-analyzer'),
           el('span', 'num text-sm text-muted', T.versions(TOOL_VERSION, RULESET_VERSION)),
-          // ボタンの文言（English・日本語）は切り替え先の言語なので lang を付ける（WCAG 3.1.2）。作り直したあとはボタンにフォーカスを戻す（第49回）
+          // ボタンの文言（English・日本語）は切り替え先の言語なので lang を付ける（WCAG 3.1.2）。作り直したあとはボタンにフォーカスを戻す（WCAG 2.4.3）
           Object.assign(button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const m = current; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); if (m) say(m);
             document.querySelector<HTMLButtonElement>('#lang-switch')?.focus(); }), { id: 'lang-switch', lang: getLang() === 'ja' ? 'en' : 'ja' })),
         el('p', 'mt-1 text-muted', T.tagline),
@@ -133,7 +132,7 @@ function buildShell() {
 }
 function keepDraft() { state.draft = { input: refs.input.value, url: refs.urlInput.value, message: refs.message.textContent ?? '' }; }
 // 状態のメッセージ（件数、入力がない、読み込みのエラーなど）は、文言を作る関数で受け取る。言語を切り替えたら、その言語で出し直す
-// （文字列のまま残すと、英語の画面に日本語のメッセージが残る。件数だけを出し直していたので、ほかのメッセージは前の言語のままだった）
+// （文字列のまま残すと、英語の画面に日本語のメッセージが残る）
 let current: (() => string) | undefined;
 function say(m: Message) { current = typeof m === 'function' ? m : undefined; refs.message.textContent = typeof m === 'function' ? m() : m; }
 function saySummary(s: [number, number, number]) { say(() => tr().analyzed(...s)); }
@@ -195,11 +194,11 @@ function analyzeUnsafe() {
   // URL 欄で補ったターゲットにも、各ホップの URL を付け直す（-L で http から https に転送されたかを判定するため。parseInput の中では URL が分からない）
   if (u) for (const t of targets) if (!t.url && t.label === 'default') { t.url = u; assignHopUrls(t); }
   if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return; }
-  // URL 欄の値がスキームのある URL でなければ（www.example.com）、#TARGET の url= と同じく警告する（http として扱い、H-01①・C-01①（高）が
-  // 警告なしに消えた。第50回）
+  // URL 欄の値がスキームのある URL でなければ（www.example.com）、#TARGET の url= と同じく警告する（HTTPS かどうかを使う項目
+  // （H-01①・C-01① など）が、警告なしに判定されなくなるのを防ぐ）
   const urlOk = /^[a-z][\w+.-]*:\/\/[^/?#\s]/i.test(u);
-  // パーサの「url= を付けてください」は、URL 欄で補ったターゲットには出さない（URL 欄の誤りは、URL 欄の警告として1つだけ出す。束のレビュー）。
-  // 文言はほかの解析の警告と同じく日本語（判定した時点の言語で残ると、言語を切り替えたあとに古い言語のまま出た）
+  // パーサの「url= を付けてください」は、URL 欄で補ったターゲットには出さない（URL 欄の誤りは、URL 欄の警告として1つだけ出す）。
+  // 文言はほかの解析の警告と同じく日本語に固定する（判定した時点の言語で作ると、言語を切り替えたあとも古い言語のまま残る）
   const warnings = [...parsed.warnings, ...fromHar.warnings, ...merged].filter(w => !(u && w.kind === 'unknown-url' && w.label === 'default'));   // URL欄で補ったのは default だけ
   if (u && !urlOk && targets.some(t => t.url === u)) warnings.push({ kind: 'unknown-url', label: 'default', detail: 'URL 欄の値を URL として読めません。HTTPSかどうかを使う項目は判定できません（https:// から書いてください）' });
   const findings = runAll(targets, { suppressions: state.suppressions, profile: state.profile });

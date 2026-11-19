@@ -1,4 +1,4 @@
-// engine/standards.ts：チェックリストの項目と、OWASP ASVS 5.0.0・IPA「安全なウェブサイトの作り方」の対応（v1.0）
+// engine/standards.ts：チェックリストの項目と、OWASP ASVS 5.0.0・IPA「安全なウェブサイトの作り方」の対応
 // - 対応は items.json の asvs・ipa に持つ。「関連する要件」であり、その要件の合否を判定するものではない
 // - ASVS の要件の文言は CC BY-SA 4.0 のため取り込まず、要件IDとレベルだけを持つ（asvs-levels.json は原典の v5.0.0 タグから生成）
 // - IPA の項番：第1章は「4-(iii)」「4-(iv)-a」、第2章は節番号と番号を「2.3-1)」のようにつなぐ
@@ -19,7 +19,7 @@ export const standardsOf = (item: string): Standards => {
   return { asvs: it?.asvs ?? [], ipa: it?.ipa ?? [] };
 };
 
-/** ASVS が推奨する引用の形（v<version>-<要件ID>）。レベルを添える：v5.0.0-3.4.1（L1） */
+/** ASVS が推奨する引用の形（v<version>-<要件ID>）。レベルを添える：v5.0.0-3.4.1 (L1) */
 export const asvsRef = (id: string) => `v${ASVS_VERSION}-${id}${LEVELS[id] ? ` (L${LEVELS[id]})` : ''}`;
 export const asvsLevel = (id: string): number | undefined => LEVELS[id];
 

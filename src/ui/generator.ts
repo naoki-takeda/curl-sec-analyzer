@@ -4,8 +4,7 @@ import { getLang, tr } from '../i18n';
 import { joinMessages } from '../messagesEn';
 import { BTN, button, download, el, labelFor } from './dom';
 
-// ---- コマンド生成器（v0.2） ----
-// 入力と生成したスクリプトは、画面を作り直しても残す（言語を切り替えると、入力と生成したスクリプトが消えた。第50回）
+// 入力と生成したスクリプトは、画面を作り直しても（言語を切り替えても）残す
 const draft = { values: new Map<string, string>(), danger: false, output: '', open: false };
 export function commandGenerator() {
   const T = tr().gen;
@@ -25,7 +24,7 @@ export function commandGenerator() {
   const out = el('textarea', 'mt-3 hidden h-64 w-full rounded-md border border-line bg-surface p-3 font-mono text-[12px]'); out.readOnly = true; out.wrap = 'off';
   out.setAttribute('aria-label', T.output);
   const err = el('p', 'mt-2 min-h-5 text-sm text-sev-high');
-  err.setAttribute('role', 'status');   // 入力の誤りと「コピーしました」を読み上げる（WCAG 4.1.3。第50回）
+  err.setAttribute('role', 'status');   // 入力の誤りと「コピーしました」を読み上げる（WCAG 4.1.3）
   const actions = el('div', 'mt-2 hidden flex-wrap gap-2',
     button(T.copy, BTN, async () => { try { await navigator.clipboard.writeText(out.value); err.textContent = T.copied; } catch { out.select(); err.textContent = T.copyFailed; } }),
     button(T.saveSh, BTN, () => download('csa-collect.sh', 'text/x-shellscript', out.value)));

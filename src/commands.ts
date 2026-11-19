@@ -27,7 +27,7 @@ export function validate(o: CommandOptions): string[] {
 
 export function generateScript(o: CommandOptions): string {
   const H = `https://${o.host}`;
-  // ポートを除いたホスト名。http の採取（C5）は 80 番に送り（https の 8443 番に http で送ると 400 になり、T-04 を「HTTP を断る」と合格にした）、
+  // ポートを除いたホスト名。http の採取（C5）は 80 番に送り（https の 8443 番に http で送ると 400 になり、T-04 を「HTTP を断る」と誤って合格にする）、
   // 部分一致の Origin（C6）は origin として正しい形にする（https://app.example.com:8443.evil.net は origin ではない）
   const hostname = o.host.replace(/:\d+$/, '');
   const L: string[] = [];
@@ -35,7 +35,7 @@ export function generateScript(o: CommandOptions): string {
   // どのマーカー行にも、実行ごとの乱数の印（run=$RUN）を付ける。ツールは最初の #TARGET の印と同じマーカー行だけを読む（parser/input.ts。
   // 診断対象のサーバが応答の本文に書いた #TARGET・#META・#PROBE で、ターゲットを作ったり分けたりできないように）
   const meta = (cmd: string) => `echo "#META at=$(date +%Y-%m-%dT%H:%M:%S) cmd=${cmd} run=$RUN"`;
-  // #TARGET の前に改行を出す（curl -i の本文が改行で終わらないと、#TARGET が前の本文の行にくっついた）
+  // #TARGET の前に改行を出す（curl -i の本文が改行で終わらないと、#TARGET が前の本文の行にくっつく）
   const t = (label: string, url: string, extra = '') => L.push('echo', `echo ${q(`#TARGET url=${url} label=${label}${extra}`)}" run=$RUN"`, meta(cmdOf(label)));
   L.push('#!/usr/bin/env bash',
     '# curl-sec-analyzer の推奨コマンド（コマンド生成器で作成）。出力を out.txt にまとめ、ツールに貼り付けて判定する',
@@ -54,7 +54,7 @@ export function generateScript(o: CommandOptions): string {
     // INT・TERM・HUP では exit して EXIT の trap を通す）。まだ作っていない一時ファイルは rm に渡さない（空の引数を渡さない）
     "probe=''; tout=''; terr=''",
     '# openssl にも時間の上限を付ける（TCP を受け付けて黙るサーバで s_client が止まり続け、logout・after-logout を採取できなかった。timeout のない環境ではそのまま）',
-    // GNU の timeout は --foreground がないと別のプロセスグループで動かし、端末の Ctrl-C が openssl に届かない（束のレビュー）。使えれば付ける
+    // GNU の timeout は --foreground がないと別のプロセスグループで動かし、端末の Ctrl-C が openssl に届かない。使えれば付ける
     'if timeout --foreground 1 true 2>/dev/null; then ossl() { timeout --foreground 20 openssl "$@"; }',
     'elif command -v timeout >/dev/null 2>&1; then ossl() { timeout 20 openssl "$@"; }',
     'else ossl() { openssl "$@"; }; fi',
@@ -76,10 +76,10 @@ export function generateScript(o: CommandOptions): string {
   }
 
   L.push('', '# ---- 第2章：ログインの流れ（C18）。login.txt にログインのPOST本文を書いておく ----');
-  // pre-login は -b を付けない（スクリプトの初めに jar.txt を消すので、-b jar.txt は -v の1行目に「* WARNING: failed to open cookie file」を出した）
+  // pre-login は -b を付けない（スクリプトの初めに jar.txt を消すので、-b jar.txt だと -v の1行目に「* WARNING: failed to open cookie file」が出る）
   t('pre-login', `${H}${o.loginPath}`); L.push(`curl -sS -v -o /dev/null -c jar.txt "$H"${q(o.loginPath)} 2>&1`);
-  // login は本文も取る（#BODY の形。下の置き換え）。本文を捨てる（-v -o /dev/null）と、パスワード欄のある画面を 200 で返し直す失敗（Django・
-  // ASP.NET Identity・WordPress）を成功と見分けられず、新しいセッションIDがないので C-09①（高）にした
+  // login は本文も取る（#BODY の形。下の置き換え）。本文がないと、パスワード欄のある画面を 200 で返し直す失敗（Django・ASP.NET Identity・
+  // WordPress）を成功と見分けられず、新しいセッションIDがないので C-09①（高）にしてしまう
   t('login', `${H}${o.loginPath}`, ' sensitive=1'); L.push(`curl -sS -i -c jar.txt -b jar.txt -X POST --data @login.txt "$H"${q(o.loginPath)}`);
   L.push('for i in 1 2 3; do', `  echo "#TARGET url=$H${o.loginPath} label=session-sample-$i run=$RUN"; ${meta('C18')}`, `  curl -sS -D - -o /dev/null -c "s$i.txt" -X POST --data @login.txt "$H"${q(o.loginPath)}`, 'done');
   t('mypage', `${H}${o.mypagePath}`, ' sensitive=1'); L.push(`curl -sS -i -b jar.txt "$H"${q(o.mypagePath)}`);
@@ -96,18 +96,18 @@ export function generateScript(o: CommandOptions): string {
 
   if (o.wsPath) {                                             // C16：許可外の Origin でハンドシェイクし、101 が返るかを見る（R-09）
     t('websocket', `${H}${o.wsPath}`, ' sensitive=1');
-    // --http1.1：HTTP/2 では curl が Connection・Upgrade を送らない（HTTP/2 で禁じられたヘッダ）。h2 に対応したサーバには普通の GET になり、
-    // 101 が返らないので R-09 がいつも na になった
+    // --http1.1：HTTP/2 では curl が Connection・Upgrade を送らない（HTTP/2 で禁じられたヘッダ）ので、h2 に対応したサーバでは普通の GET になり、
+    // 101 が返らず R-09 がいつも na になる
     L.push(`curl -sS -v -o /dev/null --http1.1 --max-time 5 -b jar.txt -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Origin: https://evil.example' "$H"${q(o.wsPath)} 2>&1`);
   }
 
   L.push('', '# ---- 第4章：メソッド・転送・ヘッダ（C9・C14・C19・C22） ----');
   t('options', `${H}/`); L.push('curl -sS -i -X OPTIONS "$H/"');
   t('trace', `${H}/`); L.push('curl -sS -i -X TRACE "$H/"');
-  // X-Forwarded-Host を変えた応答が共有キャッシュ（CDN・リバースプロキシ）に入ると、ほかの利用者に evil.example へのリンクを返しうる（第49回）。
-  // 実行ごとの印をクエリに付けて、キャッシュのキーをほかの利用者のリクエストと分ける
-  // キャッシュよけの乱数（CB）は、採取の印（RUN）と別にする。RUN をサーバに送ると、印を知ったサーバが本文に正しい印の偽のマーカーを書き、
-  // C-12① などを偽装できた（束のレビュー）。#TARGET の url は単一引用符の中で展開されないので、パスだけを書く
+  // X-Forwarded-Host を変えた応答が共有キャッシュ（CDN・リバースプロキシ）に入ると、ほかの利用者に evil.example へのリンクを返しうるので、
+  // キャッシュよけの乱数（CB）をクエリに付けて、キャッシュのキーをほかの利用者のリクエストと分ける。
+  // CB は採取の印（RUN）と別にする（RUN をサーバに送ると、印を知ったサーバが本文に正しい印の偽のマーカーを書ける）。
+  // #TARGET の url は単一引用符の中で展開されないので、パスだけを書く
   t('host-inj', `${H}/`); L.push(`curl -sS -i -H 'X-Forwarded-Host: evil.example' "$H/?csa=$CB"`);
   // T-06 は、転送した応答だけで判定する（ログイン画面が 200 を返すと na）。next= で実際に転送する URL があれば、そちらに置き換えるよう書いておく
   L.push('# T-06：ログイン画面が 200 を返すと判定できない（na）。next= などで実際に転送する URL（ログアウト、ログイン後の転送先）に置き換える');
@@ -132,19 +132,19 @@ export function generateScript(o: CommandOptions): string {
   t('tls', `${H}/`);
   const hp = o.host.includes(':') ? o.host : `${o.host}:443`, sni = hostname;
   // 診断対象のサーバは、ハンドシェイクのあとに任意のデータを送れ、s_client はそれを標準出力に出す（「unsupported protocol」「DNS:…」
-  // 「notAfter=…」「New, TLSv1, Cipher is …」を書いて、T-09・T-10・T-11 の判定を変えられた）。サーバのデータは、ハンドシェイクの要約の
+  // 「notAfter=…」「New, TLSv1, Cipher is …」を書いて、T-09・T-10・T-11 の判定を変えられる）。サーバのデータは、ハンドシェイクの要約の
   // 最初の「Verify return code:」の行より後にしか出ないので、そこで切る。エラーは手元の openssl が標準エラーに出すものだけを見る
   const cut = `sed '/^ *Verify return code:/q'`;
   L.push(`ossl s_client -connect ${q(hp)} -servername ${q(sni)} -showcerts </dev/null 2>&1 | ${cut}`,
-    // SAN は x509 が名前をそのまま（改行を含めて）出すので、見出しと値の2行だけを取る。証明書の SAN に改行と「notAfter=2099…」を入れて、
-    // 期限や SAN を偽装できた（パーサは後ろの notAfter・SAN を使う）。証明書を受け取れなかったときは x509 を実行しない
+    // SAN は x509 が名前をそのまま（改行を含めて）出すので、見出しと値の2行だけを取る（証明書の SAN に改行と「notAfter=2099…」を入れて、
+    // 期限や SAN を偽装させない。パーサは後ろの notAfter・SAN を使う）。証明書を受け取れなかったときは x509 を実行しない
     `cert=$(ossl s_client -connect ${q(hp)} -servername ${q(sni)} </dev/null 2>/dev/null | openssl x509)`,
     `if [ -n "$cert" ]; then printf '%s\\n' "$cert" | openssl x509 -noout -subject -issuer -dates; printf '%s\\n' "$cert" | openssl x509 -noout -ext subjectAltName | tr -d '\\r' | head -n 2; fi`,
     // ↑ SAN の値の CR も除く（CR は head -n 2 を通り抜け、パーサが改行にそろえると「notAfter=…」の行ができた）
     // 手元の openssl がない（終了コード 127）・実行できない（126）・時間切れ（timeout の 124）・その指定を受け付けない（no cipher match。LibreSSL は @SECLEVEL を読まない）
-    // ときは err（試していない）。拒否（ok=0）とすると、openssl のない環境で C12・C23 がすべて「拒否」になり、T-09・T-10 を合格にした。
-    // 照合の前に、証明書の検証の行（depth=・verify error/return）を除く（サーバの証明書の subject に「O=unknown option」と書くと、受け入れた
-    // プローブを err にして T-09①・T-10① を隠せた）
+    // ときは err（試していない）。拒否（ok=0）にすると、openssl のない環境で C12・C23 がすべて「拒否」になり、T-09・T-10 が合格になる。
+    // 照合の前に、証明書の検証の行（depth=・verify error/return）を除く（サーバの証明書の subject の「O=unknown option」で、受け入れた
+    // プローブを err にして T-09①・T-10① を隠させない）
     "OSSL_ERR='unknown option|no protocols available|no cipher match|invalid command|error with command|ssl_conf_cmd|command not found'",
     'tout=$(mktemp); terr=$(mktemp)',
     'for v in tls1 tls1_1 tls1_2 tls1_3; do',
@@ -153,7 +153,7 @@ export function generateScript(o: CommandOptions): string {
     // サーバが別のバージョンを選んだ（このバージョンを拒否した）ときにも出るので、拒否として扱う
     `  if [ $rc -ge 124 ] || grep -vE '^(depth=|verify (error|return))' "$terr" | grep -qiE "$OSSL_ERR"; then r=err`,
     // 「New, <版>, Cipher is <暗号>」の版は、OpenSSL 1.1 以降は暗号の最低の版（AES128-SHA は SSLv3）を出す。版は問わず、失敗したとき
-    // の「New, (NONE), Cipher is (NONE)」だけを除く（TLS で始まるものだけにすると、TLS 1.0 の AES128-SHA を「拒否」とした）
+    // の「New, (NONE), Cipher is (NONE)」だけを除く
     `  elif [ $rc -eq 0 ] && ${cut} "$tout" | grep -qE '^New, [^(,][^,]*, Cipher is [^(]'; then r=1`, '  else r=0; fi',
     `  printf '#TLSPROBE run=%s v=%s ok=%s\\n' "$RUN" "$v" "$r"`, 'done',
     'for c in RC4-SHA DES-CBC3-SHA NULL-SHA256 AES128-SHA ECDHE-RSA-AES128-SHA; do',
@@ -173,19 +173,18 @@ export function generateScript(o: CommandOptions): string {
 
   L.push('', '# ---- 第2章：ログアウトと、ログアウト後の旧Cookie（C18） ----', 'cp jar.txt old.txt');
   // logout は送った Cookie の名前（H-15）を使うので -v のまま、本文を別に取って #BODY の印のあとに出す（GET ではログアウトの確認画面を返すだけの
-  // アプリを見分ける。第48回。-v の出力に本文を混ぜると、パーサは本文を読まず、本文に書いた「< HTTP/1.1 200」などで偽の応答を作れた）。
-  // after-logout は本文も取る（#BODY の形。本文がないと、ログインのフォーム・SPA の殻・データのない JSON を見分けられず C-12①（高）にした）
+  // アプリを見分ける。-v の出力に本文を混ぜると、パーサは本文を読まず、本文に書いた「< HTTP/1.1 200」などで偽の応答を作れる）。
+  // after-logout は本文も取る（#BODY の形。本文がないと、ログインのフォーム・SPA の殻・データのない JSON を見分けられず C-12①（高）にしてしまう）
   t('logout', `${H}${o.logoutPath}`); L.push(`: > "$body"; curl -sS -v -o "$body" -c jar.txt -b jar.txt "$H"${q(o.logoutPath)} 2>&1; echo "#BODY run=$RUN"; head -c 196608 "$body"; echo`);
   t('after-logout', `${H}${o.mypagePath}`, ' sensitive=1'); L.push(`curl -sS -i -b old.txt "$H"${q(o.mypagePath)}`);
 
   L.push('} > out.txt', 'rm -f "$hdr" "$body"', `echo 'out.txt に書き出しました。ツールで読み込んだら、パスワードやCookieを含むファイルも削除してください：rm -f out.txt login.txt jar.txt old.txt s1.txt s2.txt s3.txt' >&2`);
   // 本文を取るコマンド（ここでは curl -sS -i と書く）は、ヘッダ（-D）と本文（-o）を別のファイルに取り、「ヘッダ・#BODY の印・本文」の順に出す。
-  // -i の出力では本文と次の応答を見分けられず、診断対象のサーバが本文を「HTTP/1.1 200 OK」と偽のヘッダで始めると、本物の応答を置き換えられた。
+  // -i の出力では本文と次の応答を見分けられず、診断対象のサーバが本文を「HTTP/1.1 200 OK」と偽のヘッダで始めると、本物の応答を置き換えられる。
   // 印は実行ごとの乱数を持つので、サーバは本文の終わりを作れない。取る前に2つのファイルを空にする（接続に失敗したとき、前のコマンドの
   // ヘッダ・本文を出さない）。最後に改行を出す（本文が改行で終わらないと、次の #TARGET が本文の続きになる）。
   // 本文は先頭の192KBだけを出す（パーサが使うのは先頭の64K文字。head -c はバイト数なので、日本語などの多バイトの本文でも64K文字に届く
-  // 3倍の大きさにする。全部を出すと、大きな JS のバンドルで out.txt が読み込みの上限5MBを超えて判定できず、
-  // 認証後の本文の使わない部分までファイルに残った）
+  // 3倍の大きさにする。全部を出すと、大きな JS のバンドルで out.txt が読み込みの上限5MBを超え、認証後の本文の使わない部分までファイルに残る）
   return L.map(l => l.replace(/^(\s*)curl -sS -i (.*?)(\s+#.*)?$/, (_, ind: string, args: string, comment = '') =>
     `${ind}: > "$hdr"; : > "$body"; curl -sS -D "$hdr" -o "$body" ${args}; cat "$hdr"; echo "#BODY run=$RUN"; head -c 196608 "$body"; echo${comment}`)
     .replace(/\bcurl -sS /g, `curl ${CURL_COMMON} `)).join('\n') + '\n';
@@ -194,9 +193,9 @@ export function generateScript(o: CommandOptions): string {
 /**
  * すべての curl に付ける指定（生成したスクリプトの curl -sS を置き換える）：
  * - -q：利用者の ~/.curlrc を読まない（最初の引数でないと効かない）。.curlrc の header = "Authorization: …" で、認証を付けないはずの
- *   unauth-api（A-01）や CORS の採取にトークンが付き、location で -D - の採取が転送をたどって、判定が黙って変わった
- * - --connect-timeout・--max-time：応答しないサーバ（tarpit・WAF）でスクリプトが止まらないようにする。プローブ（/backup.zip など）は
- *   全体をダウンロードしていたが、時間で打ち切る（打ち切っても先頭の64バイトとステータスは残る）。WebSocket（C16）は後ろの --max-time 5 が効く
+ *   unauth-api（A-01）や CORS の採取にトークンが付いたり、location で -D - の採取が転送をたどったりして、判定が黙って変わるため
+ * - --connect-timeout・--max-time：応答しないサーバ（tarpit・WAF）でスクリプトが止まらないようにする。プローブ（/backup.zip など）も
+ *   時間で打ち切る（打ち切っても先頭の64バイトとステータスは残る）。WebSocket（C16）は後ろの --max-time 5 が効く
  */
 const CURL_COMMON = '-q -sS --connect-timeout 10 --max-time 30';
 

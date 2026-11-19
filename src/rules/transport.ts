@@ -32,7 +32,6 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', ev, '')];
   } };
 
-// ---- 以下 MVP で追加（T-05、T-07②、T-08） ----
 const INTERNAL_HOST = /^(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost$)|\.(?:internal|local|lan|corp|intra)$/i;
 export const redirectChain: Rule = { id: 'T-05', title: 'リダイレクトチェーン', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG'],
@@ -78,7 +77,6 @@ export const crlfInjection: Rule = { id: 'T-08', title: 'CRLFインジェクシ�
                : [mk(crlfInjection, ctx, 'ok', 'info', 'pass', '注入したヘッダは応答に現れない', '')];
   } };
 
-// ---- 以下 v0.2 で追加（T-01、T-06、T-12） ----
 const RISKY_METHODS = /\b(PUT|DELETE|PATCH|TRACE|TRACK|CONNECT|PROPFIND|PROPPATCH|MKCOL|COPY|MOVE|LOCK|UNLOCK)\b/gi;
 export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 'any', scope: 'target',
   basis: ['OWASP WSTG-CONF-06'],
@@ -101,7 +99,7 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
 const OPEN_REDIRECT_REC = 'next= などで実際に転送する URL（ログインに成功したあとの転送など）で採取し直す';
 /**
  * 転送先の URL が、テスト値（evil.example）を持ったままか（エンコードしたものを含む）。ホスト名をそろえる転送（example.com → www.example.com）や
- * パスの書き換え（/redirect → /en/redirect）はテスト値を次の応答に渡すだけで、転送先を検証したことにはならない（合格にした）
+ * パスの書き換え（/redirect → /en/redirect）はテスト値を次の応答に渡すだけで、転送先を検証したことにはならない
  */
 const carriesTestValue = (loc: string) => {
   let d = loc;
@@ -110,7 +108,7 @@ const carriesTestValue = (loc: string) => {
 };
 /**
  * Refresh ヘッダの転送先（HTML Standard の shared declarative refresh steps）。「秒数」のあとの ; か , と「url=」は省略できる
- * （Refresh: 0; https://evil.example/ も転送する。url= があるものだけを見ると、外部への転送を合格にした）。転送先がなければ undefined（読み込み直し）
+ * （Refresh: 0; https://evil.example/ も転送する）。転送先がなければ undefined（読み込み直し）
  */
 export function refreshTarget(v: string): string | undefined {
   const m = v.match(/^\s*[\d.]+\s*(?:[;,]\s*)?([\s\S]*)$/);
@@ -124,9 +122,9 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
   basis: ['OWASP Unvalidated Redirects CS', 'IPA'],
   run(ctx) {
     if (!ctx.final) return [mk(openRedirect, ctx, 'na', 'info', 'na', '応答がない', '')];
-    // 転送先はブラウザと同じ読み方（WHATWG URL）で解釈する。http・https の URL の「\」は「/」と読まれるので、/\evil.example・https:\\evil.example/・
-    // ///evil.example も外部ホストへの転送になる（正規表現の //evil.example だけでは、よく使われる回避の値を合格にした）
-    // ターゲットの URL が絶対 URL でないとき（url=a.example/r?to=…）は、仮の基準で読む（基準を作れずに例外になり、evil.example への転送を合格にした）
+    // 転送先はブラウザと同じ読み方（WHATWG URL）で解釈する。http・https の URL の「\」は「/」と読まれるので、/\evil.example・
+    // https:\\evil.example/・///evil.example も外部ホストへの転送になる。ターゲットの URL が絶対 URL でないとき（url=a.example/r?to=…）は、
+    // 仮の基準で読む（例外で転送を見逃さない）
     const base = (() => { try { return new URL(ctx.target.url ?? '').href; } catch { return 'https://x.invalid/'; } })();
     // 末尾のドット（FQDN の表記 evil.example.）も同じホスト
     const evil = (l: string) => { try { return /(?:^|\.)evil\.example\.?$/i.test(new URL(l.trim(), base).hostname); } catch { return false; } };
@@ -134,19 +132,16 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
     // Refresh ヘッダ（Refresh: 0; url=https://evil.example/）による転送も見る
     const refresh = ctx.target.responses.flatMap(r => r.headers.get('refresh') ?? []).map(v => refreshTarget(v) ?? '').find(evil);
     if (loc || refresh) return [mk(openRedirect, ctx, 1, 'medium', 'fail', loc ? `Location: ${loc}` : `Refresh: url=${refresh}`, '転送先は許可リスト（または相対パス）に限る')];
-    // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）
-    // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面への転送（next= を持ち越した /login?next=…evil.example。ログインのあとで使う）と、
-    // 同じページへの転送（末尾の /）は、転送先の検証を試していないので na
+    // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）。
+    // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面・認証の入り口への転送（テスト値を持ち越したかによらない。Spring・Devise・
+    // Laravel は保存したリクエストでログインのあとに戻る）と、同じページへの転送（末尾の /）は、転送先の検証を試していないので na
     const tested = (r: HttpResponse) => {
-      // 試していない転送：ログイン画面・認証の入り口への転送（テスト値を持ち越したかによらない。Spring・Devise・Laravel は保存したリクエストで
-      // ログインのあとに戻る）と、同じページへの転送。/home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、
-      // 転送先を検証して止めたので合格
+      // /home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、転送先を検証して止めたので合格
       const loc = r.headers.get('location')?.[0] ?? '';
       let path = ''; try { path = new URL(loc, r.url ?? base).pathname; } catch { /* 解釈できない */ }
       return !LOGIN_PATH.test(path.length > 1 ? path.replace(/\/+$/, '') : path) && !sameDocument(r, ctx.target.url) && !passedOn(r);
     };
-    // テスト値を持ったまま、同じ入口（パスの最後の部分が同じ。/redirect → www の /redirect・/en/redirect）へ転送した。転送先の検証はその先で行う。
-    // 別の画面へのテスト値つきの転送（/home?blocked=https%3A%2F%2Fevil.example）は、検証して止めたので試した転送とする
+    // テスト値を持ったまま、同じ入口（パスの最後の部分が同じ。/redirect → www の /redirect・/en/redirect）へ転送した。転送先の検証はその先で行う
     const lastSegment = (u: string, b: string) => { try { return new URL(u, b).pathname.replace(/\/+$/, '').split('/').pop() ?? ''; } catch { return undefined; } };
     const passedOn = (r: HttpResponse) => {
       const loc = r.headers.get('location')?.[0] ?? '';
