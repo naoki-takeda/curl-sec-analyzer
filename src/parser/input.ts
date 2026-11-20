@@ -166,7 +166,7 @@ export function parseInput(input: string): ParseResult {
         // 横断の判定（C-09 など）が動かない理由が分からない）。値は出さない（ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
         const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
         if (unknown.length) badTargetAttrs.push([t, `${unknown.slice(0, 3).map(k => (/^[A-Za-z_][\w-]{0,30}$/.test(k) ? k : '…')).join('・')}=（使える名前は url・label・kind・sensitive）`]);
-        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push([t, 'label= に使えるのは英数字・日本語などの文字と _ . - と空白（64文字まで。「HAR 」で始まるものは使えない）']);
+        if (a.label !== undefined && t.label === 'invalid-label' && a.label !== 'invalid-label') badTargetAttrs.push([t, 'label= に使えるのは英数字・日本語などの文字と _ . - と空白（64文字まで。「HAR 」で始まるものは使えない）']);
         if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push([t, 'kind= は html・api・auto のいずれか']);
       }
       else if (tag === 'META') {

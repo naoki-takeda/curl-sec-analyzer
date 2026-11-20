@@ -14,14 +14,14 @@ import sample from './sample.txt?raw';   // 「サンプルを入れる」の入
 import { BTN, LINK, PRIMARY, button, download, el, fileInput as hidden, focusResultsIfLost, labelFor, link, reducedMotion } from './ui/dom';
 import { type AnalyzeSource, type AnalyzedInput, type Message, actions, refs, state } from './ui/state';
 import { render, renderEmpty } from './ui/results';
-import { cancelHarLoad, loadHar, renderHar } from './ui/har';
+import { cancelHarLoad, harNotice, isHarLoading, loadHar, renderHar } from './ui/har';
 import { commandGenerator } from './ui/generator';
 import { joinMessages } from './messagesEn';
 
 const MAX_MB = 5; const MAX_BYTES = MAX_MB * 1024 * 1024;
 const app = document.querySelector<HTMLDivElement>('#app')!;
 refs.dialog = el('dialog', 'm-auto w-[min(32rem,92vw)] rounded-md border border-line bg-surface p-0 text-ink backdrop:bg-black/40');
-Object.assign(actions, { analyze, cancelAnalysis, isAnalyzing: () => !!analyzing, say, renderSettings, openGenerator, loadSample });
+Object.assign(actions, { analyze, cancelAnalysis, isAnalyzing: () => !!analyzing, say, message: () => current, renderSettings, openGenerator, loadSample });
 
 // ?lang= は ja・en（en-US などは en）だけを受け付け、それ以外の値はブラウザの言語で決める
 const qLang = new URLSearchParams(location.search).get('lang')?.toLowerCase() ?? '';
@@ -51,7 +51,7 @@ function buildShell() {
   refs.harBox = el('div', '');
   refs.settingsStatus = el('ul', 'mt-2 space-y-0.5 text-sm text-muted');
   refs.inputNote = el('div', 'hidden rounded-md border border-line bg-surface p-3 text-sm text-muted');
-  // 入力欄が空なら隠さない（applyInputVisibility はボタンを消し、押したボタンのフォーカスが落ちる）
+  // 入力欄が空なら隠さない（空の入力欄ではボタンを出さないが、念のため）
   refs.inputToggle = button('', LINK, () => { state.view.inputHidden = !state.view.inputHidden && /\S/.test(refs.input.value); applyInputVisibility(); if (!state.view.inputHidden) refs.input.focus(); });
   refs.genDetails = commandGenerator();
 
@@ -163,8 +163,9 @@ function say(m?: Message) { current = m; refs.message.textContent = m ? m() : ''
  */
 async function refresh(msg: Message) {
   renderSettings();
-  // 判定する前の HAR は判定しない（ホストとラベルを確かめてから「判定する」を押す）。読み込みのエラーがなければ HAR の案内を残す
-  if (!(state.last || analyzing)) { if (msg() || !state.har) say(msg); return; }
+  // 判定する前の HAR は判定しない（ホストとラベルを確かめてから「判定する」を押す）。読み込みのエラーがなければ HAR の案内（読み込み中・読み込み済み）
+  // を出し直す（前の設定ファイルのエラーを残さない）
+  if (!(state.last || analyzing)) { say(msg() ? msg : harNotice()); return; }
   const shown = await analyze('result');
   if (!msg()) return;
   const prev = current;
@@ -186,15 +187,17 @@ function applyInputVisibility() {
   const hide = state.view.inputHidden && has;
   refs.input.classList.toggle('hidden', hide);
   refs.inputNote.classList.toggle('hidden', !hide);
-  refs.inputNote.textContent = hide ? T.inputHidden(refs.input.value.split('\n').length) : '';
+  refs.inputNote.textContent = hide ? T.inputHidden(refs.input.value.replace(/\n$/, '').split('\n').length) : '';   // 末尾の改行は行に数えない
   refs.inputToggle.classList.toggle('hidden', !has);
   refs.inputToggle.textContent = hide ? T.showInput : T.hideInput;
 }
 function loadSample() {
-  // 読み込んだ HAR は外す（利用者の HAR とダミーのサンプルを1つの結果にしない）
-  if (state.har ? !confirm(tr().confirmDropHar) : refs.input.value.trim() && refs.input.value !== sample && !confirm(tr().confirmReplace)) return;
-  if (state.har) { cancelHarLoad(); state.har = null; renderHar(); }
-  refs.input.value = sample; analyze();
+  // 読み込んだ（読み込み中の）HAR は外す（利用者の HAR とダミーのサンプルを1つの結果にしない）。貼り付けた内容も置き換えるなら、両方を確かめる
+  const har = !!state.har || isHarLoading(); const typed = !!refs.input.value.trim() && refs.input.value !== sample;
+  if ((har || typed) && !confirm(har ? (typed ? tr().confirmDropHarAndInput : tr().confirmDropHar) : tr().confirmReplace)) return;
+  openGen++; cancelHarLoad();   // 読み込み中のテキストファイル・HAR を、あとからサンプルに混ぜない
+  if (state.har) { state.har = null; renderHar(); }
+  refs.input.value = sample; state.view.inputHidden = false; applyInputVisibility(); analyze();
 }
 function openGenerator() {
   refs.genDetails.open = true;

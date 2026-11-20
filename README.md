@@ -48,7 +48,7 @@ CSP（H-04・H-05・H-07）は Google の csp_evaluator（Apache-2.0）で評価
 
 そのほかの機能：curl・openssl・HAR の取り込み、コマンド生成器、ラベル対応表、ターゲット横断・ホスト単位の判定、診断カバレッジ、例外登録、Markdown・JSON・CSV のエクスポート（マスク済み）。
 
-v1.0 の範囲として、各項目を **OWASP ASVS 5.0.0** の要件と **IPA「安全なウェブサイトの作り方」改訂第7版** の項番に対応付けました。画面の項目名の横、Markdown（診断カバレッジの表の「ASVS 5.0.0」「IPA」列）、JSON（`standards`）に出ます。これは関連する要件の番号で、その要件を満たすかどうかの判定ではありません（対応の持ち方は設計書の「ASVS 5.0・IPAとの対応」）。
+v1.0 の範囲として、各項目を **OWASP ASVS 5.0.0** の要件と **IPA「安全なウェブサイトの作り方」改訂第7版** の項番に対応付けました。画面の項目名の横、Markdown（指摘の項目名の横と、診断カバレッジの表の「ASVS 5.0.0」「IPA」列）、JSON（`standards`）に出ます。これは関連する要件の番号で、その要件を満たすかどうかの判定ではありません（対応の持ち方は設計書の「ASVS 5.0・IPAとの対応」）。
 
 ブラウザだけで使う運用のため、CLI 版は作りません（`docs/design.md` の「判断の根拠」14）。版は 1.0.0 からセマンティックバージョニングで付けます（`docs/design.md` の「版の付け方」）。
 
@@ -65,12 +65,12 @@ npm run audit        # 依存の署名の検証と、公開物に含まれる依
 npm run build        # 型チェック＋本番ビルド（dist/）
 npx playwright install chromium firefox webkit
 npm run test:e2e     # E2E（先に npm run build が必要。本番ビルドに対して実行。Chromium・Firefox・WebKit。外部へのリクエストがないこと、アクセシビリティも確認）
-npm run screenshot   # README の画像（docs/screenshot.png）と共有用の画像（public/og.png）を撮り直す。リリースのたびに実行する
+npm run screenshot   # README の画像（docs/screenshot.png）と共有用の画像（public/og.png）を撮り直す（画面を変えたら、リリースの前に）
 ```
 
 | ディレクトリ | 内容 |
 |---|---|
-| `src/parser/` | 貼り付けの解析（#TARGET、-i、-D -、-v、-L、openssl）、HAR の取り込み、Set-Cookie の解析 |
+| `src/parser/` | 貼り付けの解析（#TARGET、-i、-D -、-v、-L、%{header_json}、openssl）、HAR の取り込み、Set-Cookie の解析 |
 | `src/rules/` | 判定ルール（第1〜6章） |
 | `src/ui/` | 画面の部品（結果、HAR、コマンド生成器、例外のダイアログ、状態） |
 | `src/engine/` | 入力から判定までの流れ、ルールの実行、ラベル対応表、例外、組織プロファイル、前回との差分と突き合わせのキー、診断カバレッジと項目の台帳、規格の対応、集計 |

@@ -20,9 +20,12 @@ const HTML_ONLY_ITEMS = new Set(['H-03', 'H-04', 'H-05', 'H-06', 'H-07', 'H-09',
 /**
  * 二重減点の除去（第0章 0.2「同じ事象は1つの項目でだけ減点」、評価順序の⑧）。
  * 同じターゲットで keep が fail のとき、drop の fail は数えない（status を na にし、dedupedBy に keep を残す）。
- * perCookie は Cookie ごとの指摘で、同じ Cookie（証跡の末尾の「（…）」の注記を除いて同じ）のときだけ数えない
+ * perCookie は Cookie ごとの指摘で、同じ Cookie（証跡の末尾の「（…）」の注記を除いて同じ）のときだけ数えない。when は、drop の指摘を数えない条件
  */
-const DEDUPE: { keep: string; drop: string; why: string; perCookie?: boolean }[] = [
+// Domain を付けた __Host- の Cookie（__Secure- は Domain を付けてよく、Secure を足しても Domain の問題は残るので除く）
+const hostPrefixed = (f: Finding) => /^__host-/i.test(f.evidence);
+const preflight = (f: Finding) => baseLabel(f.target) === 'cors-preflight';
+const DEDUPE: { keep: string; drop: string; why: string; perCookie?: boolean; when?: (f: Finding) => boolean }[] = [
   { keep: 'A-09.2', drop: 'H-08.1', why: 'API応答の nosniff なしは A-09② で数える' },
   { keep: 'A-09.3', drop: 'H-03.1', why: 'API応答の CSP なしは A-09③ で数える' },
   { keep: 'A-09.3', drop: 'H-03.2', why: 'API応答の CSP なし（Report-Only だけ）は A-09③ で数える' },
@@ -39,9 +42,14 @@ const DEDUPE: { keep: string; drop: string; why: string; perCookie?: boolean }[]
   // http のターゲット（C-01 は判定しない）では、Secure のない Cookie を HTTP で発行したことを C-10 で数える
   ...['C-10.1', 'C-10.2'].map(keep => ({ keep, drop: 'C-03.4', why: 'HTTP で発行した Secure のない SameSite=None の Cookie は C-10 で数える', perCookie: true })),
   // Domain を付けた __Host- の Cookie は、どのブラウザも拒否して保存しない（サブドメインに送られることはない）
-  ...['C-04.1', 'C-04.3'].map(drop => ({ keep: 'C-06.2', drop, why: 'Domain を付けた __Host- の Cookie はブラウザが拒否する（C-06② で数える）', perCookie: true })),
-  // プリフライトの応答の許可外の Origin の反射・*（実際の応答を読めるかは示さない）は、状態を変えるメソッドの許可（R-05①）で数える
-  ...['R-01.1', 'R-01.2', 'R-04.3'].map(drop => ({ keep: 'R-05.1', drop, why: 'プリフライトの応答の許可外の Origin の許可は R-05① で数える' })),
+  ...['C-04.1', 'C-04.3'].map(drop => ({ keep: 'C-06.2', drop, why: 'Domain を付けた __Host- の Cookie はブラウザが拒否する（C-06② で数える）', perCookie: true, when: hostPrefixed })),
+  // プリフライトの応答（cors-preflight）の許可外の Origin の反射・*・null（実際の応答を読めるかは示さない）は、状態を変えるメソッドの許可（R-05①）と
+  // 同じ事象なので、重要度の高いほうで数える（R-01①・R-02①・R-03① は高、R-05① は中、R-01②〜R-04 は中以下）
+  ...['R-01.1', 'R-02.1', 'R-03.1'].map(keep => ({ keep, drop: 'R-05.1', why: `プリフライトの応答の許可外の Origin の許可は ${keep} で数える（重要度の高いほう）`, when: preflight })),
+  ...['R-01.2', 'R-02.2', 'R-03.2', 'R-04.1', 'R-04.2', 'R-04.3'].map(drop => ({ keep: 'R-05.1', drop, why: 'プリフライトの応答の許可外の Origin の許可は R-05① で数える', when: preflight })),
+  // 普通の応答（プリフライトでない）の Access-Control-Allow-Methods はブラウザが使わないので、許可外の Origin の許可は R-01〜R-04 で数える
+  ...['R-01.1', 'R-01.2', 'R-02.1', 'R-02.2', 'R-03.1', 'R-03.2', 'R-04.1', 'R-04.2', 'R-04.3'].map(keep => ({ keep, drop: 'R-05.1',
+    why: '普通の応答の Access-Control-Allow-Methods はブラウザが使わない（許可外の Origin の許可は R-01〜R-04 で数える）', when: (f: Finding) => !preflight(f) })),
 ];
 /** perCookie の突き合わせのキー：Cookie の証跡（C-01②③の「（ホストのHSTSなし…）」の注記を除く） */
 const cookieKey = (ev: string) => ev.replace(/（[^（）]*）$/, '');
@@ -50,7 +58,7 @@ function dedupe(fs: Finding[]): Finding[] {
   for (const f of fs) if (f.status === 'fail') { fails.set(`${f.ruleId}\u0000${f.target}`, f); fails.set(`${f.ruleId}\u0000${f.target}\u0000${cookieKey(f.evidence)}`, f); }
   const keepOf = (f: Finding) => {
     for (const x of DEDUPE) {
-      const keep = x.drop === f.ruleId ? fails.get(`${x.keep}\u0000${f.target}${x.perCookie ? `\u0000${cookieKey(f.evidence)}` : ''}`) : undefined;
+      const keep = x.drop === f.ruleId && (!x.when || x.when(f)) ? fails.get(`${x.keep}\u0000${f.target}${x.perCookie ? `\u0000${cookieKey(f.evidence)}` : ''}`) : undefined;
       if (keep) return { keep, why: x.why };
     }
     return undefined;
@@ -59,7 +67,7 @@ function dedupe(fs: Finding[]): Finding[] {
     if (f.status !== 'fail') return f;
     let d = keepOf(f); if (!d) return f;
     // keep もほかの keep に数えられるなら、数える指摘までたどる（C-10① → C-01① → C-06②。数えない指摘を「…として数える」と示さない）。
-    // 組は項目の順に一方向なので、たどりは止まる（念のため回数に上限を付ける）
+    // keep になる指摘を drop にする組は、ほかの keep に数えられない向きだけなので、たどりは止まる（念のため回数に上限を付ける）
     for (let i = 0, next = keepOf(d.keep); next && i < DEDUPE.length; i++, next = keepOf(d.keep)) d = next;
     return { ...f, status: 'na', dedupedBy: d.keep.ruleId, recommendation: `${d.keep.ruleId} として数える（${d.why}）` };
   });

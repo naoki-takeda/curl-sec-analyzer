@@ -4,7 +4,7 @@ import { finalResponse, isSensitive, responseKind } from '../parser/target';
 import { coverageRate } from '../engine/coverage';
 import { localDate } from '../engine/suppress';
 import { labelRow, RESERVED_HINTS } from '../engine/labels';
-import { type DiffRow, diffSummary, profileDiffers } from '../engine/diff';
+import { type DiffRow, UNKNOWN_RULESET, diffSummary, profileDiffers } from '../engine/diff';
 import { SEVERITIES, circled, countBySeverity, mergeNa, overall } from '../engine/summarize';
 import { RULESET_VERSION } from '../version';
 import { toMarkdown } from '../export/markdown';
@@ -202,7 +202,7 @@ function crossBlock(findings: Finding[], targets: Target[], names: TargetNames) 
 /** 前回との差分の警告（ルールセットの版・組織プロファイルの違い）。画面と Markdown で同じものを出す */
 function diffWarnings(): { rulesetWarning?: string; profileWarning?: string } {
   const s = state.last?.settings; const b = s?.baseline; const T = tr();
-  return { rulesetWarning: b?.rulesetVersion && b.rulesetVersion !== RULESET_VERSION ? T.diffRulesetWarning(b.rulesetVersion, RULESET_VERSION) : undefined,
+  return { rulesetWarning: b?.rulesetVersion && b.rulesetVersion !== RULESET_VERSION ? T.diffRulesetWarning(b.rulesetVersion === UNKNOWN_RULESET ? T.unknownRuleset : b.rulesetVersion, RULESET_VERSION) : undefined,
            profileWarning: profileDiffers(b?.profile, s?.profile) ? T.diffProfileWarning : undefined };
 }
 function diffBlock(rows: DiffRow[], names: TargetNames) {

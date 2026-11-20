@@ -172,10 +172,10 @@ H-04 | evaluated | fails=0 | 一部の条件（ほかのラベルと比べる条
 H-05 | evaluated | fails=1
 H-06 | evaluated | fails=3
 H-07 | evaluated | fails=0
-H-08 | evaluated | fails=4 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答は対象外）
+H-08 | evaluated | fails=4 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答・転送の応答は対象外）
 H-09 | evaluated | fails=4
 H-10 | evaluated | fails=4
-H-11 | evaluated | fails=3 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける / 本文のある応答（200 など）で採取する（本文のない応答は対象外）
+H-11 | evaluated | fails=3 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける / 本文のある応答（200 など）で採取する（本文のない応答・転送の応答は対象外）
 H-12 | evaluated | fails=2 | 機密応答では判定していない（静的リソース・機密でない応答だけ） / 一部のターゲット（6件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける / 機密データを返す 200 の応答（認証後ページなど）で採取する
 H-13 | evaluated | fails=1
 H-14 | evaluated | fails=4

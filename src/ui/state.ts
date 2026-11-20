@@ -36,5 +36,5 @@ export type Message = () => string;
 
 /** 循環する依存を避けるため、main.ts が登録する操作 */
 export const actions = {
-  analyze: (_source?: AnalyzeSource): Promise<boolean> => Promise.resolve(false), cancelAnalysis: () => {}, isAnalyzing: (): boolean => false, say: (_m?: Message) => {}, renderSettings: () => {}, openGenerator: () => {}, loadSample: () => {},
+  analyze: (_source?: AnalyzeSource): Promise<boolean> => Promise.resolve(false), cancelAnalysis: () => {}, isAnalyzing: (): boolean => false, say: (_m?: Message) => {}, message: (): Message | undefined => undefined, renderSettings: () => {}, openGenerator: () => {}, loadSample: () => {},
 };

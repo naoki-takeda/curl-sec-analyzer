@@ -1,9 +1,9 @@
 // rules/api.ts：第6章 WebAPI（A-01〜A-03、A-07〜A-11。A-04〜A-06は手動確認）
 import type { CrossContext, Finding, HttpResponse, Rule, RuleContext } from '../model';
-import { baseLabel, finalResponse, isRedirectWithLocation, responseKind, sameDocumentHop, targetUrl } from '../parser/target';
+import { baseLabel, finalResponse, isRedirectWithLocation, responseKind, sameDocument, sameDocumentHop, targetUrl } from '../parser/target';
 import { JWT_IN_TEXT } from '../parser/setCookie';
 import { TOKEN_PARAM_NAMES, paramRegex } from '../mask';
-import { FOLLOW_REC, NO_BODY_REC, NO_CONTENT_REC, bodyNotCaptured, cf, cspPolicies, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, noResponse, notSecretFormat, notSecretText, nothingToSniff, zeroLength } from './util';
+import { FOLLOW_REC, NO_BODY_REC, NO_CONTENT_OR_REDIRECT_REC, bodyNotCaptured, cf, cspPolicies, graphqlError, header, isLabelText, isNosniff, isPlaceholderValue, isPublicClientValue, mk, noDataJson, noResponse, notSecretFormat, notSecretText, nothingToSniff, zeroLength } from './util';
 import { loginForm } from './html';
 import { b64urlJson } from './jwt';
 
@@ -23,7 +23,7 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     // kind=api を明示したターゲットでも、text/html で返していれば①（自動判定では text/html は API 応答にならないため、上の分岐で見る）
     if (/^\s*text\/html/i.test(ct)) out.push(mk(jsonHeaders, ctx, 1, 'medium', 'fail', `Content-Type: ${ct}（API応答）`, 'JSONは application/json で返す（text/html だとXSSの原因になる）'));
     // 本文のない応答は、スニッフィングされる本文がない（H-08 と同じ）
-    if (nothingToSniff(ctx)) return out.length ? out : [mk(jsonHeaders, ctx, 'na', 'info', 'na', `HTTP ${f.status}（本文のない応答）`, NO_CONTENT_REC)];
+    if (nothingToSniff(ctx)) return out.length ? out : [mk(jsonHeaders, ctx, 'na', 'info', 'na', `HTTP ${f.status}（本文のない応答）`, NO_CONTENT_OR_REDIRECT_REC)];
     if (!isNosniff(ctx)) out.push(mk(jsonHeaders, ctx, 2, 'medium', 'fail', 'nosniff なし', 'X-Content-Type-Options: nosniff'));
     if (!cspPolicies(ctx).length) out.push(mk(jsonHeaders, ctx, 3, 'info', 'fail', 'CSPなし', "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"));
     return out.length ? out : [mk(jsonHeaders, ctx, 'ok', 'info', 'pass', ct, '')];
@@ -33,11 +33,11 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
  * A-01・A-08・A-11 が判定に使う応答（r）とステータス。同じページへの転送（末尾の / への 307、apex → www の同じパスなど）はたどった先で見る。
  * たどれない（-L なし）ときは unfollowed で、呼び出し側で na にする
  */
-const judged = (ctx: RuleContext) => {
-  const { hop, unfollowed } = sameDocumentHop(ctx.target); const r = hop ?? ctx.final;
+const judged = (ctx: RuleContext, keepMethod = false) => {
+  const { hop, unfollowed } = sameDocumentHop(ctx.target, keepMethod); const r = hop ?? ctx.final;
   return { r, unfollowed, status: r?.status ?? 0 };
 };
-const UNFOLLOWED_EV = '同じページへの転送（末尾の / など）。転送先を採取していない';
+const UNFOLLOWED_EV = '同じページへの転送（末尾の /、apex から www の同じパスなど）。転送先を採取していない';
 /**
  * API の URL に HTML の画面を 200 で返したか（どのパスにも index.html を返す SPA、ログイン画面）。A-01・A-11 では、データを返したかが
  * 分からないので①②にしない（E-05 の HTML の 200 と同じ考え方）。ログインのフォームなら、認証を求めたのと同じ
@@ -302,16 +302,18 @@ export const requestContentType: Rule = { id: 'A-08', title: 'リクエストの
   basis: ['OWASP API Security Top 10 2023: API8', 'OWASP CSRF Prevention CS'],
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'ctype') return [];
-    const { unfollowed, status: s } = judged(ctx);
+    // 送った本文の Content-Type を見るので、本文を送り直す転送（307・308）だけをたどる。301・302・303 のあとの GET の 200 は、本文を処理した応答ではない
+    const { r, unfollowed, status: s } = judged(ctx, true);
     if (unfollowed) return [mk(requestContentType, ctx, 'na', 'info', 'na', UNFOLLOWED_EV, FOLLOW_REC)];
     if (!s) return [noResponse(requestContentType, ctx)];
     // 認証・認可・パスで断られた応答（401・403・404）は、Content-Type を確かめるところまで届いていない
     if (s === 401 || s === 403 || s === 404) return [mk(requestContentType, ctx, 'na', 'info', 'na', `HTTP ${s}（Content-Type を確かめる前に断られた）`, '認証情報を付けて、存在する API の URL で採取し直す')];
     if (s >= 200 && s < 300)
       return [mk(requestContentType, ctx, 1, 'medium', 'fail', `Content-Type: text/plain のJSONが HTTP ${s} で処理された`, 'application/json 以外は 415 で拒否する（CSRFの単純リクエスト対策）')];
-    // 合格は、Content-Type で断ったと分かる応答（415）と、それ以外の 4xx（405 を除く）。ログイン画面への転送（3xx）・5xx・405 は、
-    // Content-Type を確かめるところまで届いたかが分からない（A-11 と同じ考え方）
-    if ((s >= 300 && s < 400) || s >= 500 || s === 405)
+    // 合格は、Content-Type で断ったと分かる応答（415）と、それ以外の 4xx（405・429 を除く）。ログイン画面への転送（3xx）・5xx・405・429 は、
+    // Content-Type を確かめるところまで届いたかが分からない（A-11 と同じ考え方）。同じページへの 301・302・303 は、POST が GET に変わったもの
+    if ((s === 301 || s === 302 || s === 303) && !!r && sameDocument(r, ctx.target.url)) return [mk(requestContentType, ctx, 'na', 'info', 'na', `HTTP ${s}（同じページへの転送で、POST が GET に変わる）`, '転送先の URL（www・末尾の / など）に直接 POST して採取し直す')];
+    if ((s >= 300 && s < 400) || s >= 500 || s === 405 || s === 429)
       return [mk(requestContentType, ctx, 'na', 'info', 'na', `HTTP ${s}（Content-Type を確かめるところまで届いたかが分からない）`, '認証情報を付けて、存在する API の URL で採取し直す')];
     return [mk(requestContentType, ctx, 'ok', 'info', 'pass', `HTTP ${s}`, '')];
   } };

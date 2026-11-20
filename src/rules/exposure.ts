@@ -125,7 +125,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     if (probe) {                                              // C13 の存在確認（probes ラベル）
       if (!probe.code) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP 000、接続できなかった）`, PROBE_UNREACHED_REC)];
       if (probe.code >= 300 && probe.code < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}、転送先を確かめていない）`, PROBE_REDIRECT_REC)];
-      if (probe.code >= 500) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。サーバのエラーで、security.txt があるかは分からない）`, '時間をおいて採取し直す')];
+      if (probe.code >= 500 || probe.code === 429) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。サーバのエラー・レート制限で、security.txt があるかは分からない）`, '時間をおいて採取し直す')];
       const hit = probePattern(probe.path, probe.headB64, probe.code);
       if (hit?.name === 'security-txt-comment') return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。採った先頭がコメントだけで、Contact・Expires があるかは分からない）`, '本文を取得して（C2）、Contact と Expires があるか確かめる')];
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
@@ -140,8 +140,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     if (/\/robots\.txt$/.test(p)) {
       // 転送（3xx）を -L なしで採取したものは、転送先の robots.txt を見ていない
       if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, FOLLOW_REC)];
-      // 5xx は、robots.txt がないとは言えない（一時的な障害の可能性。E-05 の 5xx と同じく na）
-      if (st >= 500) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラーで、robots.txt があるかは分からない）`, '時間をおいて採取し直す')];
+      // 5xx・429 は、robots.txt がないとは言えない（一時的な障害・レート制限の可能性。E-05 と同じく na）
+      if (st >= 500 || st === 429) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラー・レート制限で、robots.txt があるかは分からない）`, '時間をおいて採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
       if (!b) return bodyNotCaptured(ctx) ? noBody() : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt が空（HTTP ${st}）`, '')];
       // どのパスにも index.html を返す SPA の 200 は robots.txt ではない（なしとして合格）。HTML かは本文で見る（robots.txt を text/html で返す
@@ -155,7 +155,7 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     if (/\/security\.txt$/.test(p)) {
       // RFC 9116 3 は転送を認めるので、-L なしの 3xx は転送先を見ていない
       if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, FOLLOW_REC)];
-      if (st >= 500) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラーで、security.txt があるかは分からない）`, '時間をおいて採取し直す')];
+      if (st >= 500 || st === 429) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラー・レート制限で、security.txt があるかは分からない）`, '時間をおいて採取し直す')];
       if (!got) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `security.txt を取得できない（HTTP ${st}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
       if (!b && bodyNotCaptured(ctx)) return noBody();
       const txt = b ?? '';
@@ -236,8 +236,8 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     }
     // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、拒否されたかどうかも分からない
     if (!f.status) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
-    // 5xx は、公開していないとは言えない（認証の前に落ちた・一時的な障害の可能性。A-01 の 5xx と同じく na）
-    if (f.status >= 500) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。サーバのエラーで、公開しているかは分からない）`, '時間をおいて採取し直す')];
+    // 5xx・429 は、公開していないとは言えない（認証の前に落ちた・一時的な障害・レート制限の可能性。A-01 と同じく na）
+    if (f.status >= 500 || f.status === 429) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。サーバのエラー・レート制限で、公開しているかは分からない）`, '時間をおいて採取し直す')];
     // 304 は、条件付きのリクエストにキャッシュがまだ新しいと答えたもの（そのパスは公開されている）
     if (f.status === 304) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP 304。キャッシュの確認の応答で、公開しているかは分からない）`, 'If-None-Match・If-Modified-Since を付けずに採取し直す')];
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
@@ -331,10 +331,10 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     if (maps.length) {                                         // ① probes ラベル：.map を取得できるか
       const got = maps.filter(p => probePattern(p.path, p.headB64, p.code)?.name === 'source-map');
       const unreached = maps.filter(p => !p.code).length; const redirected = maps.filter(p => p.code >= 300 && p.code < 400).length;
-      const serverError = maps.filter(p => p.code >= 500).length;
+      const serverError = maps.filter(p => p.code >= 500 || p.code === 429).length;   // サーバのエラー・レート制限（E-03 と同じ）
       return got.length ? got.map(p => mk(sourceMap, ctx, 1, 'medium', 'fail', `${p.path}（HTTP ${p.code}、一致したパターン: source-map）`, '本番では .map を配信しない（sourcesContent に元のソースがあるかは手動で確認）'))
         : unreached ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC)]
-        : serverError ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${serverError}件はサーバのエラー（HTTP 5xx。.map があるかは分からない）`, '時間をおいて採取し直す')]
+        : serverError ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${serverError}件はサーバのエラー・レート制限（HTTP 5xx・429。.map があるかは分からない）`, '時間をおいて採取し直す')]
         : redirected ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${redirected}件は転送された（HTTP 3xx。転送先を確かめていない）`, PROBE_REDIRECT_REC)]
         : [mk(sourceMap, ctx, 'ok', 'info', 'pass', `${maps.length}件の .map は取得できなかった`, '')];
     }

@@ -30,7 +30,7 @@ const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：approver は文字列で書きます$/, m => `Entry ${m[1]}: approver must be a string`],
   [/^(\d+)件目：until は YYYY-MM-DD で書きます$/, m => `Entry ${m[1]}: until must be YYYY-MM-DD`],
   [/^「(.*)」は組織プロファイルの項目ではありません$/s, m => `"${m[1]}" is not a profile setting`],
-  [/^severity：「(.*)」は項目IDではありません$/s,m => `severity: "${m[1]}" is not a check ID`],
+  [/^severity：「(.*)」は項目IDではありません$/s, m => `severity: "${m[1]}" is not a check ID`],
   [/^severity：「(.*)」は条件番号が(.+)にありません（1〜(\d+)）$/s, m => `severity: "${m[1]}" is not a condition of ${m[2]} (1 to ${m[3]})`],
   [/^severity：「(.*)」の重要度は high・medium・low・info のいずれか$/s, m => `severity: the severity for "${m[1]}" must be high, medium, low or info`],
   [/^(.+)のパスは \/ で始まる英数字と - \. _ ~ % \/ で書いてください$/, m => `${FIELD[m[1]] ?? m[1]} path: start with / and use only letters, digits and - . _ ~ % /`],

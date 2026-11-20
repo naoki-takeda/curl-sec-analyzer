@@ -11,15 +11,23 @@ import { renderEmpty } from './results';
 
 const say = (m?: Message) => actions.say(m);
 
-// 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外すを押したりしたら、前の読み込みの結果は使わない
+// 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外す・サンプルを入れるを押したりしたら、前の読み込みの結果は使わない
 let harLoad = 0; let harWorker: Worker | undefined;
 export const cancelHarLoad = () => { harLoad++; harWorker?.terminate(); harWorker = undefined; };
+/** HAR を読み込んでいる途中か（読み込み中のファイルは、まだ state.har に入っていない） */
+export const isHarLoading = () => !!harWorker;
+/** HAR の案内（読み込み中・読み込み済み）。HAR がなければ undefined */
+export const harNotice = (): Message | undefined => {
+  const h = state.har;
+  return harWorker ? () => tr().har.loading : h ? () => tr().har.loaded(h.name, h.imp.chains.length) : undefined;
+};
 
 export function loadHar(f: File) {
+  // 前の読み込みは、新しいファイルが大きすぎても止める（置き換えたつもりの前の HAR を、あとから入れない）
+  cancelHarLoad();
   if (f.size > HAR_MAX_BYTES) { say(() => tr().har.tooLarge(HAR_MAX_BYTES / 1024 / 1024)); return; }
   say(() => tr().har.loading);
   // Worker は blob: URL で作る（ページの CSP を引き継ぐため。csp.config.ts）。作れない・送れない・結果を受け取れないときも失敗と知らせる
-  cancelHarLoad();
   let w: Worker;
   try { w = new HarWorker(); } catch { say(() => tr().har.failed('worker')); return; }
   harWorker = w; const gen = harLoad;
@@ -30,13 +38,16 @@ export function loadHar(f: File) {
     if (gen !== harLoad) return;                     // 古い読み込みの結果
     if (!e.data.ok || !e.data.result) { const err = e.data.error === 'JSON' ? 'json' : 'format'; say(() => tr().har.failed(err)); return; }
     const imp = e.data.result;
+    // 読み込み中に出た設定ファイルのエラーは、読み込みの案内のあとに残す（案内で上書きしない）
+    const prev = actions.message(); const pending = prev && prev() !== tr().har.loading ? prev : undefined;
     // Worker の中では組織プロファイルが分からないため、プロファイルがあればセッションCookieの名前を反映して候補を作り直す
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));
     state.har = { imp, hosts: defaultHarHosts(imp), name: f.name };
     renderHar(); say();
     // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない。判定中（初回を含む）なら、読み込んだ HAR も入れて判定し直す
     if (state.last || actions.isAnalyzing()) actions.analyze();
-    if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直したときは、判定のメッセージ（判定中・エラー）を残す
+    // 判定し直したときは、判定のメッセージ（判定中・エラー）を残す
+    if (!refs.message.textContent) say(pending ? () => `${tr().har.loaded(f.name, imp.chains.length)} ${pending()}` : () => tr().har.loaded(f.name, imp.chains.length));
   };
   w.onerror = w.onmessageerror = () => failed('worker');
   f.text().then(t => { try { w.postMessage(t); } catch { failed('worker'); } }, () => failed('read'));

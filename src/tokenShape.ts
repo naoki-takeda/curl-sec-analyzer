@@ -16,7 +16,7 @@ export function lowerToken(x: string): boolean {
   return rareBigrams(x) >= 0.35;
 }
 
-// ---- 区切った番号・コードの形。画面の許可リスト（shownText.ts の allowRun）と突き合わせのキー（engine/targetKey.ts の keySegment）で共有する ----
+// ---- 区切った番号・コードの形。画面の許可リスト（shownText.ts の allowRun・maskDottedCodes）と突き合わせのキー（engine/targetKey.ts の keySegment）で共有する ----
 /**
  * 6桁までの数字だけのかけらが3つ以上続き、合わせて12桁以上になる部分があるか（カード番号 4111-1111-1111-1111 など。10〜11桁の電話番号は
  * 含まない（画面は電話番号を残す。キーは phoneRun も見る）。日付の 20261118 のような8桁を含む並び（db-backup-20261118-0300-01）は番号としない）
@@ -134,3 +134,62 @@ export function wordLike(w: string): boolean {
       && (p.length !== 2 || SHORT_WORDS.has(p.toLowerCase()) || /^[A-Z]{2}$/.test(p)))
     && partRare(parts) < 0.45;
 }
+
+// ---- パスのトークンの形（画面のマスク（mask.ts の maskSegment）と突き合わせのキー（targetKey.ts の keySegment）で共有する） ----
+/** 秘密らしい語。これを含む名前は、語だけでできていても wordName としない */
+const SECRET_WORD = /token|secret|session|passw|pwd|auth|cred|apikey|^keys?$/i;
+/** 名前のかたまり：3文字までの語（csv・v2 の v）、4文字までの大文字の略語（API・PDF）、4桁までの数字、12文字までで母音（aeiou）が4分の1以上あり、
+ *  子音が4つ・母音が3つ続かない語（History・Export） */
+const wordChunk = (w: string) => (/^\d+$/.test(w) ? w.length <= 4 : w.length <= 3 || (/^[A-Z]+$/.test(w) ? w.length <= 4
+  : w.length <= 12 && (w.match(/[aeiou]/gi) ?? []).length / w.length >= 0.25 && !/[^aeiouy]{4}|[aeiou]{3}/i.test(w)));
+/**
+ * 英語の語と短い数字をつないだ名前（MyCompanyLogo2026Final.png、/docs/GettingStartedV2Guide）か。トークンとして伏せると、読めないうえに
+ * 別のページが同じ表示になる。- _ で区切った部分ごとに、かたまり（語・大文字の略語・数字）に分け、すべてが wordChunk で、かたまりの平均が3.5文字以上、
+ * 4文字以上の語が全体で3つ以上あるものだけを名前とする。乱数のトークン（Dk3x9Lq2AbZ7…）はかたまりが短く、母音の少ない長いかたまりを含むので
+ * 当たらない（16文字のトークンで、乱数1万個のうち当たるのは数個）
+ */
+const wordName = (p: string): boolean => {
+  let words = 0;
+  for (const part of p.split(/[-_]/)) {
+    if (!part) continue;
+    const ws = part.match(/[A-Z][a-z]+|[a-z]+|[A-Z]+(?![a-z])|\d+/g) ?? [];
+    // 短い部分（_csv・_v12・-Q3）は平均を見ない
+    if (!ws.length || (part.length > 4 && part.length / ws.length < 3.5) || !ws.every(wordChunk) || ws.some(w => SECRET_WORD.test(w)) || SECRET_WORD.test(part)) return false;
+    // キャメルケースで小文字だけの語は先頭の1つだけ（小文字と数字だけのトークン kh8uerlepa7qxrul… を名前としない）
+    if (ws.filter(w => /^[a-z]{4,}$/.test(w)).length > 1) return false;
+    words += ws.filter(w => w.length >= 4 && /^[A-Za-z]+$/.test(w) && !/^[A-Z]+$/.test(w)).length;
+  }
+  return words >= 3;
+};
+// 小文字（または大文字）と数字だけの20文字以上の並び（base36・base32 のトークン。x7k2…・MFRGGZDF…）も、数字と英字が4つ以上ずつあれば伏せる。
+// - _ で区切った部分ごとに見る（sk_live_<トークン>）。区切りのある読める名前（2026-annual-report-v2）は部分が短いので残る
+const caseToken = (x: string) => x.length >= 20 && (/^[a-z0-9]+$/.test(x) || /^[A-Z0-9]+$/.test(x)) && (x.match(/\d/g) ?? []).length >= 4 && (x.match(/[A-Za-z]/g) ?? []).length >= 4;
+/**
+ * パスのかけらがトークンの形か（16文字以上の [A-Za-z0-9_-]）：英大文字・小文字・数字をすべて含むものと、数字を含む32文字以上のもの（語と短い数字を
+ * つないだ名前（wordName）は除く）、24文字以上の16進数（UUID を含む）、- _ で区切った部分が caseToken・randomLetters・lowerToken（英小文字だけの
+ * 16文字以上の乱数 /reset/kqzvwxmplrtbnhjd）のもの。「2026-annual-report-v2」のような普通の名前は残す
+ */
+export const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
+  (((/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || (p.length >= 32 && /\d/.test(p))) && !wordName(p))
+  || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || p.split(/[-_]/).some(x => caseToken(x) || randomLetters(x) || lowerToken(x)));
+/**
+ * 数字のない、大文字・小文字が頻繁に入れ替わり（かたまりの数が長さの4割以上）、母音が3割未満の16文字以上の並び（AbCdEfGhIjKlMnOpQrStUv）。
+ * 英語の名前（GettingStartedGuide）は入れ替わりが少なく、キャメルケース（getUserByIdAndName）は母音が3〜4割ある（乱数の英字は2割ほど）。
+ * 入れ替わりの多さだけで見ると、短い語をつないだ API のパスまで伏せる
+ */
+const randomLetters = (x: string) => x.length >= 16 && /^[A-Za-z]+$/.test(x) && (x.match(/[a-z]+|[A-Z]+/g) ?? []).length / x.length >= 0.4
+  && (x.match(/[aeiou]/gi) ?? []).length / x.length < 0.3;
+/** 語として残してよい接頭辞（application・login・AdminDashboard）。トークンの先頭（QwErTyUiOpAsDfGhJk）は残さない */
+export const wordPrefix = (w: string) => w.length <= 20 && (w.match(/[a-z]+|[A-Z]+/g) ?? []).length / w.length < 0.3;
+// ビルドしたファイルの名前として伏せないのは、静的ファイルの拡張子が付いた部分だけ（/magic/login-Xy7Kp2Lm9Qa のようなトークンを伏せ忘れない）
+export const ASSET_EXT = /\.(?:m?js|css|map|woff2?|ttf|otf|svg|png|jpe?g|gif|webp|avif|ico)$/i;
+/**
+ * ビルドしたファイルの名前（英字の語を - _ でつなぎ、最後に短いハッシュを付けたもの）。Vite の AdminDashboard-Dk3x9Lq2、vendor-react-BxYz12Ab、
+ * webpack の main-3f8a9c2e1b4d5f6a7b8c。ハッシュは12文字未満か、20文字以下の16進数。トークンではないので伏せない（伏せると、別のファイルが
+ * 同じ表示になる）。語が token・reset・magic・login などのものは除く
+ */
+export const buildAssetName = (p: string): boolean => {
+  if (/^(?:token|reset|magic|share|login|invite|verify|confirm|auth|session|secret|key|code|otp|download)[-_]/i.test(p)) return false;
+  const m = p.match(/^((?:[A-Za-z]+[-_])+)([A-Za-z0-9]+)$/);
+  return !!m && (m[2].length < 12 || (m[2].length <= 20 && /^[0-9a-f]+$/i.test(m[2])));
+};

@@ -1,4 +1,4 @@
-// scripts/screenshot.mjs：README の画像（docs/screenshot.png）と共有用の画像（public/og.png）を撮り直す。リリースのたびに実行する
+// scripts/screenshot.mjs：README の画像（docs/screenshot.png）と共有用の画像（public/og.png）を撮り直す。画面を変えたら、リリースの前に実行する
 //   npm run screenshot   （先に本番ビルドを行い、vite preview で開いたページを撮る）
 // インストール済みの Chromium を使う場合は PW_CHROMIUM にパスを指定する（通常は npx playwright install chromium）
 import { preview } from 'vite';

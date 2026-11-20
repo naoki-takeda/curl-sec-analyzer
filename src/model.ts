@@ -30,7 +30,7 @@ export interface Target {
   sentAuthorization?: boolean; sentCookieNames?: string[];   // 送った Authorization の有無と Cookie の名前（値は持たない。-v と HAR だけ）
   /** ブラウザが自動で送る方式（Basic・Digest・Negotiate・NTLM）の Authorization を送った。Bearer はページのスクリプトが付けるので、クロスサイトで送られない（R-09） */
   sentAutoAuth?: boolean;
-  sentTokens: string[];             // -v の送信ヘッダにあったJWT。A-03 のデコードにだけ使い、画面・エクスポートには出さない
+  sentTokens: string[];             // 送ったJWT（-v の送信ヘッダ、HAR の Authorization・Cookie）。A-03 のデコードにだけ使い、画面・エクスポートには出さない
   meta: Record<string, string>; probes: Probe[]; tlsProbes: TlsProbe[]; cipherProbes: CipherProbe[]; openssl: string[];
 }
 export interface RuleContext {

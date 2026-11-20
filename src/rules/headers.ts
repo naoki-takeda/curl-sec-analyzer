@@ -1,6 +1,6 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext, Target } from '../model';
-import { INTERNAL_HOST_IN_TEXT, LOGOUT_FAILED_REC, NO_BODY_REC, NO_CONTENT_REC, SENSITIVE_REC, cacheDirectives, cspPolicies, directiveNames, header, hstsDirective, isNosniff, isStaticResource, mk, noContent, noResponse, nothingToSniff, parseCsp, parseHsts, sensitiveUnlessStatic, zeroLength } from './util';
+import { INTERNAL_HOST_IN_TEXT, LOGOUT_FAILED_REC, NO_BODY_REC, NO_CONTENT_OR_REDIRECT_REC, NO_CONTENT_REC, SENSITIVE_REC, cacheDirectives, cspPolicies, directiveNames, header, hstsDirective, isNosniff, isStaticResource, mk, noContent, noResponse, nothingToSniff, parseCsp, parseHsts, sensitiveUnlessStatic, zeroLength } from './util';
 import { excerpt, maskValue } from '../mask';
 import { baseLabel, chainOf, firstStatus, hostnameOf, isRedirectWithLocation, isToken, siteResponses } from '../parser/target';
 import { htmlBody, logoutFailed, metaCspPolicies, mixedContent, tags } from './html';
@@ -107,7 +107,7 @@ export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appl
   basis: ['OWASP HTTP Headers CS'],
   run(ctx) {
     if (!ctx.final) return [noResponse(nosniff, ctx)];
-    if (nothingToSniff(ctx)) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
+    if (nothingToSniff(ctx)) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_OR_REDIRECT_REC)];
     const v = header(ctx, 'x-content-type-options').join(', ');
     if (isNosniff(ctx)) return [mk(nosniff, ctx, 'ok', 'info', 'pass', v, '')];
     return [mk(nosniff, ctx, 1, 'medium', 'fail', v || '(ヘッダなし)', 'X-Content-Type-Options: nosniff')];
@@ -347,7 +347,7 @@ export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CO
     if (!ctx.final) return [noResponse(crossOriginIsolation, ctx)];
     if (noContent(ctx)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
     // Location のある 3xx は、ブラウザが転送先を読み込む（CORP・COOP は転送先の応答で効く。H-08 と同じ）
-    if (isRedirectWithLocation(ctx.final)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（転送の応答）`, NO_CONTENT_REC)];
+    if (isRedirectWithLocation(ctx.final)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（転送の応答）`, NO_CONTENT_OR_REDIRECT_REC)];
     const out = []; const sensitive = sensitiveUnlessStatic(ctx);
     // 守りにならない値は、ないのと同じ：CORP の cross-origin（どのサイトからも読み込める）、COOP の unsafe-none（既定の動作）と、
     // 知らない値・2つ以上の値（ブラウザは読めずに無視する）。値は大文字・小文字を区別する（ブラウザは Same-Origin を読めずに無視する）

@@ -674,3 +674,59 @@ describe('第74回：同じサイトへの転送・プローブの 5xx・転送�
     expect(fails('http://intra.example.com/', `sid=${'0123456789abcdef'.repeat(2)}; Path=/; HttpOnly; SameSite=None`)).toEqual(['C-10.1']);
   });
 });
+
+describe('第75回：第74回の二重の指摘の組・転送のたどり方の退行', () => {
+  const cors = (label: string, extra: string[]) => evaluate([`#TARGET url=https://api.example.com/v1/me label=${label}`, '* Connected to api.example.com (192.0.2.20) port 443',
+    `> ${label === 'cors-preflight' ? 'OPTIONS' : 'GET'} /v1/me HTTP/2`, '> Origin: https://evil.example', '> Cookie: session=abc', '>', `< HTTP/2 ${label === 'cors-preflight' ? 204 : 200}`,
+    '< access-control-allow-origin: https://evil.example', '< access-control-allow-credentials: true', ...extra.map(h => `< ${h}`), '<', ''].join('\n')).findings
+    .filter(f => /^R-0[145]/.test(f.ruleId) && f.status === 'fail').map(f => f.ruleId).sort();
+  it('R-05① と R-01・R-04 の組：プリフライトの応答は重要度の高いほう、普通の応答は R-01（Allow-Methods はブラウザが使わない）で数える', () => {
+    expect(cors('cors-reflect', ['access-control-allow-methods: GET, POST, PUT, DELETE'])).toEqual(['R-01.1']);
+    expect(cors('cors-preflight', ['access-control-allow-methods: GET, POST'])).toEqual(['R-01.1']);
+    expect(cors('cors-preflight', ['access-control-allow-methods: GET, POST, PUT, DELETE'])).toEqual(['R-01.1']);
+  });
+  it('C-06② と C-04 の組は __Host- だけ（__Secure- は Domain を付けてよい）', () => {
+    const r = evaluate(target('https://www.example.com/mypage', `HTTP/2 200\ncontent-type: text/html\nset-cookie: __Secure-sessionid=${'0123456789abcdef'.repeat(2)}; Path=/; HttpOnly; SameSite=Lax; Domain=example.com`));
+    expect(r.findings.find(f => f.ruleId === 'C-04.1')?.status).toBe('fail');
+  });
+  it('A-08：POST を GET に変える転送（301）のあとの 200 は、送った本文を処理した応答としない', () => {
+    const r = evaluate(['#TARGET url=https://example.com/api/items label=ctype', 'HTTP/1.1 301 Moved Permanently', 'location: https://www.example.com/api/items', '',
+      'HTTP/1.1 200 OK', 'content-type: application/json', '', '{"ok":true}', ''].join('\n'));
+    expect(r.ids('ctype').filter(i => i.startsWith('A-08'))).toEqual(['A-08.na']);
+  });
+  it('C-12①：mypage の同じページへの転送もたどる（転送の 301 を「ログインできていない」にしない）', () => {
+    const page = (label: string) => [`#TARGET url=https://example.com/mypage label=${label}`, 'HTTP/1.1 301 Moved Permanently', 'location: https://www.example.com/mypage', '',
+      'HTTP/1.1 200 OK', 'content-type: text/html', '', '<p>alice@example.com</p>', ''];
+    const r = evaluate([...page('mypage'), '#TARGET url=https://www.example.com/logout label=logout', 'HTTP/1.1 302 Found', 'location: /login', 'set-cookie: sessionid=; Max-Age=0; Path=/', '',
+      ...page('after-logout')].join('\n'));
+    expect(r.findings.filter(f => f.item === 'C-12').map(f => f.ruleId)).toContain('C-12.1');
+  });
+  it('E-03・E-13①：プローブのレート制限（429）も、取得できなかったと合格にしない', () => {
+    const r = evaluate(['#TARGET url=https://www.example.com/ label=probes', ...['/.git/HEAD', '/.env', '/app.js.map'].map(p => `#PROBE path=${p} head= code=429 size=0 ct=text/html`), ''].join('\n'));
+    expect(r.findings.filter(f => f.item === 'E-03' || f.item === 'E-13').map(f => f.ruleId).sort()).toEqual(['E-03.na', 'E-13.na']);
+  });
+});
+
+describe('第76回：プリフライトの R-02・R-03、レート制限（429）、mypage の転送', () => {
+  const pre = (origin: string, acac: boolean) => evaluate(['#TARGET url=https://www.example.com/v1/me label=cors-preflight', '* Connected to www.example.com (192.0.2.20) port 443',
+    '> OPTIONS /v1/me HTTP/2', `> Origin: ${origin}`, '>', '< HTTP/2 204', `< access-control-allow-origin: ${origin}`, ...(acac ? ['< access-control-allow-credentials: true'] : []),
+    '< access-control-allow-methods: GET, PUT, DELETE', '<', ''].join('\n')).findings.filter(f => /^R-0[1-5]/.test(f.ruleId) && f.status === 'fail').map(f => f.ruleId).sort();
+  it('プリフライトの R-02・R-03 と R-05① も、重要度の高いほうで数える', () => {
+    expect(pre('https://www.example.com.evil.net', true)).toEqual(['R-03.1']);
+    expect(pre('https://www.example.com.evil.net', false)).toEqual(['R-05.1']);
+    expect(pre('null', true)).toEqual(['R-02.1']);
+  });
+  it('レート制限（429）は、合格にも指摘にもしない（E-05・A-08・T-04・T-01・E-04）', () => {
+    const one = (url: string, label: string, item: string) => evaluate(`#TARGET url=${url} label=${label}\nHTTP/1.1 429 Too Many Requests\ncontent-type: text/plain\n\nslow down\n`)
+      .ids(label).filter(i => i.startsWith(item));
+    expect([one('https://www.example.com/actuator/env', 't', 'E-05'), one('https://www.example.com/api/items', 'ctype', 'A-08'), one('http://www.example.com/', 'http', 'T-04'),
+      one('https://www.example.com/', 'trace', 'T-01'), one('https://www.example.com/robots.txt', 't', 'E-04'), one('https://www.example.com/.well-known/security.txt', 't', 'E-04')])
+      .toEqual([['E-05.na'], ['A-08.na'], ['T-04.na'], ['T-01.na'], ['E-04.na'], ['E-04.na']]);
+  });
+  it('C-12①：mypage の同じページへの転送を採取していなければ、ログインできていたかが分からないので na', () => {
+    const r = evaluate(['#TARGET url=https://example.com/mypage label=mypage', 'HTTP/1.1 301 Moved Permanently', 'location: https://www.example.com/mypage', '',
+      '#TARGET url=https://www.example.com/logout label=logout', 'HTTP/1.1 302 Found', 'location: /login', 'set-cookie: sessionid=; Max-Age=0; Path=/', '',
+      '#TARGET url=https://www.example.com/mypage label=after-logout', 'HTTP/1.1 401 Unauthorized', 'content-type: text/html', '', '<p>login</p>', ''].join('\n'));
+    expect(r.findings.filter(f => f.item === 'C-12' && f.target === 'after-logout').map(f => f.ruleId)).toContain('C-12.na');
+  });
+});

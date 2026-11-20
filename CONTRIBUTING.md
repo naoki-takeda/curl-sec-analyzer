@@ -5,7 +5,7 @@ curl-sec-analyzer の開発に参加するときの決まりです。使い方�
 ## 大切にしていること
 
 - **入力をブラウザの外に出さない。** 外部と通信するコード（fetch・外部の画像やスクリプトなど）は追加しません。ツール自身の CSP（[csp.config.ts](csp.config.ts)）も緩めません。
-- **秘密情報を画面にもファイルにも出さない。** Cookie・Authorization・トークン・パスワードは、画面・Markdown・JSON・CSV のどれにも生の値で出しません（`tests/masking.test.ts` で検査しています）。
+- **秘密情報を画面にもファイルにも出さない。** Cookie・Authorization・トークン・パスワードは、画面・Markdown・JSON・CSV のどれにも生の値で出しません（`tests/masking.test.ts` で検査しています。残りうるものは CHANGELOG の「既知の限界」）。
 - **判定の根拠を示す。** 項目・条件・重要度は設計書に根拠（OWASP・MDN・ASVS など）とあわせて書きます。
 
 ## 開発環境と検査

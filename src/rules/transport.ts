@@ -16,7 +16,8 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、転送したかどうかも分からない（A-01・C-12・E-05 と同じ）
     if (!first.status) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
     // HTTP を 4xx で断る（CloudFront の「HTTPS のみ」、HTTP を拒否する API）は、HTTP でコンテンツを返していないので①にしない。
-    // 5xx はサーバの不調で、HTTP をどう扱う設定かが分からない
+    // 5xx はサーバの不調、429 はレート制限で、HTTP をどう扱う設定かが分からない
+    if (first.status === 429) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', 'HTTP 429（レート制限）', '時間をおいて採取し直す')];
     if (first.status >= 400 && first.status < 500) return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', `HTTP ${first.status}（HTTP のリクエストを拒否）`, '')];
     if (first.status >= 500) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `HTTP ${first.status}（サーバエラー）`, '')];
     if (first.status < 300 || !loc)
@@ -83,6 +84,7 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
     if (!f) return [noResponse(methods, ctx)];
     if (baseLabel(ctx.target.label) === 'trace') {
       if (f.status === 200 && bodyNotCaptured(ctx)) return [mk(methods, ctx, 'na', 'info', 'na', 'HTTP 200（本文を採取していない。反射したかが分からない）', NO_BODY_REC)];
+      if (f.status >= 500 || f.status === 429) return [mk(methods, ctx, 'na', 'info', 'na', `HTTP ${f.status}（サーバのエラー・レート制限で、TRACE を受け付けるかは分からない）`, '時間をおいて採取し直す')];
       const reflected = f.status === 200 && /^TRACE \S+ HTTP\//m.test(f.body ?? '');
       return reflected ? [mk(methods, ctx, 1, 'medium', 'fail', `HTTP ${f.status}（リクエストを反射）`, 'TRACE を無効にする（405 か 501 を返す）')]
                        : [mk(methods, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
@@ -133,7 +135,7 @@ export const openRedirect: Rule = { id: 'T-06', title: 'オープンリダイレ
     if (loc || refresh) return [mk(openRedirect, ctx, 1, 'medium', 'fail', loc ? `Location: ${loc}` : `Refresh: url=${refresh}`, '転送先は許可リスト（または相対パス）に限る')];
     // 転送しなかった応答（200・404 など）では、転送先を検証しているかは分からない（ログイン画面の next= はログインに成功したあとでだけ使う）。
     // 合格にするのは、転送先を検証したと分かる転送だけ。ログイン画面・認証の入り口への転送（テスト値を持ち越したかによらない。Spring・Devise・
-    // Laravel は保存したリクエストでログインのあとに戻る）と、同じページへの転送（末尾の /）は、転送先の検証を試していないので na
+    // Laravel は保存したリクエストでログインのあとに戻る）と、同じページへの転送（末尾の /、apex から www の同じパス）は、転送先の検証を試していないので na
     const tested = (r: HttpResponse) => {
       // /home?blocked=https%3A%2F%2Fevil.example のような、ログイン画面以外への転送は、転送先を検証して止めたので合格
       const loc = r.headers.get('location')?.[0] ?? '';

@@ -1,12 +1,12 @@
 // engine/targetKey.ts：差分・例外の突き合わせのキー（Finding.targetKey）
 // 画面・エクスポートに出すマスク（mask.ts）とは別に、ここだけで作る。このファイルは mask.ts を読み込まない（tests/properties.test.ts で確かめる。
-// マスクの一覧を変えるたびにキーが変わると、以前の例外と前回の結果が黙って突き合わなくなるため）。キーが守ること（同じファイルの性質テスト）：
+// マスクの一覧を変えるたびにキーが変わると、以前の例外と前回の結果が黙って突き合わなくなるため）。形の判定（tokenShape.ts）だけは画面と共有する。キーが守ること（同じファイルの性質テスト）：
 // - もう一度かけても変わらない（以前の形式のキーを、かけ直して変わるかで見分けるため）
 // - 値を持たない（クエリ・フラグメント・ユーザー情報・パス引数の値は、変えてもキーが変わらない）。パスのトークンは * にする
 // - 入力の順番で変わらない（クエリのパラメータの順番、同じ名前の値の順番、貼り付けたターゲットの順番）
 import type { Target } from '../model';
 import { baseLabel } from '../parser/target';
-import { codeGroups, digitRun, lowerToken, phoneRun, wordLike } from '../tokenShape';
+import { ASSET_EXT, buildAssetName, codeGroups, digitRun, lowerToken, phoneRun, rareBigrams, secretPiece, wordLike } from '../tokenShape';
 
 /**
  * 例外と前回の結果の突き合わせに使う URL（HAR と、同じラベルが複数ある curl の targetKey、Finding.keyUrl、CSV の実施コマンドの URL）。URL の形だけで作る：
@@ -53,7 +53,7 @@ export function urlKey(raw: string): string {
  * - 日本語などの ASCII 以外の文字の語（お知らせ・採用情報）：24文字まで、かたまりは4つまで。すべて * にすると、別のページが同じキーになり、記録の
  *   順番だけで「 #2」が入れ替わって、差分と例外の対象がずれる
  * - 6桁までの数字（7〜8桁にすると、パスに置いたワンタイムの番号がキーに入る）と、「v2」「x64」のような短い語と数字
- * 残す形を決めておくので、トークンがどんな形でもキーには入らない（秘密らしい形を数え上げて伏せる作りでは、;jsessionid= の値や小文字と数字だけの
+ * 残す形を決めておくので、トークンはキーに入らない（英語の語をつないだ名前に見えるものと、トークンの中の語に見えるかけらはまれに残る。秘密らしい形を数え上げて伏せる作りでは、;jsessionid= の値や小文字と数字だけの
  * トークン t2ybctp0… を見分けられない）。別のページが同じキーになることはある（GettingStartedV2Guide と MigrationGuideV3 はどちらも *）が、秘密は漏れない
  */
 const keyPiece = (p: string): boolean => {
@@ -69,17 +69,31 @@ const keyPiece = (p: string): boolean => {
 /**
  * かけらを1つずつ見ると残る、区切った番号とコード（カード番号・電話番号・米国の社会保障番号の形、招待のコード QWER-TYUI-ZXCV-ASDF・7Gk-p2Q-xZ81-m）は、
  * 部分ごと * にする（画面の許可リスト（shownText.ts の allowRun）と同じ形。キーが CSV の実施コマンドと JSON の keyUrl に入るため）。10〜11桁の
- * 電話番号（phoneRun）はキーだけで伏せる（画面は残す）。拡張子が付いても（123-45-6789.pdf・090-1234-5678.vcf）見る
+ * 電話番号（phoneRun）はキーだけで伏せる（画面は残す）。拡張子が付いても（123-45-6789.pdf・090-1234-5678.vcf）見る。
+ * . ~ で区切ったかけら（チャンク）がトークンの形（画面の maskSegment と同じ secretPiece。base64url・UUID・JWT の各部分）なら、そのチャンクでは
+ * 英語の語（3文字以上の英小文字か、先頭だけ大文字。まれな2文字の並びが半分未満）と v2 だけを残し、ほかのかけらと、それに続く区切りは * にまとめる
+ * （かけらを1つずつ見ると、トークンの中の短い語と数字（r・x0・uc52）や区切りが残り、記録し直すたびにキーが変わる）。静的ファイルのビルドした名前
+ * （AdminDashboard-Dk3x9Lq2.js）は除く。英語の語をつないだ名前に見えるトークン（乱数のおよそ1万個に1個）は残りうる
  */
+const tokenChunkPiece = (p: string) => /^v\d{1,2}$/.test(p) || (/^[A-Z]?[a-z]{3,23}$/.test(p) && wordLike(p) && rareBigrams(p.toLowerCase()) < 0.5);
+// 区切りの並び（トークンの先頭の -・_ と、前の語の _ が続いたもの）は、* の前では1つにし、チャンクの端では落とす
+const maskTokenChunk = (c: string) => c.replace(/[^-_]+/g, p => (tokenChunkPiece(p) ? p : '*'))
+  .replace(/\*(?:[-_]+\*)+/g, '*').replace(/([-_])[-_]*\*/g, '$1*').replace(/\*[-_]+(?=[-_]|$)/g, '*').replace(/^[-_]+\*/, '*');
+/**
+ * トークンの形のチャンク：secretPiece と、数字のない base64url（大文字・小文字を含む16文字以上で、語として読めないかけらを含むもの。secretPiece は
+ * 数字のないものを伏せないが、画面は別の規則で伏せる）
+ */
+const tokenChunk = (c: string) => secretPiece(c)
+  || (/^[A-Za-z0-9_-]{16,}$/.test(c) && /[A-Z]/.test(c) && /[a-z]/.test(c) && c.split(/[-_]/).some(p => !!p && !keyPiece(p)));
 const keySegment = (s: string): string => {
   // カード番号の数字の並びは . で区切らない（画面と同じ。版 10.0.19045.3803 や IP アドレスを番号にしない）。末尾の拡張子は除いて見る。
   // 電話番号とコードは . で区切ったもの（090.1234.5678・AB12.CD34.EF56・090-1234-5678.vcf.gz）も見る（IPv4 は合わせて12桁までの4つなので、
   // 電話番号の形（3つ以上で10〜11桁。0 で始まらないものは3つだけ）に当たらない）
   const base = s.replace(/\.[A-Za-z][A-Za-z0-9]{0,9}$/, ''); const pieces = base.split(/[-_~]/), dotted = s.split(/[-_.~]/);
-  // - で区切った16進数で、合わせて24文字以上のもの（UUID）。数字だけのかけらを残すと、記録し直すたびにキーが変わる（画面の secretPiece と同じ長さ）
-  const hexId = /^[0-9a-f]+(?:-[0-9a-f]+)+$/i.test(base) && /\d/.test(base) && /[a-f]/i.test(base) && base.replace(/-/g, '').length >= 24;
-  if (hexId || digitRun(pieces) || phoneRun(dotted) || /(?:^|[-_.~])\d{3}-\d{2}-\d{4}(?=$|[-_.~])/.test(s) || codeGroups(pieces) || codeGroups(dotted)) return '*';
-  return s.replace(/[^-_.~]+/g, piece => (keyPiece(piece) ? piece : '*')).replace(/\*(?:[-_.~]\*)+/g, '*');
+  if (digitRun(pieces) || phoneRun(dotted) || /(?:^|[-_.~])\d{3}-\d{2}-\d{4}(?=$|[-_.~])/.test(s) || codeGroups(pieces) || codeGroups(dotted)) return '*';
+  const asset = ASSET_EXT.test(s);
+  return s.replace(/[^.~]+/g, c => (tokenChunk(c) && !(asset && buildAssetName(c)) ? maskTokenChunk(c)
+    : c.replace(/[^-_]+/g, piece => (keyPiece(piece) ? piece : '*')))).replace(/\*(?:[-_.~]\*)+/g, '*');
 };
 /** キーに値を残すパラメータの名前（秘密や個人情報を入れない決まった名前だけ）。数字の値（ページ送り）と英字の語の値（並べ替え・表示の切り替え） */
 const KEY_NUMBER_NAMES = /^(?:page|per_page|page_size|pagesize|offset|limit|start)$/i;

@@ -143,8 +143,10 @@ export const bodyNotCaptured = (ctx: RuleContext): boolean => {
  * ないので、H-08・H-11・H-12・A-09 の対象外（ビーコンや XHR の 204 を指摘しない）
  */
 export const noContent = (ctx: RuleContext): boolean => ctx.final?.status === 204 || ctx.final?.status === 304;
-/** 本文のない応答の na の推奨。どの応答を本文のないものとみなすかは項目による（H-11・H-12 は noContent、H-08・A-09 は nothingToSniff） */
+/** 本文のない応答（noContent。H-11・H-12）の na の推奨 */
 export const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（本文のない応答は対象外）';
+/** 本文のない応答と転送の応答（nothingToSniff と Location のある 3xx。H-08・H-11・A-09）の na の推奨 */
+export const NO_CONTENT_OR_REDIRECT_REC = '本文のある応答（200 など）で採取する（本文のない応答・転送の応答は対象外）';
 /** Content-Length: 0 の応答 */
 export const zeroLength = (ctx: RuleContext): boolean => header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
 /** スニッフィングする本文がない応答（H-08・A-09②）：204・304、Location のある 3xx（ブラウザは 3xx の本文を表示しない）、Content-Length: 0 */

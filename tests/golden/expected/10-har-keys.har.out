@@ -1,6 +1,6 @@
 ## targets
 har-1 | https://www.example.com/password/reset/x7k2…(26 chars) | key=HAR GET https://www.example.com/password/reset/* | responses=1
-har-2 | https://www.example.com/k/sk_l…(31 chars) | key=HAR GET https://www.example.com/k/sk_live_* | responses=1
+har-2 | https://www.example.com/k/sk_l…(31 chars) | key=HAR GET https://www.example.com/k/*_live_* | responses=1
 har-3 | https://www.example.com/app/index.jsp;jsessionid=CANA…(23 chars) | key=HAR GET https://www.example.com/app/index.jsp;jsessionid | responses=1
 har-4 | https://www.example.com/list?page=2&v=20261116&token=CANA…(21 chars) | key=HAR GET https://www.example.com/list?page=2&token&v | responses=1
 har-5 | https://www.example.com/assets/AdminDashboard-Dk3x9Lq2.js | key=HAR GET https://www.example.com/assets/AdminDashboard-*.js | responses=1

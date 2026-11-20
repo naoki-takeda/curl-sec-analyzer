@@ -94,10 +94,10 @@ test('英語UIでは推奨対応も英語で表示する', async ({ page }) => {
   await expect(page.getByText('Issue a new session ID when login succeeds').first()).toBeVisible();
 });
 
-test('他のサイトに埋め込まれたときは、入力欄を出さない（クリックジャッキング対策）', async ({ page }) => {
+test('ほかのページに埋め込まれたときは、入力欄を出さない（クリックジャッキング対策）', async ({ page }) => {
   await page.setContent('<iframe src="http://localhost:4173/" width="900" height="600"></iframe>');
   const frame = page.frameLocator('iframe');
-  await expect(frame.getByText('他のサイトに埋め込んだ状態では使えません')).toBeVisible();
+  await expect(frame.getByText('ほかのページに埋め込んだ状態では使えません')).toBeVisible();
   await expect(frame.locator('textarea')).toHaveCount(0);
 });
 
@@ -333,6 +333,14 @@ test('HAR のラベルを矢印で見て回っても、ほかのエントリの�
   await page.locator('select[data-focus^="har-label-"]').first().focus();
   for (const k of ['ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp']) await page.keyboard.press(k);
   expect(await labels()).toEqual(before);
+  // 矢印で値が変わらないブラウザでも確かめる：ほかのエントリの予約ラベルを移してから戻すと、そのエントリのラベルも戻る
+  const i = before.findIndex((l, j) => j > 0 && !/^(?:har|error)-\d+$/.test(l));
+  expect(i).toBeGreaterThan(0);
+  const first = page.locator('select[data-focus^="har-label-"]').first();
+  await first.selectOption(before[i]);
+  await expect.poll(async () => (await labels())[i]).toMatch(/^har-\d+$/);
+  await first.selectOption(before[0]);
+  await expect.poll(labels).toEqual(before);
 });
 
 test('判定は Web Worker で行い、判定中に消去したら前の入力の結果を出さない', async ({ page }) => {
@@ -599,4 +607,64 @@ test('指摘の一覧・例外の登録のダイアログ・差分の表の対�
   const diff = page.getByRole('region', { name: '前回との差分の一覧' });
   await expect(diff).toContainText('glpat-…(20 chars)');
   await expect(diff).not.toContainText(token);
+});
+
+test('指摘がどれも形式の違う前回の結果は使わず、読み込み済みの前回の結果を使い続けると知らせる', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  const base = page.locator('input[type=file]').nth(3);
+  await base.setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ generatedAt: '2026-11-01T00:00:00Z',
+    findings: [{ ruleId: 'H-01.1', item: 'H-01', severity: 'high', status: 'fail', target: 'top' }] })) });
+  await expect(page.getByText('前回の結果：2026-11-01T00:00:00Z')).toBeAttached();   // 1つ目を読み終えてから2つ目を読む
+  await base.setInputFiles({ name: 'other.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ findings: [{ ruleId: 'bad' }] })) });
+  await expect(page.getByRole('status')).toHaveText(/^前回の結果を読み込めませんでした：1件の指摘のどれも形式が正しくありません.*読み込み済みの前回の結果を使い続けます。$/);
+  await page.getByText('設定ファイル').click();
+  await expect(page.getByText('前回の結果：2026-11-01T00:00:00Z')).toBeVisible();
+});
+
+test('HAR を読んだまま「サンプルを入れる」と、確かめてから HAR を外す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await expect(page.getByRole('button', { name: 'HARを外す' })).toBeVisible();
+  const dialogs: string[] = [];
+  page.on('dialog', d => { dialogs.push(d.message()); void d.accept(); });
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  expect(dialogs).toEqual([expect.stringMatching(/^読み込んだ（読み込み中の）HARを外して/)]);
+  await expect(page.getByRole('button', { name: 'HARを外す' })).toHaveCount(0);
+});
+
+test('HAR のエントリをすべて外して判定すると、curl のオプションではなく HAR の選択を案内する。入力欄を空にすると「入力を隠す」を出さない', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  const hosts = page.locator('input[type=checkbox][id^="har-host-"]');
+  await expect(hosts.first()).toBeVisible();
+  for (const cb of await hosts.all()) await cb.uncheck();
+  await page.getByRole('button', { name: '判定する', exact: true }).click();
+  await expect(page.getByRole('status')).toHaveText(/^判定するHARのエントリがありません/);
+  await page.locator('#input').fill('x');
+  await expect(page.getByRole('button', { name: '入力を隠す' })).toBeVisible();
+  await page.locator('#input').fill('');
+  await expect(page.getByRole('button', { name: '入力を隠す' })).toHaveCount(0);
+});
+
+test('HAR の読み込み中：設定ファイルを読んでも案内を残し、「サンプルを入れる」は確かめてから読み込みを止める', async ({ page }) => {
+  await fakeWorker(page);
+  await page.goto('/');
+  await setWorkerMode(page, 'hang');
+  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  const status = page.getByRole('status');
+  await expect(status).toHaveText('HARを読み込んでいます…');
+  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
+  await expect(page.getByText('組織プロファイル：x')).toBeAttached();
+  await expect(status).toHaveText('HARを読み込んでいます…');
+  await setWorkerMode(page, 'real');
+  const dialogs: string[] = [];
+  page.on('dialog', d => { dialogs.push(d.message()); void d.accept(); });
+  await page.locator('#input').fill('#TARGET url=https://other.example/ label=top');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  expect(dialogs).toEqual([expect.stringMatching(/^読み込んだ（読み込み中の）HARを外し、貼り付けた内容/)]);
+  await expect(page.getByRole('button', { name: 'HARを外す' })).toHaveCount(0);
 });

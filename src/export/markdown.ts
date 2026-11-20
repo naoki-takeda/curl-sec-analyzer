@@ -48,7 +48,7 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
     const api = apiTop10Short(f.item, itemSep()), stds = standardsShort(f.item, standardsSep());
     L.push(`| ${sevLabel(f.severity)}${f.originalSeverity ? `*` : ''} | ${f.item}${circled(f.condition)} ${cell(itemTitle(f.item, f.title))}${api ? par(api) : ''}${stds ? std(cell(stds)) : ''} | ${cell(f.target)}${f.url ? par(cell(f.url)) : ''} | ${cell(f.evidence)} | ${cell(en ? recommendationEn(f.recommendation) : f.recommendation)} |`);
   }
-  if (fs.some(f => f.originalSeverity)) L.push('', en ? '\\* Severity changed by the organization profile.' : '\\* 組織プロファイルで重要度を変えた指摘。');
+  if (fs.some(f => f.status === 'fail' && f.originalSeverity)) L.push('', en ? '\\* Severity changed by the organization profile.' : '\\* 組織プロファイルで重要度を変えた指摘。');
   const sup = fs.filter(f => f.status === 'suppressed');
   if (sup.length) {
     L.push('', en ? '## Exceptions' : '## 例外として扱った指摘', '', `| ${en ? 'Check' : '項目'} | ${en ? 'Target' : '対象'} | ${en ? 'Reason' : '理由'} | ${en ? 'Approver' : '承認者'} | ${en ? 'Expires' : '期限'} |`, '| --- | --- | --- | --- | --- |');

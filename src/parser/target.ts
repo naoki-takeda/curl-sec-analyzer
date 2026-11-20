@@ -148,9 +148,10 @@ export function sameDocument(r: HttpResponse, base?: string): boolean {
  * その URL の応答のうち、同じページへの転送をたどった先（A-01・A-08・A-11 のステータス、C-12①）。
  * 末尾の / への 307 のあとの 200 を、転送の 307 で判定しないため。転送先を採取していない（-L なし）ときは unfollowed
  */
-export function sameDocumentHop(t: Target): { hop?: HttpResponse; unfollowed: boolean } {
+export function sameDocumentHop(t: Target, keepMethod = false): { hop?: HttpResponse; unfollowed: boolean } {
   const c = ownChain(t); let i = 0;
-  while (c[i]?.kind === 'redirect' && sameDocument(c[i], t.url)) { if (!c[i + 1]) return { hop: c[i], unfollowed: true }; i++; }
+  // keepMethod：リクエストの方法と本文を変えない転送（307・308）だけをたどる（301・302・303 では curl もブラウザも POST を本文のない GET にする）
+  while (c[i]?.kind === 'redirect' && (!keepMethod || c[i].status === 307 || c[i].status === 308) && sameDocument(c[i], t.url)) { if (!c[i + 1]) return { hop: c[i], unfollowed: true }; i++; }
   return { hop: c[i], unfollowed: false };
 }
 
