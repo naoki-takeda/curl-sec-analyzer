@@ -70,6 +70,8 @@ const LABEL_OK = /^[\p{L}\p{N}_.-](?:[\p{L}\p{N}_. -]{0,62}[\p{L}\p{N}_.-])?$/u;
 const SENS_TRUE = /^(?:1|true|yes)$/i, SENS_FALSE = /^(?:0|false|no)$/i;
 /** #TARGET で読む名前（run= は採取の印） */
 const TARGET_KEYS = new Set(['url', 'label', 'kind', 'sensitive', 'run']);
+/** #META で受け付ける名前（採取時刻・実施コマンド・採取の印・curl の -w の値）。ほかの名前は読まない */
+const META_KEYS = ['at', 'cmd', 'run', 'response_code', 'num_redirects', 'url_effective', 'http_version'] as const;
 const newTarget = (a: Record<string, string>): Target => ({
   label: a.label === undefined ? 'default' : LABEL_OK.test(a.label) && !/^HAR /i.test(a.label) ? a.label : 'invalid-label', url: a.url, kind: (['html', 'api'].includes(a.kind?.toLowerCase() ?? '') ? a.kind.toLowerCase() : 'auto') as Target['kind'],   // kind=API も受け付ける
   // sensitive は 1・true・yes と 0・false・no を受け付ける。ほかの値は読まずに警告する（黙って無視すると、機密応答の項目が na や弱い判定になる）
@@ -170,8 +172,9 @@ export function parseInput(input: string): ParseResult {
         if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push([t, 'kind= は html・api・auto のいずれか']);
       }
       else if (tag === 'META') {
-        // source・method は HAR の取り込みが付ける印（突き合わせのキーの「HAR メソッド URL」、送ったヘッダが見えるか）。入力の #META では受け付けない
-        for (const [k, v] of Object.entries(a)) if (k !== 'source' && k !== 'method') t.meta[k] = v;
+        // 使う名前（META_KEYS）だけを写す。入力の名前をそのままプロパティにしない（__proto__ などで Target の meta を壊さない）。
+        // source・method は HAR の取り込みが付ける印（突き合わせのキーの「HAR メソッド URL」、送ったヘッダが見えるか）なので、入力の #META では受け付けない
+        for (const k of META_KEYS) if (a[k] !== undefined) t.meta[k] = a[k];
         // %{header_json} のあとに出した response_code（-w '%{header_json}' のあとの #META）も、その応答のステータスにする。
         // ステータスがまだない %{header_json} の応答だけを見る（行ごとに全応答を見直すと、#META の多い入力で2乗の時間になる）
         if (a.response_code) { for (const r of pendingJson) if (r.status === 0) r.status = Number(a.response_code) || 0; pendingJson.length = 0; }

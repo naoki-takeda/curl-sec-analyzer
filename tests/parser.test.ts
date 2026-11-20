@@ -114,3 +114,12 @@ describe('最初の #TARGET と HAR の redirectURL', () => {
     expect(r.findings.filter(f => f.evidence.includes('エラーが発生した'))).toEqual([]);
   });
 });
+
+describe('#META の名前', () => {
+  it('使う名前だけを受け付け、入力の名前をそのままプロパティにしない（__proto__ などで meta を壊さない）', () => {
+    const { targets } = parseInput('#TARGET url=https://a.example/ label=t\n#META at=2026-11-01T10:00:00 __proto__=x constructor=y source=har method=POST foo=1\nHTTP/2 200\n\n');
+    const meta = targets[0].meta;
+    expect(Object.keys(meta)).toEqual(['at']);
+    expect(Object.getPrototypeOf(meta)).toBe(Object.prototype);
+  });
+});

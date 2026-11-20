@@ -1515,3 +1515,10 @@ v1.0 の範囲を実装し、要確認事項（第44回）を確かめたので�
 | 冗長・整理 | 5xx・429 の判定と「時間をおいて採取し直す」が8か所。状態のメッセージ（`say`）を `actions` 経由で呼んだ。E2E が隠したファイルの入力を並びの順番で選んだ。前回の結果の検査・HAR で残す本文の形式・`sensitive` の値・`tokenShape.ts` の共有の説明が設計書に複数あった | `unavailable`・`RETRY_REC` にまとめた。`ui/message.ts` に移した。id（`file-in` など）で選ぶ。1か所にした | `src/rules/util.ts` ほか、`src/ui/message.ts`、`e2e/*.ts`、設計書 |
 | 判断したこと | R-05 のプリフライトの 5xx・429 は合格のまま（ブラウザは 2xx でないプリフライトを失敗にし、実際のリクエストを送らない）。パスを取り出す関数（`exposure.ts` の `path` と `util.ts` の `pathOf`）は、スキームのない URL での結果が違うのでまとめなかった。トークンの形の部分で略語・短い数字が `*` になる（`API-Reference-v2` → `*-Reference-v2`）のは、緩めると漏れが増える（約2%）のでそのまま | — | — |
 | 未対応（低） | `main.ts` からの判定の流れ（`ui/analysis.ts`）と設定ファイルの読み込み（`ui/settings.ts`）の切り出し。第76回の未対応（低） | 次回以降 | — |
+
+### CI の指摘への対応（第77回のあと、プルリクエスト #8 の CodeQL・dependency-review）
+
+| 対象 | 内容 | 対応 | 反映箇所 |
+| --- | --- | --- | --- |
+| CodeQL（Remote property injection、高） | `#META` の行の名前を、そのまま `t.meta[名前]` に書いた（`source`・`method` 以外のどの名前も受け付けた。入力の名前でプロパティを書くので、`__proto__` などの名前を書き込める形だった） | 使う名前（`at`・`cmd`・`run`・`response_code`・`num_redirects`・`url_effective`・`http_version`）だけを写す（`META_KEYS`。決まった一覧を回すので、入力の名前でプロパティを書かない）。テストを足した（直す前のコードでは失敗する） | `src/parser/input.ts`、設計書、`tests/parser.test.ts` |
+| dependency-review | 公開リポジトリになって実行され、「Dependency graph が有効でない」で失敗した（ワークフローの先頭のコメントのとおり、公開後は設定で有効にする前提） | コードの問題ではない。リポジトリの設定（Settings → Security → Dependency graph）で有効にする | — |
