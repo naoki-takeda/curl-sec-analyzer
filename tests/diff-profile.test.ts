@@ -163,3 +163,38 @@ describe('組織プロファイルの読み込み', () => {
     expect(parseProfile('{"name":1}').errors).toEqual(['name は文字列にしてください']);
   });
 });
+
+describe('第74回：突き合わせのキー・例外・前回の結果の読み込み', () => {
+  it('「ラベル URL」の例外は、同じラベル・URL の2つ目（top#2。キーに「 #2」が付く）には当てない', () => {
+    const { targets } = parseInput(top('a.example', false) + top('a.example', false));
+    const fs = runAll(targets, { suppressions: [{ ruleId: 'H-01', target: 'top https://a.example/', reason: 'r', approver: '', until: '' }] }).filter(f => f.item === 'H-01');
+    expect(fs.map(f => `${f.target}:${f.status}`)).toEqual(['top:suppressed', 'top#2:fail']);
+  });
+  it('HAR で同じ URL がまた出たら、その URL に前に付けたキーを使う', async () => {
+    const { targetKeys } = await import('../src/engine/targetKey');
+    const t = (q: string) => ({ label: 'har', url: `https://a.example/s?q=${q}`, meta: { source: 'har', method: 'GET' } });
+    expect(targetKeys([t('a'), t('b'), t('b'), t('a')])).toEqual(['HAR GET https://a.example/s?q', 'HAR GET https://a.example/s?q #2', 'HAR GET https://a.example/s?q #2', 'HAR GET https://a.example/s?q']);
+  });
+  it('UUID の数字だけのかけらをキーに残さない', async () => {
+    const { urlKey } = await import('../src/engine/targetKey');
+    expect(urlKey('https://a.example/reset/9f1c2a7e-4821-a093-8512-0c3e5d7b9a11')).toBe('https://a.example/reset/*');
+    expect(urlKey('https://a.example/reset/9f1c2a7e-4821-a093-8512-0c3e5d7b9a11.json')).toBe('https://a.example/reset/*');
+  });
+  it('前回の結果の日時は toJson の形だけを受け付ける', async () => {
+    const { parseBaseline } = await import('../src/engine/diff');
+    const at = (generatedAt: unknown) => parseBaseline(JSON.stringify({ generatedAt, findings: [] })).baseline?.generatedAt;
+    expect([at('2026-11-01T00:00:00.000Z'), at('2026-11-01T00:00:00Z'), at('glpat-xxxxxxxxxxxxxxxxxxxx'), at(5)]).toEqual(['2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00Z', '', '']);
+  });
+  it('#TARGET の指定の警告は、付け直したあとのラベルを出す', () => {
+    const { warnings } = parseInput('#TARGET url=https://a.example/ label=top lable=x\nHTTP/2 200\n\n#TARGET url=https://a.example/b label=top lable=x\nHTTP/2 200\n\n');
+    expect(warnings.find(w => w.detail.startsWith('#TARGET の指定'))?.detail).toMatch(/（top：lable=.*、top#2：lable=/);
+  });
+  it('HAR の base64 の本文は、日本語でも64K文字まで読む', async () => {
+    const { importHar } = await import('../src/parser/har');
+    const text = `${'あ'.repeat(50_000)}END`;
+    const b64 = Buffer.from(text, 'utf8').toString('base64');
+    const imp = importHar(JSON.stringify({ log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z', request: { method: 'GET', url: 'https://a.example/x', headers: [] },
+      response: { status: 200, httpVersion: 'HTTP/2', headers: [], content: { mimeType: 'text/html', text: b64, encoding: 'base64' } } }] } }));
+    expect(imp.chains[0].responses.at(-1)?.body).toBe(text);
+  });
+});

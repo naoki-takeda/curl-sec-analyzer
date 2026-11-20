@@ -645,3 +645,32 @@ describe('二重の指摘の除去のたどりと、自サイトの Origin の R
     expect(r.findings.filter(f => f.item === 'R-04').map(f => f.ruleId)).toEqual(['R-04.na']);
   });
 });
+
+describe('第74回：同じサイトへの転送・プローブの 5xx・転送の応答・二重の指摘', () => {
+  it('E-05：apex から www の同じパスへの転送は、転送先の応答で判定する（転送の 301 で合格にしない）', () => {
+    const redirect = ['#TARGET url=https://example.com/actuator/env label=act', 'HTTP/1.1 301 Moved Permanently', 'location: https://www.example.com/actuator/env', ''];
+    expect(evaluate([...redirect, 'HTTP/1.1 200 OK', 'content-type: application/json', '', '{"activeProfiles":["prod"]}', ''].join('\n')).ids('act').filter(i => i.startsWith('E-05'))).toEqual(['E-05.1']);
+    expect(evaluate(redirect.join('\n')).ids('act').filter(i => i.startsWith('E-05'))).toEqual(['E-05.na']);
+  });
+  it('A-01：apex から www の同じパスへの転送のあとの 401・200 で判定する', () => {
+    const api = (tail: string[]) => evaluate(['#TARGET url=https://example.com/api/me label=unauth-api', 'HTTP/1.1 301 Moved Permanently', 'location: https://www.example.com/api/me', '', ...tail, ''].join('\n'))
+      .ids('unauth-api').filter(i => i.startsWith('A-01'));
+    expect(api(['HTTP/1.1 401 Unauthorized', 'content-type: application/json', '', '{"error":"unauthorized"}'])).toEqual(['A-01.ok']);
+    expect(api(['HTTP/1.1 200 OK', 'content-type: application/json', '', '{"id":1,"email":"alice@example.com"}'])).toEqual(['A-01.1']);
+  });
+  it('E-03・E-13①：プローブのサーバのエラー（5xx）は、取得できなかったと合格にしない', () => {
+    const r = evaluate(['#TARGET url=https://www.example.com/ label=probes', ...['/.git/HEAD', '/.env', '/app.js.map'].map(p => `#PROBE path=${p} head= code=503 size=0 ct=text/html`), ''].join('\n'));
+    expect(r.findings.filter(f => f.item === 'E-03' || f.item === 'E-13').map(f => f.ruleId).sort()).toEqual(['E-03.na', 'E-13.na']);
+  });
+  it('H-11：Location のある 3xx は判定しない。H-12：ステータスが分からない応答は「キャッシュされない応答」としない', () => {
+    expect(ids(target('https://a.example/mypage', 'HTTP/2 302\nlocation: https://a.example/mypage/\ncontent-type: text/html\ncontent-length: 0', 'sensitive=1')).filter(i => i.startsWith('H-11'))).toEqual(['H-11.na']);
+    const r = evaluate(target('https://a.example/mypage', '{"content-type":["text/html; charset=utf-8"]}', 'sensitive=1'));
+    expect(r.findings.find(f => f.item === 'H-12')?.evidence).toBe('ステータスが分からない（HTTP 0）');
+  });
+  it('Domain を付けた __Host- の Cookie は C-06② だけ、http の Secure のない SameSite=None の Cookie は C-10 だけで数える', () => {
+    const fails = (url: string, cookie: string) => evaluate(target(url, `HTTP/2 200\ncontent-type: text/html\nset-cookie: ${cookie}`)).findings
+      .filter(f => f.status === 'fail' && /^C-(?:0[346]|10)/.test(f.ruleId)).map(f => f.ruleId).sort();
+    expect(fails('https://www.example.com/', `__Host-sid=${'0123456789abcdef'.repeat(2)}; Path=/; Secure; HttpOnly; SameSite=Lax; Domain=example.com`)).toEqual(['C-06.2']);
+    expect(fails('http://intra.example.com/', `sid=${'0123456789abcdef'.repeat(2)}; Path=/; HttpOnly; SameSite=None`)).toEqual(['C-10.1']);
+  });
+});

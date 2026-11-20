@@ -93,8 +93,10 @@ export function focusResultsIfLost(results: ParentNode, before: Element | null) 
 /** 折りたたみ（details）の見出しの先頭に付ける開閉の目印。summary を flex にするとブラウザの三角が消えるため自前で付ける */
 export const disclosure = () => { const s = el('span', 'disclosure inline-block w-4 shrink-0 text-muted'); s.setAttribute('aria-hidden', 'true'); return s; };
 
-/** 画面の「対象」の列で、そのまま出してよい名前：今のターゲットのラベルと、ホスト単位の指摘の対象（host と同じ URL.host） */
-/** shown：出す文字列の使い回し（ホスト名は showText を3回通すので、1回の描画の中で同じ対象を数え直さない） */
+/**
+ * 画面の「対象」の列で、そのまま出してよい名前：今のターゲットのラベルと、ホスト単位の指摘の対象（host と同じ URL.host）。
+ * shown は出す文字列の使い回し（ホスト名は showText を3回通すので、1回の描画の中で同じ対象を数え直さない）
+ */
 export interface TargetNames { labels: ReadonlySet<string>; hosts: ReadonlySet<string>; shown: Map<string, string> }
 export const targetNames = (targets: readonly Target[], findings: readonly Finding[]): TargetNames =>
   ({ labels: new Set(targets.map(t => t.label)), hosts: new Set(findings.filter(f => f.host !== undefined && f.target === f.host).map(f => f.target)), shown: new Map() });

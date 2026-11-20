@@ -90,15 +90,15 @@ function ledger(c: Record<Severity, number>) {
   return wrap;
 }
 function exportBar() {
-  const T = tr(); const stamp = localDate();
+  const T = tr();
   return el('div', 'mt-3 flex flex-wrap items-center gap-2 text-sm',
     el('span', 'text-muted', T.save),
     // 結果のファイルは、その結果を判定したときの設定で書く（判定のあとに読み込んだ設定と混ぜない）。判定中は押せない（main.ts の setBusy）
     exportButton('Markdown', () => { const L = state.last!; const b = L.settings.baseline;
-      return download(`sec-report-${stamp}.md`, 'text/markdown', toMarkdown(L.findings, L.cov, L.settings.suppressions, new Date(),
+      return download(`sec-report-${localDate()}.md`, 'text/markdown', toMarkdown(L.findings, L.cov, L.settings.suppressions, new Date(),
         { profile: L.settings.profile, diff: L.diff && b ? { rows: L.diff, baselineAt: b.generatedAt, ...diffWarnings() } : undefined })); }),
-    exportButton('JSON', () => { const L = state.last!; download(`sec-report-${stamp}.json`, 'application/json', toJson(L.findings, L.cov, L.settings.suppressions, new Date(), L.settings.profile)); }),
-    exportButton(T.csv, () => download(`sec-report-${stamp}.csv`, 'text/csv', toCsv(state.last!.findings, state.last!.targets))),
+    exportButton('JSON', () => { const L = state.last!; download(`sec-report-${localDate()}.json`, 'application/json', toJson(L.findings, L.cov, L.settings.suppressions, new Date(), L.settings.profile)); }),
+    exportButton(T.csv, () => download(`sec-report-${localDate()}.csv`, 'text/csv', toCsv(state.last!.findings, state.last!.targets))),
     button(T.suppressionsFile, BTN, () => download('suppressions.json', 'application/json', suppressionsJson(state.suppressions))));
 }
 /** 結果のファイルの保存ボタン。判定中（actions.isAnalyzing）は押せないようにする（data-export で main.ts の setBusy が切り替える） */

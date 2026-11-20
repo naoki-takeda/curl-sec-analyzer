@@ -10,6 +10,7 @@ export interface Baseline { generatedAt: string; rulesetVersion?: string; findin
 
 const RULE_ID = /^([HCRTEA]-\d\d)\.(\d+|ok|na)$/;
 const STATUSES: Finding['status'][] = ['pass', 'fail', 'na', 'suppressed'];
+const GENERATED_AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/;
 
 /** 前回の結果の指摘1件を確かめる。形式が合わなければ undefined（手で編集したJSONや別のツールのJSONでも、表示を崩さないため） */
 function validFinding(x: unknown): Finding | undefined {
@@ -35,7 +36,8 @@ export function parseBaseline(text: string): { baseline?: Baseline; error?: stri
   const findings = all.map(validFinding).filter((f): f is Finding => !!f);
   // プロファイルも組織プロファイルと同じ検査を通す（壊れた値で差分の警告の比較が落ちないように）
   const profile = d.profile && typeof d.profile === 'object' ? parseProfile(JSON.stringify(d.profile)).profile : undefined;
-  return { baseline: { generatedAt: typeof d.generatedAt === 'string' ? d.generatedAt : '',
+  // 日時は toJson が出す形だけを受け付ける（ファイルに書かれた任意の文字列を、差分の見出し・設定の欄・Markdown にそのまま出さない）
+  return { baseline: { generatedAt: typeof d.generatedAt === 'string' && GENERATED_AT.test(d.generatedAt) ? d.generatedAt : '',
                        rulesetVersion: typeof d.rulesetVersion === 'string' ? d.rulesetVersion : undefined, findings, profile },
            skipped: all.length - findings.length };
 }

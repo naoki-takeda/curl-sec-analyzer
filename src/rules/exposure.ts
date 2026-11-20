@@ -3,7 +3,7 @@ import type { HttpResponse, Rule, RuleContext } from '../model';
 import { excerpt } from '../mask';
 import { probePattern } from './probes';
 import { ASSET_CT, FOLLOW_REC, NO_BODY_REC, PROBE_REDIRECT_REC, PROBE_UNREACHED_REC, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk, noContent } from './util';
-import { baseLabel, isRedirectWithLocation, ownChain } from '../parser/target';
+import { baseLabel, isRedirectWithLocation, ownChain, siteOf } from '../parser/target';
 import { allowedItems } from '../engine/labels';
 import { AWS_KEY, noHtmlBody } from './html';
 
@@ -178,17 +178,21 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
 const DOC_SEGMENT = /\/(actuator|swagger-ui(?:\.html)?|swagger(?:\.json|\.ya?ml)?|openapi\.(?:json|ya?ml)|api-docs|graphql)(?=\/|$)/i;
 const docSegment = (p: string) => p.match(DOC_SEGMENT)?.[1].toLowerCase();
 /**
- * 転送先が、同じホストで同じ機能のページ（転送元のパスに「/」か「/index.html」を足しただけ。springdoc の /swagger-ui.html → /swagger-ui/index.html
- * を含む）なら、そのパスを返す。/actuator → /actuator/login のようなログイン画面への転送は undefined（転送先の 200 で①にしない）
+ * 転送先が、同じサイトで同じ機能のページ（転送元のパスに「/」か「/index.html」を足しただけ。springdoc の /swagger-ui.html → /swagger-ui/index.html
+ * を含む。apex → www・https への転送は同じパスも）なら、その URL を返す。/actuator → /actuator/login のようなログイン画面への転送は undefined
+ * （転送先の 200 で①にしない）
  */
 function docRedirect(r: HttpResponse, targetUrl: string | undefined): string | undefined {
   const loc = r.headers.get('location')?.[0]; const base = r.url ?? targetUrl;
   if (!loc || !base) return undefined;
   try {
     const from = new URL(base), to = new URL(loc.trim(), from);
-    if (to.host !== from.host || !docSegment(to.pathname)) return undefined;
+    const moved = to.host !== from.host || to.protocol !== from.protocol;
+    const sameSite = to.host === from.host || (siteOf(to.hostname) === siteOf(from.hostname) && (to.protocol === from.protocol || to.protocol === 'https:'));
+    if (!sameSite || !docSegment(to.pathname)) return undefined;
     const stem = from.pathname.replace(/\.html?$/i, '').replace(/\/+$/, '');
-    return to.pathname.startsWith(stem) && /^\/?(?:index\.html?)?$/i.test(to.pathname.slice(stem.length)) && to.pathname !== from.pathname ? to.pathname : undefined;
+    return to.pathname.startsWith(stem) && /^\/?(?:index\.html?)?$/i.test(to.pathname.slice(stem.length)) && (moved || to.pathname !== from.pathname)
+      ? (moved ? `${to.host}${to.pathname}` : to.pathname) : undefined;
   } catch { return undefined; }
 }
 
@@ -202,14 +206,14 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
   basis: ['OWASP API Security Top 10 2023: API8・API9'],
   run(ctx) {
     // ステータスは、そのURL自身の応答（転送の最初のホップ）で見る。/actuator からログイン画面に転送した先の 200 で①（高）にしないため。
-    // ただし、同じホストの仕様・管理機能のパスへの転送（/swagger-ui → /swagger-ui/index.html）は、同じ機能のページなので転送先で見る
+    // ただし、同じサイトの仕様・管理機能のパスへの転送（/swagger-ui → /swagger-ui/index.html、apex → www の同じパス）は、同じ機能のページなので転送先で見る
     const p = path(ctx); const chain = ownChain(ctx.target); const seg = docSegment(p);
     if (!chain[0] || !seg) return [];
     let i = 0;
     while (chain[i].kind === 'redirect') {
       const to = docRedirect(chain[i], ctx.target.url);
       if (!to) break;
-      if (!chain[i + 1]) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${chain[i].status}（同じホストの ${to} への転送。転送先を採取していない）`, FOLLOW_REC)];
+      if (!chain[i + 1]) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${chain[i].status}（同じサイトの ${to} への転送。転送先を採取していない）`, FOLLOW_REC)];
       i++;
     }
     const f = chain[i];
@@ -284,7 +288,6 @@ const ACTIVE_CT = /^\s*(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|tex
 // その場で表示するのが普通の種類（画像・音声・動画）。Content-Disposition がなくても②にしない
 // HLS・DASH のプレイリスト（application/vnd.apple.mpegurl・x-mpegurl・dash+xml）も、プレイヤーが読み込むもので、ダウンロードではない
 const INLINE_MEDIA_CT = /^\s*(?:image\/(?!svg)|audio\/|video\/|application\/(?:vnd\.apple\.mpegurl|x-mpegurl|dash\+xml)\b)/i;
-// 旧式のフォント（application/vnd.ms-fontobject。.eot）も含める
 export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード応答', appliesTo: 'any', scope: 'target',
   basis: ['OWASP File Upload CS'],
   run(ctx) {
@@ -328,8 +331,10 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     if (maps.length) {                                         // ① probes ラベル：.map を取得できるか
       const got = maps.filter(p => probePattern(p.path, p.headB64, p.code)?.name === 'source-map');
       const unreached = maps.filter(p => !p.code).length; const redirected = maps.filter(p => p.code >= 300 && p.code < 400).length;
+      const serverError = maps.filter(p => p.code >= 500).length;
       return got.length ? got.map(p => mk(sourceMap, ctx, 1, 'medium', 'fail', `${p.path}（HTTP ${p.code}、一致したパターン: source-map）`, '本番では .map を配信しない（sourcesContent に元のソースがあるかは手動で確認）'))
         : unreached ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC)]
+        : serverError ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${serverError}件はサーバのエラー（HTTP 5xx。.map があるかは分からない）`, '時間をおいて採取し直す')]
         : redirected ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${redirected}件は転送された（HTTP 3xx。転送先を確かめていない）`, PROBE_REDIRECT_REC)]
         : [mk(sourceMap, ctx, 'ok', 'info', 'pass', `${maps.length}件の .map は取得できなかった`, '')];
     }

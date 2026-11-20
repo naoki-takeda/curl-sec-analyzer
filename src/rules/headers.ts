@@ -131,6 +131,8 @@ export const cacheControl: Rule = { id: 'H-12', title: 'Cache-Control', appliesT
     // private も保存を許す指定（私的キャッシュは private があれば 201・403 も保存できる）。ただし Location のある 3xx では private を
     // 数えない（ASP.NET は既定ですべての応答に private を付けるので、転送のたびに②にしない）
     const redirect = isRedirectWithLocation(ctx.final);
+    // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、キャッシュされない応答かも分からない（E-05 と同じ）
+    if (!ctx.final.status) return [mk(cacheControl, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
     if (!HEURISTIC_CACHEABLE.has(ctx.final.status) && !['max-age', 's-maxage', 'public', ...(redirect ? [] : ['private'])].some(d => dirs.has(d)) && !header(ctx, 'expires').length)
       return [mk(cacheControl, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（鮮度の指定がなく、キャッシュされない応答）`, '機密データを返す 200 の応答（認証後ページなど）で採取する')];
     // 静的リソース・公開ファイルは、sensitive=1 を明示したときだけ機密応答として扱う（rules/util.ts の sensitiveUnlessStatic。静的リソースでは
@@ -344,6 +346,8 @@ export const crossOriginIsolation: Rule = { id: 'H-11', title: 'COOP・COEP・CO
   run(ctx) {
     if (!ctx.final) return [noResponse(crossOriginIsolation, ctx)];
     if (noContent(ctx)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_REC)];
+    // Location のある 3xx は、ブラウザが転送先を読み込む（CORP・COOP は転送先の応答で効く。H-08 と同じ）
+    if (isRedirectWithLocation(ctx.final)) return [mk(crossOriginIsolation, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（転送の応答）`, NO_CONTENT_REC)];
     const out = []; const sensitive = sensitiveUnlessStatic(ctx);
     // 守りにならない値は、ないのと同じ：CORP の cross-origin（どのサイトからも読み込める）、COOP の unsafe-none（既定の動作）と、
     // 知らない値・2つ以上の値（ブラウザは読めずに無視する）。値は大文字・小文字を区別する（ブラウザは Same-Origin を読めずに無視する）

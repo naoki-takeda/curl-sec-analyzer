@@ -68,7 +68,7 @@ const stemmedWord = (p: string) => { const m = p.match(STEM_DIGITS); return !!m 
  * 番号・コードのかけらとして、語として読めないもの：英字と数字が混ざる（K7QX・a1b2。rc4・md5・sha1 のような残してよい語は除く）か、英字4文字以上で
  * まれな2文字の並びが半分以上（ZXCV・ASDF）。英字3文字（pdf・img・MIT）は略語として乱数とみなさない
  */
-export const randomPiece = (p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !stemmedWord(p)
+const randomPiece = (p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !stemmedWord(p)
   : /^[A-Za-z]{4,}$/.test(p) && rareBigrams(p.toLowerCase()) >= 0.5);
 /**
  * 英数字のかけらをつないだコード（招待・パスワードの再設定の QWER-TYUI-ZXCV-ASDF・K7QX-9MZP・7Gk-p2Q-xZ81-m）か。次のどちらか：

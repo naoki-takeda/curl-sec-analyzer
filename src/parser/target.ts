@@ -131,12 +131,16 @@ const upgradedToHttps = (t: Target): boolean => {
 
 /** パスの末尾の / を除く（/ だけのパスはそのまま） */
 export const trimPath = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
-/** 転送先が同じページ（同じホストで、パスが末尾の / の違いだけ）か。Django の APPEND_SLASH、FastAPI の redirect_slashes、Apache の DirectorySlash など */
+/**
+ * 転送先が同じページ（パスが末尾の / の違いだけ。Django の APPEND_SLASH、FastAPI の redirect_slashes、Apache の DirectorySlash など）か。
+ * 同じサイトの別のホスト（apex → www）・https への転送で、パスが同じものも同じページとする（転送先の 401・200 を、転送の 301 で判定しない）
+ */
 export function sameDocument(r: HttpResponse, base?: string): boolean {
   try {
     const from = new URL(r.url ?? base ?? ''), to = new URL(r.headers.get('location')?.[0] ?? '', from);
+    const sameSite = siteOf(to.hostname) === siteOf(from.hostname) && (to.protocol === from.protocol || (from.protocol === 'http:' && to.protocol === 'https:'));
     // クエリも同じもの（/login?next=… から /login、/redirect?url=… から /redirect?error=… は別のページへの転送）
-    return to.host === from.host && trimPath(to.pathname) === trimPath(from.pathname) && to.search === from.search;
+    return (to.host === from.host || sameSite) && trimPath(to.pathname) === trimPath(from.pathname) && to.search === from.search;
   } catch { return false; }
 }
 

@@ -88,9 +88,12 @@ export const knownFiles: Rule = { id: 'E-03', title: '既知ファイル（/.git
         else if (p.code === 200) { fails++; out.push(hf(knownFiles, host, 2, 'info', 'fail', `${p.path}（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）`, '中身を手動で確認する')); }
       }
       // コード 000 は接続できなかった（タイムアウト・名前解決の失敗など）ことを示し、ファイルがないことは分からない。1件でもあれば合格にしない
-      // 転送（3xx。apex から www へ、http から https へ）されたパスも、転送先にファイルがあるかは分からない（C13 は -L を付けない）
+      // 転送（3xx。apex から www へ、http から https へ）されたパスも、転送先にファイルがあるかは分からない（C13 は -L を付けない）。
+      // サーバのエラー（5xx。メンテナンス中の 503 など）も、ファイルがないとは言えない（E-04② と同じ）
       const unreached = own.filter(p => !p.code).length; const redirected = own.filter(p => p.code >= 300 && p.code < 400).length;
+      const serverError = own.filter(p => p.code >= 500).length;
       if (!fails && unreached) out.push(hf(knownFiles, host, 'na', 'info', 'na', `${own.length}件のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC));
+      else if (!fails && serverError) out.push(hf(knownFiles, host, 'na', 'info', 'na', `${own.length}件のうち${serverError}件はサーバのエラー（HTTP 5xx。ファイルがあるかは分からない）`, '時間をおいて採取し直す'));
       else if (!fails && redirected) out.push(hf(knownFiles, host, 'na', 'info', 'na', `${own.length}件のうち${redirected}件は転送された（HTTP 3xx。転送先を確かめていない）`, PROBE_REDIRECT_REC));
       else if (!fails && own.length) out.push(hf(knownFiles, host, 'ok', 'info', 'pass', `${own.length}件のパスはいずれも取得できなかった${html ? `（うち${html}件は HTML の画面が返った。どのパスにも同じ画面を返す SPA など）` : ''}`, ''));
     }

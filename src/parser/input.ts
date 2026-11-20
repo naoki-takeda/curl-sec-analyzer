@@ -128,7 +128,7 @@ export function parseInput(input: string): ParseResult {
     ? splitRunMarkers(normalized, runId)
     : normalized.replace(STUCK_MARKER, '$1\n$2').replace(STUCK_TARGET, '$1\n$2').split('\n');
   const badSensitive: Target[] = [];                   // sensitive= の値を読めなかったターゲット（ラベルは付け直したあとのものを出す）
-  const badTargetAttrs: string[] = [];                 // #TARGET の読めなかった指定（書き間違えた名前、受け付けないラベル・kind）
+  const badTargetAttrs: [Target, string][] = [];       // #TARGET の読めなかった指定（書き間違えた名前、受け付けないラベル・kind）と、そのターゲット（ラベルは付け直したあとのものを出す）
   let sawUnreadable = false;                          // このターゲットで、応答の前に読めない行があったか（コロンのあるステータス行の偽装の手がかり）
   let firstLine: 'pending' | 'hint' | 'other' = 'pending';   // 印のある入力で、ターゲットの最初の行が curl -v の「*」の行だったか
   // chunked の 3xx のあとに読んだホップ。-L で採取したターゲット（#META に num_redirects= がある）でなければ、トレーラの偽のホップなので捨てる
@@ -165,9 +165,9 @@ export function parseInput(input: string): ParseResult {
         // 書き間違い（lable=）や受け付けない値（label=login/x、kind=page）は、sensitive= と同じく知らせる（黙って既定にすると、予約したラベルの
         // 横断の判定（C-09 など）が動かない理由が分からない）。値は出さない（ラベルは画面にそのまま出るので、受け付けない形のものは名前だけ）
         const unknown = Object.keys(a).filter(k => !TARGET_KEYS.has(k));
-        if (unknown.length) badTargetAttrs.push(`${t.label}：${unknown.slice(0, 3).map(k => (/^[A-Za-z_][\w-]{0,30}$/.test(k) ? k : '…')).join('・')}=（使える名前は url・label・kind・sensitive）`);
-        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push('invalid-label：label= に使えるのは英数字・日本語などの文字と _ . - と空白（64文字まで。「HAR 」で始まるものは使えない）');
-        if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push(`${t.label}：kind= は html・api・auto のいずれか`);
+        if (unknown.length) badTargetAttrs.push([t, `${unknown.slice(0, 3).map(k => (/^[A-Za-z_][\w-]{0,30}$/.test(k) ? k : '…')).join('・')}=（使える名前は url・label・kind・sensitive）`]);
+        if (a.label !== undefined && t.label === 'invalid-label') badTargetAttrs.push([t, 'label= に使えるのは英数字・日本語などの文字と _ . - と空白（64文字まで。「HAR 」で始まるものは使えない）']);
+        if (a.kind !== undefined && !['html', 'api', 'auto'].includes(a.kind.toLowerCase())) badTargetAttrs.push([t, 'kind= は html・api・auto のいずれか']);
       }
       else if (tag === 'META') {
         // source・method は HAR の取り込みが付ける印（突き合わせのキーの「HAR メソッド URL」、送ったヘッダが見えるか）。入力の #META では受け付けない
@@ -356,7 +356,7 @@ export function parseInput(input: string): ParseResult {
   // 印のない入力として読み、応答の本文に書かれたマーカーを読む（手書きのターゲットを前に足すと印による保護が外れるので、知らせる）
   const mixedRun: ParseWarning[] = !runId && RUN_TARGET.test(normalized) ? [{ kind: 'mixed-run',
     detail: '生成スクリプトの出力（run= の印のある #TARGET）の前に、印のない #TARGET があります。この場合は印を使わずに読むので、応答の本文に書かれた #TARGET などのマーカーもターゲットとして読みます。生成スクリプトの出力だけを先頭から貼り付け、手書きの出力は別に貼り付けて判定してください' }] : [];
-  if (badTargetAttrs.length) badAttr.push({ kind: 'invalid-attr', detail: `#TARGET の指定を読めませんでした（${badTargetAttrs.slice(0, 5).join('、')}${badTargetAttrs.length > 5 ? ' など' : ''}）` });
+  if (badTargetAttrs.length) badAttr.push({ kind: 'invalid-attr', detail: `#TARGET の指定を読めませんでした（${badTargetAttrs.slice(0, 5).map(([x, m]) => `${x.label}：${m}`).join('、')}${badTargetAttrs.length > 5 ? ' など' : ''}）` });
   return { targets, warnings: [...dup, ...ignored, ...mixedRun, ...badAttr, ...collectWarnings(targets, unparsed, emptyTargets), ...cookieCapWarnings(targets)] };
 }
 

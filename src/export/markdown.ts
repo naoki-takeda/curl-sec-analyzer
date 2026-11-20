@@ -23,8 +23,8 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
   // 英語のレポートでは、全角の「：、（）」を使わない
   const COL = en ? ': ' : '：', SEP = en ? ', ' : '、';
   const par = (s: string) => (en ? ` (${s})` : `（${s}）`);
-  // 規格の欄（ASVS 3.4.1・IPA 2.3-1)）は、英語では「, 」で区切り、閉じ括弧で終わる項番（2.3-1)）が「))」にならないよう — でつなぐ
-  const std = (s: string) => (en ? ` — ${s.replace(/・/g, ', ')}` : `（${s}）`);
+  // 規格の欄（ASVS 3.4.1・IPA 2.3-1)）は、英語では閉じ括弧で終わる項番（2.3-1)）が「))」にならないよう — でつなぐ（区切りは standardsSep）
+  const std = (s: string) => (en ? ` — ${s}` : `（${s}）`);
   const c = countBySeverity(overall(fs)); const rate = coverageRate(cov);
   const L: string[] = [];
   L.push(en ? '# Security self-assessment results' : '# 自主セキュリティ診断の結果', '');
@@ -44,8 +44,10 @@ export function toMarkdown(fs: Finding[], cov: Coverage[], suppressions: Suppres
     L.push('');
   }
   L.push(en ? '## Findings' : '## 指摘', '', `| ${en ? 'Severity' : '重要度'} | ${en ? 'Check' : '項目'} | ${en ? 'Target' : '対象'} | ${en ? 'Evidence (masked)' : '証跡（マスク済み）'} | ${en ? 'Recommendation' : '推奨対応'} |`, '| --- | --- | --- | --- | --- |');
-  for (const f of fs.filter(x => x.status === 'fail').sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity)))
-    L.push(`| ${sevLabel(f.severity)}${f.originalSeverity ? `*` : ''} | ${f.item}${circled(f.condition)} ${cell(itemTitle(f.item, f.title))}${apiTop10Short(f.item) ? par(apiTop10Short(f.item, itemSep())) : ''}${standardsShort(f.item) ? std(cell(standardsShort(f.item, standardsSep()))) : ''} | ${cell(f.target)}${f.url ? par(cell(f.url)) : ''} | ${cell(f.evidence)} | ${cell(en ? recommendationEn(f.recommendation) : f.recommendation)} |`);
+  for (const f of fs.filter(x => x.status === 'fail').sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity))) {
+    const api = apiTop10Short(f.item, itemSep()), stds = standardsShort(f.item, standardsSep());
+    L.push(`| ${sevLabel(f.severity)}${f.originalSeverity ? `*` : ''} | ${f.item}${circled(f.condition)} ${cell(itemTitle(f.item, f.title))}${api ? par(api) : ''}${stds ? std(cell(stds)) : ''} | ${cell(f.target)}${f.url ? par(cell(f.url)) : ''} | ${cell(f.evidence)} | ${cell(en ? recommendationEn(f.recommendation) : f.recommendation)} |`);
+  }
   if (fs.some(f => f.originalSeverity)) L.push('', en ? '\\* Severity changed by the organization profile.' : '\\* 組織プロファイルで重要度を変えた指摘。');
   const sup = fs.filter(f => f.status === 'suppressed');
   if (sup.length) {

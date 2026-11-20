@@ -13,7 +13,7 @@ const EXACT: Record<string, string> = {
   'trustedScriptOrigins：https://cdn.example.com や *.example.com の形の配列にしてください': 'trustedScriptOrigins: use an array of origins such as https://cdn.example.com or *.example.com',
   'sessionCookieNames：Cookie名（英数字と記号）の配列にしてください': 'sessionCookieNames: use an array of cookie names (letters, digits and symbols)',
   'severity：項目ID（例：H-10）と重要度の組のオブジェクトにしてください': 'severity: use an object that maps check IDs (such as H-10) to severities',
-  'sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）':'sessionMaxAgeHours must be a number of hours from 1 to 9600 (the default of 24 hours is used)',
+  'sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）': 'sessionMaxAgeHours must be a number of hours from 1 to 9600 (the default of 24 hours is used)',
   'ホスト名は英数字・ハイフン・ドット（必要なら :ポート）だけで書いてください': 'Use only letters, digits, hyphens and dots in the host name (plus :port if needed)',
   'apexドメインの書き方が正しくありません': 'The apex domain is not valid',
   'name は文字列にしてください': 'name must be a string',

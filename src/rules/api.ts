@@ -29,14 +29,13 @@ export const jsonHeaders: Rule = { id: 'A-09', title: 'JSON応答のヘッダ', 
     return out.length ? out : [mk(jsonHeaders, ctx, 'ok', 'info', 'pass', ct, '')];
   } };
 
-
 /**
- * A-01・A-08・A-11 が判定に使う応答（r）とステータス。同じページへの転送（末尾の / への 307 など）はたどった先（hop）で見る。
+ * A-01・A-08・A-11 が判定に使う応答（r）とステータス。同じページへの転送（末尾の / への 307、apex → www の同じパスなど）はたどった先で見る。
  * たどれない（-L なし）ときは unfollowed で、呼び出し側で na にする
  */
 const judged = (ctx: RuleContext) => {
   const { hop, unfollowed } = sameDocumentHop(ctx.target); const r = hop ?? ctx.final;
-  return { hop, r, unfollowed, status: r?.status ?? 0 };
+  return { r, unfollowed, status: r?.status ?? 0 };
 };
 const UNFOLLOWED_EV = '同じページへの転送（末尾の / など）。転送先を採取していない';
 /**

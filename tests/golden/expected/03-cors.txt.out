@@ -25,7 +25,7 @@ cors-partial | R-02.na | info | na | Origin: https://example.com.evil.net（null
 cors-partial | R-03.2 | medium | fail | Origin: https://example.com.evil.net → ACAO: https://example.com.evil.net
 cors-partial | R-04.ok | info | pass | ACAO: https://example.com.evil.net
 cors-partial | R-06.ok | info | pass | Vary: origin
-cors-preflight | R-01.2 | medium | fail | Origin: https://evil.example → ACAO: https://evil.example
+cors-preflight | R-01.2 | medium | na | Origin: https://evil.example → ACAO: https://evil.example | dedupedBy=R-05.1
 cors-preflight | R-02.na | info | na | Origin: https://evil.example（null では試していない。Origin: null を送ったターゲットで判定）
 cors-preflight | R-04.ok | info | pass | ACAO: https://evil.example
 cors-preflight | R-05.1 | medium | fail | ACAO: https://evil.example / Allow-Methods: *
@@ -83,7 +83,7 @@ C-12 | missing-input | fails=0 | 必要なラベル: logout, after-logout
 C-13 | missing-input | fails=0 | 必要なラベル: （一般）, pre-login, login, session-sample-*
 C-14 | manual | fails=0
 C-15 | manual | fails=0
-R-01 | evaluated | fails=3 | 一部のターゲット（1件）は入力不足 / C6 のとおり許可外の Origin（https://evil.example）で採取し直す
+R-01 | evaluated | fails=2 | 一部のターゲット（1件）は入力不足 / C6 のとおり許可外の Origin（https://evil.example）で採取し直す
 R-02 | evaluated | fails=1
 R-03 | evaluated | fails=1
 R-04 | evaluated | fails=1

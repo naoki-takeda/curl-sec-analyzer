@@ -70,7 +70,8 @@ function toResponse(e: HarEntry): HttpResponse {
   // application/…+xml・application/xml だけ（image/svg+xml や Office の文書（application/vnd.openxmlformats-…）のバイナリは残さない）。
   // 本文が文字列でないもの（content.text: 12345）は読まない
   if (typeof c?.text === 'string' && c.text && /html|json|javascript|ecmascript|^\s*text\/(?:plain|xml)\b|^\s*application\/(?:[\w.-]+\+)?xml\b/i.test(String(c.mimeType ?? ''))) {
-    try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 2)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
+    // base64 は4文字で3バイト。日本語の3バイトの文字でも、64K文字まで読めるだけ取る
+    try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 4)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
     body = body?.slice(0, BODY_LIMIT);
   }
   const r: HttpResponse = { httpVersion: normalizeVersion(e.response.httpVersion), status: e.response.status, reason: e.response.statusText, headers, body,

@@ -75,8 +75,10 @@ const keySegment = (s: string): string => {
   // カード番号の数字の並びは . で区切らない（画面と同じ。版 10.0.19045.3803 や IP アドレスを番号にしない）。末尾の拡張子は除いて見る。
   // 電話番号とコードは . で区切ったもの（090.1234.5678・AB12.CD34.EF56・090-1234-5678.vcf.gz）も見る（IPv4 は合わせて12桁までの4つなので、
   // 電話番号の形（3つ以上で10〜11桁。0 で始まらないものは3つだけ）に当たらない）
-  const pieces = s.replace(/\.[A-Za-z][A-Za-z0-9]{0,9}$/, '').split(/[-_~]/), dotted = s.split(/[-_.~]/);
-  if (digitRun(pieces) || phoneRun(dotted) || /(?:^|[-_.~])\d{3}-\d{2}-\d{4}(?=$|[-_.~])/.test(s) || codeGroups(pieces) || codeGroups(dotted)) return '*';
+  const base = s.replace(/\.[A-Za-z][A-Za-z0-9]{0,9}$/, ''); const pieces = base.split(/[-_~]/), dotted = s.split(/[-_.~]/);
+  // - で区切った16進数で、合わせて24文字以上のもの（UUID）。数字だけのかけらを残すと、記録し直すたびにキーが変わる（画面の secretPiece と同じ長さ）
+  const hexId = /^[0-9a-f]+(?:-[0-9a-f]+)+$/i.test(base) && /\d/.test(base) && /[a-f]/i.test(base) && base.replace(/-/g, '').length >= 24;
+  if (hexId || digitRun(pieces) || phoneRun(dotted) || /(?:^|[-_.~])\d{3}-\d{2}-\d{4}(?=$|[-_.~])/.test(s) || codeGroups(pieces) || codeGroups(dotted)) return '*';
   return s.replace(/[^-_.~]+/g, piece => (keyPiece(piece) ? piece : '*')).replace(/\*(?:[-_.~]\*)+/g, '*');
 };
 /** キーに値を残すパラメータの名前（秘密や個人情報を入れない決まった名前だけ）。数字の値（ページ送り）と英字の語の値（並べ替え・表示の切り替え） */
@@ -98,17 +100,17 @@ export function targetKeys(targets: readonly Pick<Target, 'label' | 'url' | 'met
   const duplicated = new Set(targets.filter(t => /#\d+$/.test(t.label)).map(t => baseLabel(t.label)));
   const keys = targets.map(t => (t.meta.source === 'har' ? `HAR ${t.meta.method ?? 'GET'} ${t.url ? urlKey(t.url) : t.label}`
     : duplicated.has(baseLabel(t.label)) && t.url ? `${baseLabel(t.label)} ${urlKey(t.url)}` : t.label));
-  const seenKeys = new Map<string, number>(); const seenUrls = new Map<string, Set<string>>();
+  // HAR で同じ URL がまた出たら、その URL に前に付けたキーを返す（?q=a・?q=b・?q=b の3つ目を、?q=a と同じキーにしない）
+  const seenKeys = new Map<string, number>(); const seenUrls = new Map<string, Map<string, string>>();
   return keys.map((k, i) => {
     const t = targets[i];
     if (k === t.label) return k;
-    if (t.meta.source === 'har') {
-      const urls = seenUrls.get(k) ?? new Set<string>(); seenUrls.set(k, urls);
-      if (urls.has(t.url ?? '')) return k;
-      urls.add(t.url ?? '');
-    }
+    const urls = t.meta.source === 'har' ? seenUrls.get(k) ?? new Map<string, string>() : undefined;
+    if (urls) { seenUrls.set(k, urls); const seen = urls.get(t.url ?? ''); if (seen !== undefined) return seen; }
     const n = (seenKeys.get(k) ?? 0) + 1; seenKeys.set(k, n);
-    return n > 1 ? `${k} #${n}` : k;
+    const key = n > 1 ? `${k} #${n}` : k;
+    urls?.set(t.url ?? '', key);
+    return key;
   });
 }
 

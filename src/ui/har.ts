@@ -3,7 +3,7 @@ import { HAR_MAX_BYTES, type HarChain, type HarImport, defaultHarHosts, suggestL
 import { HAR_LABEL_CHOICES } from '../engine/labels';
 import { withProfile } from '../engine/profile';
 import { type HarFailure, tr } from '../i18n';
-import { showText } from '../shownText';
+import { showTarget, showText } from '../shownText';
 import { BTN, button, el, focusable, focusedKey, labelFor, options, restoreFocus, table, td } from './dom';
 import HarWorker from '../harWorker.ts?worker&inline';
 import { type Message, actions, refs, state } from './state';
@@ -75,10 +75,11 @@ export function renderHar() {
   const same = shownImp === imp; shownImp = imp; if (!same) moved.clear();
   const prevScroll = same ? refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? 0 : 0;
   const prevOpen = same ? refs.harBox.querySelector('details')?.open : undefined;
+  // ホスト名は URL の列と同じ出し方にする（URL の列で伏せるカード番号のラベルのホスト名を、ここでそのまま出さない）
   const hostBoxes = imp.hosts.map(h => {
     const cb = el('input'); cb.type = 'checkbox'; cb.checked = hosts.has(h); cb.id = `har-host-${h}`; focusable(cb, `har-host-${h}`);
     cb.addEventListener('change', () => { if (cb.checked) hosts.add(h); else hosts.delete(h); renderHar(); });
-    return el('span', 'mr-4 inline-flex items-center gap-1', cb, labelFor(cb.id, `${h} (${imp.chains.filter(c => c.host === h).length})`, 'text-sm'));
+    return el('span', 'mr-4 inline-flex items-center gap-1', cb, labelFor(cb.id, `${showTarget(h, h)} (${imp.chains.filter(c => c.host === h).length})`, 'text-sm'));
   });
   const rows = imp.chains.filter(c => hosts.has(c.host)).map(c => {
     const base = c.suggested.startsWith('har-') || c.suggested.startsWith('error-') ? c.suggested : `har-${c.id + 1}`;

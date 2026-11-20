@@ -18,7 +18,7 @@ chain | C-10.ok | info | pass | HTTP応答でCookieを発行していない
 chain | H-01.1 | high | fail | (ヘッダなし)
 chain | H-02.na | info | na | HSTSがない（H-01で判定）
 chain | H-08.na | info | na | HTTP 302（本文のない応答）
-chain | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+chain | H-11.na | info | na | HTTP 302（転送の応答）
 chain | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 chain | H-13.na | info | na | HTTP 302（別のサイトへの転送で終わる。転送先の応答は判定しない）
 chain | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
@@ -84,7 +84,7 @@ H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定�
 H-08 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答は対象外）
 H-09 | evaluated | fails=1
 H-10 | evaluated | fails=1
-H-11 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-11 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答は対象外）
 H-12 | missing-input | fails=0 | 機密データを返す 200 の応答（認証後ページなど）で採取する / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 転送先の URL を別のターゲットとして採取する
 H-14 | evaluated | fails=1

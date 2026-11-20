@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
+import { type Locator, expect, test } from '@playwright/test';
 import { analyzed, fakeWorker, setWorkerMode } from './helpers';
 
 test('サンプルを判定でき、外部へのリクエストが発生しない', async ({ page }) => {
@@ -144,9 +144,10 @@ test('HAR の Worker も含め、ページから作る Worker は外部へ通信
 });
 
 test('?lang= に ja・en 以外を指定しても判定できる（en-US は英語）', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
   for (const [q, button, heading] of [['en-US', 'Load sample', 'Findings (check × condition)'], ['fr', 'サンプルを入れる', '指摘（項目×条件）']]) {
-    const errors: string[] = [];
-    page.on('pageerror', e => errors.push(e.message));
+    errors.length = 0;
     await page.goto(`/?lang=${q}`);
     await page.getByRole('button', { name: button }).click();
     await expect(page.getByRole('heading', { name: heading })).toBeVisible();   // 状態の欄（件数の読み上げ）にも同じ語があるので、見出しで探す
@@ -271,13 +272,23 @@ test('言語を切り替えても、コマンド生成器の入力と生成し�
   await expect(page.locator('textarea[readonly]').first()).toHaveValue(/label=pre-login/);
 });
 
+/**
+ * 選択を今と別の値に変え、描き直されたことを確かめる（閉じた select の矢印キーの動きはブラウザで違い、値が変わらないと描き直しを確かめられない）
+ */
+async function selectOther(sel: Locator) {
+  const before = await sel.inputValue();
+  const other = (await sel.locator('option').evaluateAll(os => os.map(o => (o as HTMLOptionElement).value))).find(v => v !== before)!;
+  await sel.selectOption(other);
+  await expect(sel).toHaveValue(other);
+}
+
 test('章の絞り込みを変えてもフォーカスを失わず、例外の理由のエラーを読み上げる', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   const sel = page.locator('select[data-focus="chapter"]');
   await sel.focus();
-  await page.keyboard.press('ArrowDown');
-  await expect(page.locator('select[data-focus="chapter"]')).toBeFocused();
+  await selectOther(sel);
+  await expect(sel).toBeFocused();
   await page.getByRole('button', { name: '例外に登録' }).first().click();
   await page.getByRole('button', { name: '登録する' }).click();
   await expect(page.getByRole('alert')).toHaveText(/理由/);
@@ -300,17 +311,17 @@ test('HAR の一覧で操作してもフォーカスを失わない', async ({ p
   const sel = page.locator('select[data-focus^="har-label-"]').first();
   await expect(sel).toBeVisible();
   await sel.focus();
-  await page.keyboard.press('ArrowDown');
-  await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeFocused();
+  await selectOther(sel);
+  await expect(sel).toBeFocused();
 });
 
-test('ホストが2つあるとき、ホスト単位の表に対象の列を出す', async ({ page }) => {
+test('ホスト単位の表に対象の列を出し、ホスト名を入れる', async ({ page }) => {
   await page.goto('/');
   await page.locator('#input').fill(['#TARGET url=https://www.example.com/ label=tls', '#TLSPROBE v=tls1 ok=1', '#TARGET url=https://api.example.com/ label=tls2', '#TLSPROBE v=tls1 ok=1', ''].join('\n'));
   await page.getByRole('button', { name: '判定する' }).click();
   const cross = page.getByRole('region', { name: 'ホスト単位・ターゲット横断の判定' });
   await expect(cross.getByRole('columnheader', { name: 'ターゲット' })).toBeVisible();
-  await expect(cross.getByText('www.example.com', { exact: false }).first()).toBeVisible();
+  await expect(cross.getByRole('cell', { name: 'www.example.com', exact: true }).first()).toBeVisible();
 });
 
 test('HAR のラベルを矢印で見て回っても、ほかのエントリの予約ラベルを失わない', async ({ page }) => {
@@ -429,7 +440,8 @@ test('例外の登録・設定ファイルの読み込みで判定し直すと�
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
   const status = page.getByRole('status');
-  await expect(status).toHaveText(/^11件のターゲット/);
+  await expect(status).toHaveText(/^\d+件のターゲット/);
+  const count = (await status.textContent())!.match(/^\d+件のターゲット/)![0];   // サンプルのターゲットの数（サンプルを変えても通る）
   // 判定のあとに入力欄を書き換える（まだ「判定する」は押さない）
   await page.getByRole('button', { name: '入力を表示する' }).click();
   const other = '#TARGET url=https://other.example/ label=top\nHTTP/2 200\ncontent-type: text/html\n\n<html></html>';
@@ -439,7 +451,7 @@ test('例外の登録・設定ファイルの読み込みで判定し直すと�
   await page.getByLabel('理由（必須）').fill('検証環境のため');
   await page.getByRole('button', { name: '登録する' }).click();
   await analyzed(page);
-  await expect(status).toHaveText(/^11件のターゲット.*入力欄の変更/);
+  await expect(status).toHaveText(new RegExp(`^${count}.*入力欄の変更`));
   await expect(page.locator('#input')).toBeVisible();
   await expect(page.locator('#input')).toHaveValue(other);
   // 入力欄を空にしてから例外のない例外ファイルを読み込んでも、表示中の結果を消さずに判定し直す（登録した例外が外れるまで待つ）
@@ -449,7 +461,7 @@ test('例外の登録・設定ファイルの読み込みで判定し直すと�
   await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
   await expect(suppressed).toHaveCount(0);
   await analyzed(page);
-  await expect(status).toHaveText(/^11件のターゲット.*入力欄の変更/);
+  await expect(status).toHaveText(new RegExp(`^${count}.*入力欄の変更`));
   await expect(page.locator('#input')).toBeVisible();
   // 読み込みのエラーを出すときも、入力欄の変更をまだ判定していないことを残す
   await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
@@ -510,6 +522,11 @@ test('組織プロファイルの読み込みのエラーは、ボタンの文�
   await analyzed(page);
   await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await expect(page.getByRole('status')).toHaveText(/^組織プロファイルを読み込めませんでした：JSONとして読めません。/);
+  // 組織プロファイルでないファイル（例外ファイル）も、読み込み済みのプロファイルがなくても使わない（名前のないプロファイルにしない）
+  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{"suppressions":[]}') });
+  await expect(page.getByRole('status')).toHaveText(/^組織プロファイルを読み込めませんでした：「suppressions」は組織プロファイルの項目ではありません。$/);
+  await page.getByText('設定ファイル').click();
+  await expect(page.getByText('組織プロファイル：なし（既定の重要度）')).toBeVisible();
 });
 
 test('解析の警告に出す #TARGET の読めない名前も、許可リストを通す', async ({ page }) => {

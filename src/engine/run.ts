@@ -36,6 +36,12 @@ const DEDUPE: { keep: string; drop: string; why: string; perCookie?: boolean }[]
   ...['C-01.1', 'C-01.2', 'C-01.3'].map(drop => ({ keep: 'C-06.2', drop, why: 'Secure のない __Host-・__Secure- の Cookie はブラウザが拒否する（C-06② で数える）', perCookie: true })),
   // Secure のない SameSite=None の Cookie を拒否するのは Chromium だけ（Safari・Firefox は保存して平文でも送る）。Secure がないことは C-01 で数える
   ...['C-01.1', 'C-01.2', 'C-01.3'].map(keep => ({ keep, drop: 'C-03.4', why: 'Secure のない SameSite=None の Cookie は C-01 で数える', perCookie: true })),
+  // http のターゲット（C-01 は判定しない）では、Secure のない Cookie を HTTP で発行したことを C-10 で数える
+  ...['C-10.1', 'C-10.2'].map(keep => ({ keep, drop: 'C-03.4', why: 'HTTP で発行した Secure のない SameSite=None の Cookie は C-10 で数える', perCookie: true })),
+  // Domain を付けた __Host- の Cookie は、どのブラウザも拒否して保存しない（サブドメインに送られることはない）
+  ...['C-04.1', 'C-04.3'].map(drop => ({ keep: 'C-06.2', drop, why: 'Domain を付けた __Host- の Cookie はブラウザが拒否する（C-06② で数える）', perCookie: true })),
+  // プリフライトの応答の許可外の Origin の反射・*（実際の応答を読めるかは示さない）は、状態を変えるメソッドの許可（R-05①）で数える
+  ...['R-01.1', 'R-01.2', 'R-04.3'].map(drop => ({ keep: 'R-05.1', drop, why: 'プリフライトの応答の許可外の Origin の許可は R-05① で数える' })),
 ];
 /** perCookie の突き合わせのキー：Cookie の証跡（C-01②③の「（ホストのHSTSなし…）」の注記を除く） */
 const cookieKey = (ev: string) => ev.replace(/（[^（）]*）$/, '');

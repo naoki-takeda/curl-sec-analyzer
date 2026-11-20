@@ -26,7 +26,7 @@ Object.assign(actions, { analyze, cancelAnalysis, isAnalyzing: () => !!analyzing
 // ?lang= は ja・en（en-US などは en）だけを受け付け、それ以外の値はブラウザの言語で決める
 const qLang = new URLSearchParams(location.search).get('lang')?.toLowerCase() ?? '';
 setLang(/^(ja|en)(-|$)/.test(qLang) ? qLang.slice(0, 2) as Lang : (navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en'));
-// 他のサイトに埋め込まれたときは、入力欄を出さない（クリックジャッキング対策。メタCSPでは frame-ancestors が効かないため。ツール設計3）
+// ほかのページ（同じ組織の Pages を含む）に埋め込まれたときは、入力欄を出さない（クリックジャッキング対策。メタCSPでは frame-ancestors が効かないため。ツール設計3）
 if (window.top !== window.self) {
   const T = tr().framed;
   app.replaceChildren(el('div', 'p-6', el('p', 'font-bold', T.title), el('p', 'mt-2 text-sm', T.note), el('p', 'mt-2', link(location.href, T.open))));
@@ -51,7 +51,8 @@ function buildShell() {
   refs.harBox = el('div', '');
   refs.settingsStatus = el('ul', 'mt-2 space-y-0.5 text-sm text-muted');
   refs.inputNote = el('div', 'hidden rounded-md border border-line bg-surface p-3 text-sm text-muted');
-  refs.inputToggle = button('', LINK, () => { state.view.inputHidden = !state.view.inputHidden; applyInputVisibility(); if (!state.view.inputHidden) refs.input.focus(); });
+  // 入力欄が空なら隠さない（applyInputVisibility はボタンを消し、押したボタンのフォーカスが落ちる）
+  refs.inputToggle = button('', LINK, () => { state.view.inputHidden = !state.view.inputHidden && /\S/.test(refs.input.value); applyInputVisibility(); if (!state.view.inputHidden) refs.input.focus(); });
   refs.genDetails = commandGenerator();
 
   const fileIn = hidden('.txt,.log,.har,text/plain,application/json', openFile);
@@ -71,23 +72,29 @@ function buildShell() {
   const profIn = hidden('.json,application/json', async f => {
     const text = await readSettings(f, MAX_BYTES); if (text === undefined) return;
     const { profile: p, errors, recognized } = parseProfile(text);
-    // 形式の違うファイル（組織プロファイルの項目がなく、エラーがある）では、読み込み済みのプロファイルを残す（既定の設定に置き換えない。例外ファイルと同じ）
-    const kept = !!state.profile && !(p && (recognized || !errors.length));
-    if (p && !kept) state.profile = p;
-    // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）。残したプロファイルでは作り直さない
-    // （判定に使うプロファイルと食い違わないため）
-    if (p && !kept && state.har) { const chains = state.har.imp.chains; withProfile(p, () => suggestLabels(chains, true)); renderHar(); }
+    // 読めない・形式の違うファイル（組織プロファイルの項目がなく、エラーがある）は使わない（名前のない既定の設定のプロファイルにしない）。
+    // 読み込み済みのプロファイルは残す（例外ファイルと同じ）
+    const loaded = p && (recognized || !errors.length) ? p : undefined;
+    if (loaded) state.profile = loaded;
+    // 読み込み済みのHARのラベル候補も、プロファイルのセッションCookieの名前で作り直す（画面で選び直したラベルは残す）
+    if (loaded && state.har) { const chains = state.har.imp.chains; withProfile(loaded, () => suggestLabels(chains, true)); renderHar(); }
     // 残したときは、そのことを知らせる（「既定の24時間を使います」などのエラーの文言だけでは、古いプロファイルを使い続けることが分からない）
+    const kept = !loaded && !!state.profile;
     refresh(() => { const t = tr(); const e = joinMessages(errors);
-      return errors.length ? (p && !kept ? t.readErrors(t.profileName, e) : t.readFailed(t.profileName, e)) + (kept ? t.profileKept : '') : ''; });
+      return errors.length ? (loaded ? t.readErrors(t.profileName, e) : t.readFailed(t.profileName, e)) + (kept ? t.profileKept : '') : ''; });
   });
   const baseIn = hidden('.json,application/json', async f => {
     // 前回の結果は HAR と同じ上限（大きな HAR を判定した結果の JSON は 5MB を超えるので、貼り付けと同じ上限では自分のエクスポートを読めない）
     const text = await readSettings(f, HAR_MAX_BYTES); if (text === undefined) return;
     const { baseline: b, error, skipped } = parseBaseline(text);
-    if (b) state.baseline = b;
-    const legacy = b ? b.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
-    refresh(() => { const t = tr(); return error ? t.baselineError(joinMessages([error])) : skipped ? t.baselineSkipped(skipped) : legacy ? t.legacyHarKeys(legacy) : ''; });
+    // 指摘がどれも形式の違うファイルは使わない（0件の前回の結果にすると、差分がすべて「新規」になる）。読み込み済みの前回の結果は残す
+    const loaded = b && (b.findings.length || !skipped) ? b : undefined;
+    if (loaded) state.baseline = loaded;
+    const kept = !loaded && !!state.baseline;
+    const legacy = loaded ? loaded.findings.filter(x => legacyHarKey(x.targetKey)).length : 0;
+    refresh(() => { const t = tr();
+      return (error ? t.baselineError(joinMessages([error])) : !loaded ? t.baselineInvalid(skipped) : skipped ? t.baselineSkipped(skipped) : legacy ? t.legacyHarKeys(legacy) : '')
+        + (kept ? t.baselineKept : ''); });
   });
 
   app.replaceChildren(
@@ -134,11 +141,15 @@ function buildShell() {
 /** 設定ファイルを読む。上限を超えたら、そのファイルの上限を知らせて undefined を返す */
 async function readSettings(f: File, limit: number): Promise<string | undefined> {
   if (f.size > limit) { say(() => tr().settingsTooLarge(limit / 1024 / 1024)); return undefined; }
-  return f.text();
+  return readText(f);
+}
+/** ファイルを読む。読めない（選んだあとに書き換わった・消えた）ときは知らせて undefined を返す */
+async function readText(f: Blob): Promise<string | undefined> {
+  try { return await f.text(); } catch { say(() => tr().fileUnreadable); return undefined; }
 }
 /** 入力（URL 欄を含む）・HAR・結果を消す（設定ファイルは残す。URL 欄を残すと、次に貼った別のサイトの出力を前の URL で判定する） */
 function clearAll() {
-  refs.input.value = ''; refs.urlInput.value = ''; cancelAnalysis(); cancelHarLoad(); state.har = null; renderHar(); say();
+  openGen++; refs.input.value = ''; refs.urlInput.value = ''; cancelAnalysis(); cancelHarLoad(); state.har = null; renderHar(); say();
   state.last = null; state.view.inputHidden = false; applyInputVisibility(); renderEmpty(); refs.input.focus();
 }
 function keepDraft() { state.draft = { input: refs.input.value, url: refs.urlInput.value }; }
@@ -150,7 +161,7 @@ function say(m?: Message) { current = m; refs.message.textContent = m ? m() : ''
  * 設定を読み込んだあとに判定し直す。読み込みのエラーは判定のあとに表示する（analyze は最初に表示を消すため、先に出すと消えてしまう）。
  * 判定の結果を表示できなかった（失敗・中止・置き換わった）ときは、判定のメッセージを消さずに読み込みのエラーを後ろに足す
  */
-async function refresh(msg: Message = () => '') {
+async function refresh(msg: Message) {
   renderSettings();
   // 判定する前の HAR は判定しない（ホストとラベルを確かめてから「判定する」を押す）。読み込みのエラーがなければ HAR の案内を残す
   if (!(state.last || analyzing)) { if (msg() || !state.har) say(msg); return; }
@@ -171,7 +182,7 @@ function renderSettings() {
 }
 /** 判定後は、生の出力（Cookieやトークンを含む）を入力欄に見せたままにしない */
 function applyInputVisibility() {
-  const T = tr(); const has = refs.input.value.trim().length > 0;
+  const T = tr(); const has = /\S/.test(refs.input.value);
   const hide = state.view.inputHidden && has;
   refs.input.classList.toggle('hidden', hide);
   refs.inputNote.classList.toggle('hidden', !hide);
@@ -180,7 +191,9 @@ function applyInputVisibility() {
   refs.inputToggle.textContent = hide ? T.showInput : T.hideInput;
 }
 function loadSample() {
-  if (refs.input.value.trim() && refs.input.value !== sample && !confirm(tr().confirmReplace)) return;
+  // 読み込んだ HAR は外す（利用者の HAR とダミーのサンプルを1つの結果にしない）
+  if (state.har ? !confirm(tr().confirmDropHar) : refs.input.value.trim() && refs.input.value !== sample && !confirm(tr().confirmReplace)) return;
+  if (state.har) { cancelHarLoad(); state.har = null; renderHar(); }
   refs.input.value = sample; analyze();
 }
 function openGenerator() {
@@ -188,10 +201,17 @@ function openGenerator() {
   refs.genDetails.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' });
   refs.genDetails.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
 }
+// 開いたファイルの世代。読み込みを待つあいだに消去・別のファイルを開いたら、前のファイルの中身を入力欄に入れない
+let openGen = 0;
 async function openFile(f: File) {
-  if (/\.har$/i.test(f.name) || isHar(await f.slice(0, 400).text())) { loadHar(f); return; }
+  const gen = ++openGen;
+  const head = /\.har$/i.test(f.name) ? '' : await readText(f.slice(0, 400));
+  if (head === undefined || gen !== openGen) return;
+  if (/\.har$/i.test(f.name) || isHar(head)) { loadHar(f); return; }
   if (f.size > MAX_BYTES) { say(() => tr().fileTooLarge(MAX_MB)); return; }
-  refs.input.value = await f.text(); analyze();
+  const text = await readText(f); if (text === undefined || gen !== openGen) return;
+  // 新しい入力は、判定できるまで隠さない（貼り付けたときと同じ。隠したままだと、前の入力の行数の説明が残る）
+  refs.input.value = text; state.view.inputHidden = false; applyInputVisibility(); analyze();
 }
 // 判定の世代と、判定中の Worker・その Promise の解決。判定し直したり、消去・HAR を外すを押したりしたら、前の Worker を止め、前の結果は
 // 使わない（古い結果で新しい入力の表示を上書きしない）。止めた判定の Promise も解決する（待っている呼び出し側を止めたままにしない）
@@ -215,6 +235,7 @@ function setBusy(b: boolean) {
  * 表示中の結果の入力で判定し直しているときは止めない（入力欄を判定しているのではなく、入力欄も隠さない）
  */
 function inputChanged() {
+  applyInputVisibility();   // 入力欄を空にしたら「入力を隠す」を消す
   if (!analyzing || analyzing.source === 'result' || (refs.input.value === analyzing.text && refs.urlInput.value === analyzing.url)) return;
   cancelAnalysis(); say(() => tr().analysisCancelled);
 }
@@ -267,7 +288,9 @@ function analyze(source: AnalyzeSource = 'form'): Promise<boolean> {
  * 判定の結果を表示する。応答が1つもなければ結果を消して false を返す。fromResult は、表示中の結果の入力で判定し直したか
  */
 function show({ targets, warnings, findings, cov }: AnalyzeResult, input: AnalyzedInput, settings: NonNullable<typeof state.last>['settings'], fromResult: boolean): boolean {
-  if (!targets.length) { say(() => tr().noResponse); state.last = null; renderEmpty(); return false; }
+  // HAR だけで判定して、対象ホスト・除外ですべてのエントリを外したときは、curl のオプションではなく HAR の選択を案内する
+  const harOnly = !!state.har && !input.text.trim();
+  if (!targets.length) { say(() => harOnly ? tr().harNoEntries : tr().noResponse); state.last = null; renderEmpty(); return false; }
   state.last = { targets, warnings, findings, cov, settings, input, diff: settings.baseline ? diff(settings.baseline.findings, findings) : undefined };
   // 表示中の結果の入力で判定し直したとき、判定のあとに書き換えた入力欄は、まだ判定していない
   formNotAnalyzed = fromResult && (refs.input.value !== input.text || refs.urlInput.value !== input.url);

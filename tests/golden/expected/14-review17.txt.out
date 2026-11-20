@@ -146,7 +146,7 @@ top | A-02.ok | info | pass | URL・Location・本文にトークンなし
 top | H-01.ok | info | pass | max-age=31536000; includeSubDomains
 top | H-02.2 | info | fail | max-age=31536000; includeSubDomains
 top | H-08.na | info | na | HTTP 302（本文のない応答）
-top | H-11.na | info | na | 機密応答かどうか分からない（CORP なし）
+top | H-11.na | info | na | HTTP 302（転送の応答）
 top | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 top | H-13.na | info | na | HTTP 302（別のサイトへの転送で終わる。転送先の応答は判定しない）
 top | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
@@ -198,7 +198,7 @@ H-07 | evaluated | fails=0
 H-08 | evaluated | fails=5 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答は対象外）
 H-09 | evaluated | fails=5
 H-10 | evaluated | fails=5
-H-11 | evaluated | fails=4 | 一部のターゲット（3件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-11 | evaluated | fails=4 | 一部のターゲット（3件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答は対象外） / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-12 | evaluated | fails=0 | 一部のターゲット（8件）は入力不足 / 機密データを返す 200 の応答（認証後ページなど）で採取する / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0 | 一部のターゲット（1件）は入力不足 / 転送先の URL を別のターゲットとして採取する
 H-14 | evaluated | fails=5

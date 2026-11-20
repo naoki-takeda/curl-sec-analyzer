@@ -221,7 +221,7 @@ Object.assign(EXACT, {
   'ログイン前の Cookie だけを送って、ログイン後のページを取得できないか手動で確認する': 'Manually check whether sending only the pre-login cookies still retrieves a signed-in page',
   'サーバ側のセッションIDの作り方（フレームワークの既定の乱数か）を確認する': 'Check how the server generates session IDs (for example, the framework\'s default random generator)',
   '本文を取得して（C2）、Contact と Expires があるか確かめる': 'Fetch the body (C2) and check that it has Contact and Expires',
-  'CSPのスクリプトのディレクティブにnonceがない': 'The CSP script directives (script-src, script-src-elem, script-src-attr, default-src) have no nonce',
+  'CSPのスクリプトのディレクティブにnonceがない': 'The CSP script directives (script-src-elem, script-src, default-src) have no nonce',
   '比較できるセッションCookieがない': 'No session cookies to compare',
   'HTTPのバージョンが分からない': 'Unknown HTTP version',
   'JSONを解析できない（64K文字を超えて切れた可能性）': 'Cannot parse the JSON (it may have been cut off at 64K characters)',
