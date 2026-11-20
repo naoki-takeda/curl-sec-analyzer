@@ -1,9 +1,9 @@
 // rules/exposure.ts：第5章 エラー・情報露出（E-01、E-02、E-04〜E-06、E-11、E-13）
 import type { HttpResponse, Rule, RuleContext } from '../model';
-import { clip } from '../mask';
+import { excerpt } from '../mask';
 import { probePattern } from './probes';
-import { ASSET_CT, FOLLOW_REC, NO_BODY_REC, PROBE_UNREACHED_REC, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk, noContent } from './util';
-import { baseLabel, ownChain } from '../parser/target';
+import { ASSET_CT, FOLLOW_REC, NO_BODY_REC, PROBE_REDIRECT_REC, PROBE_UNREACHED_REC, RETRY_REC, unavailable, bodyNotCaptured, bodyTruncated, header, isStaticResource, mk, noContent } from './util';
+import { baseLabel, isRedirectWithLocation, ownChain, siteOf } from '../parser/target';
 import { allowedItems } from '../engine/labels';
 import { AWS_KEY, noHtmlBody } from './html';
 
@@ -64,7 +64,7 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
       // 資格情報のない jdbc: は、接続先（ホスト名）を出さないよう「jdbc:mysql:」までを証跡にする。資格情報を含む jdbc: は①だけにする
       // （②にも出すと二重になる）。スタックトレースがあれば、そちらを証跡にする
       ?? (cred ? null : b.match(/\bjdbc:\w+:(?=\S)/));
-    if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', clip(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
+    if (trace) out.push(mk(errorDetail, ctx, 2, 'medium', 'fail', excerpt(trace[0], 120), 'スタックトレース・SQL文・接続文字列・絶対パスを応答に含めない'));
     // ③ Laravel は既定のレイアウト（window.Laravel）ではなく、エラーページに固有の文言で見る。Rails も同じく、既定のエラーページ
     // （public/404.html・500.html）と開発用の画面の文言で見る（「Ruby on Rails」はブログの記事などにも出る）
     const page = b.match(/Whitelabel Error Page|Apache Tomcat\/[\d.]+|Werkzeug Debugger|Django Version:|Whoops, looks like something went wrong|Illuminate\\[\w\\]+Exception|Action Controller: Exception caught|<h1>Routing Error<\/h1>|We're sorry, but something went wrong\.|The page you were looking for doesn't exist\.|Server Error in '\/' Application|IIS \d+\.\d+ Detailed Error|<title>Express<\/title>/i)
@@ -74,7 +74,7 @@ export const errorDetail: Rule = { id: 'E-01', title: 'スタックトレース�
       // <title>Error 404 - Page not found | MyShop</title> のような独自のエラーページを既定のページとしない
       ?? (/HTTP ERROR:?\s*\d{3}|Powered by Jetty/i.test(b) ? b.match(/<title>Error \d{3}[^<]*<\/title>/i) : null);
     // <title>Error 401 …</title>（Jetty など）の「…」は自由な文言で、アプリが「Invalid API key sk_live_…」のように秘密を入れうるので出さない
-    if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', clip(page[0].replace(/^(<title>Error \d{3})[^<]*/i, '$1 …'), 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
+    if (page) out.push(mk(errorDetail, ctx, 3, 'low', 'fail', excerpt(page[0].replace(/^(<title>Error \d{3})[^<]*/i, '$1 …'), 120), 'フレームワーク既定のエラーページを独自のページ（またはRFC 9457の問題詳細形式）にする'));
     return out.length ? out : [mk(errorDetail, ctx, 'ok', 'info', 'pass', 'エラーの詳細らしき記述なし', '')];
   } };
 
@@ -103,7 +103,8 @@ export const dirListing: Rule = { id: 'E-02', title: 'ディレクトリリス�
     // オブジェクトストレージの一覧（S3・GCS の <ListBucketResult>、Azure Blob の <EnumerationResults>）も一覧表示（XML の応答）
     const bucket = b?.match(/^\s*(?:<\?xml[^>]*>\s*)?<(ListBucketResult|EnumerationResults)\b/);
     if (bucket) return [mk(dirListing, ctx, 1, 'medium', 'fail', `${bucket[1]}（オブジェクトストレージの一覧）`, 'バケット・コンテナの一覧の公開を無効にする（S3 のブロックパブリックアクセス、Azure のコンテナのアクセスレベルを private に）')];
-    if (ctx.responseKind !== 'html') return [];
+    // 転送の応答の本文（nginx の「301 Moved Permanently」の画面）は、転送先が一覧かどうかを示さない
+    if (ctx.responseKind !== 'html' || isRedirectWithLocation(ctx.final)) return [];
     if (!b) return noHtmlBody(dirListing, ctx);
     // nginx・Apache の「Index of /」、Python の http.server、IIS の「[To Parent Directory]」、Tomcat の「Directory Listing For [/…]」、
     // Jetty の「<title>Directory: /…」、Express の serve-index の「listing directory /…」
@@ -123,7 +124,8 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     const probe = ctx.target.probes.find(x => /\/security\.txt$/.test(x.path));
     if (probe) {                                              // C13 の存在確認（probes ラベル）
       if (!probe.code) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP 000、接続できなかった）`, PROBE_UNREACHED_REC)];
-      if (probe.code >= 300 && probe.code < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}、転送先を確かめていない）`, FOLLOW_REC)];
+      if (probe.code >= 300 && probe.code < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}、転送先を確かめていない）`, PROBE_REDIRECT_REC)];
+      if (unavailable(probe.code)) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。サーバのエラー・レート制限で、security.txt があるかは分からない）`, RETRY_REC)];
       const hit = probePattern(probe.path, probe.headB64, probe.code);
       if (hit?.name === 'security-txt-comment') return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `${probe.path}（HTTP ${probe.code}。採った先頭がコメントだけで、Contact・Expires があるかは分からない）`, '本文を取得して（C2）、Contact と Expires があるか確かめる')];
       return hit?.name === 'security-txt' ? [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `${probe.path}（HTTP ${probe.code}）`, '')]
@@ -132,14 +134,16 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     // 本文を取得したターゲット（一般のターゲット）。2xx でなければファイルがない（404 のエラーページの本文を、ファイルの中身として読まない）。
     // 2xx（ステータスの分からないものを含む）で本文を採取していない（-I、-o /dev/null、HAR の本文なし）なら、中身を判定できない。
     // 304 は中身が分からないので適用外。204・Content-Length: 0 は空のファイル
-    if (!ctx.final) return [];
+    if (!ctx.final || ctx.final.status === 304) return [];
     const st = ctx.final.status; const got = !st || (st >= 200 && st < 300);
     const noBody = () => [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)];
     if (/\/robots\.txt$/.test(p)) {
       // 転送（3xx）を -L なしで採取したものは、転送先の robots.txt を見ていない
       if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, FOLLOW_REC)];
+      // 5xx・429 は、robots.txt がないとは言えない（一時的な障害・レート制限の可能性。E-05 と同じく na）
+      if (unavailable(st)) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラー・レート制限で、robots.txt があるかは分からない）`, RETRY_REC)];
       if (!got) return [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt なし（HTTP ${st}）`, '')];
-      if (!b) return bodyNotCaptured(ctx) ? noBody() : st === 304 ? [] : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt が空（HTTP ${st}）`, '')];
+      if (!b) return bodyNotCaptured(ctx) ? noBody() : [mk(robotsSecurityTxt, ctx, 'ok', 'info', 'pass', `robots.txt が空（HTTP ${st}）`, '')];
       // どのパスにも index.html を返す SPA の 200 は robots.txt ではない（なしとして合格）。HTML かは本文で見る（robots.txt を text/html で返す
       // サーバの User-agent・Disallow の行を見逃さない。robots.txt は < で始まらない）
       if (/^\s*</.test(b))
@@ -151,8 +155,9 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
     if (/\/security\.txt$/.test(p)) {
       // RFC 9116 3 は転送を認めるので、-L なしの 3xx は転送先を見ていない
       if (st >= 300 && st < 400) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（転送先を採取していない）`, FOLLOW_REC)];
+      if (unavailable(st)) return [mk(robotsSecurityTxt, ctx, 'na', 'info', 'na', `HTTP ${st}（サーバのエラー・レート制限で、security.txt があるかは分からない）`, RETRY_REC)];
       if (!got) return [mk(robotsSecurityTxt, ctx, 2, 'info', 'fail', `security.txt を取得できない（HTTP ${st}）`, '/.well-known/security.txt に Contact と Expires を書いて公開する')];
-      if (!b && (bodyNotCaptured(ctx) || st === 304)) return st === 304 ? [] : noBody();
+      if (!b && bodyNotCaptured(ctx)) return noBody();
       const txt = b ?? '';
       // どのパスにも index.html を返す SPA の 200 は、security.txt ではない
       if (looksHtml(ctx, txt))
@@ -173,17 +178,21 @@ export const robotsSecurityTxt: Rule = { id: 'E-04', title: 'robots.txt・securi
 const DOC_SEGMENT = /\/(actuator|swagger-ui(?:\.html)?|swagger(?:\.json|\.ya?ml)?|openapi\.(?:json|ya?ml)|api-docs|graphql)(?=\/|$)/i;
 const docSegment = (p: string) => p.match(DOC_SEGMENT)?.[1].toLowerCase();
 /**
- * 転送先が、同じホストで同じ機能のページ（転送元のパスに「/」か「/index.html」を足しただけ。springdoc の /swagger-ui.html → /swagger-ui/index.html
- * を含む）なら、そのパスを返す。/actuator → /actuator/login のようなログイン画面への転送は undefined（転送先の 200 で①にしない）
+ * 転送先が、同じサイトで同じ機能のページ（転送元のパスに「/」か「/index.html」を足しただけ。springdoc の /swagger-ui.html → /swagger-ui/index.html
+ * を含む。apex → www・https への転送は同じパスも）なら、その URL を返す。/actuator → /actuator/login のようなログイン画面への転送は undefined
+ * （転送先の 200 で①にしない）
  */
 function docRedirect(r: HttpResponse, targetUrl: string | undefined): string | undefined {
   const loc = r.headers.get('location')?.[0]; const base = r.url ?? targetUrl;
   if (!loc || !base) return undefined;
   try {
     const from = new URL(base), to = new URL(loc.trim(), from);
-    if (to.host !== from.host || !docSegment(to.pathname)) return undefined;
+    const moved = to.host !== from.host || to.protocol !== from.protocol;
+    const sameSite = to.host === from.host || (siteOf(to.hostname) === siteOf(from.hostname) && (to.protocol === from.protocol || to.protocol === 'https:'));
+    if (!sameSite || !docSegment(to.pathname)) return undefined;
     const stem = from.pathname.replace(/\.html?$/i, '').replace(/\/+$/, '');
-    return to.pathname.startsWith(stem) && /^\/?(?:index\.html?)?$/i.test(to.pathname.slice(stem.length)) && to.pathname !== from.pathname ? to.pathname : undefined;
+    return to.pathname.startsWith(stem) && /^\/?(?:index\.html?)?$/i.test(to.pathname.slice(stem.length)) && (moved || to.pathname !== from.pathname)
+      ? (moved ? `${to.host}${to.pathname}` : to.pathname) : undefined;
   } catch { return undefined; }
 }
 
@@ -197,14 +206,14 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
   basis: ['OWASP API Security Top 10 2023: API8・API9'],
   run(ctx) {
     // ステータスは、そのURL自身の応答（転送の最初のホップ）で見る。/actuator からログイン画面に転送した先の 200 で①（高）にしないため。
-    // ただし、同じホストの仕様・管理機能のパスへの転送（/swagger-ui → /swagger-ui/index.html）は、同じ機能のページなので転送先で見る
+    // ただし、同じサイトの仕様・管理機能のパスへの転送（/swagger-ui → /swagger-ui/index.html、apex → www の同じパス）は、同じ機能のページなので転送先で見る
     const p = path(ctx); const chain = ownChain(ctx.target); const seg = docSegment(p);
     if (!chain[0] || !seg) return [];
     let i = 0;
     while (chain[i].kind === 'redirect') {
       const to = docRedirect(chain[i], ctx.target.url);
       if (!to) break;
-      if (!chain[i + 1]) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${chain[i].status}（同じホストの ${to} への転送。転送先を採取していない）`, FOLLOW_REC)];
+      if (!chain[i + 1]) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `HTTP ${chain[i].status}（同じサイトの ${to} への転送。転送先を採取していない）`, FOLLOW_REC)];
       i++;
     }
     const f = chain[i];
@@ -227,8 +236,10 @@ export const apiDocsAdmin: Rule = { id: 'E-05', title: 'API仕様・管理機能
     }
     // ステータスが分からない応答（%{header_json} だけで #META response_code= がない）は、拒否されたかどうかも分からない
     if (!f.status) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
-    // 5xx は、公開していないとは言えない（認証の前に落ちた・一時的な障害の可能性。A-01 の 5xx と同じく na）
-    if (f.status >= 500) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。サーバのエラーで、公開しているかは分からない）`, '時間をおいて採取し直す')];
+    // 5xx・429 は、公開していないとは言えない（認証の前に落ちた・一時的な障害・レート制限の可能性。A-01 と同じく na）
+    if (unavailable(f.status)) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。サーバのエラー・レート制限で、公開しているかは分からない）`, RETRY_REC)];
+    // 304 は、条件付きのリクエストにキャッシュがまだ新しいと答えたもの（そのパスは公開されている）
+    if (f.status === 304) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP 304。キャッシュの確認の応答で、公開しているかは分からない）`, 'If-None-Match・If-Modified-Since を付けずに採取し直す')];
     if (!ok200) return [mk(apiDocsAdmin, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     // ①②は「未認証で使える・公開されている」。Cookie・Authorization を送った応答の 200 では、未認証で使えるかは分からない
     if (ctx.target.sentAuth) return [mk(apiDocsAdmin, ctx, 'na', 'info', 'na', `${p}（HTTP ${f.status}。Cookie・Authorization を送った応答で、未認証で使えるかは分からない）`, 'Cookie・Authorization を付けずに採取し直す')];
@@ -261,7 +272,8 @@ export const jsonp: Rule = { id: 'E-06', title: 'JSONP', appliesTo: 'any', scope
     // 「cb(」「/**/cb(」のほか、Express の res.jsonp の形「/**/ typeof cb === 'function' && cb(」も JSONP とみなす
     const esc = cb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const hit = new RegExp(`^(?:/\\*\\*/\\s*)?(?:typeof\\s+${esc}\\s*===?\\s*['"]function['"]\\s*&&\\s*)?${esc}\\s*\\(`).test(b.slice(0, 2048));
-    if (!hit) return [mk(jsonp, ctx, 'ok', 'info', 'pass', `callback=${cb} は本文に反映されない`, '')];
+    // 2xx でない応答（404 の画面など）に反映されないことは、JSONP の API がないことを示さない（設計書の対象は 2xx）
+    if (!hit) return ctx.final.status && (ctx.final.status < 200 || ctx.final.status >= 300) ? [] : [mk(jsonp, ctx, 'ok', 'info', 'pass', `callback=${cb} は本文に反映されない`, '')];
     // 機密かどうか分からないときは①を判定しない（第0章 0.3）。JSONP があることは確かなので、より弱い②として出す
     if (ctx.sensitive === undefined) return [mk(jsonp, ctx, 2, 'low', 'fail', `本文が ${cb}( で始まる（機密応答かどうか分からない）`, 'JSONP をやめる。機密応答なら①（高）にあたる（#TARGET に sensitive=1 か sensitive=0 を付ける）')];
     return ctx.sensitive
@@ -276,7 +288,6 @@ const ACTIVE_CT = /^\s*(?:text\/html|application\/xhtml\+xml|image\/svg\+xml|tex
 // その場で表示するのが普通の種類（画像・音声・動画）。Content-Disposition がなくても②にしない
 // HLS・DASH のプレイリスト（application/vnd.apple.mpegurl・x-mpegurl・dash+xml）も、プレイヤーが読み込むもので、ダウンロードではない
 const INLINE_MEDIA_CT = /^\s*(?:image\/(?!svg)|audio\/|video\/|application\/(?:vnd\.apple\.mpegurl|x-mpegurl|dash\+xml)\b)/i;
-// 旧式のフォント（application/vnd.ms-fontobject。.eot）も含める
 export const downloadResponse: Rule = { id: 'E-11', title: 'ダウンロード応答', appliesTo: 'any', scope: 'target',
   basis: ['OWASP File Upload CS'],
   run(ctx) {
@@ -319,9 +330,12 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     const maps = ctx.target.probes.filter(p => /\.map$/.test(p.path));
     if (maps.length) {                                         // ① probes ラベル：.map を取得できるか
       const got = maps.filter(p => probePattern(p.path, p.headB64, p.code)?.name === 'source-map');
-      const unreached = maps.filter(p => !p.code).length;
+      const unreached = maps.filter(p => !p.code).length; const redirected = maps.filter(p => p.code >= 300 && p.code < 400).length;
+      const serverError = maps.filter(p => unavailable(p.code)).length;   // サーバのエラー・レート制限（E-03 と同じ）
       return got.length ? got.map(p => mk(sourceMap, ctx, 1, 'medium', 'fail', `${p.path}（HTTP ${p.code}、一致したパターン: source-map）`, '本番では .map を配信しない（sourcesContent に元のソースがあるかは手動で確認）'))
         : unreached ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC)]
+        : serverError ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${serverError}件はサーバのエラー・レート制限（HTTP 5xx・429。.map があるかは分からない）`, RETRY_REC)]
+        : redirected ? [mk(sourceMap, ctx, 'na', 'info', 'na', `${maps.length}件の .map のうち${redirected}件は転送された（HTTP 3xx。転送先を確かめていない）`, PROBE_REDIRECT_REC)]
         : [mk(sourceMap, ctx, 'ok', 'info', 'pass', `${maps.length}件の .map は取得できなかった`, '')];
     }
     if (!ctx.final) return [];
@@ -329,12 +343,15 @@ export const sourceMap: Rule = { id: 'E-13', title: 'ソースマップの露出
     const ref = header(ctx, 'sourcemap')[0] ?? header(ctx, 'x-sourcemap')[0] ?? b?.match(/\/[/*]#\s*sourceMappingURL=(\S+)/)?.[1];
     const isJs = /javascript|ecmascript/i.test(header(ctx, 'content-type')[0] ?? '') || /\.m?js$/.test(path(ctx));   // 拡張子はパスで見る（クエリの ?name=lib.js で JS にしない）
     if (!isJs && !ref) return [];
+    // 拡張子で JS とみなしても、2xx でない応答（404 の画面、ログインへの転送）と HTML の応答は JS の本文ではない（参照がないとは言えない）
+    const st = ctx.final.status;
+    if (!ref && ((st && (st < 200 || st >= 300) && st !== 304) || ctx.responseKind === 'html')) return [];
     // 本文のない応答（キャッシュした JS の 304 など）は適用外
     if (!ref && !b) return bodyNotCaptured(ctx) ? [mk(sourceMap, ctx, 'na', 'info', 'na', '本文を採取していない', NO_BODY_REC)] : [];
-    if (!ref && bodyTruncated(ctx)) return [mk(sourceMap, ctx, 'na', 'info', 'na', '本文の先頭64KBに参照なし（参照は末尾にあることが多い）', NO_BODY_REC)];
+    if (!ref && bodyTruncated(ctx)) return [mk(sourceMap, ctx, 'na', 'info', 'na', '本文の先頭64K文字に参照なし（参照は末尾にあることが多い）', NO_BODY_REC)];
     // 本文に埋め込んだソースマップ（data:application/json;base64,…）は、.map を配信しているのと同じ（sourcesContent に元のソースを含みうる）。
     // 「.map を C13 に追加して確かめる」は当てはまらないので、証跡と推奨を分ける（①はプローブ（probes ラベル）の条件なので②のまま。中身は証跡に出さない）
     if (ref && /^data:/i.test(ref)) return [mk(sourceMap, ctx, 2, 'low', 'fail', '本文に埋め込んだソースマップ（data:。中身は表示しない）', '本番ビルドではインラインのソースマップ（webpack の inline-source-map・Vite の sourcemap: \'inline\' など）を出さない（sourcesContent に元のソースがあるかは手動で確認）')];
-    return ref ? [mk(sourceMap, ctx, 2, 'low', 'fail', `参照: ${clip(ref, 120)}`, '本番ビルドでは sourceMappingURL を出さない。.map を C13 のパス一覧に追加して取得できるか確認する')]
+    return ref ? [mk(sourceMap, ctx, 2, 'low', 'fail', `参照: ${excerpt(ref, 120)}`, '本番ビルドでは sourceMappingURL を出さない。.map を C13 のパス一覧に追加して取得できるか確認する')]
                : [mk(sourceMap, ctx, 'ok', 'info', 'pass', 'ソースマップへの参照なし', '')];
   } };

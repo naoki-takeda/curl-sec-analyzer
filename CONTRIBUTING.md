@@ -5,7 +5,7 @@ curl-sec-analyzer の開発に参加するときの決まりです。使い方�
 ## 大切にしていること
 
 - **入力をブラウザの外に出さない。** 外部と通信するコード（fetch・外部の画像やスクリプトなど）は追加しません。ツール自身の CSP（[csp.config.ts](csp.config.ts)）も緩めません。
-- **秘密情報を画面にもファイルにも出さない。** Cookie・Authorization・トークン・パスワードは、画面・Markdown・JSON・CSV のどれにも生の値で出しません（`tests/masking.test.ts` で検査しています）。
+- **秘密情報を画面にもファイルにも出さない。** Cookie・Authorization・トークン・パスワードは、画面・Markdown・JSON・CSV のどれにも生の値で出しません（`tests/masking.test.ts` で検査しています。残りうるものは CHANGELOG の「既知の限界」）。
 - **判定の根拠を示す。** 項目・条件・重要度は設計書に根拠（OWASP・MDN・ASVS など）とあわせて書きます。
 
 ## 開発環境と検査
@@ -16,9 +16,9 @@ curl-sec-analyzer の開発に参加するときの決まりです。使い方�
 
 ## コードの書き方
 
-- **描画**：`innerHTML`・`outerHTML`・`insertAdjacentHTML`・`document.write` を使わず、`textContent`・`el()`（`src/ui/dom.ts`）で描画します。`eval` 系も使いません。どちらも ESLint で禁止しています。
+- **描画**：HTML として解釈させる API（`innerHTML` など。一覧は `eslint.config.js`）を使わず、`textContent`・`el()`（`src/ui/dom.ts`）で描画します。`eval` 系も使いません。どちらも ESLint で禁止しています。
 - **ルール**（`src/rules/`）：評価したら必ず `.ok` か fail を返し、判定できなければ `.na` を返します。空配列は「適用外」のときだけに使います。
-- **文言**：画面の文言は `src/i18n.ts` の `ja`・`en` の両方に足します（足りないと型チェックで失敗します）。設定ファイル・コマンド生成器のエラーの英訳は `src/messagesEn.ts`、推奨対応と判定不能の理由の英訳は `src/recommendationsEn.ts` に足します。推奨対応の訳の漏れは `tests/i18n.test.ts` が検出します。
+- **文言**：画面の文言は `src/i18n.ts` の `ja`・`en` の両方に足します（足りないと型チェックで失敗します）。設定ファイル・コマンド生成器のエラーの英訳は `src/messagesEn.ts`、推奨対応・判定不能の理由・診断カバレッジの理由の英訳は `src/recommendationsEn.ts` に足します。コマンド生成器のパスの欄の名前（日本語・英語）は `src/commands.ts` の `PATH_FIELDS` に足します。推奨対応の訳の漏れは `tests/i18n.test.ts` が検出します。
 - **ブラウザの保存領域**：localStorage・sessionStorage・IndexedDB・Cookie は使いません（理由は設計書の「ブラウザの保存領域」）。
 - **依存パッケージ**：追加はできるだけ避けます。追加する場合は、理由と、自前で実装しない理由をプルリクエストに書きます。
 

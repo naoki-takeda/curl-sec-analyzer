@@ -1,24 +1,39 @@
 // ui/har.ts：HARの読み込み（Web Worker）と、エントリ一覧の画面
-import { HAR_LABEL_CHOICES, HAR_MAX_BYTES, type HarChain, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
+import { HAR_MAX_BYTES, type HarChain, type HarImport, defaultHarHosts, suggestLabels } from '../parser/har';
+import { HAR_LABEL_CHOICES } from '../engine/labels';
 import { withProfile } from '../engine/profile';
 import { type HarFailure, tr } from '../i18n';
-import { showText } from '../shownText';
-import { BTN, button, el, labelFor, options, table, td } from './dom';
+import { showTarget, showText } from '../shownText';
+import { BTN, button, el, focusable, focusedKey, labelFor, options, restoreFocus, table, td } from './dom';
 import HarWorker from '../harWorker.ts?worker&inline';
 import { type Message, actions, refs, state } from './state';
+import { currentMessage, joined, say } from './message';
 import { renderEmpty } from './results';
 
-const say = (m?: Message) => actions.say(m);
 
-// 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外すを押したりしたら、前の読み込みの結果は使わない
+// 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外す・サンプルを入れるを押したりしたら、前の読み込みの結果は使わない
 let harLoad = 0; let harWorker: Worker | undefined;
-export const cancelHarLoad = () => { harLoad++; harWorker?.terminate(); harWorker = undefined; };
+export const cancelHarLoad = () => { harLoad++; harWorker?.terminate(); harWorker = undefined; pendingSettings = undefined; };
+/** 読み込み中に読み込んだ設定ファイルの知らせ（main.ts の refresh が預ける）。読み込みが終わったら、その案内・判定し直しの結果のあとに出す */
+let pendingSettings: Message | undefined;
+export const setPendingSettings = (m?: Message) => { pendingSettings = m; };
+/** HAR を読み込んでいる途中か（読み込み中のファイルは、まだ state.har に入っていない） */
+export const isHarLoading = () => !!harWorker;
+let kept: { open?: boolean; scroll: number } | undefined;
+/** 画面を作り直す前（言語の切り替え）に、HAR の一覧の開閉とスクロール位置を覚える（作り直した一覧で戻す） */
+export const keepHarView = () => { kept = { open: refs.harBox.querySelector('details')?.open, scroll: refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? 0 }; };
+/** HAR の案内（読み込み中・読み込み済み）。HAR がなければ undefined */
+export const harNotice = (): Message | undefined => {
+  const h = state.har;
+  return harWorker ? () => tr().har.loading : h ? () => tr().har.loaded(h.name, h.imp.chains.length) : undefined;
+};
 
 export function loadHar(f: File) {
+  // 前の読み込みは、新しいファイルが大きすぎても止める（置き換えたつもりの前の HAR を、あとから入れない）
+  cancelHarLoad();
   if (f.size > HAR_MAX_BYTES) { say(() => tr().har.tooLarge(HAR_MAX_BYTES / 1024 / 1024)); return; }
   say(() => tr().har.loading);
   // Worker は blob: URL で作る（ページの CSP を引き継ぐため。csp.config.ts）。作れない・送れない・結果を受け取れないときも失敗と知らせる
-  cancelHarLoad();
   let w: Worker;
   try { w = new HarWorker(); } catch { say(() => tr().har.failed('worker')); return; }
   harWorker = w; const gen = harLoad;
@@ -29,13 +44,18 @@ export function loadHar(f: File) {
     if (gen !== harLoad) return;                     // 古い読み込みの結果
     if (!e.data.ok || !e.data.result) { const err = e.data.error === 'JSON' ? 'json' : 'format'; say(() => tr().har.failed(err)); return; }
     const imp = e.data.result;
+    // 読み込み中に読み込んだ設定ファイルの知らせは、読み込みの案内・判定し直しの結果のあとに残す（上書きしない）
+    const pending = pendingSettings; pendingSettings = undefined;
     // Worker の中では組織プロファイルが分からないため、プロファイルがあればセッションCookieの名前を反映して候補を作り直す
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));
     state.har = { imp, hosts: defaultHarHosts(imp), name: f.name };
     renderHar(); say();
     // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない。判定中（初回を含む）なら、読み込んだ HAR も入れて判定し直す
-    if (state.last || actions.isAnalyzing()) actions.analyze();
-    if (!refs.message.textContent) say(() => tr().har.loaded(f.name, imp.chains.length));   // 判定し直したときは、判定のメッセージ（判定中・エラー）を残す
+    if (state.last || actions.isAnalyzing()) {
+      void actions.analyze().then(() => { const m = currentMessage(); if (pending && gen === harLoad) say(m ? joined(m, pending) : pending); });
+      return;   // 判定し直したときは、判定のメッセージ（判定中・件数・エラー）を出す
+    }
+    say(joined(harNotice()!, pending));
   };
   w.onerror = w.onmessageerror = () => failed('worker');
   f.text().then(t => { try { w.postMessage(t); } catch { failed('worker'); } }, () => failed('read'));
@@ -69,15 +89,18 @@ export function renderHar() {
   if (!state.har) { refs.harBox.replaceChildren(); return; }
   // 一覧は描き直すので、操作した部品のフォーカス・表のスクロール位置・開閉を戻す（チェックボックス・ラベルの選択を変えても、フォーカスを
   // body に落とさず、表を先頭に戻さない。WCAG 2.4.3）
-  const focusKey = (document.activeElement as HTMLElement | null)?.dataset?.focus;
+  const focusKey = focusedKey();
   const T = tr().har; const { imp, hosts } = state.har;
   const same = shownImp === imp; shownImp = imp; if (!same) moved.clear();
-  const prevScroll = same ? refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? 0 : 0;
-  const prevOpen = same ? refs.harBox.querySelector('details')?.open : undefined;
+  // 画面を作り直したあと（言語の切り替え）は、作り直す前に覚えた開閉とスクロール位置を使う
+  const k = kept; kept = undefined;
+  const prevScroll = same ? refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? k?.scroll ?? 0 : 0;
+  const prevOpen = same ? refs.harBox.querySelector('details')?.open ?? k?.open : undefined;
+  // ホスト名は URL の列と同じ出し方にする（URL の列で伏せるカード番号のラベルのホスト名を、ここでそのまま出さない）
   const hostBoxes = imp.hosts.map(h => {
-    const cb = el('input'); cb.type = 'checkbox'; cb.checked = hosts.has(h); cb.id = `har-host-${h}`; cb.dataset.focus = `har-host-${h}`;
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = hosts.has(h); cb.id = `har-host-${h}`; focusable(cb, `har-host-${h}`);
     cb.addEventListener('change', () => { if (cb.checked) hosts.add(h); else hosts.delete(h); renderHar(); });
-    return el('span', 'mr-4 inline-flex items-center gap-1', cb, labelFor(cb.id, `${h} (${imp.chains.filter(c => c.host === h).length})`, 'text-sm'));
+    return el('span', 'mr-4 inline-flex items-center gap-1', cb, labelFor(cb.id, `${showTarget(h, h)} (${imp.chains.filter(c => c.host === h).length})`, 'text-sm'));
   });
   const rows = imp.chains.filter(c => hosts.has(c.host)).map(c => {
     const base = c.suggested.startsWith('har-') || c.suggested.startsWith('error-') ? c.suggested : `har-${c.id + 1}`;
@@ -85,7 +108,7 @@ export function renderHar() {
       // har-N は、予約ラベルをほかのエントリに移したときの戻り先なので、いつも選択肢に入れる（候補が error-N のエントリでも空欄にしない）
       [...new Set([base, `har-${c.id + 1}`, `error-${c.id + 1}`, ...HAR_LABEL_CHOICES, c.label])].map((v): [string, string] => [v, v]).concat([['__exclude', T.exclude]]),
       c.excluded ? '__exclude' : c.label);
-    sel.setAttribute('aria-label', T.labelFor(c.method, shownUrl(c))); sel.dataset.focus = `har-label-${c.id}`;   // 読み上げ用の名前も、画面の表示と同じくマスクする
+    sel.setAttribute('aria-label', T.labelFor(c.method, shownUrl(c))); focusable(sel, `har-label-${c.id}`);   // 読み上げ用の名前も、画面の表示と同じくマスクする
     sel.addEventListener('change', () => {
       // このエントリが前に予約ラベルを移していたら、そのエントリのラベルを戻す（ほかのラベルに変えていなければ）
       for (const [o, v] of moved) if (v.by === c) { if (o.label === `har-${o.id + 1}` && !imp.chains.some(x => x !== o && x !== c && x.label === v.label)) o.label = v.label; moved.delete(o); }
@@ -96,7 +119,7 @@ export function renderHar() {
     });
     const sens = options(el('select', 'rounded-md border border-line bg-paper px-2 py-1 text-sm'),
       [['auto', T.auto(c.sentAuth)], ['1', tr().yes], ['0', tr().no]], c.sensitive === undefined ? 'auto' : c.sensitive ? '1' : '0');
-    sens.setAttribute('aria-label', T.sensFor(shownUrl(c))); sens.dataset.focus = `har-sens-${c.id}`;
+    sens.setAttribute('aria-label', T.sensFor(shownUrl(c))); focusable(sens, `har-sens-${c.id}`);
     sens.addEventListener('change', () => { c.sensitive = sens.value === 'auto' ? undefined : sens.value === '1'; });
     return el('tr', '', td('whitespace-nowrap', c.method), td('break-all font-mono text-[12px]', shownUrl(c)),
       td('num whitespace-nowrap', `${c.status}${c.hops > 1 ? T.hops(c.hops) : ''}`), td('', sel), td('', sens));
@@ -113,5 +136,5 @@ export function renderHar() {
   box.open = prevOpen ?? true;
   refs.harBox.replaceChildren(box);
   scroller.scrollTop = prevScroll;
-  if (focusKey) box.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focusKey)}"]`)?.focus();
+  restoreFocus(box, focusKey);
 }

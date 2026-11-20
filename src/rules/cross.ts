@@ -3,9 +3,9 @@ import type { Finding, Rule, Target } from '../model';
 import { capturedAt, finalResponse, firstStatus, hostOf, isHttps, ownChain, sameDocumentHop, siteResponses, trimPath } from '../parser/target';
 import { MAIN_SESSION, isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, notSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { FOLLOW_REC, LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, cf, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
+import { FOLLOW_REC, LOGIN_FAILED_REC, NO_BODY_REC, RETRY_REC, cf, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies, unavailable } from './util';
 import { apexHop } from './headers';
-import { LOGIN_ACTION, LOGIN_PATH, hasPasswordField, loginForm, logoutFailed, metaCspFromHtml, passwordFormActions } from './html';
+import { LOGIN_ACTION, LOGIN_PATH, hasPasswordField, loginForm, logoutProblem, metaCspFromHtml, passwordFormActions } from './html';
 
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
@@ -68,7 +68,7 @@ function loginFormAction(b: string): boolean {
   });
 }
 /**
- * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64KB で、閉じタグまで）：type="application/json" のスクリプト、
+ * インラインのスクリプト（src のないもの）に、利用者・状態のデータがあるか（先頭の 64K 文字で、閉じタグまで）：type="application/json" のスクリプト、
  * オブジェクト・配列の代入、JSON.parse のうち、中身が STATE_DATA に当てはまるもの。ld+json（構造化データ）と設定だけのものはデータとしない
  */
 function inlineData(b: string): boolean {
@@ -291,14 +291,17 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     if (!f) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', '応答がない', '')];
     // ログアウトが失敗した（GET の /logout に 405 など）なら、旧Cookieが使えても当然なので①にしない。
     // ログイン後のページ（mypage）が 2xx でないなら、そもそもセッションがなく、旧Cookieが使えないのも当然なので合格にしない
-    if (logoutFailed(lo)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(lo)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
-    const mp = x.byLabel('mypage'), ms = mp ? firstStatus(mp) : 0;
+    const lp = logoutProblem(lo); if (lp) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', lp.ev, lp.rec)];
+    // mypage も after-logout と同じく、同じページへの転送（末尾の /、apex から www）はたどった先で見る（転送の 301 を「ログインできていない」にしない）
+    const mp = x.byLabel('mypage'), mh = mp ? sameDocumentHop(mp) : undefined; const ms = mh?.hop?.status ?? 0;
+    // mypage の転送先を採取していなければ、ログインできていたかが分からない（after-logout の転送と同じく na）
+    if (mh?.unfollowed) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログイン後のページ（mypage）が HTTP ${ms}（同じページへの転送。転送先を採取していない）`, FOLLOW_REC)];
     if (ms && !(ms >= 200 && ms < 300)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログイン後のページ（mypage）が HTTP ${ms}（ログインできていない）`, LOGIN_FAILED_REC)];
     const chain = ownChain(after);
     // ステータスが分からない応答（%{header_json} だけで #META response_code がない）は判定しない（第0章 0.2）
     if (!chain[0]?.status) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', 'ステータスが分からない', '-w に #META response_code=%{response_code} を加えて採取する')];
-    // 同じページ（末尾の / の違いだけ）への転送はたどって、その先で判定する（Django の APPEND_SLASH、Next.js の trailingSlash、Apache の DirectorySlash。
-    // 301 のあとに旧Cookieで 200 になることがある）
+    // 同じページ（末尾の / の違い、apex から www・https の同じパス）への転送はたどって、その先で判定する（Django の APPEND_SLASH、Next.js の
+    // trailingSlash、Apache の DirectorySlash。301 のあとに旧Cookieで 200 になることがある）
     const { hop, unfollowed } = sameDocumentHop(after);
     const r = hop!;
     if (unfollowed) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `HTTP ${r.status}（同じページへの転送。転送先を採取していない）`, FOLLOW_REC)];
@@ -351,7 +354,8 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
       }
       return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（転送先がログイン画面か分からない）`, '転送先まで（-L）採取し直す')];
     }
-    return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（セッションが無効になったかは分からない）`, '')];
+    return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（セッションが無効になったかは分からない）`,
+      unavailable(r.status) ? RETRY_REC : '存在する認証後ページの URL を after-logout として採取し直す')];
   } };
 
 export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'any', scope: 'cross',

@@ -163,3 +163,113 @@ describe('組織プロファイルの読み込み', () => {
     expect(parseProfile('{"name":1}').errors).toEqual(['name は文字列にしてください']);
   });
 });
+
+describe('第74回：突き合わせのキー・例外・前回の結果の読み込み', () => {
+  it('「ラベル URL」の例外は、同じラベル・URL の2つ目（top#2。キーに「 #2」が付く）には当てない', () => {
+    const { targets } = parseInput(top('a.example', false) + top('a.example', false));
+    const fs = runAll(targets, { suppressions: [{ ruleId: 'H-01', target: 'top https://a.example/', reason: 'r', approver: '', until: '' }] }).filter(f => f.item === 'H-01');
+    expect(fs.map(f => `${f.target}:${f.status}`)).toEqual(['top:suppressed', 'top#2:fail']);
+  });
+  it('HAR で同じ URL がまた出たら、その URL に前に付けたキーを使う', async () => {
+    const { targetKeys } = await import('../src/engine/targetKey');
+    const t = (q: string) => ({ label: 'har', url: `https://a.example/s?q=${q}`, meta: { source: 'har', method: 'GET' } });
+    expect(targetKeys([t('a'), t('b'), t('b'), t('a')])).toEqual(['HAR GET https://a.example/s?q', 'HAR GET https://a.example/s?q #2', 'HAR GET https://a.example/s?q #2', 'HAR GET https://a.example/s?q']);
+  });
+  it('UUID の数字だけのかけらをキーに残さない', async () => {
+    const { urlKey } = await import('../src/engine/targetKey');
+    expect(urlKey('https://a.example/reset/9f1c2a7e-4821-a093-8512-0c3e5d7b9a11')).toBe('https://a.example/reset/*');
+    expect(urlKey('https://a.example/reset/9f1c2a7e-4821-a093-8512-0c3e5d7b9a11.json')).toBe('https://a.example/reset/*.json');
+  });
+  it('前回の結果の日時は toJson の形だけを受け付ける', async () => {
+    const { parseBaseline } = await import('../src/engine/diff');
+    const at = (generatedAt: unknown) => parseBaseline(JSON.stringify({ generatedAt, findings: [] })).baseline?.generatedAt;
+    expect([at('2026-11-01T00:00:00.000Z'), at('2026-11-01T00:00:00Z'), at('glpat-xxxxxxxxxxxxxxxxxxxx'), at(5)]).toEqual(['2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00Z', '', '']);
+  });
+  it('#TARGET の指定の警告は、付け直したあとのラベルを出す', () => {
+    const { warnings } = parseInput('#TARGET url=https://a.example/ label=top lable=x\nHTTP/2 200\n\n#TARGET url=https://a.example/b label=top lable=x\nHTTP/2 200\n\n');
+    expect(warnings.find(w => w.detail.startsWith('#TARGET の指定'))?.detail).toMatch(/（top：lable=.*、top#2：lable=/);
+  });
+  it('HAR の base64 の本文は、日本語でも64K文字まで読む', async () => {
+    const { importHar } = await import('../src/parser/har');
+    const text = `${'あ'.repeat(50_000)}END`;
+    const b64 = Buffer.from(text, 'utf8').toString('base64');
+    const imp = importHar(JSON.stringify({ log: { entries: [{ startedDateTime: '2026-11-01T00:00:00Z', request: { method: 'GET', url: 'https://a.example/x', headers: [] },
+      response: { status: 200, httpVersion: 'HTTP/2', headers: [], content: { mimeType: 'text/html', text: b64, encoding: 'base64' } } }] } }));
+    expect(imp.chains[0].responses.at(-1)?.body).toBe(text);
+  });
+});
+
+describe('第75回：キーのトークン・前回の結果の検査・Markdown の注・ラベル', () => {
+  it('パスの部分全体がトークンの形なら、かけらの語・短い語と数字を残さない（画面の secretPiece と同じ）', async () => {
+    const { urlKey } = await import('../src/engine/targetKey');
+    const uuid = '9f3ac2e1-4821-4b7d-8512-0a1b2c3d4e5f';
+    expect([urlKey('https://a.example/reset/Nn9-_OXJiypeizhEflepwg'), urlKey(`https://a.example/files/user-${uuid}`), urlKey(`https://a.example/files/avatar_${uuid}.png`),
+      urlKey('https://a.example/files/9f3ac2e1_4821_4b7d_8512_0a1b2c3d4e5f')])
+      .toEqual(['https://a.example/reset/*', 'https://a.example/files/user-*', 'https://a.example/files/avatar_*.png', 'https://a.example/files/*']);
+    // ビルドしたファイルの名前・普通の名前は残す
+    expect([urlKey('https://a.example/assets/AdminDashboard-Dk3x9Lq2.js'), urlKey('https://a.example/docs/2026-annual-report-v2.pdf')])
+      .toEqual(['https://a.example/assets/AdminDashboard-*.js', 'https://a.example/docs/2026-annual-report-v2.pdf']);
+  });
+  it('前回の結果のルールセットの版と、チェックリストにない項目は、ファイルの値をそのまま出さない', async () => {
+    const { parseBaseline } = await import('../src/engine/diff');
+    const f = { ruleId: 'H-99.1', item: 'H-99', title: 'ghp_secret', severity: 'high', status: 'fail', target: 'top' };
+    const r = parseBaseline(JSON.stringify({ rulesetVersion: 'ghp_16C7e42F292c6912E7710c838347Ae178B4a', findings: [f, { ...f, ruleId: 'H-01.1', item: 'H-01' }] }));
+    expect([r.baseline?.rulesetVersion, r.baseline?.findings.map(x => x.ruleId), r.skipped]).toEqual(['?', ['H-01.1'], 1]);   // 形の違う版は値を出さずに「不明」として警告する
+    expect(parseBaseline(JSON.stringify({ rulesetVersion: '2026.11-v1.0.0', findings: [] })).baseline?.rulesetVersion).toBe('2026.11-v1.0.0');
+  });
+  it('Markdown の「*」の注は、例外を当てただけの指摘では出さない', async () => {
+    const { toMarkdown } = await import('../src/export/markdown');
+    const { targets } = parseInput(top('a.example', false));
+    const fs = runAll(targets, { profile: parseProfile('{"severity":{"H-01":"low"}}').profile, suppressions: [{ ruleId: 'H-01', target: 'top', reason: 'r', approver: '', until: '' }] });
+    expect(toMarkdown(fs, [], [])).not.toContain('組織プロファイルで重要度を変えた指摘');
+  });
+  it('label=invalid-label と正しく書いたラベルは、読めないと知らせない', () => {
+    const { warnings } = parseInput('#TARGET url=https://a.example/ label=invalid-label\nHTTP/2 200\n\n');
+    expect(warnings.filter(w => w.kind === 'invalid-attr')).toEqual([]);
+  });
+});
+
+describe('第76回：トークンの形のチャンクのキー', () => {
+  it('JWT・数字のない base64url・区切りで始まるトークンも、どのトークンでも同じキーにする。電話番号の検査を先にする（もう一度かけても変わらない）', async () => {
+    const { urlKey } = await import('../src/engine/targetKey');
+    const k = (p: string) => urlKey(`https://a.example/${p}`).slice('https://a.example/'.length);
+    expect([k('verify/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c'), k('reset/-PuC-iLKVFZcoBYfaEKUMK'),
+      k('reset/xK2-v9_mPq7Lz3RtYb8wNc'), k('files/avatar_-Xk29Lq7MpZ3RtYb8wNc.png')]).toEqual(['verify/*', 'reset/*', 'reset/*-v9_*', 'files/avatar_*.png']);
+    const phone = k('x/Kx9pQ2mZ7rT4vB8n-01-23-45-67-89');
+    expect([phone, k(phone)]).toEqual(['x/*', 'x/*']);
+  });
+  it('大文字で始まる語と年をつないだ普通の名前は、語を残す', async () => {
+    const { urlKey } = await import('../src/engine/targetKey');
+    expect(['Product-Guide-2026', 'Spring-Sale-2026-Banner.png'].map(p => urlKey(`https://a.example/docs/${p}`).slice('https://a.example/docs/'.length)))
+      .toEqual(['Product-Guide-*', 'Spring-Sale-*-Banner.png']);
+  });
+});
+
+describe('第77回：キーのビルドした名前・前回の結果の条件番号', () => {
+  it('キーで残すビルドした名前は、ハッシュの前がすべて3文字以上の英語の語のものだけ（アップロードした画像のトークンのかけらを残さない）', async () => {
+    const { urlKey } = await import('../src/engine/targetKey');
+    const k = (p: string) => urlKey(`https://a.example/${p}`).slice('https://a.example/'.length);
+    expect([k('avatars/cE-Xk29Lq7MpZ3RtYb8w.png'), k('assets/AdminDashboard-Dk3x9Lq2.js'), k('assets/vendor-react-BxYz12Ab.js')])
+      .toEqual(['avatars/*.png', 'assets/AdminDashboard-*.js', 'assets/vendor-react-*.js']);
+  });
+  it('前回の結果の先頭が0の条件番号（H-01.01）は、H-01.1 として突き合わせる（「新規」と「解消」に分けない）', async () => {
+    const { parseBaseline, diff } = await import('../src/engine/diff');
+    const f = (ruleId: string) => ({ ruleId, item: 'H-01', severity: 'high', status: 'fail', target: 'top' });
+    const b = parseBaseline(JSON.stringify({ findings: [f('H-01.01')] })).baseline!;
+    expect(b.findings.map(x => x.ruleId)).toEqual(['H-01.1']);
+    expect(diff(b.findings, b.findings).map(r => r.kind)).toEqual(['continuing']);
+  });
+});
+
+describe('第77回：CSV の横断の行の実施日時', () => {
+  it('付け直したラベル（session-sample-1#2）は、判定と同じく使わない', async () => {
+    const { toCsv } = await import('../src/export/csv');
+    const sid = (n: string) => `set-cookie: sessionid=${n}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+    const t = (label: string, at: string, cookie: string) => `#TARGET url=https://a.example/ label=${label}\n#META at=${at} cmd=C18\nHTTP/2 200\ncontent-type: text/html\n${cookie}\n\n<p>x</p>\n`;
+    const { targets } = parseInput(t('session-sample-1', '2026-11-01T10:00:00', sid('a'.repeat(32))) + t('session-sample-2', '2026-11-01T10:00:05', sid('a'.repeat(31) + 'b'))
+      + t('session-sample-1', '2026-11-19T09:00:00', sid('c'.repeat(32))));
+    const row = toCsv(runAll(targets), targets).split('\n').find(l => l.includes('C-07'));
+    expect(row).toBeDefined();
+    expect(row).not.toContain('2026-11-19');
+  });
+});

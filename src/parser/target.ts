@@ -1,8 +1,14 @@
 // parser/target.ts：ターゲットの共通の処理（ラベル・判定に使う応答のホップ・HTTPS か・機密か・採取時刻・Set-Cookie の上限）
 import type { HttpResponse, ParseWarning, ResponseKind, Target } from '../model';
 
-/** 読む本文の上限（curl の貼り付け・HAR とも先頭 64KB まで） */
+/** 読む本文の上限（curl の貼り付け・HAR とも先頭 64K 文字まで） */
 export const BODY_LIMIT = 64 * 1024;
+
+/** HTTP のトークン（RFC 9110 5.6.2 の token）の1文字。ヘッダ名・Cookie の名前・ディレクティブの名前の形 */
+export const TCHAR = "[!#$%&'*+.^_`|~0-9A-Za-z-]";
+const TOKEN = new RegExp(`^${TCHAR}+$`);
+/** 全体が HTTP のトークンか */
+export const isToken = (s: string) => TOKEN.test(s);
 
 /** 付け直したラベル（http#2 など）の元のラベル。ラベル対応表やラベルで判定を変えるルールは、この元のラベルで判定する */
 export const baseLabel = (label: string) => label.replace(/#\d+$/, '');
@@ -84,7 +90,7 @@ export const pushCookies = (list: string[], vals: string[]): number => {
 /** 上限を超えた Set-Cookie のあるターゲットの警告 */
 export const cookieCapWarnings = (targets: Target[]): ParseWarning[] => targets.flatMap(t => {
   const n = t.responses.reduce((a, r) => a + (r.droppedCookies ?? 0), 0);
-  return n ? [{ kind: 'too-many-cookies' as const, label: t.label, detail: `ターゲット「${t.label}」：1つの応答の Set-Cookie が${MAX_SET_COOKIES}個を超えたので、先の${n}個を判定に使いませんでした（ブラウザも1つのドメインに約180個までしか保存せず、古いものから捨てます）` }] : [];
+  return n ? [{ kind: 'too-many-cookies' as const, detail: `ターゲット「${t.label}」：1つの応答の Set-Cookie が${MAX_SET_COOKIES}個を超えたので、先の${n}個を判定に使いませんでした（ブラウザも1つのドメインに約180個までしか保存せず、古いものから捨てます）` }] : [];
 });
 /**
  * ホスト名の「サイト」（登録したドメイン）の目安。公開接尾辞の一覧は持たないので、最後の2つのラベル（example.com）とし、
@@ -125,12 +131,16 @@ const upgradedToHttps = (t: Target): boolean => {
 
 /** パスの末尾の / を除く（/ だけのパスはそのまま） */
 export const trimPath = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
-/** 転送先が同じページ（同じホストで、パスが末尾の / の違いだけ）か。Django の APPEND_SLASH、FastAPI の redirect_slashes、Apache の DirectorySlash など */
+/**
+ * 転送先が同じページ（パスが末尾の / の違いだけ。Django の APPEND_SLASH、FastAPI の redirect_slashes、Apache の DirectorySlash など）か。
+ * 同じサイトの別のホスト（apex → www）・https への転送で、パスが同じものも同じページとする（転送先の 401・200 を、転送の 301 で判定しない）
+ */
 export function sameDocument(r: HttpResponse, base?: string): boolean {
   try {
     const from = new URL(r.url ?? base ?? ''), to = new URL(r.headers.get('location')?.[0] ?? '', from);
+    const sameSite = siteOf(to.hostname) === siteOf(from.hostname) && (to.protocol === from.protocol || (from.protocol === 'http:' && to.protocol === 'https:'));
     // クエリも同じもの（/login?next=… から /login、/redirect?url=… から /redirect?error=… は別のページへの転送）
-    return to.host === from.host && trimPath(to.pathname) === trimPath(from.pathname) && to.search === from.search;
+    return (to.host === from.host || sameSite) && trimPath(to.pathname) === trimPath(from.pathname) && to.search === from.search;
   } catch { return false; }
 }
 
@@ -138,9 +148,10 @@ export function sameDocument(r: HttpResponse, base?: string): boolean {
  * その URL の応答のうち、同じページへの転送をたどった先（A-01・A-08・A-11 のステータス、C-12①）。
  * 末尾の / への 307 のあとの 200 を、転送の 307 で判定しないため。転送先を採取していない（-L なし）ときは unfollowed
  */
-export function sameDocumentHop(t: Target): { hop?: HttpResponse; unfollowed: boolean } {
+export function sameDocumentHop(t: Target, keepMethod = false): { hop?: HttpResponse; unfollowed: boolean } {
   const c = ownChain(t); let i = 0;
-  while (c[i]?.kind === 'redirect' && sameDocument(c[i], t.url)) { if (!c[i + 1]) return { hop: c[i], unfollowed: true }; i++; }
+  // keepMethod：リクエストの方法と本文を変えない転送（307・308）だけをたどる（301・302・303 では curl もブラウザも POST を本文のない GET にする）
+  while (c[i]?.kind === 'redirect' && (!keepMethod || c[i].status === 307 || c[i].status === 308) && sameDocument(c[i], t.url)) { if (!c[i + 1]) return { hop: c[i], unfollowed: true }; i++; }
   return { hop: c[i], unfollowed: false };
 }
 

@@ -1,6 +1,6 @@
 // engine/diff.ts：前回の結果（JSONエクスポート）との差分
 import type { Finding, Profile, Severity } from '../model';
-import { parseProfile } from './profile';
+import { knownItem, parseProfile } from './profile';
 import { SEVERITIES } from './summarize';
 import { baseLabel } from '../parser/target';
 
@@ -10,6 +10,10 @@ export interface Baseline { generatedAt: string; rulesetVersion?: string; findin
 
 const RULE_ID = /^([HCRTEA]-\d\d)\.(\d+|ok|na)$/;
 const STATUSES: Finding['status'][] = ['pass', 'fail', 'na', 'suppressed'];
+const GENERATED_AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/;
+const RULESET = /^\d{4}\.\d{1,2}-v\d{1,3}\.\d{1,3}\.\d{1,3}$/;   // 2026.11-v1.0.0 の形
+/** 前回の結果に版が書かれているが、形が違う（値は出さず、版が分からないとして警告する） */
+export const UNKNOWN_RULESET = '?';
 
 /** 前回の結果の指摘1件を確かめる。形式が合わなければ undefined（手で編集したJSONや別のツールのJSONでも、表示を崩さないため） */
 function validFinding(x: unknown): Finding | undefined {
@@ -19,11 +23,14 @@ function validFinding(x: unknown): Finding | undefined {
   if (!m || typeof f.target !== 'string' || !f.target) return undefined;
   if (!SEVERITIES.includes(f.severity as Severity) || !STATUSES.includes(f.status as Finding['status'])) return undefined;
   if (f.item !== undefined && f.item !== m[1]) return undefined;               // ruleId と item が食い違うものは信用しない
-  const condition = /^\d+$/.test(m[2]) ? Number(m[2]) : undefined;              // 条件番号は ruleId から作り直す
+  if (!knownItem(m[1])) return undefined;                                       // チェックリストにない項目（H-99）は読み込まない
+  // 条件番号は ruleId から作り直し、ruleId も作り直す（先頭が0の H-01.01 を H-01.1 と突き合わせる。同じ指摘が「新規」と「解消」に分かれない）
+  const condition = /^\d+$/.test(m[2]) ? Number(m[2]) : undefined;
   // 差分で使う項目だけを、型を確かめて取り出す（"evidence": 1 のような値で差分の計算を例外にしない）。
   // 長さは切らない（大きな CSP の証跡の後ろのホスト名が前回のキーからだけ落ち、同じ結果どうしが新規と解消に分かれるため）
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
-  return { ruleId: f.ruleId!, item: m[1], condition, title: str(f.title), severity: f.severity!, status: f.status!, target: f.target,
+  // title は使わない（表示はチェックリストの項目名。知らない項目は上で除く）
+  return { ruleId: condition === undefined ? f.ruleId! : `${m[1]}.${condition}`, item: m[1], condition, title: '', severity: f.severity!, status: f.status!, target: f.target,
            targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined, evidence: str(f.evidence), recommendation: '', references: [] };
 }
 
@@ -35,8 +42,9 @@ export function parseBaseline(text: string): { baseline?: Baseline; error?: stri
   const findings = all.map(validFinding).filter((f): f is Finding => !!f);
   // プロファイルも組織プロファイルと同じ検査を通す（壊れた値で差分の警告の比較が落ちないように）
   const profile = d.profile && typeof d.profile === 'object' ? parseProfile(JSON.stringify(d.profile)).profile : undefined;
-  return { baseline: { generatedAt: typeof d.generatedAt === 'string' ? d.generatedAt : '',
-                       rulesetVersion: typeof d.rulesetVersion === 'string' ? d.rulesetVersion : undefined, findings, profile },
+  // 日時とルールセットの版は toJson が出す形だけを受け付ける（ファイルに書かれた任意の文字列を、差分の見出し・設定の欄・Markdown にそのまま出さない）
+  return { baseline: { generatedAt: typeof d.generatedAt === 'string' && GENERATED_AT.test(d.generatedAt) ? d.generatedAt : '',
+                       rulesetVersion: typeof d.rulesetVersion === 'string' ? (RULESET.test(d.rulesetVersion) ? d.rulesetVersion : UNKNOWN_RULESET) : undefined, findings, profile },
            skipped: all.length - findings.length };
 }
 
@@ -45,8 +53,9 @@ const tkey = (f: Finding) => f.targetKey ?? f.target;
 /**
  * 証跡の突き合わせの形：証跡に出てくるホスト名（URL・CSP の配信元）の一覧。同じルール・ターゲットで別の配信元の指摘（E-08 の cdn-a と cdn-b、
  * E-07 の読み込み先）を別の指摘として突き合わせる（cdn-a を直して cdn-b が増えたことを「継続」の1行にしない）。
- * ホスト名だけを使うのは、証跡のほかの部分は画面のマスク（mask.ts・shownText.ts）で形が変わるため（突き合わせのキーはマスクに依存しない。
- * マスクの規則を変えただけで、変わらない指摘を新規と解消にしない）。ホスト名は「スキーム://」のあとのものを取る（showText もマスクしない）。
+ * ホスト名だけを使うのは、証跡のほかの部分は画面のマスク（mask.ts・shownText.ts）で形が変わるため（マスクの規則を変えただけで、変わらない指摘を
+ * 新規と解消にしにくくする）。ホスト名は「//」（スキームのあるものもないものも）のあとのものを取る。showText はふつうのホスト名を伏せないが、
+ * ユーザー名らしいもの（後ろに @ が続く）とスキームのない大文字・決まっていない最上位ドメインのものは伏せるので、マスクに依存しないのはそれ以外
  * ホスト名はサイトにまとめない（ajax.googleapis.com に storage.googleapis.com のスクリプトが増えたことや、*.github.io・*.cloudfront.net の
  * 別の持ち主の配信元を、1つの「継続」にしない）。そのため、A-01② の転送先が同じサイトの別のサーバ（web-03 → web-07）に変わっただけでも
  * 「解消」と「新規」に分かれる（見逃すより安全なので、そのままにする）

@@ -70,8 +70,8 @@ robots | A-02.ok | info | pass | URL・Location・本文にトークンなし
 robots | E-04.na | info | na | HTTP 301（転送先を採取していない）
 robots | H-01.1 | high | fail | (ヘッダなし)
 robots | H-02.na | info | na | HSTSがない（H-01で判定）
-robots | H-08.na | info | na | HTTP 301（本文のない応答）
-robots | H-11.ok | info | pass | (該当なし)
+robots | H-08.na | info | na | HTTP 301（転送の応答）
+robots | H-11.na | info | na | HTTP 301（転送の応答）
 robots | H-12.3 | info | fail | (ヘッダなし)
 robots | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし
 robots | H-17.ok | info | pass | 廃止・非推奨ヘッダなし
@@ -96,10 +96,10 @@ H-04 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定�
 H-05 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
 H-06 | evaluated | fails=2
 H-07 | missing-input | fails=0 | 強制モードのCSPがない（H-03で判定）
-H-08 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）
+H-08 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 本文のある応答（200 など）で採取する（本文のない応答・転送の応答は対象外）
 H-09 | evaluated | fails=2
 H-10 | evaluated | fails=2
-H-11 | evaluated | fails=1 | 一部のターゲット（1件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
+H-11 | evaluated | fails=1 | 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける / 本文のある応答（200 など）で採取する（本文のない応答・転送の応答は対象外）
 H-12 | evaluated | fails=1 | 機密応答では判定していない（静的リソース・機密でない応答だけ） / 一部のターゲット（2件）は入力不足 / 認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける
 H-13 | evaluated | fails=0
 H-14 | evaluated | fails=2

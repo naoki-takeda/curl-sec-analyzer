@@ -1,6 +1,9 @@
 // messagesEn.ts：画面に出すエラーメッセージ（設定ファイルの読み込み、コマンド生成器の入力）の英訳
 // キーは engine/suppress.ts・engine/profile.ts・engine/diff.ts・commands.ts が返す日本語の文言。新しい文言を足したら、ここにも足す
 // （tests/regression/review4.test.ts が、不正な入力で出るメッセージに日本語が残らないことを確かめる）
+import { PATH_FIELDS } from './commands';
+import { type Lang, getLang, listSep } from './i18n';
+
 const EXACT: Record<string, string> = {
   'JSONとして読めません': 'The file is not valid JSON',
   '配列、または suppressions を持つオブジェクトが必要です': 'Expected an array, or an object with a suppressions array',
@@ -10,12 +13,12 @@ const EXACT: Record<string, string> = {
   'trustedScriptOrigins：https://cdn.example.com や *.example.com の形の配列にしてください': 'trustedScriptOrigins: use an array of origins such as https://cdn.example.com or *.example.com',
   'sessionCookieNames：Cookie名（英数字と記号）の配列にしてください': 'sessionCookieNames: use an array of cookie names (letters, digits and symbols)',
   'severity：項目ID（例：H-10）と重要度の組のオブジェクトにしてください': 'severity: use an object that maps check IDs (such as H-10) to severities',
-  'sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）':'sessionMaxAgeHours must be a number of hours from 1 to 9600 (the default of 24 hours is used)',
+  'sessionMaxAgeHours は 1 以上 9600 以下の時間数にしてください（既定の24時間を使います）': 'sessionMaxAgeHours must be a number of hours from 1 to 9600 (the default of 24 hours is used)',
   'ホスト名は英数字・ハイフン・ドット（必要なら :ポート）だけで書いてください': 'Use only letters, digits, hyphens and dots in the host name (plus :port if needed)',
   'apexドメインの書き方が正しくありません': 'The apex domain is not valid',
   'name は文字列にしてください': 'name must be a string',
 };
-const FIELD: Record<string, string> = { 機密のAPI: 'Sensitive API', ログイン: 'Login', 認証後のページ: 'Page behind login', ログアウト: 'Logout', '静的リソース（JS）': 'Static resource (JS)', WebSocket: 'WebSocket' };
+const FIELD: Record<string, string> = Object.fromEntries(Object.values(PATH_FIELDS).map(f => [f.ja, f.en]));
 const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：ruleId が不正です$/, m => `Entry ${m[1]}: invalid ruleId`],
   [/^(\d+)件目：ruleId「(.*)」は項目IDではありません$/s, m => `Entry ${m[1]}: ruleId "${m[2]}" is not a check ID`],
@@ -27,7 +30,7 @@ const PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^(\d+)件目：approver は文字列で書きます$/, m => `Entry ${m[1]}: approver must be a string`],
   [/^(\d+)件目：until は YYYY-MM-DD で書きます$/, m => `Entry ${m[1]}: until must be YYYY-MM-DD`],
   [/^「(.*)」は組織プロファイルの項目ではありません$/s, m => `"${m[1]}" is not a profile setting`],
-  [/^severity：「(.*)」は項目IDではありません$/s,m => `severity: "${m[1]}" is not a check ID`],
+  [/^severity：「(.*)」は項目IDではありません$/s, m => `severity: "${m[1]}" is not a check ID`],
   [/^severity：「(.*)」は条件番号が(.+)にありません（1〜(\d+)）$/s, m => `severity: "${m[1]}" is not a condition of ${m[2]} (1 to ${m[3]})`],
   [/^severity：「(.*)」の重要度は high・medium・low・info のいずれか$/s, m => `severity: the severity for "${m[1]}" must be high, medium, low or info`],
   [/^(.+)のパスは \/ で始まる英数字と - \. _ ~ % \/ で書いてください$/, m => `${FIELD[m[1]] ?? m[1]} path: start with / and use only letters, digits and - . _ ~ % /`],
@@ -40,4 +43,4 @@ export function messageEn(ja: string): string {
 }
 
 /** エラーの一覧を画面の言語でつなぐ */
-export const joinMessages = (list: string[], lang: string) => (lang === 'en' ? list.map(messageEn).join('; ') : list.join('、'));
+export const joinMessages = (list: string[], l: Lang = getLang()) => (l === 'en' ? list.map(messageEn) : list).join(listSep(l));

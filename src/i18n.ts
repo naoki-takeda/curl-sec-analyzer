@@ -1,7 +1,7 @@
 // i18n.ts：画面の文言（日本語と英語）。推奨対応の英訳は recommendationsEn.ts。判定の証跡・解析警告・CSV は日本語のみ
 import type { CoverageStatus, Severity, Status } from './model';
 import type { DiffKind } from './engine/diff';
-import type { CommandOptions } from './commands';
+import { type CommandOptions, PATH_FIELDS } from './commands';
 import { ITEMS } from './engine/coverage';
 
 export type Lang = 'ja' | 'en';
@@ -14,6 +14,16 @@ export function setLang(l: Lang) {
   lang = l; document.documentElement.lang = l;
   document.title = l === 'en' ? 'curl-sec-analyzer: check web security settings from curl output' : 'curl-sec-analyzer：curlの出力でWebセキュリティ設定を判定';
 }
+
+/** コマンド生成器のパスの欄の名前（入力の誤りの文言と同じ名前にする） */
+const pathFields = (l: Lang) =>
+  Object.fromEntries(Object.entries(PATH_FIELDS).map(([k, f]) => [k, f[l]])) as Record<keyof typeof PATH_FIELDS, string>;
+
+/** 理由・エラーの一覧の区切り（日本語は読点、英語は「; 」） */
+export const listSep = (l: Lang = lang) => (l === 'en' ? '; ' : '、');
+/** 項目ID・ラベル・基準の短い並びの区切り（日本語は中黒、英語は「, 」）。基準の種類（ASVS と IPA）の区切りは standardsSep */
+export const itemSep = (l: Lang = lang) => (l === 'en' ? ', ' : '・');
+export const standardsSep = (l: Lang = lang) => (l === 'en' ? '; ' : '・');
 
 const ja = {
   tagline: 'curl と openssl の出力、またはブラウザの HAR を読み込むと、HTTPヘッダ・Cookie・CORS・リダイレクト・TLS・APIの設定を判定します。',
@@ -29,21 +39,27 @@ const ja = {
   loadBaseline: '前回の結果（JSON）を読み込む',
   noSuppressions: '例外の登録はありません', suppressionsStatus: (n: number, a: number) => `例外 ${n}件（有効 ${a}件、期限切れ ${n - a}件）`,
   noProfile: '組織プロファイル：なし（既定の重要度）', profileStatus: (name: string) => `組織プロファイル：${name || '（名前なし）'}`,
-  legacyHarKeys: (n: number) => `前回の結果・例外のうち${n}件は以前の版（v0.4.30 まで）の形式で記録されているため、今の結果と突き合いません（例外は登録し直し、前回の結果はこの版で出力し直してください）。`,
+  legacyHarKeys: (n: number) => `前回の結果・例外のうち${n}件は以前の版の形式で記録されているため、今の結果と突き合いません（例外は登録し直し、前回の結果はこの版で出力し直してください）。`,
   noBaseline: '前回の結果：なし', baselineSkipped: (n: number) => `前回の結果のうち${n}件は、形式が正しくないため除外しました（このツールでエクスポートしたJSONを使ってください）。`, baselineStatus: (at: string) => `前回の結果：${at || '日時不明'}`,
   emptyInput: 'curlの出力を貼り付けてから「判定する」を押してください。', tooLarge: (mb: number) => `入力が大きすぎます（上限${mb}MB）。`,
   fileTooLarge: (mb: number) => `ファイルが大きすぎます（上限${mb}MB）。ターゲットを分けて読み込んでください。`,
   settingsTooLarge: (mb: number) => `ファイルが大きすぎます（上限${mb}MB）。このツールで書き出したファイルを選んでください。`,
-  profileKept: '（形式の違うファイルなので、読み込み済みの組織プロファイルを使い続けます）',
+  profileKept: '形式の違うファイルなので、読み込み済みの組織プロファイルを使い続けます。',
+  baselineInvalid: (n: number) => `前回の結果を読み込めませんでした：${n}件の指摘のどれも形式が正しくありません（このツールでエクスポートしたJSONを使ってください）。`,
+  baselineKept: '読み込み済みの前回の結果を使い続けます。', fileUnreadable: 'ファイルを読めませんでした。もう一度選んでください。',
+  harNoEntries: '判定するHARのエントリがありません。対象ホストの選択とラベルの「除外」を見直してください。',
+  confirmDropHar: '読み込んだ（読み込み中の）HARを外して、サンプルで判定します。よろしいですか？',
+  confirmDropHarAndInput: '読み込んだ（読み込み中の）HARを外し、貼り付けた内容をサンプルで置き換えて判定します。よろしいですか？',
   suppressedCount: (n: number) => `例外を当てた指摘（項目×条件）：${n}件（重要度別の件数には含めていません。「合格・判定不能・例外も表示」で確認できます）`,
   noResponse: 'HTTPの応答が見つかりませんでした。curl に -i、-D -、-v のいずれかを付けて実行した出力を貼り付けてください。',
   analyzed: (targets: number, fails: number, high: number) => `${targets}件のターゲットを判定しました。指摘（項目×条件）${fails}件（うち重要度「高」${high}件）。`,
   analyzing: '判定しています…',
   workerFailed: '判定を始められなかったか、結果を受け取れませんでした。ブラウザが Web Worker を使えない、メモリが足りない、またはツールの不具合の可能性があります。',
   analysisCancelled: '判定中に入力が変わったので、判定を止めました。もう一度「判定する」を押してください。',
+  formNotAnalyzed: '設定に合わせて、表示中の結果の入力で判定し直しました。入力欄の変更は、「判定する」を押すと判定します。',
   analysisFailed: '判定の途中でエラーが発生したため、結果を消しました。入力の形式を確認してください（ツールの不具合の可能性があります）。',
   emptyTitle: 'まだ判定していません',
-  emptySteps: ['「コマンドを作る」で、対象のホスト名とパスから採取用のスクリプトを作る', '自分の端末でスクリプトを実行し、out.txt を作る（ログインにはテスト用アカウントを使う）', 'out.txt を左に貼り付けるか「ファイルを開く」で読み込み、「判定する」を押す'],
+  emptySteps: ['「コマンドを作る」で、対象のホスト名とパスから採取用のスクリプトを作る', '自分の端末でスクリプトを実行し、out.txt を作る（ログインにはテスト用アカウントを使う）', 'out.txt を入力欄に貼り付けるか「ファイルを開く」で読み込み、「判定する」を押す'],
   openGenerator: 'コマンドの生成へ', trySample: 'サンプルで試す', emptyHave: 'curl の出力やブラウザの HAR がすでにあれば、そのまま貼り付けるか読み込んでください。',
   inputHidden: (n: number) => `貼り付けた出力（${n}行）は隠しています。パスワードやCookieが含まれるため、画面共有やスクリーンショットに注意してください。`,
   showInput: '入力を表示する', hideInput: '入力を隠す', confirmReplace: '貼り付けた内容をサンプルで置き換えます。よろしいですか？',
@@ -60,7 +76,8 @@ const ja = {
   kinds: { html: 'HTML', api: 'API', other: 'その他' }, unknown: '不明', yes: 'はい', no: 'いいえ', urlUnknown: 'URL不明', noResp: '応答なし',
   nothingToShow: '表示する指摘はありません。', crossTitle: 'ホスト単位・ターゲット横断の判定',
   suppressedNote: (r: string, a: string, u: string) => `例外：${r}（${a || '承認者なし'}、${u || '期限なし'}）`, addSuppression: '例外に登録',
-  profileChanged: (from: string) => `プロファイルで変更（元：${from}）`,
+  profileWas: (from: string) => `（元：${from}）`,
+  profileLegend: '「*」は、組織プロファイルで重要度を変えた指摘です（かっこの中は元の重要度）。',
   coverage: '診断カバレッジ', coverageRate: (e: number, d: number, ni: number, m: number) => `${e} / ${d} 項目を判定（未対応 ${ni} 項目、手動確認 ${m} 項目）`,
   coverageNote: '「入力不足」の項目は、必要なラベルのターゲットを追加して採取すると判定できます。率が高くても、安全であることの保証にはなりません。項目名に添えた ASVS（OWASP ASVS 5.0.0）と IPA（安全なウェブサイトの作り方 改訂第7版）の番号は関連する要件で、その要件を満たすかどうかの判定ではありません。',
   allCategories: 'すべての区分', filterCategory: '区分で絞り込む', manualNote: '第8章の様式に記録する', command: 'コマンド',
@@ -68,15 +85,16 @@ const ja = {
   diff: '前回との差分', diffSummary: (n: number, r: number, s: number, sup: number, nr: number, c: number) => `新規 ${n}件、解消 ${r}件、重要度の変化 ${s}件、例外登録 ${sup}件、再診断していない ${nr}件、継続 ${c}件`,
   diffNote: '「再診断していない」は、前回の指摘のうち今回の入力で同じターゲット・項目を判定していないものです。「例外登録」は、今回は例外を適用した指摘で、解消には数えません。curl はラベルで、HAR はメソッドとURLで突き合わせます。',
   diffProfileWarning: '前回と今回で組織プロファイルが違います。「重要度の変化」や「解消」には、設定の違いによるものが含まれます。',
+  diffRulesetUnknown: (b: string) => `前回の結果のルールセットの版が分かりません（今回は${b}）。ルールの追加・変更による差分が含まれることがあります。`,
   diffRulesetWarning: (a: string, b: string) => `前回（ルールセット ${a}）と今回（${b}）でルールセットの版が違います。ルールの追加・変更による差分が含まれます。`,
   missingPair: (a: string, b: string, item: string) => `「${a}」はありますが「${b}」がありません。横断ルール（${item}）を判定できません。`,
   preloadNoApex: 'HSTS に preload がありますが「apex」ラベルのターゲットがありません（H-02③）。',
   englishNote: '',
   resultsLabel: '判定結果',
-  framed: { title: 'このツールは、他のサイトに埋め込んだ状態では使えません。', note: '貼り付ける内容を守るため、単独のタブで開いてください。', open: 'このツールを直接開く' },
-  dlg: { title: '例外に登録', scope: '範囲', onlyCond: (x: string) => `この条件だけ（${x}）`, wholeItem: (x: string) => `この項目すべて（${x}）`, reason: '理由（必須）', approver: '承認者', until: '期限', needReason: '理由を入力してください。', save: '登録する', cancel: 'やめる', note: (t: string, target: string) => `${t}（対象：${target}）。登録した例外は「例外ファイル」で保存し、次回は読み込んで使います。` },
+  framed: { title: 'このツールは、ほかのページに埋め込んだ状態では使えません。', note: '貼り付ける内容を守るため、単独のタブで開いてください。', open: 'このツールを直接開く' },
+  dlg: { title: '例外に登録', scope: '範囲', onlyCond: (x: string) => `この条件だけ（${x}）`, wholeItem: (x: string) => `この項目すべて（${x}）`, reason: '理由（必須）', approver: '承認者', until: '期限', needReason: '理由を入力してください。', pastUntil: '期限が過去の日付です（登録してもすぐに無効になります）。今日以降の日付にするか、空にしてください。', save: '登録する', cancel: 'やめる', note: (t: string, target: string) => `${t}（対象：${target}）。登録した例外は「例外ファイル」で保存し、次回は読み込んで使います。` },
   gen: { title: 'コマンドを作る（推奨コマンド C1〜C26）', note: 'ホスト名とパスを入れると、#TARGET 付きのコマンドを作ります。実行は自分の端末で行い、出力（out.txt）をここに貼り付けます。ログインには login.txt（POST本文）を用意してください。',
-    fields: { host: 'ホスト名', apex: 'apexドメイン（任意）', apiPath: '機密のAPI', loginPath: 'ログイン', mypagePath: '認証後のページ', logoutPath: 'ログアウト', staticPath: '静的リソース（JS）', wsPath: 'WebSocket（任意）' } satisfies Record<Exclude<keyof CommandOptions, 'dangerous'>, string>,
+    fields: { host: 'ホスト名', apex: 'apexドメイン（任意）', ...pathFields('ja'), wsPath: `${PATH_FIELDS.wsPath.ja}（任意）` } satisfies Record<Exclude<keyof CommandOptions, 'dangerous'>, string>,
     danger: '検証環境でだけ行う試験（CRLF、メソッド上書き、送信元の偽装、Content-Type）も含める。DELETE など、データを消しうる試験は生成しません', make: 'コマンドを作る', copy: 'コピー', saveSh: 'csa-collect.sh として保存',
     copied: 'コピーしました。', copyFailed: 'コピーできませんでした。選択した状態にしたので、手動でコピーしてください。', output: '生成したコマンド' },
   har: { loading: 'HARを読み込んでいます…', tooLarge: (mb: number) => `HARが大きすぎます（上限${mb}MB）。対象の操作だけを記録して書き出してください。`, failed: (k: HarFailure) => `HARを読み込めませんでした。${{ json: 'JSONの形式が正しくありません。', format: 'HARの形式として読めません。', read: 'ファイルを読めません。', worker: 'ブラウザが Web Worker を使えない、メモリが足りない、またはツールの不具合の可能性があります。' }[k]}`,
@@ -84,7 +102,9 @@ const ja = {
     title: (name: string) => `HARのエントリ一覧（${name}）`, note: 'ラベルはリダイレクトをまとめた単位で付けます。after-logout・session-sample・CORS・TLS・既知ファイルなど細工したリクエストが必要な項目は、curl で別に採取してください。',
     sanitized: 'Cookie・Set-Cookie が含まれていません。ブラウザの設定で機密情報を含めて書き出すと、Cookie の項目も判定できます。', hosts: '対象ホスト：', remove: 'HARを外す', exclude: '除外',
     method: 'メソッド', status: 'ステータス', hops: (n: number) => `（${n}ホップ）`, labelFor: (m: string, u: string) => `${m} ${u} のラベル`, sensFor: (u: string) => `${u} の機密区分`, auto: (y: boolean): string => (y ? '自動（はい）' : '自動（不明）') },
-  readErrors: (what: string, e: string) => `${what}の一部を読み込めませんでした：${e}`,
+  readErrors: (what: string, e: string) => `${what}の一部を読み込めませんでした：${e}。`, suppressionsName: '例外ファイル', profileName: '組織プロファイル',
+  readFailed: (what: string, e: string) => `${what}を読み込めませんでした：${e}。`, suppressionsKept: '登録済みの例外を使い続けます。',
+  baselineError: (e: string) => `前回の結果を読み込めませんでした：${e}。`,
 };
 type Dict = typeof ja;
 
@@ -104,21 +124,27 @@ const en: Dict = {
   loadBaseline: 'Load previous results (JSON)',
   noSuppressions: 'No exceptions', suppressionsStatus: (n, a) => `${n} exception${s(n)} (${a} active, ${n - a} expired)`,
   noProfile: 'Organization profile: none (default severities)', profileStatus: name => `Organization profile: ${name || '(unnamed)'}`,
-  legacyHarKeys: n => `${n} entr${n === 1 ? 'y uses' : 'ies use'} the format of an earlier version (v0.4.30 or before), so ${n === 1 ? 'it does' : 'they do'} not match the current results (register the exceptions again, and export the previous results again with this version).`,
+  legacyHarKeys: n => `${n} entr${n === 1 ? 'y uses' : 'ies use'} the format of an earlier version, so ${n === 1 ? 'it does' : 'they do'} not match the current results (register the exceptions again, and export the previous results again with this version).`,
   noBaseline: 'Previous results: none', baselineSkipped: n => `${n} of the previous findings ${n === 1 ? 'was' : 'were'} skipped because their format is invalid (use JSON exported by this tool).`, baselineStatus: at => `Previous results: ${at || 'date unknown'}`,
   emptyInput: 'Paste curl output, then select Analyze.', tooLarge: mb => `The input is too large (${mb} MB limit).`,
   fileTooLarge: mb => `The file is too large (${mb} MB limit). Split it by target.`,
   settingsTooLarge: mb => `The file is too large (${mb} MB limit). Choose a file exported by this tool.`,
-  profileKept: ' (The file is not a profile, so the loaded organization profile is kept.)',
+  profileKept: ' The file is not a profile, so the loaded organization profile is kept.',
+  baselineInvalid: n => `Could not load the previous results: none of the ${n} finding${s(n)} has a valid format (use JSON exported by this tool).`,
+  baselineKept: ' The loaded previous results are kept.', fileUnreadable: 'The file could not be read. Select it again.',
+  harNoEntries: 'There are no HAR entries to analyze. Check the selected target hosts and the entries set to Exclude.',
+  confirmDropHar: 'Remove the HAR file (loaded or loading) and analyze the sample?',
+  confirmDropHarAndInput: 'Remove the HAR file (loaded or loading), replace your pasted content with the sample, and analyze it?',
   suppressedCount: n => `Findings (check × condition) covered by exceptions: ${n} (not in the severity counts; select Show passes, N/A and exceptions to see them).`,
   noResponse: 'No HTTP response found. Paste output from curl run with -i, -D - or -v.',
   analyzed: (targets, fails, high) => `Analyzed ${targets} target${s(targets)}: ${fails} finding${s(fails)}, ${high} high.`,
   analyzing: 'Analyzing…',
   workerFailed: 'The analysis could not start or its result could not be received. The browser may not allow Web Workers, memory may be low, or this may be a bug in the tool.',
-  analysisCancelled: 'The input changed during analysis, so the analysis was stopped. Press Analyze again.',
+  analysisCancelled: 'The input changed during analysis, so the analysis was stopped. Select Analyze again.',
+  formNotAnalyzed: ' Re-analyzed the input of the shown result with the new settings. Select Analyze to analyze your changes to the input.',
   analysisFailed: 'An error occurred while analyzing, so the previous results were cleared. Check the input format (this may be a bug in the tool).',
   emptyTitle: 'Nothing analyzed yet',
-  emptySteps: ['Build a capture script from the host name and paths with “Build commands”', 'Run the script on your own machine to create out.txt (use a test account for login)', 'Paste out.txt on the left or load it with “Open file”, then select Analyze'],
+  emptySteps: ['Build a capture script from the host name and paths with “Build commands”', 'Run the script on your own machine to create out.txt (use a test account for login)', 'Paste out.txt into the input box or load it with “Open file”, then select Analyze'],
   openGenerator: 'Go to command builder', trySample: 'Try the sample', emptyHave: 'If you already have curl output or a browser HAR file, paste or load it directly.',
   inputHidden: n => `Your pasted output (${n} line${s(n)}) is hidden. It contains passwords and cookies, so take care when sharing your screen or taking screenshots.`,
   showInput: 'Show input', hideInput: 'Hide input', confirmReplace: 'Replace your pasted content with the sample?',
@@ -135,23 +161,25 @@ const en: Dict = {
   kinds: { html: 'HTML', api: 'API', other: 'Other' }, unknown: 'Unknown', yes: 'Yes', no: 'No', urlUnknown: 'URL unknown', noResp: 'No response',
   nothingToShow: 'Nothing to show.', crossTitle: 'Host-level and cross-target checks',
   suppressedNote: (r, a, u) => `Exception: ${r} (${a || 'no approver'}, ${u || 'no expiry'})`, addSuppression: 'Add exception',
-  profileChanged: from => `Changed by profile (was ${from})`,
+  profileWas: from => ` (was ${from})`,
+  profileLegend: '* Severity changed by the organization profile (the original severity is in parentheses).',
   coverage: 'Coverage', coverageRate: (e, d, ni, m) => `${e} of ${d} checks run (${ni} not implemented, ${m} manual)`,
   coverageNote: 'Checks marked “Missing input” run once you capture a target with the label shown. High coverage does not mean the system is secure. The ASVS (OWASP ASVS 5.0.0) and IPA (IPA “How to Secure Your Web Site”, 7th ed.) numbers next to each check are related requirements, not a verdict on whether the requirement is met.',
   allCategories: 'All statuses', filterCategory: 'Filter by status', manualNote: 'Record in the test record sheet', command: 'command',
   outOfScope: 'Out of scope (Ch. 7): authorization and business logic, input handling (XSS, SQL injection, etc.), logging and monitoring. Check these with OWASP ZAP, Burp Suite or code review.',
-  diff: 'Changes since previous results', diffSummary: (n, r, s, sup, nr, c) => `${n} new, ${r} resolved, ${s} severity changed, ${sup} exception registered, ${nr} not rechecked, ${c} unchanged`,
+  diff: 'Changes since previous results', diffSummary: (n, r, s, sup, nr, c) => `${n} new, ${r} resolved, ${s} severity changed, ${sup} exception${sup === 1 ? '' : 's'} registered, ${nr} not rechecked, ${c} unchanged`,
   diffNote: '“Not rechecked” means the previous finding’s target and check were not evaluated this time. “Exception registered” means an exception now applies to the finding; it is not counted as resolved. curl targets are matched by label, HAR targets by method and URL.',
   diffProfileWarning: 'The organization profile differs from the previous run, so some severity changes or resolutions come from the settings, not the system.',
+  diffRulesetUnknown: b => `The ruleset version of the previous results is unknown (this run uses ${b}). Some changes may come from added or changed rules.`,
   diffRulesetWarning: (a, b) => `The previous results used ruleset ${a}; this run uses ${b}. Some changes come from added or changed rules.`,
   missingPair: (a, b, item) => `Label “${a}” is present but “${b}” is missing, so ${item} cannot be checked.`,
   preloadNoApex: 'HSTS includes preload, but there is no target with the “apex” label (H-02③).',
   englishNote: 'Evidence, parsing warnings, the CSV export and the generated script are in Japanese. Recommendations are in English.',
   resultsLabel: 'Results',
-  framed: { title: 'This tool cannot be used inside another site.', note: 'To protect what you paste, open it in its own tab.', open: 'Open this tool directly' },
-  dlg: { title: 'Add exception', scope: 'Scope', onlyCond: x => `This condition only (${x})`, wholeItem: x => `Whole check (${x})`, reason: 'Reason (required)', approver: 'Approver', until: 'Expires', needReason: 'Enter a reason.', save: 'Add exception', cancel: 'Cancel', note: (t, target) => `${t} (target: ${target}). Save exceptions with “Exceptions file” and load them next time.` },
+  framed: { title: 'This tool cannot be used inside another page.', note: 'To protect what you paste, open it in its own tab.', open: 'Open this tool directly' },
+  dlg: { title: 'Add exception', scope: 'Scope', onlyCond: x => `This condition only (${x})`, wholeItem: x => `Whole check (${x})`, reason: 'Reason (required)', approver: 'Approver', until: 'Expires', needReason: 'Enter a reason.', pastUntil: 'The expiry date is in the past (the exception would not apply). Choose today or a later date, or leave it empty.', save: 'Add exception', cancel: 'Cancel', note: (t, target) => `${t} (target: ${target}). Save exceptions with “Exceptions file” and load them next time.` },
   gen: { title: 'Build commands (recommended commands C1–C26)', note: 'Enter a host name and paths to build commands with #TARGET lines. Run them on your own machine and paste the output (out.txt) here. Prepare login.txt (the login POST body) first.',
-    fields: { host: 'Host name', apex: 'Apex domain (optional)', apiPath: 'Sensitive API', loginPath: 'Login', mypagePath: 'Page behind login', logoutPath: 'Logout', staticPath: 'Static resource (JS)', wsPath: 'WebSocket path (optional)' },
+    fields: { host: 'Host name', apex: 'Apex domain (optional)', ...pathFields('en'), wsPath: `${PATH_FIELDS.wsPath.en} path (optional)` },
     danger: 'Include tests for test environments only (CRLF, method override, IP spoofing, Content-Type). Tests that may delete data, such as DELETE, are never generated', make: 'Build commands', copy: 'Copy', saveSh: 'Save as csa-collect.sh',
     copied: 'Copied.', copyFailed: 'Could not copy. The text is selected so you can copy it manually.', output: 'Generated commands' },
   har: { loading: 'Loading HAR…', tooLarge: mb => `The HAR file is too large (${mb} MB limit). Record only the steps you need.`, failed: k => `Could not load the HAR file. ${{ json: 'It is not valid JSON.', format: 'It is not in the HAR format.', read: 'The file could not be read.', worker: 'The browser may not allow Web Workers, memory may be low, or this may be a bug in the tool.' }[k]}`,
@@ -159,7 +187,9 @@ const en: Dict = {
     title: name => `HAR entries (${name})`, note: 'Labels apply to each redirect chain. Capture after-logout, session samples, CORS, TLS and known files separately with curl.',
     sanitized: 'This HAR has no Cookie or Set-Cookie headers. Export it with sensitive data included to check cookies.', hosts: 'Hosts:', remove: 'Remove HAR', exclude: 'Exclude',
     method: 'Method', status: 'Status', hops: n => ` (${n} hops)`, labelFor: (m, u) => `Label for ${m} ${u}`, sensFor: u => `Sensitivity for ${u}`, auto: y => (y ? 'Auto (yes)' : 'Auto (unknown)') },
-  readErrors: (what, e) => `Part of the ${what} could not be loaded: ${e}`,
+  readErrors: (what, e) => `Part of the ${what} could not be loaded: ${e}.`, suppressionsName: 'exceptions file', profileName: 'organization profile',
+  readFailed: (what, e) => `Could not load the ${what}: ${e}.`, suppressionsKept: ' The registered exceptions are kept.',
+  baselineError: e => `Could not load the previous results: ${e}.`,
 };
 
 export const tr = (): Dict => (lang === 'en' ? en : ja);

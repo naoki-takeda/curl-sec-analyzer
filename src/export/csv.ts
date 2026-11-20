@@ -51,7 +51,8 @@ function sourceMeta(f: Finding, ix: MetaIndex): { at: string; cmd: string } {
       src = picked.length ? picked : onHost;
     } else {
       const parts = f.target.split('/').map(p => p.trim()).filter(Boolean);
-      src = ix.targets.filter(t => parts.some(p => (p.endsWith('*') ? t.label.startsWith(p.slice(0, -1)) : t.label === p)));
+      // 接頭辞（session-sample-*）は、判定と同じく付け直したラベル（session-sample-1#2）を除く（engine/run.ts の withPrefix）
+      src = ix.targets.filter(t => parts.some(p => (p.endsWith('*') ? t.label.startsWith(p.slice(0, -1)) && !/#\d+$/.test(t.label) : t.label === p)));
     }
   }
   // 最も新しい日時は、時刻として比べる（文字列で並べると、T 区切りと空白区切りが混ざったときに時刻順にならない）

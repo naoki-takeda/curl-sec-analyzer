@@ -1,5 +1,5 @@
 // mask.ts：画面とエクスポートに出す値のマスキング（常に行う。切り替えはない）
-import { lowerToken } from './tokenShape';
+import { ASSET_EXT, buildAssetName, secretPiece, wordPrefix } from './tokenShape';
 // 生のヘッダ行は画面・エクスポートに出さない（Cookie の値は rules/cookies.ts の cookieEvidence でマスクする）ので、ヘッダ行用の関数は持たない。
 // 突き合わせのキー（engine/targetKey.ts）と CSV の実施コマンド（export/cmdSummary.ts）は、このファイルを使わずに許可リストで作る
 // URLのパラメータ：検出（A-02・C-09②）の一覧は、マスクする名前に必ず含まれる（検出したものは必ずマスクされる）。
@@ -180,55 +180,8 @@ const PATH_SEGMENT = /(?<=(?<!\/)\/|(?<=[\w.~%+/-]\/)(?<!%(?:25)*3[Aa]\/)\/|(?<!
  */
 export const HASH_SOURCE = String.raw`(?<![\w-])(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)(?![\w+/=-])`;
 const HASH_OR_SEGMENT = new RegExp(`(${HASH_SOURCE})|${PATH_SEGMENT.source}`, 'g');
-/** 秘密らしい語。これを含む名前は、語だけでできていても wordName としない */
-const SECRET_WORD = /token|secret|session|passw|pwd|auth|cred|apikey|^keys?$/i;
-/** 名前のかたまり：3文字までの語（csv・v2 の v）、4文字までの大文字の略語（API・PDF）、4桁までの数字、12文字までで母音（aeiou）が4分の1以上あり、
- *  子音が4つ・母音が3つ続かない語（History・Export） */
-const wordChunk = (w: string) => (/^\d+$/.test(w) ? w.length <= 4 : w.length <= 3 || (/^[A-Z]+$/.test(w) ? w.length <= 4
-  : w.length <= 12 && (w.match(/[aeiou]/gi) ?? []).length / w.length >= 0.25 && !/[^aeiouy]{4}|[aeiou]{3}/i.test(w)));
-/**
- * 英語の語と短い数字をつないだ名前（MyCompanyLogo2026Final.png、/docs/GettingStartedV2Guide）か。トークンとして伏せると、読めないうえに
- * 別のページが同じ表示になる。- _ で区切った部分ごとに、かたまり（語・大文字の略語・数字）に分け、すべてが wordChunk で、かたまりの平均が3.5文字以上、
- * 4文字以上の語が全体で3つ以上あるものだけを名前とする。乱数のトークン（Dk3x9Lq2AbZ7…）はかたまりが短く、母音の少ない長いかたまりを含むので
- * 当たらない（16文字のトークンで、乱数1万個のうち当たるのは数個）
- */
-const wordName = (p: string): boolean => {
-  let words = 0;
-  for (const part of p.split(/[-_]/)) {
-    if (!part) continue;
-    const ws = part.match(/[A-Z][a-z]+|[a-z]+|[A-Z]+(?![a-z])|\d+/g) ?? [];
-    // 短い部分（_csv・_v12・-Q3）は平均を見ない
-    if (!ws.length || (part.length > 4 && part.length / ws.length < 3.5) || !ws.every(wordChunk) || ws.some(w => SECRET_WORD.test(w)) || SECRET_WORD.test(part)) return false;
-    // キャメルケースで小文字だけの語は先頭の1つだけ（小文字と数字だけのトークン kh8uerlepa7qxrul… を名前としない）
-    if (ws.filter(w => /^[a-z]{4,}$/.test(w)).length > 1) return false;
-    words += ws.filter(w => w.length >= 4 && /^[A-Za-z]+$/.test(w) && !/^[A-Z]+$/.test(w)).length;
-  }
-  return words >= 3;
-};
-// 小文字（または大文字）と数字だけの20文字以上の並び（base36・base32 のトークン。x7k2…・MFRGGZDF…）も、数字と英字が4つ以上ずつあれば伏せる。
-// - _ で区切った部分ごとに見る（sk_live_<トークン>）。区切りのある読める名前（2026-annual-report-v2）は部分が短いので残る
-const caseToken = (x: string) => x.length >= 20 && (/^[a-z0-9]+$/.test(x) || /^[A-Z0-9]+$/.test(x)) && (x.match(/\d/g) ?? []).length >= 4 && (x.match(/[A-Za-z]/g) ?? []).length >= 4;
-/**
- * パスのかけらがトークンの形か（16文字以上の [A-Za-z0-9_-]）：英大文字・小文字・数字をすべて含むものと、数字を含む32文字以上のもの（語と短い数字を
- * つないだ名前（wordName）は除く）、24文字以上の16進数（UUID を含む）、- _ で区切った部分が caseToken・randomLetters・lowerToken（英小文字だけの
- * 16文字以上の乱数 /reset/kqzvwxmplrtbnhjd。tokenShape.ts で突き合わせのキーと共有する）のもの。「2026-annual-report-v2」のような普通の名前は残す
- */
-const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
-  (((/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || (p.length >= 32 && /\d/.test(p))) && !wordName(p))
-  || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || p.split(/[-_]/).some(x => caseToken(x) || randomLetters(x) || lowerToken(x)));
-/**
- * 数字のない、大文字・小文字が頻繁に入れ替わり（かたまりの数が長さの4割以上）、母音が3割未満の16文字以上の並び（AbCdEfGhIjKlMnOpQrStUv）。
- * 英語の名前（GettingStartedGuide）は入れ替わりが少なく、キャメルケース（getUserByIdAndName）は母音が3〜4割ある（乱数の英字は2割ほど）。
- * 入れ替わりの多さだけで見ると、短い語をつないだ API のパスまで伏せる
- */
-const randomLetters = (x: string) => x.length >= 16 && /^[A-Za-z]+$/.test(x) && (x.match(/[a-z]+|[A-Z]+/g) ?? []).length / x.length >= 0.4
-  && (x.match(/[aeiou]/gi) ?? []).length / x.length < 0.3;
-/** 語として残してよい接頭辞（application・login・AdminDashboard）。トークンの先頭（QwErTyUiOpAsDfGhJk）は残さない */
-const wordPrefix = (w: string) => w.length <= 20 && (w.match(/[a-z]+|[A-Z]+/g) ?? []).length / w.length < 0.3;
 /** 長さだけを残して伏せる（語を残した残りの部分と、個人の番号）。maskValue は先頭の数文字も残す */
 const bare = (v: string) => `…(${v.length} chars)`;
-// ビルドしたファイルの名前として伏せないのは、静的ファイルの拡張子が付いた部分だけ（/magic/login-Xy7Kp2Lm9Qa のようなトークンを伏せ忘れない）
-const ASSET_EXT = /\.(?:m?js|css|map|woff2?|ttf|otf|svg|png|jpe?g|gif|webp|avif|ico)$/i;
 // 公開の値を入れる決まった名前（utm_*・gclid・list・id・title・q など）。名前が一覧にないパラメータとしては値を見ない（キャンペーン名・動画の一覧・
 // UUID の ID を伏せない）
 const PUBLIC_PARAM = /^(?:utm_\w+|gclid|gbraid|wbraid|fbclid|msclkid|yclid|dclid|mc_cid|mc_eid|_ga|_gl|list|v|vid|video|id|ids|uuid|guid|title|name|slug|q|query|search|keyword|s|ref|ref_src|lang|locale|hl|page|sort|order|category|cat|tag|tags|format|type|mode|view|tab|ver|version)$/i;
@@ -256,16 +209,6 @@ const maskSegment = (seg: string): string => { const asset = ASSET_EXT.test(seg)
   const m = body.match(/^([A-Za-z]{3,20}[-_])(.+)$/);
   return (m && wordPrefix(m[1].slice(0, -1)) && secretPiece(m[2]) ? m[1] + bare(m[2]) : maskValue(body)) + pad;
 }; return seg.replace(/[^.:~+]+/g, one); };
-/**
- * ビルドしたファイルの名前（英字の語を - _ でつなぎ、最後に短いハッシュを付けたもの）。Vite の AdminDashboard-Dk3x9Lq2、vendor-react-BxYz12Ab、
- * webpack の main-3f8a9c2e1b4d5f6a7b8c。ハッシュは12文字未満か、20文字以下の16進数。トークンではないので伏せない（伏せると、別のファイルが
- * 同じ表示になる）。語が token・reset・magic・login などのものは除く
- */
-const buildAssetName = (p: string): boolean => {
-  if (/^(?:token|reset|magic|share|login|invite|verify|confirm|auth|session|secret|key|code|otp|download)[-_]/i.test(p)) return false;
-  const m = p.match(/^((?:[A-Za-z]+[-_])+)([A-Za-z0-9]+)$/);
-  return !!m && (m[2].length < 12 || (m[2].length <= 20 && /^[0-9a-f]+$/i.test(m[2])));
-};
 /**
  * ASP.NET の Cookie を使わないセッション（/(S(<セッションID>))/、フォーム認証のチケット /(F(<チケット>))/、匿名ID の A(…)）。
  * パスの部分が「(」で始まるので、PATH_SEGMENT では見つからない
@@ -310,13 +253,13 @@ const JSON_NUMBERS: RegExp[] = [
 const NUMERIC_SECRET = /pin|otp|passcode|passw|pwd|secret|token|ssn|cvv|cvc|card|ccnum|暗証番号|パスワード/i;
 /**
  * 配列の値（"password":["a","b"]・入れ子の [["a"]]・エスケープした \"password\":[…]・URL エンコードした %22password%22%3A%5B…）の、すべての
- * 文字列の要素を伏せる。中身は 64KB まで、入れ子は1段まで
+ * 文字列の要素を伏せる。中身は 64K 文字まで（入れ子の [ … ] は1つに数える）、入れ子は1段まで
  */
 // 中身：括弧の外の文字（整形した JSON の改行を含む）と、1段の入れ子の [ … ]。] で中身を終える（, のあとの別のキーの配列まで読まない）。
 // 閉じの ] を待たない（中身が上限を超えた配列でも、上限までの要素を伏せる）
 const IN_ARRAY = String.raw`((?:[^[\]]|\[[^[\]]*\]){0,65536})`;
 const E_OPEN = String.raw`%(?:25)*5[Bb]|\[`, E_CLOSE = String.raw`%(?:25)*5[Dd]|\]`, E_CH = String.raw`(?:(?!${E_OPEN}|${E_CLOSE})[^&\s"'<>#])`;
-// 値がオブジェクト（"password":{"value":"…"}）のときも、中の文字列の値を伏せる。中身は入れ子のない { … } の 64KB まで
+// 値がオブジェクト（"password":{"value":"…"}）のときも、中の文字列の値を伏せる。中身は入れ子のない { … } の 64K 文字まで
 const IN_OBJECT = String.raw`([^{}]{0,65536})`;
 const O_OPEN = String.raw`%(?:25)*7[Bb]|\{`, O_CH = String.raw`(?:(?!${O_OPEN}|%(?:25)*7[Dd]|\})[^&\s"'<>#])`;
 // 中身の文字列。あとに : が続くもの（オブジェクトのキー "v":）は伏せずに読み進める（キーの閉じの " から次の " までを文字列として読まない）。
@@ -467,11 +410,20 @@ export const maskText = (s: string): string => {
  * 証跡の抜粋：マスクしてから切り詰める。切り詰めてからマスクすると、途中で切れた JWT（ドットが足りない）や
  * パラメータが一致せず、生の値が残るため
  */
-export const clip = (s: string, n: number) => {
-  const m = maskText(s);
+export const clip = (s: string, n: number) => clipMasked(maskText(s), n);
+/** マスク済みの文字列 m を切り詰める（clip・excerpt で共有し、マスクを2回かけない） */
+const clipMasked = (m: string, n: number) => {
   if (m.length <= n) return m;
   // 伏せた値の印（…(N chars)）の途中で切らない（「abcd…(3」では長さが読めない）。印にかかるなら、印の終わりまで含める
   const re = /…\(\d+ chars\)/g; re.lastIndex = Math.max(0, n - 20);
   for (let x = re.exec(m); x && x.index < n; x = re.exec(m)) if (x.index + x[0].length > n) return m.slice(0, x.index + x[0].length);
   return m.slice(0, n);
+};
+/**
+ * 証跡の抜粋（ルールが使う）：clip と同じく切り詰め、語の途中で切ったら、そのかけらを残さない（切れたトークンの先頭（ghp_R8kQ）は、あとで通す
+ * 許可リスト（showText）が短い語として残す）
+ */
+export const excerpt = (s: string, n: number) => {
+  const m = maskText(s); const c = clipMasked(m, n);
+  return c.length < m.length && /[\w-]/.test(m[c.length]) ? c.replace(/[\w-]+$/, '') : c;
 };

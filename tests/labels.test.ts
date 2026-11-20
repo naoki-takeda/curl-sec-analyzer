@@ -1,6 +1,6 @@
 // 診断カバレッジで案内する「必要なラベル」が、ルールの実際の判定範囲と一致することを確かめる
 import { describe, expect, it } from 'vitest';
-import { RESERVED_HINTS, requiredLabels } from '../src/engine/labels';
+import { HAR_LABEL_CHOICES, RESERVED_HINTS, allowedForHar, requiredLabels } from '../src/engine/labels';
 import { ITEMS } from '../src/engine/coverage';
 import { evaluate } from './helpers';
 
@@ -26,6 +26,13 @@ describe('必要なラベル', () => {
     expect(t('top', 'https://a.example/api', 'HTTP/2 415').some(i => i.startsWith('A-08'))).toBe(false);
     expect(t('logout', 'https://a.example/logout', 'HTTP/2 302\nlocation: /')).toContain('H-15.1');
     expect(t('http', 'http://a.example/admin', 'HTTP/1.1 401 Unauthorized\nWWW-Authenticate: Basic realm="x"')).toContain('A-01.3');   // B：HTTPでのBasic認証
+  });
+});
+
+describe('HARで付けられる予約ラベル', () => {
+  it('labels.json の HAR で使える行から、設計書の許可リストの順に作る（csp-sample-* は比べる2つ、error-* はエントリごとの番号なので除く）', () => {
+    expect(HAR_LABEL_CHOICES).toEqual(['http', 'apex', 'pre-login', 'login', 'logout', 'csp-sample-1', 'csp-sample-2']);
+    for (const l of HAR_LABEL_CHOICES) expect(allowedForHar(l)).toBe(true);
   });
 });
 

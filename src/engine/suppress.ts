@@ -41,7 +41,8 @@ const isKeyTarget = (target: string): boolean => {
 
 /**
  * 例外が指摘に当てはまるか。currentKeys は今回の結果のキーの一覧（applySuppressions が渡す）。
- * 例外の target が今の形式のキー（画面で登録したもの）か、今回のどれかのキーと同じなら、キーの完全一致だけで判定する（画面で1つのターゲットに
+ * 例外の target が今の形式のキー（画面で登録したもの）か、今回のどれかのキーと同じなら、キーの完全一致（と、キーがラベルだけになった指摘の
+ * 「ラベル URL」）だけで判定する（画面で1つのターゲットに
  * 登録したキー HAR GET https://a.example/* の *（伏せたパスの部分）で、/login・/admin・/ の指摘まで抑止しない。そのページを含まない回の入力でも
  * 同じなので、今回のキーにあるかではなく、キーの形で見分ける）。それ以外の target（以前の版の形式のキー、手で書いたパターン HAR GET *）は、
  * * を任意の文字列として、キーの全体と照合する（1つの部分の中だけにすると、HAR GET * や log* が効かない）
@@ -59,8 +60,9 @@ export function matches(s: Suppression, f: Finding, currentKeys?: ReadonlySet<st
     || (pattern && !!f.targetKey && f.targetKey.includes('://') && s.target.includes('*') && !currentKeys?.has(s.target) && !isKeyTarget(s.target) && wildcardMatch(s.target, f.targetKey))
     // 同じラベルが1つに減って、キーが「ラベル URL」からラベルだけになったもの（page https://a.example/b で登録した例外を外さない）。URL のキーは、
     // 生の URL から作ったもの（f.keyUrl）を使う（マスクした URL では ASP.NET の (S(…)) が * になる）。形が「ラベル 空白 URL」のときだけ比べる
-    // （組ごとに URL を解析し直すと、例外の照合が大きく遅くなる）
-    || (!!f.keyUrl && LABEL_URL.test(s.target) && s.target === `${baseLabel(f.target)} ${f.keyUrl}`)
+    // （組ごとに URL を解析し直すと、例外の照合が大きく遅くなる）。今のキーがラベルだけのときに限る（同じラベル・URL の2つ目の top#2 には
+    // 「 #2」を付けたキーがあるので、1つ目に登録した例外を当てない）
+    || (!!f.keyUrl && f.targetKey === f.target && LABEL_URL.test(s.target) && s.target === `${baseLabel(f.target)} ${f.keyUrl}`)
     || s.target === '*';   // 対象「*」はすべての指摘に当てる
   return targetOk;
 }

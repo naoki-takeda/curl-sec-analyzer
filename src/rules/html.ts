@@ -1,10 +1,10 @@
-// rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64KBまで。タグとコメントは HTML の字句解析をなぞった走査（scan）で読む
+// rules/html.ts：HTML本文のルール（E-07〜E-10、E-12）。本文は先頭64K文字まで。タグとコメントは HTML の字句解析をなぞった走査（scan）で読む
 import type { Finding, Rule, RuleContext, Target } from '../model';
-import { LOGOUT_WORD, finalResponse, firstStatus, hostOf, ownChain } from '../parser/target';
+import { LOGOUT_WORD, finalResponse, firstStatus, hostOf, ownChain, sameDocumentHop } from '../parser/target';
 import { looksLikeSessionName, parseSetCookie } from '../parser/setCookie';
 import { isTrustedOrigin } from '../engine/profile';
-import { INTERNAL_HOST, NO_BODY_REC, SENSITIVE_REC, bodyNotCaptured, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
-import { clip } from '../mask';
+import { FOLLOW_REC, INTERNAL_HOST, LOGOUT_FAILED_REC, NO_BODY_REC, SENSITIVE_REC, bodyNotCaptured, isLabelText, isPlaceholderValue, isPublicClientValue, mk, notSecretFormat, notSecretText } from './util';
+import { excerpt } from '../mask';
 import { b64urlJson } from './jwt';
 
 interface Tag {
@@ -31,7 +31,7 @@ interface Tag {
 const SHOWN_ATTRS = new Set(['src', 'href', 'action', 'data', 'rel', 'method', 'type', 'name', 'content', 'integrity', 'crossorigin', 'as']);
 function tagEvidence(name: string, attrs: Map<string, string>): string {
   const parts = [...attrs].map(([k, v]) => (SHOWN_ATTRS.has(k) ? `${k}="${v}"` : v === '' ? k : `${k}="…"`));
-  return clip(`<${[name, ...parts].join(' ')}>`, 200);
+  return excerpt(`<${[name, ...parts].join(' ')}>`, 200);
 }
 
 /**
@@ -366,7 +366,7 @@ export const htmlSecrets: Rule = { id: 'E-09', title: 'HTML本文：機密・内
     const text = posted.reduce((h, [s, e]) => h.slice(0, s) + h.slice(e), html);
     for (const [name, re] of SECRETS) if (re.test(text)) out.push(mk(htmlSecrets, ctx, 1, 'high', 'fail', `本文に「${name}」らしき値（値は表示しない）`, '秘密情報をHTML・JavaScriptに含めない。漏れた値は失効させる'));
     const iu = internalUrl(html, pageHostOf(ctx)?.toLowerCase());
-    if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${clip(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
+    if (iu) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `内部URL: ${excerpt(iu, 120)}`, '本番のHTMLに内部URLを残さない'));
     // コメントの中身はパスワードなどを含みうるので、証跡には一致した語だけを出す
     const dc = devCommentWord(html);
     if (dc) out.push(mk(htmlSecrets, ctx, 2, 'low', 'fail', `開発用コメント（「${dc}」を含む。中身は表示しない）`, 'ビルド時にコメントを削除する'));
@@ -497,13 +497,16 @@ export const passwordFormActions = (html: string): (string | undefined)[] =>
   forms(html).filter(f => f.inputs.some(isPassword)).map(f => f.form.attrs.get('action'));
 
 /**
- * ログアウトの応答が失敗（4xx・5xx）しているか、ログアウトの確認画面か。GET の /logout に 405 を返すアプリなどでは、ログアウトしていないので、
- * C-12（ログアウト後の無効化・Cookie の削除）と H-15 を判定しない
+ * ログアウトできたと言えない理由（証跡と推奨）。応答が失敗（4xx・5xx）しているか、ログアウトの確認画面なら、ログアウトしていない（GET の /logout に
+ * 405 を返すアプリなど）。同じページへの転送（apex → www、末尾の /）はたどった先で見て、転送先を採取していなければ分からない。
+ * どちらでも C-12（ログアウト後の無効化・Cookie の削除）と H-15 を判定しない
  */
-export const logoutFailed = (t: Target): boolean => {
-  const s = firstStatus(t);
-  return s >= 400 || (s >= 200 && s < 300 && logoutConfirmPage(t));
-};
+export function logoutProblem(t: Target): { ev: string; rec: string } | undefined {
+  const { hop, unfollowed } = sameDocumentHop(t); const s = hop?.status ?? firstStatus(t);
+  if (unfollowed) return { ev: `ログアウトの応答が HTTP ${s}（同じページへの転送。転送先を採取していない）`, rec: FOLLOW_REC };
+  if (s >= 400 || (s >= 200 && s < 300 && logoutConfirmPage(t))) return { ev: `ログアウトの応答が HTTP ${s}（ログアウトできていない）`, rec: LOGOUT_FAILED_REC };
+  return undefined;
+}
 /**
  * ログアウトの確認画面（GET では「ログアウトしますか」のフォームを返すだけで、POST でログアウトする作り。ASP.NET Core Identity の既定の画面、
  * Spring Security の既定のログアウトの確認画面）。次のすべてに当たるもの：

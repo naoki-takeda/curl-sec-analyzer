@@ -65,3 +65,69 @@ describe('突き合わせのキーのクエリの値', () => {
     expect(k).toContain('lang=ja'); expect(k).toContain('order=created_at');
   });
 });
+
+describe('突き合わせのキーの区切った番号とコード', () => {
+  it('カード番号・社会保障番号の形・招待のコードは、かけらごとに残さない（画面の許可リストと同じ形）', () => {
+    for (const [path, code] of [['/card/4111-1111-1111-1111', '4111'], ['/u/123-45-6789', '6789'], ['/invite/QWER-TYUI-ZXCV-ASDF', 'ZXCV'],
+      ['/invite/123456-654321-111111', '654321'], ['/r/ab12_cd34_ef56_gh78', 'cd34'], ['/invite/K7QX-9MZP', '9MZP']] as const) {
+      const k = urlKey(`https://a.example${path}`);
+      expect(k).not.toContain(code); expect(urlKey(k)).toBe(k);
+    }
+  });
+  it('日付・版・語のパスは残す', () => {
+    for (const p of ['/news/2026-11-19', '/docs/2026-annual-report-v2', '/api/v1/user-list', '/cipher/ECDHE-RSA-AES-GCM']) expect(urlKey(`https://a.example${p}`)).toBe(`https://a.example${p}`);
+  });
+});
+
+describe('#META の内部の印', () => {
+  it('入力の #META の source=・method= は受け付けない（HAR のターゲットのキーにしない）', () => {
+    const [t] = parseInput('#TARGET url=https://a.example/api label=t\n#META source=har method=Bearer_secret\nHTTP/2 200\n\n').targets;
+    expect(t.meta.source).toBeUndefined(); expect(t.meta.method).toBeUndefined();
+    expect(targetKeys([t])[0]).toBe('t');
+  });
+});
+
+describe('突き合わせのキーの番号とコード（第70回）', () => {
+  it('拡張子の付いた社会保障番号の形は残さず、版・IP アドレス・語と数字の組は残す', () => {
+    expect(urlKey('https://a.example/x/123-45-6789.pdf')).not.toContain('6789');
+    for (const p of ['/download/10.0.19045.3803/setup.exe', '/ip/192.168.100.200', '/f/x86-x64', '/f/md5-rc4'])
+      expect(urlKey(`https://a.example${p}`)).toBe(`https://a.example${p}`);
+  });
+  it('「HAR 」で始まるラベルは使えない（HAR のターゲットのキーにしない）', () => {
+    const { targets } = parseInput('#TARGET url=https://a.example/x label="HAR GET"\nHTTP/2 200\n\n#TARGET url=https://a.example/y label="HAR GET"\nHTTP/2 200\n\n');
+    expect(targets.every(t => t.label.startsWith('invalid-label'))).toBe(true);
+    expect(targetKeys(targets).some(k => k.startsWith('HAR '))).toBe(false);
+  });
+});
+
+describe('突き合わせのキーの電話番号と、長さのそろわないコード', () => {
+  it('10〜11桁の電話番号（拡張子が付いても）と、長さのそろわない乱数のかけらのコードは残さない', () => {
+    for (const [path, code] of [['/u/090-1234-5678', '5678'], ['/u/090-1234-5678.vcf', '1234'], ['/t/03-1234-5678', '5678'], ['/c/0120-123-456', '0120'],
+      ['/u/555-123-4567', '4567'], ['/u/+81-90-1234-5678', '5678'], ['/i/7Gk-p2Q-xZ81-m', 'xZ81']] as const) {
+      const k = urlKey(`https://a.example${path}`);
+      expect(k, path).not.toContain(code); expect(urlKey(k)).toBe(k);
+    }
+  });
+  it('日付に番号を付けたもの・語と数字の組・画像の大きさは残す', () => {
+    for (const p of ['/news/2026-11-19-01', '/img/1920-1080', '/f/s3-ap-northeast-1', '/f/x86-x64-v2'])
+      expect(urlKey(`https://a.example${p}`), p).toBe(`https://a.example${p}`);
+  });
+});
+
+describe('突き合わせのキーの . で区切った電話番号・コードと、ほかの電話番号の形', () => {
+  it('. で区切ったもの・拡張子が2つのもの・前に語の付いたもの・0 で始まるほかの区切り方の電話番号は残さない', () => {
+    for (const [path, code] of [['/u/090.1234.5678', '5678'], ['/u/555.123.4567', '4567'], ['/i/AB12.CD34.EF56.GH78', 'CD34'], ['/u/090-1234-5678.vcf.gz', '5678'],
+      ['/u/090-1234-5678.profile.json', '5678'], ['/u/tel090-1234-5678', '5678'], ['/u/0312-34-5678', '5678'], ['/u/01267-2-3456', '3456'], ['/u/01-23-45-67-89', '67-89'],
+      ['/i/QWER-TYUI-ZXCV-ASDF.png', 'ZXCV'],
+      // 国番号・tel:・括弧・内線の付いたもの
+      ['/u/+81-3-1234-5678', '1234'], ['/u/81-3-1234-5678', '1234'], ['/u/+33-1-23-45-67-89', '67-89'], ['/call/tel:090-1234-5678', '1234'],
+      ['/u/(090)-1234-5678', '1234'], ['/u/090-1234-5678x', '1234'], ['/u/+1-555-123-4567', '4567']] as const) {
+      const k = urlKey(`https://a.example${path}`);
+      expect(k, path).not.toContain(code); expect(urlKey(k)).toBe(k);
+    }
+  });
+  it('IP アドレス・版・ファイル名・略語は変えない', () => {
+    for (const p of ['/ip/192.168.100.200', '/ip/10.1.100.200', '/ip/010.123.123.123', '/v/2026.11.20', '/v/v1.28.3', '/img/1920-1080-60', '/download/120.0.6099.109/x.exe', '/download/10.0.19045.3803/x.exe', '/docs/user-guide-v2', '/js/jquery-3.6.0.min.js'])
+      expect(urlKey(`https://a.example${p}`), p).toBe(`https://a.example${p}`);
+  });
+});

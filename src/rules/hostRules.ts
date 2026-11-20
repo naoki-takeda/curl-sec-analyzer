@@ -3,7 +3,7 @@ import type { Finding, Rule, Severity, Status, Target } from '../model';
 import { HTML_PROBE_PATHS, htmlProbe, probePattern } from './probes';
 import { hasCertificate, nameMatches, parseOpenssl, type TlsInfo } from '../parser/openssl';
 import { hostnameOf } from '../parser/target';
-import { PROBE_UNREACHED_REC, cf } from './util';
+import { PROBE_REDIRECT_REC, PROBE_UNREACHED_REC, RETRY_REC, cf, unavailable } from './util';
 
 const hf = (rule: Rule, host: string, cond: number | 'ok' | 'na', severity: Severity, status: Status, evidence: string, recommendation: string) =>
   cf(rule, host, cond, severity, status, evidence, recommendation, host);
@@ -88,8 +88,13 @@ export const knownFiles: Rule = { id: 'E-03', title: '既知ファイル（/.git
         else if (p.code === 200) { fails++; out.push(hf(knownFiles, host, 2, 'info', 'fail', `${p.path}（HTTP 200、中身はパターンに一致しない。どのパスにも200を返す可能性）`, '中身を手動で確認する')); }
       }
       // コード 000 は接続できなかった（タイムアウト・名前解決の失敗など）ことを示し、ファイルがないことは分からない。1件でもあれば合格にしない
-      const unreached = own.filter(p => !p.code).length;
+      // 転送（3xx。apex から www へ、http から https へ）されたパスも、転送先にファイルがあるかは分からない（C13 は -L を付けない）。
+      // サーバのエラー（5xx。メンテナンス中の 503 など）とレート制限（429。C13 は短い時間に多くのパスを取る）も、ファイルがないとは言えない
+      const unreached = own.filter(p => !p.code).length; const redirected = own.filter(p => p.code >= 300 && p.code < 400).length;
+      const serverError = own.filter(p => unavailable(p.code)).length;
       if (!fails && unreached) out.push(hf(knownFiles, host, 'na', 'info', 'na', `${own.length}件のうち${unreached}件は接続できなかった（HTTP 000）`, PROBE_UNREACHED_REC));
+      else if (!fails && serverError) out.push(hf(knownFiles, host, 'na', 'info', 'na', `${own.length}件のうち${serverError}件はサーバのエラー・レート制限（HTTP 5xx・429。ファイルがあるかは分からない）`, RETRY_REC));
+      else if (!fails && redirected) out.push(hf(knownFiles, host, 'na', 'info', 'na', `${own.length}件のうち${redirected}件は転送された（HTTP 3xx。転送先を確かめていない）`, PROBE_REDIRECT_REC));
       else if (!fails && own.length) out.push(hf(knownFiles, host, 'ok', 'info', 'pass', `${own.length}件のパスはいずれも取得できなかった${html ? `（うち${html}件は HTML の画面が返った。どのパスにも同じ画面を返す SPA など）` : ''}`, ''));
     }
     return out;

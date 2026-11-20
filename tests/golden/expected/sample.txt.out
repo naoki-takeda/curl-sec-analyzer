@@ -19,7 +19,7 @@ apex | H-01.1 | high | fail | (ヘッダなし)
 apex | H-02.3 | low | fail | www.example.com は preload を付けているが、apex がHSTSを返さない
 apex | H-02.na | info | na | HSTSがない（H-01で判定）
 cors-reflect | R-01.1 | high | fail | Origin: https://evil.example → ACAO: https://evil.example / ACAC: true
-cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない）
+cors-reflect | R-02.na | info | na | Origin: https://evil.example（null では試していない。Origin: null を送ったターゲットで判定）
 cors-reflect | R-04.ok | info | pass | ACAO: https://evil.example
 cors-reflect | R-06.1 | low | fail | ACAO: https://evil.example / Vary: (なし)
 csp-sample-* | H-04.na | info | na | 

@@ -1,6 +1,6 @@
 // ui/generator.ts：コマンド生成器の画面
 import { type CommandOptions, generateScript, validate } from '../commands';
-import { getLang, tr } from '../i18n';
+import { tr } from '../i18n';
 import { joinMessages } from '../messagesEn';
 import { BTN, button, download, el, labelFor } from './dom';
 
@@ -34,7 +34,7 @@ export function commandGenerator() {
     const o: CommandOptions = { host: v('host'), apex: v('apex') || undefined, apiPath: v('apiPath'), loginPath: v('loginPath'),
       mypagePath: v('mypagePath'), logoutPath: v('logoutPath'), staticPath: v('staticPath'), wsPath: v('wsPath') || undefined, dangerous: danger.checked };
     const errors = validate(o);
-    err.textContent = joinMessages(errors, getLang());
+    err.textContent = joinMessages(errors);
     if (errors.length) { out.classList.add('hidden'); actions.classList.add('hidden'); draft.output = ''; return; }
     out.value = draft.output = generateScript(o); show();
   });

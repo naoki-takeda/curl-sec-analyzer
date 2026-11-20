@@ -1,6 +1,6 @@
 import type { Finding, Rule, RuleContext, Severity, Status } from '../model';
 import { wordLike } from '../tokenShape';
-import { BODY_LIMIT, isRedirectWithLocation } from '../parser/target';
+import { BODY_LIMIT, TCHAR, isRedirectWithLocation } from '../parser/target';
 
 /** 送ったテスト値のホスト（既知のテスト値。ツール設計1。生成するコマンド（src/commands.ts）と同じ値） */
 export const TEST_HOST = 'evil.example';
@@ -75,6 +75,9 @@ export function parseCsp(v: string): Map<string, string[]> {
   return m;
 }
 
+/** HSTS の1つのディレクティブ：名前、または名前=値（値はトークンか引用符の文字列） */
+const HSTS_DIRECTIVE = new RegExp(String.raw`^(${TCHAR}+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|(${TCHAR}+)))?$`);
+
 /**
  * HSTS のヘッダを RFC 6797 6.1 のとおりに読む。「;」で分けた各ディレクティブが「名前」か「名前=値」（値はトークンか引用符の文字列）で、
  * 同じディレクティブが2回なく、max-age が数字であるときだけ有効（ブラウザは無効なヘッダを無視する（8.1））。
@@ -85,7 +88,7 @@ export function parseHsts(v: string | undefined): { valid: boolean; maxAge: numb
   const seen = new Set<string>(); let maxAge: number | undefined;
   for (const raw of hstsParts(v)) {
     const d = raw.trim(); if (!d) continue;
-    const m = d.match(/^([!#$%&'*+.^_`|~0-9A-Za-z-]+)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([!#$%&'*+.^_`|~0-9A-Za-z-]+)))?$/);
+    const m = d.match(HSTS_DIRECTIVE);
     if (!m) return { valid: false, maxAge: 0 };
     const name = m[1].toLowerCase();
     if (seen.has(name)) return { valid: false, maxAge: 0 };
@@ -122,6 +125,9 @@ export const LOGIN_FAILED_REC = 'テスト用アカウントでログインで�
 export const SENSITIVE_REC = '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける';
 /** 転送先を採取していないときの推奨 */
 export const FOLLOW_REC = '-L を付けて、転送先まで採取し直す';
+/** 一時的に使えない応答（5xx・429 のレート制限）。リクエストを処理したかが分からないので、合格にも指摘にもしない */
+export const unavailable = (status: number): boolean => status >= 500 || status === 429;
+export const RETRY_REC = '時間をおいて採取し直す';
 /**
  * 本文を見て判定するルールで、本文を採取していないとき（-v、-D - -o /dev/null、HAR の本文なし）の推奨。
  * 本文がないのに「反映されない」「参照なし」と合格にすると、見逃しになり、カバレッジも水増しになる
@@ -140,13 +146,18 @@ export const bodyNotCaptured = (ctx: RuleContext): boolean => {
  * ないので、H-08・H-11・H-12・A-09 の対象外（ビーコンや XHR の 204 を指摘しない）
  */
 export const noContent = (ctx: RuleContext): boolean => ctx.final?.status === 204 || ctx.final?.status === 304;
-export const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（本文のない応答（204・304・転送・Content-Length: 0）は対象外）';
+/** 本文のない応答（noContent。H-11・H-12）の na の推奨 */
+export const NO_CONTENT_REC = '本文のある応答（200 など）で採取する（本文のない応答は対象外）';
+/** 本文のない応答と転送の応答（nothingToSniff と Location のある 3xx。H-08・H-11・A-09）の na の推奨 */
+export const NO_CONTENT_OR_REDIRECT_REC = '本文のある応答（200 など）で採取する（本文のない応答・転送の応答は対象外）';
 /** Content-Length: 0 の応答 */
 export const zeroLength = (ctx: RuleContext): boolean => header(ctx, 'content-length').some(x => /^\s*0\s*$/.test(x));
 /** スニッフィングする本文がない応答（H-08・A-09②）：204・304、Location のある 3xx（ブラウザは 3xx の本文を表示しない）、Content-Length: 0 */
 export const nothingToSniff = (ctx: RuleContext): boolean => noContent(ctx) || isRedirectWithLocation(ctx.final) || zeroLength(ctx);
 /** プローブ（C13）のコードが 000（接続できなかった）のときの推奨。ファイルがあるかどうかは分からないので、合格にしない（E-03・E-04・E-13） */
 export const PROBE_UNREACHED_REC = 'ネットワークの状態を確かめて C13 を実行し直す（HTTP 000 は接続できなかったことを示す）';
+/** C13 のプローブは -L を付けない（転送先のファイルを取らない）。転送された（3xx）パスは、ファイルがないことが分からない */
+export const PROBE_REDIRECT_REC = '転送先のホスト（www の有無など）・パスを URL にして C13 を実行し直す';
 const AUTH_FLAG = /^(?:is_?)?(?:authenticated|authorized|logged_?in|signed_?in|auth|ok|success|valid)$/i;
 // false を空とみなすのは、ログインの状態を表す名前（authenticated・loggedIn・isAuthenticated など）だけ（{"isAdmin":false,"mfaEnabled":false} は利用者のデータ）
 const blank = (v: unknown, k?: string) => v === null || v === '' || (v === false && (k === undefined || AUTH_FLAG.test(k)))
@@ -203,7 +214,7 @@ export const graphqlError = (body: string | undefined): 'denied' | 'error' | und
   if (!(d === null || d === undefined || (typeof d === 'object' && Object.values(d as Record<string, unknown>).every(v => v === null)))) return undefined;
   return /UNAUTHENTICATED|UNAUTHORIZED|FORBIDDEN|not authenticated|unauthori[sz]ed|authentication required|access denied|not logged in|login required/i.test(JSON.stringify(j.errors)) ? 'denied' : 'error';
 };
-/** 本文の上限（パーサが残す先頭64KB）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
+/** 本文の上限（パーサが残す先頭64K文字）に達しているか。末尾にある記述（sourceMappingURL など）は、なくても「ない」とは言えない */
 export const bodyTruncated = (ctx: RuleContext) => (ctx.final?.body?.length ?? 0) >= BODY_LIMIT;
 
 // 内部のホスト：プライベート・ループバックの IPv4 アドレスと localhost、最後のラベルが internal・local などのホスト名

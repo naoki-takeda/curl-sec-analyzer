@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
-import { analyzed, fakeWorker, setWorkerMode } from './helpers';
+import { type Locator, expect, test } from '@playwright/test';
+import { analyzed, fakeWorker, heldWorkers, releaseWorkers, setWorkerMode } from './helpers';
 
 test('サンプルを判定でき、外部へのリクエストが発生しない', async ({ page }) => {
   const external: string[] = [];
@@ -57,7 +57,7 @@ test('コマンド生成器：ホスト名を入れると #TARGET 付きのコ�
 
 test('HAR を読み込み、パスワードを画面に出さずに判定する', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   await expect(page.getByText('HARのエントリ一覧（har_chrome.har）')).toBeVisible();
   await expect(page.getByRole('combobox', { name: /POST https:\/\/www\.example\.com\/login のラベル/ })).toHaveValue('login');
   await page.getByRole('button', { name: '判定する' }).click();
@@ -76,7 +76,7 @@ test('英語UIに切り替えられ、前回の結果との差分を表示する
   await expect(page.getByRole('heading', { name: 'Findings (check × condition)' })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'Session fixation' }).first()).toBeVisible();
   await page.getByText('Settings files').click();
-  await page.locator('input[type=file]').nth(3).setInputFiles(path!);
+  await page.locator('#base-in').setInputFiles(path!);
   await expect(page.getByRole('heading', { name: 'Changes since previous results' })).toBeVisible();
   await expect(page.getByText(/0 new, 0 resolved/)).toBeVisible();
 });
@@ -94,10 +94,10 @@ test('英語UIでは推奨対応も英語で表示する', async ({ page }) => {
   await expect(page.getByText('Issue a new session ID when login succeeds').first()).toBeVisible();
 });
 
-test('他のサイトに埋め込まれたときは、入力欄を出さない（クリックジャッキング対策）', async ({ page }) => {
+test('ほかのページに埋め込まれたときは、入力欄を出さない（クリックジャッキング対策）', async ({ page }) => {
   await page.setContent('<iframe src="http://localhost:4173/" width="900" height="600"></iframe>');
   const frame = page.frameLocator('iframe');
-  await expect(frame.getByText('他のサイトに埋め込んだ状態では使えません')).toBeVisible();
+  await expect(frame.getByText('ほかのページに埋め込んだ状態では使えません')).toBeVisible();
   await expect(frame.locator('textarea')).toHaveCount(0);
 });
 
@@ -144,9 +144,10 @@ test('HAR の Worker も含め、ページから作る Worker は外部へ通信
 });
 
 test('?lang= に ja・en 以外を指定しても判定できる（en-US は英語）', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
   for (const [q, button, heading] of [['en-US', 'Load sample', 'Findings (check × condition)'], ['fr', 'サンプルを入れる', '指摘（項目×条件）']]) {
-    const errors: string[] = [];
-    page.on('pageerror', e => errors.push(e.message));
+    errors.length = 0;
     await page.goto(`/?lang=${q}`);
     await page.getByRole('button', { name: button }).click();
     await expect(page.getByRole('heading', { name: heading })).toBeVisible();   // 状態の欄（件数の読み上げ）にも同じ語があるので、見出しで探す
@@ -158,15 +159,15 @@ test('判定のあとに読み込んだ設定ファイルのエラーが消え�
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
-  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
-  await expect(page.getByRole('status')).toHaveText(/例外ファイルの一部を読み込めませんでした：JSONとして読めません/);
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await expect(page.getByRole('status')).toHaveText(/例外ファイルを読み込めませんでした：JSONとして読めません。/);
 });
 
 test('HAR の一覧の読み上げ名でもトークンをマスクし、HAR を外すと結果からも消える', async ({ page }) => {
   const har = JSON.parse(readFileSync('tests/fixtures/har_chrome.har', 'utf8'));
   for (const e of har.log.entries) if (e.request.url === 'https://www.example.com/mypage') e.request.url += '?access_token=SECRETTOKENVALUE1234567890abcdef';
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles({ name: 'tok.har', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(har)) });
+  await page.locator('#file-in').setInputFiles({ name: 'tok.har', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(har)) });
   await expect(page.getByText('HARのエントリ一覧（tok.har）')).toBeVisible();
   expect(await page.locator('[aria-label*="SECRETTOKENVALUE"]').count()).toBe(0);
   expect(await page.locator('[aria-label*="access_token="]').count()).toBeGreaterThan(0);
@@ -271,13 +272,23 @@ test('言語を切り替えても、コマンド生成器の入力と生成し�
   await expect(page.locator('textarea[readonly]').first()).toHaveValue(/label=pre-login/);
 });
 
+/**
+ * 選択を今と別の値に変え、描き直されたことを確かめる（閉じた select の矢印キーの動きはブラウザで違い、値が変わらないと描き直しを確かめられない）
+ */
+async function selectOther(sel: Locator) {
+  const before = await sel.inputValue();
+  const other = (await sel.locator('option').evaluateAll(os => os.map(o => (o as HTMLOptionElement).value))).find(v => v !== before)!;
+  await sel.selectOption(other);
+  await expect(sel).toHaveValue(other);
+}
+
 test('章の絞り込みを変えてもフォーカスを失わず、例外の理由のエラーを読み上げる', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   const sel = page.locator('select[data-focus="chapter"]');
   await sel.focus();
-  await page.keyboard.press('ArrowDown');
-  await expect(page.locator('select[data-focus="chapter"]')).toBeFocused();
+  await selectOther(sel);
+  await expect(sel).toBeFocused();
   await page.getByRole('button', { name: '例外に登録' }).first().click();
   await page.getByRole('button', { name: '登録する' }).click();
   await expect(page.getByRole('alert')).toHaveText(/理由/);
@@ -289,39 +300,47 @@ test('形式の違うファイルを例外ファイルとして読んでも、�
   await page.getByRole('button', { name: '例外に登録' }).first().click();
   await page.getByLabel('理由（必須）').fill('検証環境のため');
   await page.getByRole('button', { name: '登録する' }).click();
-  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await page.getByText('設定ファイル').click();
   await expect(page.getByText(/例外 1件（有効 1件/)).toBeVisible();
 });
 
 test('HAR の一覧で操作してもフォーカスを失わない', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   const sel = page.locator('select[data-focus^="har-label-"]').first();
   await expect(sel).toBeVisible();
   await sel.focus();
-  await page.keyboard.press('ArrowDown');
-  await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeFocused();
+  await selectOther(sel);
+  await expect(sel).toBeFocused();
 });
 
-test('ホストが2つあるとき、ホスト単位の表に対象の列を出す', async ({ page }) => {
+test('ホスト単位の表に対象の列を出し、ホスト名を入れる', async ({ page }) => {
   await page.goto('/');
   await page.locator('#input').fill(['#TARGET url=https://www.example.com/ label=tls', '#TLSPROBE v=tls1 ok=1', '#TARGET url=https://api.example.com/ label=tls2', '#TLSPROBE v=tls1 ok=1', ''].join('\n'));
   await page.getByRole('button', { name: '判定する' }).click();
   const cross = page.getByRole('region', { name: 'ホスト単位・ターゲット横断の判定' });
   await expect(cross.getByRole('columnheader', { name: 'ターゲット' })).toBeVisible();
-  await expect(cross.getByText('www.example.com', { exact: false }).first()).toBeVisible();
+  await expect(cross.getByRole('cell', { name: 'www.example.com', exact: true }).first()).toBeVisible();
 });
 
 test('HAR のラベルを矢印で見て回っても、ほかのエントリの予約ラベルを失わない', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   const labels = async () => page.locator('select[data-focus^="har-label-"]').evaluateAll(els => els.map(e => (e as HTMLSelectElement).value));
   await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeVisible();
   const before = await labels();
   await page.locator('select[data-focus^="har-label-"]').first().focus();
   for (const k of ['ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp']) await page.keyboard.press(k);
   expect(await labels()).toEqual(before);
+  // 矢印で値が変わらないブラウザでも確かめる：ほかのエントリの予約ラベルを移してから戻すと、そのエントリのラベルも戻る
+  const i = before.findIndex((l, j) => j > 0 && !/^(?:har|error)-\d+$/.test(l));
+  expect(i).toBeGreaterThan(0);
+  const first = page.locator('select[data-focus^="har-label-"]').first();
+  await first.selectOption(before[i]);
+  await expect.poll(async () => (await labels())[i]).toMatch(/^har-\d+$/);
+  await first.selectOption(before[0]);
+  await expect.poll(labels).toEqual(before);
 });
 
 test('判定は Web Worker で行い、判定中に消去したら前の入力の結果を出さない', async ({ page }) => {
@@ -400,7 +419,7 @@ test('HAR の Worker を作れない・Worker がエラーになるときは、�
   const status = page.getByRole('status');
   for (const mode of ['throw', 'error'] as const) {
     await setWorkerMode(page, mode);
-    await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+    await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
     await expect(status).toHaveText(/^HARを読み込めませんでした。ブラウザが Web Worker を使えない/);
   }
   await expect(page.getByText('HARのエントリ一覧')).toHaveCount(0);
@@ -408,18 +427,266 @@ test('HAR の Worker を作れない・Worker がエラーになるときは、�
 
 test('HAR を外すと、フォーカスを「ファイルを開く」に移す', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   await page.getByRole('button', { name: 'HARを外す' }).click();
   await expect(page.getByRole('button', { name: 'ファイルを開く' })).toBeFocused();
 });
 
 test('判定する前の HAR は、設定ファイルを読み込んでも判定しない（ホストとラベルを確かめてから判定する）', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   const status = page.getByRole('status');
   await expect(status).toHaveText(/件のリクエストを読み込みました/);
-  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
+  await page.locator('#prof-in').setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
   await expect(page.getByText('組織プロファイル：x')).toBeAttached();   // 設定の欄は閉じている
   await expect(status).toHaveText(/件のリクエストを読み込みました/);
   await expect(page.getByRole('heading', { name: /指摘/ })).toHaveCount(0);
+});
+
+test('例外の登録・設定ファイルの読み込みで判定し直すときは、表示中の結果の入力を使い、入力欄の変更は「判定する」まで判定しない', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  const status = page.getByRole('status');
+  await expect(status).toHaveText(/^\d+件のターゲット/);
+  const count = (await status.textContent())!.match(/^\d+件のターゲット/)![0];   // サンプルのターゲットの数（サンプルを変えても通る）
+  // 判定のあとに入力欄を書き換える（まだ「判定する」は押さない）
+  await page.getByRole('button', { name: '入力を表示する' }).click();
+  const other = '#TARGET url=https://other.example/ label=top\nHTTP/2 200\ncontent-type: text/html\n\n<html></html>';
+  await page.locator('#input').fill(other);
+  // 例外を登録すると、表示中の結果（サンプル）の入力で判定し直し、書き換えたことを知らせる。入力欄は隠さない
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByLabel('理由（必須）').fill('検証環境のため');
+  await page.getByRole('button', { name: '登録する' }).click();
+  await analyzed(page);
+  await expect(status).toHaveText(new RegExp(`^${count}.*入力欄の変更`));
+  await expect(page.locator('#input')).toBeVisible();
+  await expect(page.locator('#input')).toHaveValue(other);
+  // 入力欄を空にしてから例外のない例外ファイルを読み込んでも、表示中の結果を消さずに判定し直す（登録した例外が外れるまで待つ）
+  const suppressed = page.getByText(/例外を当てた指摘/);
+  await expect(suppressed).toHaveCount(1);
+  await page.locator('#input').fill('');
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
+  await expect(suppressed).toHaveCount(0);
+  await analyzed(page);
+  await expect(status).toHaveText(new RegExp(`^${count}.*入力欄の変更`));
+  await expect(page.locator('#input')).toBeVisible();
+  // 読み込みのエラーを出すときも、入力欄の変更をまだ判定していないことを残す
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await expect(status).toHaveText(/JSONとして読めません.*入力欄の変更/);
+  // 「判定する」で、入力欄の内容を判定する
+  await page.locator('#input').fill(other);
+  await page.getByRole('button', { name: '判定する' }).click();
+  await expect(status).toHaveText(/^1件のターゲット/);
+  await expect(status).not.toHaveText(/入力欄の変更/);
+});
+
+test('「判定する」の判定中に設定ファイルを読み込むと、その判定を入力欄の判定として引き継ぎ、入力欄を直したら止める', async ({ page }) => {
+  await fakeWorker(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.getByRole('button', { name: '入力を表示する' }).click();
+  // 結果を返さない Worker で「判定する」を押し、その判定中に例外ファイルを読み込む（判定中の判定の入力で判定し直す）
+  await setWorkerMode(page, 'hang');
+  await page.getByRole('button', { name: '判定する' }).click();
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
+  await page.getByText('設定ファイル').click();
+  await expect(page.getByText('例外の登録はありません')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('判定しています…');
+  // 引き継いだ判定も入力欄の判定なので、入力欄を直したら止める（直す前の入力の結果を出して入力欄を隠さない）
+  await page.locator('#input').press('End');
+  await page.locator('#input').pressSequentially('x');
+  await expect(page.getByRole('status')).toHaveText(/判定を止めました/);
+});
+
+test('組織プロファイルで重要度を変えた指摘の「*」の意味を、凡例と読み上げで示す', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  const legend = page.getByText('「*」は、組織プロファイルで重要度を変えた指摘です');
+  await expect(legend).toHaveCount(0);
+  await page.locator('#prof-in').setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"t","severity":{"C-01.1":"low"}}') });
+  await expect(legend).toBeVisible();
+  // 元の重要度は文字で出す（title だけではキーボード・読み上げで分からない）。「*」は読み上げない
+  await expect(page.getByRole('cell', { name: /^低（元：高）$/ }).first()).toBeVisible();
+  await expect(page.getByRole('cell', { name: /^低（元：高）$/ }).first()).toHaveText('低*（元：高）');
+});
+
+test('入力欄で Ctrl+Enter を押して判定すると、隠した入力欄から結果の見出しにフォーカスを移す', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.getByRole('button', { name: '入力を表示する' }).click();
+  await page.locator('#input').press('Control+Enter');
+  await analyzed(page);
+  await expect(page.locator('#input')).toBeHidden();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('H2');
+});
+
+test('組織プロファイルの読み込みのエラーは、ボタンの文言ではなくファイルの名前で知らせ、1件も読めなければ「一部」と書かない', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.locator('#prof-in').setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await expect(page.getByRole('status')).toHaveText(/^組織プロファイルを読み込めませんでした：JSONとして読めません。/);
+  // 組織プロファイルでないファイル（例外ファイル）も、読み込み済みのプロファイルがなくても使わない（名前のないプロファイルにしない）
+  await page.locator('#prof-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{"suppressions":[]}') });
+  await expect(page.getByRole('status')).toHaveText(/^組織プロファイルを読み込めませんでした：「suppressions」は組織プロファイルの項目ではありません。$/);
+  await page.getByText('設定ファイル').click();
+  await expect(page.getByText('組織プロファイル：なし（既定の重要度）')).toBeVisible();
+});
+
+test('解析の警告に出す #TARGET の読めない名前も、許可リストを通す', async ({ page }) => {
+  const token = 'dXNlcjpwYXNzd29yZA';
+  await page.goto('/');
+  await page.locator('#input').fill(`#TARGET url=https://www.example.com/ label=api Authorization: Basic ${token}==\nHTTP/2 200\ncontent-type: text/html\n\n<p>x</p>\n`);
+  await page.getByRole('button', { name: '判定する' }).click();
+  await analyzed(page);
+  await expect(page.getByText(/#TARGET の指定を読めませんでした/)).toBeVisible();
+  expect(await page.locator('#app').innerText()).not.toContain(token);
+});
+
+test('前回の結果の読み込みのエラーは、どのファイルかを示して文を閉じる', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.locator('#base-in').setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await expect(page.getByRole('status')).toHaveText(/^前回の結果を読み込めませんでした：.+。$/);
+});
+
+test('判定を待つあいだに章の絞り込みへ移したフォーカスは、結果を描き直しても見出しに奪わない', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.getByRole('button', { name: '入力を表示する' }).click();
+  // 判定する を押して、結果が届く前に章の絞り込みへフォーカスを移す
+  await page.evaluate(() => {
+    [...document.querySelectorAll('button')].find(b => b.textContent === '判定する')!.click();
+    document.querySelector<HTMLSelectElement>('select[data-focus="chapter"]')!.focus();
+  });
+  await analyzed(page);
+  expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.focus)).toBe('chapter');
+});
+
+test('ホスト単位の表の対象の列は、知らない最上位ドメインの乱数のラベル・IDN のホスト名も伏せずに出す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill(['#TARGET url=https://xk9qz2mpl7rtv.shop.tokyo/ label=tls', '#TLSPROBE v=tls1 ok=1',
+    '#TARGET url=https://xn--eckwd4c7c.xn--zckzah/ label=tls2', '#TLSPROBE v=tls1 ok=1', ''].join('\n'));
+  await page.getByRole('button', { name: '判定する' }).click();
+  const cross = page.getByRole('region', { name: 'ホスト単位・ターゲット横断の判定' });
+  await expect(cross.getByRole('cell', { name: 'xk9qz2mpl7rtv.shop.tokyo', exact: true }).first()).toBeVisible();
+  await expect(cross.getByRole('cell', { name: 'xn--eckwd4c7c.xn--zckzah', exact: true }).first()).toBeVisible();
+});
+
+test('指摘の一覧・例外の登録のダイアログ・差分の表の対象：ホスト名は URL の列と同じく出し、ラベルはそのまま出す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#input').fill(['#TARGET url=https://4111111111111111.shop.tokyo/ label=web01', '#TLSPROBE v=tls1 ok=1',
+    '#TARGET url=https://xn--eckwd4c7c.xn--zckzah/ label=web02', '#TLSPROBE v=tls1 ok=1',
+    '#TARGET url=http://www.example.com/ label=web03', 'HTTP/1.1 200 OK', 'content-type: text/html', '', '<html></html>', ''].join('\n'));
+  await page.getByRole('button', { name: '判定する' }).click();
+  const list = page.getByRole('region', { name: '指摘の一覧' });
+  // カード番号のラベルのホスト名は、URL の列と同じく伏せる（行があることを先に確かめる）。IDN とラベルはそのまま
+  await expect(list).toContainText('…(16 chars).shop.tokyo');
+  await expect(list).not.toContainText('4111111111111111');
+  await expect(list).toContainText('xn--eckwd4c7c.xn--zckzah');
+  await expect(list).toContainText('web03');
+  // 例外の登録のダイアログも同じ
+  const t = page.getByRole('region', { name: 'ターゲット「web03」の判定' });
+  await t.getByRole('button', { name: '例外に登録' }).first().click();
+  await expect(page.getByRole('dialog')).toContainText('（対象：web03）');
+  await page.getByRole('button', { name: 'やめる' }).click();
+  const cross = page.getByRole('region', { name: 'ホスト単位・ターゲット横断の判定' });
+  await cross.getByRole('row').filter({ hasText: '.shop.tokyo' }).first().getByRole('button', { name: '例外に登録' }).click();
+  await expect(page.getByRole('dialog')).toContainText('…(16 chars).shop.tokyo');
+  await page.getByRole('button', { name: 'やめる' }).click();
+  // 前回の結果にだけある行の対象は、host を書いてあってもファイルの値なので許可リストを通す
+  const token = 'glpat-abcdefghijklmnopqrst';
+  const baseline = { generatedAt: '2026-11-01T00:00:00Z', findings: [{ ruleId: 'T-09.1', item: 'T-09', severity: 'high', status: 'fail', target: token, host: token, evidence: '' }] };
+  await page.locator('#base-in').setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(baseline)) });
+  const diff = page.getByRole('region', { name: '前回との差分の一覧' });
+  await expect(diff).toContainText('glpat-…(20 chars)');
+  await expect(diff).not.toContainText(token);
+});
+
+test('指摘がどれも形式の違う前回の結果は使わず、読み込み済みの前回の結果を使い続けると知らせる', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  const base = page.locator('#base-in');
+  await base.setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ generatedAt: '2026-11-01T00:00:00Z',
+    findings: [{ ruleId: 'H-01.1', item: 'H-01', severity: 'high', status: 'fail', target: 'top' }] })) });
+  await expect(page.getByText('前回の結果：2026-11-01T00:00:00Z')).toBeAttached();   // 1つ目を読み終えてから2つ目を読む
+  await base.setInputFiles({ name: 'other.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ findings: [{ ruleId: 'bad' }] })) });
+  await expect(page.getByRole('status')).toHaveText(/^前回の結果を読み込めませんでした：1件の指摘のどれも形式が正しくありません.*読み込み済みの前回の結果を使い続けます。$/);
+  await page.getByText('設定ファイル').click();
+  await expect(page.getByText('前回の結果：2026-11-01T00:00:00Z')).toBeVisible();
+});
+
+test('HAR を読んだまま「サンプルを入れる」と、確かめてから HAR を外す', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
+  await expect(page.getByRole('button', { name: 'HARを外す' })).toBeVisible();
+  const dialogs: string[] = [];
+  page.on('dialog', d => { dialogs.push(d.message()); void d.accept(); });
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  expect(dialogs).toEqual([expect.stringMatching(/^読み込んだ（読み込み中の）HARを外して/)]);
+  await expect(page.getByRole('button', { name: 'HARを外す' })).toHaveCount(0);
+});
+
+test('HAR のエントリをすべて外して判定すると、curl のオプションではなく HAR の選択を案内する。入力欄を空にすると「入力を隠す」を出さない', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
+  const hosts = page.locator('input[type=checkbox][id^="har-host-"]');
+  await expect(hosts.first()).toBeVisible();
+  for (const cb of await hosts.all()) await cb.uncheck();
+  await page.getByRole('button', { name: '判定する', exact: true }).click();
+  await expect(page.getByRole('status')).toHaveText(/^判定するHARのエントリがありません/);
+  await page.locator('#input').fill('x');
+  await expect(page.getByRole('button', { name: '入力を隠す' })).toBeVisible();
+  await page.locator('#input').fill('');
+  await expect(page.getByRole('button', { name: '入力を隠す' })).toHaveCount(0);
+});
+
+test('HAR の読み込み中：設定ファイルを読んでも案内を残し、「サンプルを入れる」は確かめてから読み込みを止める', async ({ page }) => {
+  await fakeWorker(page);
+  await page.goto('/');
+  // HAR を読み込む Worker の結果をためておく（読み込み中のまま）
+  await setWorkerMode(page, 'hold');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
+  const status = page.getByRole('status');
+  await expect(status).toHaveText('HARを読み込んでいます…');
+  await expect.poll(() => heldWorkers(page)).toBe(1);
+  await page.locator('#prof-in').setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
+  await expect(page.getByText('組織プロファイル：x')).toBeAttached();
+  await expect(status).toHaveText('HARを読み込んでいます…');
+  await setWorkerMode(page, 'real');
+  const dialogs: string[] = [];
+  page.on('dialog', d => { dialogs.push(d.message()); void d.accept(); });
+  await page.locator('#input').fill('#TARGET url=https://other.example/ label=top');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  expect(dialogs).toEqual([expect.stringMatching(/^読み込んだ（読み込み中の）HARを外し、貼り付けた内容/)]);
+  const before = await status.textContent();
+  // ためていた HAR の結果を届けても、止めた読み込みなので使わない（HAR の一覧が出ず、結果も変わらない）
+  await releaseWorkers(page);
+  await expect(page.getByRole('button', { name: 'HARを外す' })).toHaveCount(0);
+  await expect(status).toHaveText(before!);
+});
+
+test('例外の期限に過去の日付を入れると、登録せずに知らせる。言語を切り替えても設定の欄の開閉を保つ', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByLabel('理由（必須）').fill('検証環境のため');
+  await page.locator('#sup-until').fill('2020-01-01');
+  await page.getByRole('button', { name: '登録する' }).click();
+  await expect(page.getByRole('alert')).toHaveText(/期限が過去の日付です/);
+  await page.keyboard.press('Escape');
+  await page.getByText('設定ファイル').click();
+  await expect(page.locator('#settings-box')).toHaveAttribute('open', '');
+  await page.getByRole('button', { name: 'English' }).click();
+  await expect(page.locator('#settings-box')).toHaveAttribute('open', '');
 });

@@ -19,9 +19,9 @@ curl-sec-analyzer 自体の脆弱性（マスキングの漏れ、XSS、外部�
 
 - **外部への通信を禁止**：本番ビルドの `<meta>` の CSP で `connect-src 'none'` などを指定しています（[csp.config.ts](csp.config.ts)）。HAR を解析する Worker と判定の Worker も blob: の URL で作り、ページの CSP を引き継がせています。
 - **HTML として挿入しない**：描画に `innerHTML` などを使わず、ESLint で禁止しています。
-- **マスキング**：Cookie・Authorization・トークン・パスワードは、画面とエクスポートのどちらにも生の値で出しません。
+- **マスキング**：Cookie・Authorization・トークン・パスワードは、画面とエクスポートのどちらにも生の値で出しません（残りうるものは CHANGELOG の「既知の限界」）。
 - **何も保存しない**：localStorage・sessionStorage・IndexedDB・Cookie を使いません。
-- **埋め込みの拒否**：他のサイトに埋め込まれたときは、入力欄を表示しません。
+- **埋め込みの拒否**：ほかのページ（同じ組織の Pages を含む）に埋め込まれたときは、入力欄を表示しません。
 
 ## 既知の制約
 

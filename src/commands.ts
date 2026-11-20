@@ -15,14 +15,26 @@ const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 const safeHost = (h: string) => /^[a-z0-9.-]+(:\d+)?$/i.test(h);
 const safePath = (p: string) => /^\/[\w\-./~%]*$/.test(p);
 
+/** パスの欄の名前。入力の誤りの文言（validate）、画面の欄（i18n.ts の gen.fields）、文言の英訳（messagesEn.ts）が使う */
+export const PATH_FIELDS = {
+  apiPath: { ja: '機密のAPI', en: 'Sensitive API' },
+  loginPath: { ja: 'ログイン', en: 'Login' },
+  mypagePath: { ja: '認証後のページ', en: 'Page behind login' },
+  logoutPath: { ja: 'ログアウト', en: 'Logout' },
+  staticPath: { ja: '静的リソース（JS）', en: 'Static resource (JS)' },
+  wsPath: { ja: 'WebSocket', en: 'WebSocket' },
+} as const satisfies Record<Exclude<keyof CommandOptions, 'host' | 'apex' | 'dangerous'>, { ja: string; en: string }>;
+
 /** 入力の検証。ホスト名とパスだけを受け付ける（シェルに展開される文字を入れない） */
 export function validate(o: CommandOptions): string[] {
   const e: string[] = [];
   if (!safeHost(o.host)) e.push('ホスト名は英数字・ハイフン・ドット（必要なら :ポート）だけで書いてください');
   if (o.apex && !safeHost(o.apex)) e.push('apexドメインの書き方が正しくありません');
-  // 欄の名前は画面の欄（i18n.ts の gen.fields）と同じにする（英訳は messagesEn.ts の FIELD）
-  for (const [k, v] of Object.entries({ 機密のAPI: o.apiPath, ログイン: o.loginPath, 認証後のページ: o.mypagePath, ログアウト: o.logoutPath, '静的リソース（JS）': o.staticPath, ...(o.wsPath ? { WebSocket: o.wsPath } : {}) }))
-    if (!safePath(v)) e.push(`${k}のパスは / で始まる英数字と - . _ ~ % / で書いてください`);
+  for (const [k, f] of Object.entries(PATH_FIELDS) as [keyof typeof PATH_FIELDS, { ja: string }][]) {
+    const v = o[k];
+    if (k === 'wsPath' && !v) continue;   // WebSocket は任意
+    if (!safePath(v ?? '')) e.push(`${f.ja}のパスは / で始まる英数字と - . _ ~ % / で書いてください`);
+  }
   return e;
 }
 

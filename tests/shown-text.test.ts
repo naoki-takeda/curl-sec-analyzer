@@ -2,8 +2,8 @@
 // どこに置いても出さない。読める語（ヘッダの名前・値、版、暗号の名前、日時）は残す
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { allowText, showText } from '../src/shownText';
-import { maskText } from '../src/mask';
+import { allowText, showTarget, showText } from '../src/shownText';
+import { excerpt, maskText } from '../src/mask';
 import { AT, evaluate, FC_MULT, leaks } from './helpers';
 
 
@@ -419,5 +419,136 @@ describe('パスワードの中の生の @', () => {
   });
   it('%25 を重ねて3回戻しても % が残る数字の並びは伏せる', () => {
     expect(showText('1-%' + '25'.repeat(10) + '31-%31%31')).not.toContain('2525');
+  });
+});
+
+describe('スキームのない URL（//ホスト）', () => {
+  it.each([
+    '<script src="//d111111abcdef8.cloudfront.net/app.js"></script>',
+    "src='//d111111abcdef8.cloudfront.net/app.js'",
+    'background: url(//d111111abcdef8.cloudfront.net/bg.png)',
+    '<img srcset="//d111111abcdef8.cloudfront.net/a.png 1x, //d222222abcdef9.cloudfront.net/b.png 2x">',
+    "script-src 'self' //d111111abcdef8.cloudfront.net",
+    '//d111111abcdef8.cloudfront.net:8443/app.js',
+    '//user:****@d111111abcdef8.cloudfront.net/x',
+  ])('https:// の URL と同じく、ホスト名を残す：%s', s => {
+    expect(showText(s)).toBe(s);
+  });
+  it('ホスト名の形でないもの・ユーザー名・コメントに置いたトークンは残さない', () => {
+    for (const s of ['"//AKIAIOSFODNN7EXAMPLE"', '"//AKIAIOSFODNN7EXAMPLE.abcd1234"', '<script>//AKIAIOSFODNN7EXAMPLE.cloudfront.net</script>',
+      '// AKIAIOSFODNN7EXAMPLE', 'x=//AKIAIOSFODNN7EXAMPLE.cloud:x-oauth-basic@api.example/', 'a.example//AKIAIOSFODNN7EXAMPLE.cloudfront.net',
+      ' //AKIAIOSFODNN7EXAMPLE.wJalrXUtnFEMIK']) {
+      expect(showText(s), s).not.toMatch(/AKIAIOSFODNN7/);
+    }
+  });
+  it('URL でない場所（Authorization・Cookie の値・JS のコメント・JSON）の「//」のあとのドットで区切ったトークンは残さない', () => {
+    for (const s of ['Authorization: Bearer //QwErTyUiOp.AsDfGhJkLz', 'Cookie: a=1, sid=//QwErTyUiOp.AsDfGhJkLz', 'x = 1  //QwErTyUiOpAsDfGhJkLz.ZxCvBnMqWeRtYu',
+      '{"k":"//MTk4NjIyNDgzNDcxOTI1MjQ4.Cl2FMQ.ZnCjmXVWvRzebCqseKWs"}', '(//ya29.a0AfH6SMBxQwErTy.AbCdEfGh', 'Bearer //qwrtzxkpmnbvcdfgh.zxcvbnmqwrt']) {
+      expect(showText(s), s).not.toMatch(/QwErTyUiOp|MTk4NjIy|a0AfH6SMBx|qwrtzxkpmnbvcdfgh/);
+    }
+  });
+});
+
+describe('パーセントエンコードした URL のユーザー情報', () => {
+  const T = 'QwErTyUiOpAsDfGhJkLz';
+  it('エンコードした @（%40・%2540）の前のユーザー名を、ホスト名として残さない', () => {
+    for (const s of [`https://${T}%40cdn.example.com/`, `https://${T}%3Ax%40cdn.example.com/`, `https://${T}%2540cdn.example.com/`,
+      `https://${T}%3Ax%252540cdn.example.com/`, `?next=https://${T}%40evil.example/`, ` //qwrtzxkpmnbvcdfgh.example.com%3Ax%40cdn.example.com/`]) {
+      expect(showText(s), s).not.toMatch(/QwErTyUiOp|qwrtzxkpmnbvcdfgh/);
+    }
+  });
+  it('パス・クエリのエンコードした @ では、ホスト名を伏せない', () => {
+    for (const s of ['https://d111111abcdef8.cloudfront.net/a%40b.png', 'https://d111111abcdef8.cloudfront.net?e=a%40b.example', ' //d111111abcdef8.cloudfront.net/a%40b'])
+      expect(showText(s), s).toContain('d111111abcdef8.cloudfront.net');
+  });
+});
+
+describe('HTML・JS で書いた @、引用符、ユーザー情報のあとのホスト名', () => {
+  const T = 'QwErTyUiOpAsDfGhJkLz';
+  it('文字参照・JS のエスケープで書いた @ の前のユーザー名を、ホスト名として残さない', () => {
+    for (const s of [`https://${T}:x&#64;cdn.example.com/`, `https://${T}:x&#x40;cdn.example.com/`, `https://${T}:x&commat;cdn.example.com/`,
+      `"https://${T}:x\u0040cdn.example.com/"`, `"https://${T}:x\x40cdn.example.com/"`, `https://${T}'x%40cdn.example.com/`, `https://${T}"x%40cdn.example.com/`,
+      `https://a@${T}.x%40cdn.example.com/`]) {
+      expect(showText(s), s).not.toMatch(/QwErTyUiOp/);
+    }
+  });
+  it('クエリの & のあとのエンコードした @（OAuth の login_hint）では、ホスト名を伏せない', () => {
+    expect(showText('?redirect_uri=https://d111111abcdef8.cloudfront.net&login_hint=alice%40example.com')).toContain('https://d111111abcdef8.cloudfront.net&');
+  });
+});
+
+describe('2つのかけらのコードと、切り詰めた証跡', () => {
+  it('同じ長さの乱数のかけら2つのコード（K7QX-9MZP）は伏せ、暗号の名前・略語は残す', () => {
+    expect(showText('backup code K7QX-9MZP')).not.toContain('9MZP');
+    for (const w of ['SHA-256', 'x264-h265', 'TLS-AES', 'pdf-img']) expect(showText(w)).toBe(w);
+  });
+  it('excerpt：語の途中で切ったトークンのかけらを残さない（clip はそのまま）', () => {
+    const s = `Found key in body: ${'x'.repeat(30)} ghp_R8kQ2mZxW4pL9vT1yN6bC3dF7hJ0sA5eU`;
+    expect(showText(excerpt(s, 58))).not.toContain('R8kQ');
+    expect(excerpt('abc def', 5)).toBe('abc ');
+  });
+});
+
+describe('~ でつないだ番号とコード', () => {
+  it('~ で区切ったカード番号・コードも伏せる', () => {
+    expect(showText('4111~1111~1111~1111')).not.toContain('1111');
+    expect(showText('QWER~TYUI~ZXCV~ASDF')).not.toContain('ZXCV');
+  });
+});
+
+describe('. : で区切ったコード・長さのそろわないコード', () => {
+  it('電話番号・日付に番号を付けたもの・略語の並びは、画面では残す（電話番号を伏せるのは突き合わせのキーだけ）', () => {
+    for (const s of ['tel 090-1234-5678', '0120-123-456', '2026-11-19-01', 'Date: 2026-11-20', '1920-1080', '?q=XSS%20CSRF%20SQLI']) expect(showText(s), s).toBe(s);
+  });
+  it('. や : で区切ったコードと、長さのそろわない乱数のかけらのコードは伏せる', () => {
+    for (const s of ['code K7QX.9MZP.A2B4.C6D8', 'K7QX:9MZP:A2B4:C6D8', '/magic/K7QX.9MZP', '/invite/7Gk-p2Q-xZ81-m', '7Gk.p2Q.xZ81.m'])
+      expect(showText(s), s).not.toMatch(/K7QX|9MZP|xZ81/);
+  });
+  it('版・ファイル名・ホスト名・IPv6 と MAC アドレス・時刻・暗号の名前は残す', () => {
+    for (const s of ['nginx/1.25.3', 'TLSv1.3', 'ASP.NET', 'Apache/2.4.41 (Ubuntu)', 'ECDHE-RSA-AES128-GCM-SHA256', 's3-ap-northeast-1', 'win10-x64-v2',
+      'k8s-1-28', 'i18n.js', 'jquery-3.6.0.min.js', '10:30:00', 'https://a1b2.c3d4.example/', 'x86.x64', 'md5:sha1', '1.0.0a1', 'fe80::1',
+      '2001:db8:85a3:8d3:1319:8a2e:370:7348', '00:1A:2B:3C:4D:5E', 'cdn.k7qx.example'])
+      expect(showText(s), s).toBe(s);
+  });
+});
+
+describe('. : で区切ったコードの前後と、英字と数字の語の並び', () => {
+  it('- _ が前後に付いた . : のコードも伏せる', () => {
+    for (const s of ['code-K7QX.9MZP.A2B4.C6D8', 'invite_K7QX.9MZP.A2B4.C6D8', 'K7QX.9MZP.A2B4.C6D8-x', 'K7QX.9MZP%2Dfoo', 'K7QX.9MZP-Q2Z4.C6D8', '%2FK7QX.9MZP'])
+      expect(showText(s), s).not.toMatch(/K7QX|9MZP|C6D8/);
+  });
+  it('小文字だけ・大文字だけの英字と数字の語の並び（ファイル名・略語・ビルドの名前・時刻・曲線）は伏せない', () => {
+    for (const s of ['icon-16x16-2x.png', '/docs/i18n-l10n-guide', '/blog/p2p-e2e-tips', 'ec2-s3-iam', 'e2e-k8s-1-28',
+      '4xx-5xx-errors', 'W3C.WAI.a11y', '4k.8k.hdr', '(Linux; Android 13; Build/TQ3A.230901.001.C2; wv)', 'T10:30:00Z', '1.0.0a1.dev2',
+      'X25519:P256:P384', 'db1.k8s.lan'])
+      expect(showText(s), s).toBe(s);
+  });
+});
+
+describe('ホスト単位の指摘の対象（URL.host）', () => {
+  it('URL のホスト名と同じく、伏せずに出す（知らない最上位ドメイン・IDN・ポート・IPv6）', () => {
+    for (const h of ['xk9qz2mpl7rtv.shop.tokyo', 'xn--eckwd4c7c.xn--zckzah', 'www.example.co.jp:8443', '[2001:db8::1]:8443', '192.168.0.1'])
+      expect(showTarget(h, h), h).toBe(h);
+  });
+  it('ホスト名の形でないもの・ホスト単位でない対象（ラベルの組）は、許可リストを通す', () => {
+    expect(showTarget('ghp_abcdefghijklmnopqrstuvwxyz0123456789', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789')).not.toContain('abcdefghijklmnop');
+    expect(showTarget('a.example/ghp_abcdefghijklmnopqrstuvwxyz0123456789', 'a.example/ghp_abcdefghijklmnopqrstuvwxyz0123456789')).not.toContain('abcdefghijklmnop');
+    expect(showTarget('xk9qz2mpl7rtv.shop.tokyo')).toBe(showText('xk9qz2mpl7rtv.shop.tokyo'));
+    expect(showTarget('pre-login/login')).toBe('pre-login/login');
+  });
+  it('URL の列でも伏せるホスト名（カード番号のラベル）は伏せ、末尾の . のホスト名はそのまま出す', () => {
+    expect(showTarget('4111111111111111.shop.tokyo', '4111111111111111.shop.tokyo')).not.toContain('4111111111111111');
+    expect(showTarget('xk9qz2mpl7rtv.shop.tokyo.', 'xk9qz2mpl7rtv.shop.tokyo.')).toBe('xk9qz2mpl7rtv.shop.tokyo.');
+  });
+  it('ユーザー情報のあとでは URL の列が伏せる点のない乱数のホスト名は伏せ、今のターゲットのラベルはそのまま出す', () => {
+    const h = 'a8f3k2m9x7q1w5e6r4t0y2u8i3o5p7a9';
+    expect(showTarget(h, h)).not.toContain(h);
+    expect(showTarget('web01', undefined, new Set(['web01']))).toBe('web01');
+    expect(showTarget('web01')).toBe(showText('web01'));
+  });
+  it('ホスト単位の指摘は、対象と host が同じ URL.host になる', () => {
+    const r = evaluate('#TARGET url=https://xk9qz2mpl7rtv.shop.tokyo:8443/ label=tls\n#TLSPROBE v=tls1 ok=1\n');
+    const f = r.findings.find(x => x.item === 'T-09');
+    expect(f?.target).toBe('xk9qz2mpl7rtv.shop.tokyo:8443'); expect(f?.host).toBe(f?.target);
   });
 });

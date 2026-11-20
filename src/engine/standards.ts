@@ -6,7 +6,7 @@ import { ITEMS } from './coverage';
 import levels from './asvs-levels.json';
 
 /** OWASP API Security Top 10 2023 との対応（画面とエクスポートに表示） */
-export const API_TOP10: Record<string, string> = {
+const API_TOP10: Record<string, string> = {
   'A-01': 'API2:2023', 'A-02': 'API2:2023・API8:2023', 'A-03': 'API2:2023', 'A-04': 'API4:2023', 'A-05': 'API4:2023', 'A-06': 'API4:2023',
   'A-07': 'API3:2023', 'A-08': 'API8:2023', 'A-09': 'API8:2023', 'A-10': 'API8:2023', 'A-11': 'API5:2023・API9:2023',
 };
@@ -28,10 +28,12 @@ export const standardsOf = (item: string): Standards => {
 export const asvsRef = (id: string) => `v${ASVS_VERSION}-${id}${LEVELS[id] ? ` (L${LEVELS[id]})` : ''}`;
 export const asvsLevel = (id: string): number | undefined => LEVELS[id];
 
-/** 表のセル用の短い表記：「ASVS 3.4.1・IPA 2.3-1)」。対応がなければ空文字 */
-export function standardsShort(item: string): string {
+/** OWASP API Top 10 の表記（API2:2023・API8:2023。英語の画面・Markdown は sep に「, 」を渡す）。対応がなければ空文字 */
+export const apiTop10Short = (item: string, sep = '・'): string => (API_TOP10[item] ? `OWASP ${API_TOP10[item].replace(/・/g, sep)}` : '');
+/** 表のセル用の短い表記：「ASVS 3.4.1・IPA 2.3-1)」（英語の画面・Markdown は sep に「; 」を渡す）。対応がなければ空文字 */
+export function standardsShort(item: string, sep = '・'): string {
   const s = standardsOf(item);
-  return [s.asvs.length ? `ASVS ${s.asvs.join(', ')}` : '', s.ipa.length ? `IPA ${s.ipa.join(', ')}` : ''].filter(Boolean).join('・');
+  return [s.asvs.length ? `ASVS ${s.asvs.join(', ')}` : '', s.ipa.length ? `IPA ${s.ipa.join(', ')}` : ''].filter(Boolean).join(sep);
 }
 
 /** JSON エクスポート用の対応表（ほかのツールで読み込めるように、版とレベルも入れる） */

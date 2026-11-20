@@ -16,6 +16,75 @@ export function lowerToken(x: string): boolean {
   return rareBigrams(x) >= 0.35;
 }
 
+// ---- 区切った番号・コードの形。画面の許可リスト（shownText.ts の allowRun・maskDottedCodes）と突き合わせのキー（engine/targetKey.ts の keySegment）で共有する ----
+/**
+ * 6桁までの数字だけのかけらが3つ以上続き、合わせて12桁以上になる部分があるか（カード番号 4111-1111-1111-1111 など。10〜11桁の電話番号は
+ * 含まない（画面は電話番号を残す。キーは phoneRun も見る）。日付の 20261118 のような8桁を含む並び（db-backup-20261118-0300-01）は番号としない）
+ */
+export const digitRun = (pieces: string[]): boolean => {
+  let n = 0, len = 0;
+  for (const p of pieces) { if (/^\d{1,6}$/.test(p)) { n++; len += p.length; if (n >= 3 && len >= 12) return true; } else { n = 0; len = 0; } }
+  return false;
+};
+/**
+ * 電話番号の形の部分があるか。数字のかけらが3つ以上続き、合わせて10〜11桁で、次のどちらか（突き合わせのキーだけが使う）：
+ * - 先頭のかけらが 0 で始まる2桁以上（090-1234-5678・03-1234-5678・0312-34-5678・01267-2-3456・0120-123-456・01-23-45-67-89）
+ * - 2〜4桁・3〜4桁・3〜4桁の3つ（555-123-4567）
+ * 先頭のかけらには数字でない文字が前に付いてよく（tel090-…・tel:090-…・(090)-…・+1-555-…）、最後のかけらには英字が3文字まで付いてよい
+ * （内線の 5678x）。国番号のあとの番号は、市外局番の先頭の 0 を落としたものとして数える（+81-3-1234-5678・81-90-1234-5678・+33-1-23-45-67-89）。
+ * 月・日の2桁が続く日付（2026-11-19-01）は当たらない
+ */
+export const phoneRun = (pieces: string[]): boolean => {
+  for (let i = 0; i < pieces.length; i++) {
+    const m = pieces[i].match(/^\D*(\d{1,5})\)?$/); if (!m) continue;
+    // 国番号：+ の付いた1〜3桁のあとの4桁までか、+ のない1〜3桁のあとの1〜2桁（IPv4 の 192.168.100.200 を国番号のある番号と読まない。
+    // IPv4 のかけらは3桁までなので、0 を足した1〜2桁と2つのかけらで9桁までにしかならない）
+    const prev = i > 0 ? pieces[i - 1] : '';
+    const cc = !m[1].startsWith('0') && ((/^\D*\+\d{1,3}$/.test(prev) && m[1].length <= 4) || (/^\d{1,3}$/.test(prev) && m[1].length <= 2));
+    const head = cc ? `0${m[1]}` : m[1];
+    let n = 1, len = head.length;
+    // 12桁を超えたら打ち切る（かけらは1桁以上なので、1つの始まりから見るのは12個まで。線形時間）
+    for (let j = i + 1; j < pieces.length && len <= 11; j++) {
+      const d = pieces[j].match(/^(\d{1,5})([A-Za-z]{0,3})$/); if (!d) break;
+      n++; len += d[1].length;
+      // 0 で始まるのは2桁以上の市外局番だけ（版 10.0.19045.3803 の「0」から数えない）
+      if (n >= 3 && len >= 10 && len <= 11 && (/^0\d/.test(head)
+        || (n === 3 && /^\d{2,4}$/.test(head) && /^\d{3,4}$/.test(pieces[j - 1]) && /^\d{3,4}$/.test(d[1])))) return true;
+      if (d[2]) break;   // 英字の付いたかけらで、番号は終わる
+    }
+  }
+  return false;
+};
+/** 英字に数字を付けた語のうち、残してよい英字の部分（暗号・プロトコル・文字コード・版の名前）。小文字で照合する */
+export const MIXED_STEMS = new Set(('sha md aes rc des chacha poly secp sect prime ed curve x rsa ecdsa dsa dh ffdhe ecdhe dhe tls tlsv ssl sslv http https h brainpoolp ' +
+  'utf base ipv iso ucs cp windows win latin v r ubuntu deb el fc jdk java node php python net pkcs mp gzip ws wss rfc es hs rs ps cve cwe owasp ie ' +
+  'chrome firefox safari edge android ios macos jre asvs api level l a').split(' '));
+export const STEM_DIGITS = /^([a-z]{1,10})(\d{1,5})(?:([a-z]{1,2})\d{1,3})?$/i;
+// 暗号の略語（CBC・GCM・DHE・ADH・SRP）。まれな2文字の並びが多いが、番号のかけらとみなさない（ECDHE-RSA-RC4-SHA を伏せない）
+const CRYPTO_WORDS = new Set('aes des ede rc2 rc4 md5 sha cbc gcm ccm rsa dss dhe edh ecdh ecdhe adh aecdh srp psk idea exp null anon seed aria camellia chacha poly ecdsa tls ssl sm2 sm3 sm4 gost'.split(' '));
+/** 残してよい英字に数字を付けた語（rc4・md5・sha1・ipv4・win10） */
+const stemmedWord = (p: string) => { const m = p.match(STEM_DIGITS); return !!m && MIXED_STEMS.has(m[1].toLowerCase()); };
+/**
+ * 番号・コードのかけらとして、語として読めないもの：英字と数字が混ざる（K7QX・a1b2。rc4・md5・sha1 のような残してよい語は除く）か、英字4文字以上で
+ * まれな2文字の並びが半分以上（ZXCV・ASDF）。英字3文字（pdf・img・MIT）は略語として乱数とみなさない
+ */
+const randomPiece = (p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !stemmedWord(p)
+  : /^[A-Za-z]{4,}$/.test(p) && rareBigrams(p.toLowerCase()) >= 0.5);
+/**
+ * 英数字のかけらをつないだコード（招待・パスワードの再設定の QWER-TYUI-ZXCV-ASDF・K7QX-9MZP・7Gk-p2Q-xZ81-m）か。次のどちらか：
+ * - 同じ長さ（3〜5文字）のかけら：3つ以上なら半分以上、2つなら両方が乱数のかけら（randomPiece）。数字だけのものは digitRun で見る
+ * - 6文字までのかけらで、乱数のかけらが半分以上、うち大文字・小文字・数字の混ざるもの（7Gk・p2Q・xZ81）が2つ以上（長さのそろわないコード）。
+ *   大文字と小文字の両方を求めるのは、小文字だけ・大文字だけの英字と数字の語（i18n・a11y・16x16・1080p・ec2・T10・TQ3A・X25519・00Z）は
+ *   略語・単位・版・ビルドの名前に多いため（伏せると、ファイル名や User-Agent が読めない）
+ */
+export const codeGroups = (pieces: string[]): boolean => {
+  if (pieces.length < 2 || !pieces.every(p => /^[A-Za-z0-9]{1,6}$/.test(p))) return false;
+  const random = pieces.filter(randomPiece);
+  if (pieces.every(p => /^[A-Za-z0-9]{3,5}$/.test(p) && p.length === pieces[0].length) && !pieces.every(p => /^\d+$/.test(p))
+    && (pieces.length >= 3 ? random.length * 2 >= pieces.length : random.length === pieces.length)) return true;
+  return random.length * 2 >= pieces.length && random.filter(p => /\d/.test(p) && /[A-Z]/.test(p) && /[a-z]/.test(p)).length >= 2;
+};
+
 /** 英小文字の並びのうち、よく現れる2文字の並びにないものの割合（2文字未満は0）。画面の許可リスト（shownText.ts）も使う */
 export function rareBigrams(x: string): number {
   if (x.length < 2) return 0;
@@ -65,3 +134,62 @@ export function wordLike(w: string): boolean {
       && (p.length !== 2 || SHORT_WORDS.has(p.toLowerCase()) || /^[A-Z]{2}$/.test(p)))
     && partRare(parts) < 0.45;
 }
+
+// ---- パスのトークンの形（画面のマスク（mask.ts の maskSegment）と突き合わせのキー（targetKey.ts の keySegment）で共有する） ----
+/** 秘密らしい語。これを含む名前は、語だけでできていても wordName としない */
+const SECRET_WORD = /token|secret|session|passw|pwd|auth|cred|apikey|^keys?$/i;
+/** 名前のかたまり：3文字までの語（csv・v2 の v）、4文字までの大文字の略語（API・PDF）、4桁までの数字、12文字までで母音（aeiou）が4分の1以上あり、
+ *  子音が4つ・母音が3つ続かない語（History・Export） */
+const wordChunk = (w: string) => (/^\d+$/.test(w) ? w.length <= 4 : w.length <= 3 || (/^[A-Z]+$/.test(w) ? w.length <= 4
+  : w.length <= 12 && (w.match(/[aeiou]/gi) ?? []).length / w.length >= 0.25 && !/[^aeiouy]{4}|[aeiou]{3}/i.test(w)));
+/**
+ * 英語の語と短い数字をつないだ名前（MyCompanyLogo2026Final.png、/docs/GettingStartedV2Guide）か。トークンとして伏せると、読めないうえに
+ * 別のページが同じ表示になる。- _ で区切った部分ごとに、かたまり（語・大文字の略語・数字）に分け、すべてが wordChunk で、かたまりの平均が3.5文字以上、
+ * 4文字以上の語が全体で3つ以上あるものだけを名前とする。乱数のトークン（Dk3x9Lq2AbZ7…）はかたまりが短く、母音の少ない長いかたまりを含むので
+ * 当たらない（16文字のトークンで、乱数1万個のうち当たるのは数個）
+ */
+const wordName = (p: string): boolean => {
+  let words = 0;
+  for (const part of p.split(/[-_]/)) {
+    if (!part) continue;
+    const ws = part.match(/[A-Z][a-z]+|[a-z]+|[A-Z]+(?![a-z])|\d+/g) ?? [];
+    // 短い部分（_csv・_v12・-Q3）は平均を見ない
+    if (!ws.length || (part.length > 4 && part.length / ws.length < 3.5) || !ws.every(wordChunk) || ws.some(w => SECRET_WORD.test(w)) || SECRET_WORD.test(part)) return false;
+    // キャメルケースで小文字だけの語は先頭の1つだけ（小文字と数字だけのトークン kh8uerlepa7qxrul… を名前としない）
+    if (ws.filter(w => /^[a-z]{4,}$/.test(w)).length > 1) return false;
+    words += ws.filter(w => w.length >= 4 && /^[A-Za-z]+$/.test(w) && !/^[A-Z]+$/.test(w)).length;
+  }
+  return words >= 3;
+};
+// 小文字（または大文字）と数字だけの20文字以上の並び（base36・base32 のトークン。x7k2…・MFRGGZDF…）も、数字と英字が4つ以上ずつあれば伏せる。
+// - _ で区切った部分ごとに見る（sk_live_<トークン>）。区切りのある読める名前（2026-annual-report-v2）は部分が短いので残る
+const caseToken = (x: string) => x.length >= 20 && (/^[a-z0-9]+$/.test(x) || /^[A-Z0-9]+$/.test(x)) && (x.match(/\d/g) ?? []).length >= 4 && (x.match(/[A-Za-z]/g) ?? []).length >= 4;
+/**
+ * パスのかけらがトークンの形か（16文字以上の [A-Za-z0-9_-]）：英大文字・小文字・数字をすべて含むものと、数字を含む32文字以上のもの（語と短い数字を
+ * つないだ名前（wordName）は除く）、24文字以上の16進数（UUID を含む）、- _ で区切った部分が caseToken・randomLetters・lowerToken（英小文字だけの
+ * 16文字以上の乱数 /reset/kqzvwxmplrtbnhjd）のもの。「2026-annual-report-v2」のような普通の名前は残す
+ */
+export const secretPiece = (p: string): boolean => /^[A-Za-z0-9_-]{16,}$/.test(p) && (
+  (((/[A-Z]/.test(p) && /[a-z]/.test(p) && /\d/.test(p)) || (p.length >= 32 && /\d/.test(p))) && !wordName(p))
+  || /^[0-9a-f]{24,}$/i.test(p.replace(/-/g, '')) || p.split(/[-_]/).some(x => caseToken(x) || randomLetters(x) || lowerToken(x)));
+/**
+ * 数字のない、大文字・小文字が頻繁に入れ替わり（かたまりの数が長さの4割以上）、母音が3割未満の16文字以上の並び（AbCdEfGhIjKlMnOpQrStUv）。
+ * 英語の名前（GettingStartedGuide）は入れ替わりが少なく、キャメルケース（getUserByIdAndName）は母音が3〜4割ある（乱数の英字は2割ほど）。
+ * 入れ替わりの多さだけで見ると、短い語をつないだ API のパスまで伏せる
+ */
+const randomLetters = (x: string) => x.length >= 16 && /^[A-Za-z]+$/.test(x) && (x.match(/[a-z]+|[A-Z]+/g) ?? []).length / x.length >= 0.4
+  && (x.match(/[aeiou]/gi) ?? []).length / x.length < 0.3;
+/** 語として残してよい接頭辞（application・login・AdminDashboard）。トークンの先頭（QwErTyUiOpAsDfGhJk）は残さない */
+export const wordPrefix = (w: string) => w.length <= 20 && (w.match(/[a-z]+|[A-Z]+/g) ?? []).length / w.length < 0.3;
+// ビルドしたファイルの名前として伏せないのは、静的ファイルの拡張子が付いた部分だけ（/magic/login-Xy7Kp2Lm9Qa のようなトークンを伏せ忘れない）
+export const ASSET_EXT = /\.(?:m?js|css|map|woff2?|ttf|otf|svg|png|jpe?g|gif|webp|avif|ico)$/i;
+/**
+ * ビルドしたファイルの名前（英字の語を - _ でつなぎ、最後に短いハッシュを付けたもの）。Vite の AdminDashboard-Dk3x9Lq2、vendor-react-BxYz12Ab、
+ * webpack の main-3f8a9c2e1b4d5f6a7b8c。ハッシュは12文字未満か、20文字以下の16進数。トークンではないので伏せない（伏せると、別のファイルが
+ * 同じ表示になる）。語が token・reset・magic・login などのものは除く
+ */
+export const buildAssetName = (p: string): boolean => {
+  if (/^(?:token|reset|magic|share|login|invite|verify|confirm|auth|session|secret|key|code|otp|download)[-_]/i.test(p)) return false;
+  const m = p.match(/^((?:[A-Za-z]+[-_])+)([A-Za-z0-9]+)$/);
+  return !!m && (m[2].length < 12 || (m[2].length <= 20 && /^[0-9a-f]+$/i.test(m[2])));
+};

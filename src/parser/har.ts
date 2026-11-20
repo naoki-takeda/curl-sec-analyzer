@@ -1,5 +1,5 @@
 // parser/har.ts：HAR（HTTP Archive）の取り込み（ツール設計1「HAR形式の取り込み」）
-// - request.postData（ログインのパスワードなど）は読まない。本文は HTML・JSON・JS・テキスト・XML の先頭64KBだけ残す
+// - request.postData（ログインのパスワードなど）は読まない。本文は HTML・JSON・JS・テキスト・XML の先頭64K文字だけ残す
 // - リダイレクトの各ホップを1本のチェーンにまとめ、ラベルはチェーン（1つのターゲット）に付ける
 import type { HttpResponse, ParseWarning, Target } from '../model';
 import { autoAuthScheme, cookieNames, JWT_IN_TEXT, looksLikeSession, parseSetCookie, sentAuthOf, splitSetCookie } from './setCookie';
@@ -70,7 +70,8 @@ function toResponse(e: HarEntry): HttpResponse {
   // application/…+xml・application/xml だけ（image/svg+xml や Office の文書（application/vnd.openxmlformats-…）のバイナリは残さない）。
   // 本文が文字列でないもの（content.text: 12345）は読まない
   if (typeof c?.text === 'string' && c.text && /html|json|javascript|ecmascript|^\s*text\/(?:plain|xml)\b|^\s*application\/(?:[\w.-]+\+)?xml\b/i.test(String(c.mimeType ?? ''))) {
-    try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 2)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
+    // base64 は4文字で3バイト。日本語の3バイトの文字でも、64K文字まで読めるだけ取る
+    try { body = c.encoding === 'base64' ? new TextDecoder().decode(Uint8Array.from(atob(c.text.slice(0, BODY_LIMIT * 4)), x => x.charCodeAt(0))) : c.text; } catch { body = undefined; }
     body = body?.slice(0, BODY_LIMIT);
   }
   const r: HttpResponse = { httpVersion: normalizeVersion(e.response.httpVersion), status: e.response.status, reason: e.response.statusText, headers, body,
@@ -253,6 +254,3 @@ export function harTargets(imp: HarImport, selectedHosts: Set<string>): { target
   if (imp.sanitized) warnings.push({ kind: 'har-sanitized', detail: 'HAR：Cookie・Set-Cookie が含まれていません。機密情報を除いた形式で書き出された可能性があります。第2章（Cookie）の項目は判定できません' });
   return { targets, warnings };
 }
-
-/** HARで付けられるラベル（画面の選択肢） */
-export const HAR_LABEL_CHOICES = ['pre-login', 'login', 'logout', 'http', 'apex', 'csp-sample-1', 'csp-sample-2'];

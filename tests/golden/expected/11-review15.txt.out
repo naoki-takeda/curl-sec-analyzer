@@ -17,8 +17,8 @@ reset | https://www.example.com/reset/AbCd…(22 chars) | key=reset | responses=
 
 ## findings
 after-logout | C-12.1 | high | fail | 旧Cookieでの認証後ページが HTTP 200（同じページへの転送のあと）
-cors-preflight | R-01.2 | medium | fail | Origin: https://evil.example → ACAO: https://evil.example
-cors-preflight | R-02.na | info | na | Origin: (不明)（null では試していない）
+cors-preflight | R-01.2 | medium | na | Origin: https://evil.example → ACAO: https://evil.example | dedupedBy=R-05.1
+cors-preflight | R-02.na | info | na | Origin: (不明)（null では試していない。Origin: null を送ったターゲットで判定）
 cors-preflight | R-04.ok | info | pass | ACAO: https://evil.example
 cors-preflight | R-05.1 | medium | fail | ACAO: https://evil.example / Allow-Methods: GET, PUT, DELETE
 csp-sample-* | H-04.na | info | na | 
@@ -190,7 +190,7 @@ C-12 | evaluated | fails=1
 C-13 | evaluated | fails=0
 C-14 | manual | fails=0
 C-15 | manual | fails=0
-R-01 | evaluated | fails=1
+R-01 | evaluated | fails=0
 R-02 | missing-input | fails=0 | C7 のとおり Origin: null を送って採取する
 R-03 | missing-input | fails=0 | 必要なラベル: cors-*
 R-04 | evaluated | fails=0 | 一部のターゲット（4件）は入力不足 / C6 のとおり Origin を付けて（-H "Origin: https://evil.example"、R-02 は "Origin: null"）採取し直す

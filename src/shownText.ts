@@ -10,13 +10,8 @@
 // - URL のホスト名、決まった最上位ドメインのドメイン名、CSP のハッシュ（'sha256-…'）、伏せた印「…(N chars)」は、そのまま残す
 // 名前の付いた短い秘密（password=hunter2 の hunter2）は形では見分けられないので、maskText の名前による伏せ方と組み合わせて使う（showText）
 import { HASH_SOURCE, maskText } from './mask';
-import { rareBigrams, wordLike } from './tokenShape';
+import { MIXED_STEMS, STEM_DIGITS, codeGroups, digitRun, rareBigrams, wordLike } from './tokenShape';
 
-/** 英字に数字を付けた語のうち、残してよい英字の部分（暗号・プロトコル・文字コード・版の名前）。小文字で照合する */
-const MIXED_STEMS = new Set(('sha md aes rc des chacha poly secp sect prime ed curve x rsa ecdsa dsa dh ffdhe ecdhe dhe tls tlsv ssl sslv http https h brainpoolp ' +
-  'utf base ipv iso ucs cp windows win latin v r ubuntu deb el fc jdk java node php python net pkcs mp gzip ws wss rfc es hs rs ps cve cwe owasp ie ' +
-  'chrome firefox safari edge android ios macos jre asvs api level l a').split(' '));
-const STEM_DIGITS = /^([a-z]{1,10})(\d{1,5})(?:([a-z]{1,2})\d{1,3})?$/i;
 /** 日時（2026-11-01T10:00:00Z の 01T10）と、数字に単位を付けたもの（30s・500ms・64KB・2xx・1st） */
 const DATE_OR_UNIT = /^(?:x25519(?:mlkem768|kyber768draft00)?|x448|secp256r1mlkem768|secp384r1mlkem1024|mlkem(?:512|768|1024)|\d{1,2}T\d{1,2}|\d{1,6}(?:ms|s|m|h|d|w|y|kb|mb|gb|tb|px|em|rem|vh|vw|x|xx|st|nd|rd|th|k)|\d{1,3}(?:ubuntu|deb|el|fc|build|beta|alpha|rc|dev|p|pl)\d{1,3})$/i;
 
@@ -53,21 +48,38 @@ function allowedWord(w: string): boolean {
 // KEEP：語として見ずにそのまま残す部分。伏せた印、CSP・SRI のハッシュ（長さちょうどのもの。mask.ts の HASH_SOURCE）、URL のホスト名、
 // 決まった最上位ドメインのドメイン名
 // - URL のホスト名は、ユーザー情報（user:****@）のあとか、ユーザー情報のない URL の「//」の直後だけ（ユーザー名に置いたトークン
-//   https://<トークン>:x-oauth-basic@api… をホスト名として残さない）
+//   https://<トークン>:x-oauth-basic@api… をホスト名として残さない）。どちらも、後ろに @（エンコードした形を含む。BEFORE_AT）が続くものは残さない
 // - ユーザー情報には ? # / と空白・引用符・<> を含めない（?ref=bob@<トークン> の @ のあとをホスト名とみなさない）。引用符（' "）は、後ろに語の文字か
 //   @ が続くときだけ入れる（mask.ts の URL_CRED と同じ）。伏せた印「…(N chars)」は入ってよい（冪等にするため）。256文字まで（上限がないと、
 //   「@」の多い入力で位置ごとに「//」まで読み戻し、2乗の時間になる）
 const USERINFO = String.raw`(?:[^/\s?#@<>"']|["'](?=[\w@-])|…\(\d+ chars\)){0,256}@`;
+// @ をエンコードした形：パーセントエンコード（%40、多重の %2540）、HTML の文字参照（&#64;・&#x40;・&commat;）、JS のエスケープ（@・\x40・\u{40}）
+const ENCODED_AT = String.raw`(?:%(?:25)*40|&#0*64;|&#[xX]0*40;|&commat;|\\u0040|\\x40|\\u\{0*40\})`;
+// ホスト名らしい並びのあとに続くと、その並びをホスト名として残さないもの：ユーザー情報の終わりの @ と、エンコードした @
+// （https://<トークン>%3Ax%40cdn…・<トークン>:x&#64;cdn… のユーザー名をホスト名として残さない）。エンコードした @ までに、/ ? # と空白・<> と &
+// （クエリの区切り）があれば、ユーザー情報ではないので見ない（?redirect_uri=https://<CDN>&login_hint=alice%40… の CDN のホスト名を伏せない）。
+// 引用符は USERINFO と同じく、後ろに語の文字か @・% が続くときだけ入れる
+const BEFORE_AT = String.raw`(?:${USERINFO}|(?:[^/\s?#@<>"'&]|["'](?=[\w@%-])|…\(\d+ chars\)){0,256}${ENCODED_AT})`;
 // 英小文字のドメイン名（スキームのない CSP のホスト ajax.aspnetcdn.com、Via の app01.prod.example.com）。決まった最上位ドメインのものだけ
 // （/reset/<トークン>.pdf のようなファイル名を残さない）
-const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost)(?![\w-])`;
-const KEEP = String.raw`…\(\d+ chars\)|${HASH_SOURCE}|(?<=:\/\/${USERINFO})[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${USERINFO})|${DOMAIN}`;
-// ↑ ユーザー情報のない URL のホスト名は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない。区切り直すと、
-// ホスト名らしい並びのあとに @ がある入力（https://a.a.a…@evil/）で1文字ずつ短くするたびに @ まで読み直し、2乗の時間になる）
-// JOIN：- _ + でつないだ語の並び（glpat-<トークン>・sk_live_<トークン>・Strict-Transport-Security）は、まとめて見る。パーセントエンコードした
+const TLD = 'com|net|org|io|jp|co|uk|de|cn|gov|edu|dev|app|cloud|info|biz|me|us|fr|kr|tw|au|ca|in|ru|br|nl|se|ch|it|es|example|internal|local|test|invalid|localhost';
+const DOMAIN = String.raw`(?<![\w.@%/-])(?:\*\.)?(?:[a-z0-9-]{1,63}\.)+(?:${TLD})(?![\w-])`;
+// スキームのない URL（HTML の src="//cdn…/lib.js"、CSS の url(//…)、CSP の //cdn…）のホスト名。CDN の乱数のラベル（//d111111abcdef8.cloudfront.net）も
+// 残す。「//」は文字列の始めか、空白・引用符・=・(・カンマの直後だけ（パスの途中の a.example//… と、タグの直後の JS のコメント >//… を除く）。
+// スキームがなく URL かどうかが確かでない（Authorization: Bearer //…・Cookie の値・JS のコメントにも同じ形が出る）ので、英小文字で、決まった
+// 最上位ドメインで終わるものだけを残す（//QwErTy….AsDf… や //AKIA… のようなトークンを残さない）
+const NO_SCHEME = String.raw`(?:^|[\s"'=(,])\/\/`;
+const HOST_NAME = String.raw`(?:[a-z0-9-]{1,63}\.)+(?:${TLD})(?![\w.-])`;
+const KEEP = String.raw`…\(\d+ chars\)|${HASH_SOURCE}|` +
+  String.raw`(?<=:\/\/${USERINFO})(?=(?<userHost>[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+))\k<userHost>(?!${BEFORE_AT})|(?<=:\/\/)(?=(?<hostRun>[A-Za-z0-9.-]+))\k<hostRun>(?!${BEFORE_AT})|` +
+  String.raw`(?<=${NO_SCHEME}${USERINFO})${HOST_NAME}(?!${BEFORE_AT})|(?<=${NO_SCHEME})${HOST_NAME}(?!${BEFORE_AT})|${DOMAIN}`;
+// ↑ スキームのある URL のホスト名は、並び全体を一度に取ってから後ろを見る（先読みと後方参照で、短く区切り直して試さない。区切り直すと、
+// ホスト名らしい並びのあとに @ がある入力（https://a.a.a…@evil/）で1文字ずつ短くするたびに @ まで読み直し、2乗の時間になる）。
+// スキームのないホスト名（HOST_NAME）は、終わりが (?![\w.-]) で1か所に決まるので、区切り直しても @ まで読み直さない
+// JOIN：- _ + ~ でつないだ語の並び（glpat-<トークン>・sk_live_<トークン>・Strict-Transport-Security）は、まとめて見る。パーセントエンコードした
 // + / = 空白 - .（%2B・%2F・%3D・%20・%2D・%2E。二重エンコードを含む）も区切りとする（エンコードした Base64 のトークンや、区切った番号
 // 1234%205678%209012 を短いかけらに分けて残さない）
-const JOIN = String.raw`(?:[-_+]|%(?:25)*(?:2[BbFf0DdEe]|3[Dd]))+`;
+const JOIN = String.raw`(?:[-_+~]|%(?:25)*(?:2[BbFf0DdEe]|3[Dd]))+`;
 // パーセントエンコードした文字の並び（%2F。二重エンコードの %252F も）。語の一部として読まず（%2Fv1 を語 2Fv1 と読まない）、並びとして escapeRun で
 // 見る（1つずつを区切りとして残すと、エンコードしたバイナリ・暗号文 ?d=%8F%1A%C3%77… がそのまま残る）。生の - _ + . でつないだ並びも1つとして
 // 見る（全体をエンコードした番号 %34%31%31%31-%31%31%31%31-… を、戻すと4桁の数字になる並びごとに残さない）
@@ -89,20 +101,23 @@ const maskMixedDigits = (s: string): string => s.replace(MIXED_DIGITS, m => {
   if (d.includes('%')) return `…(${m.length} chars)`;
   return maskText(d) !== d || allowText(d) !== d ? `…(${m.length} chars)` : m;
 });
+// DOTTED：. か : でつないだ6文字までのかけらの並び（K7QX.9MZP.A2B4.C6D8・K7QX:9MZP）。かけらは4文字までなら1つずつ残るので、並びとして
+// コードの形（codeGroups）かを、語の並び（WORDS）より先に見る（前後に - _ が付いても（code-K7QX.9MZP…・K7QX.9MZP-A2B4.C6D8）、. : のあいだだけを見る）。
+// 始まりは語の文字・. :・% と、パーセントエンコードの途中（%2 のあと）でない位置か、パーセントエンコードした文字（%2F）の直後だけ
+// （並びの途中から試し直さないので線形時間）
+const DOTTED = new RegExp(String.raw`(?:(?<![A-Za-z0-9.:%])(?<!%[0-9A-Fa-f])|(?<=%[0-9A-Fa-f]{2}))[A-Za-z0-9]{1,6}(?:[.:][A-Za-z0-9]{1,6})+(?![A-Za-z0-9]|[.:][A-Za-z0-9])`, 'g');
+const TLDS = new Set(TLD.split('|'));
+/**
+ * . : でつないだ並びのうち、コードの形のものを伏せる。次のものはコードとしない：英小文字だけのもの（ホスト名 db1.k8s.lan・ファイル名）、最上位ドメインで
+ * 終わるもの（a1b2.c3d4.example）、: でつないだ16進数だけのもの（IPv6・MAC アドレス）
+ */
+const maskDottedCodes = (s: string): string => s.replace(DOTTED, run => {
+  const pieces = run.split(/[.:]/);
+  const host = !/[A-Z]/.test(run) || TLDS.has(pieces[pieces.length - 1].toLowerCase()), hex = run.includes(':') && pieces.every(p => /^[0-9A-Fa-f]+$/.test(p));
+  return !host && !hex && codeGroups(pieces) ? `…(${run.length} chars)` : run;
+});
 const WORDS = new RegExp(`(${ESCAPES})|(${KEEP})|[A-Za-z0-9]+(?:${JOIN}[A-Za-z0-9]+)*`, 'g');
 const JOIN_SPLIT = new RegExp(`(${JOIN})`);
-// 暗号の略語（CBC・GCM・DHE・ADH・SRP）。まれな2文字の並びが多いが、番号のかけらとみなさない（ECDHE-RSA-RC4-SHA を伏せない）
-const CRYPTO_WORDS = new Set('aes des ede rc2 rc4 md5 sha cbc gcm ccm rsa dss dhe edh ecdh ecdhe adh aecdh srp psk idea exp null anon seed aria camellia chacha poly ecdsa tls ssl sm2 sm3 sm4 gost'.split(' '));
-/** 残してよい英字に数字を付けた語（rc4・md5・sha1） */
-const stemmedWord = (p: string) => { const m = p.match(STEM_DIGITS); return !!m && MIXED_STEMS.has(m[1].toLowerCase()); };
-/**
- * 番号のかけらとして、語として読めないもの：英字と数字が混ざる（K7QX・a1b2。rc4・md5・sha1 のような残してよい語は除く）か、英字4文字以上で
- * まれな2文字の並びが半分以上（ZXCV・ASDF）
- */
-const randomPiece = (p: string) => !CRYPTO_WORDS.has(p.toLowerCase()) && (/\d/.test(p) && /[A-Za-z]/.test(p) ? !stemmedWord(p)
-  : /^[A-Za-z]{4,}$/.test(p) && rareBigrams(p.toLowerCase()) >= 0.5);   // 英字3文字（pdf・img・MIT）は略語として乱数とみなさない
-/** 6桁までの数字だけのかけらが3つ以上続き、合わせて12桁以上になる部分があるか（日付の 20261118 のような8桁を含む並び（db-backup-20261118-0300-01）は番号としない） */
-const digitRun = (nums: string[]): boolean => { let n = 0, len = 0; for (const p of nums) { if (/^\d{1,6}$/.test(p)) { n++; len += p.length; if (n >= 3 && len >= 12) return true; } else { n = 0; len = 0; } } return false; };
 /**
  * 語の並びの、残してよい部分。並びの中に残せないかけらが1つでもあれば、そこから並びの終わりまでを伏せる（かけらを1つずつ見ると、- _ で区切った
  * 乱数のトークン（URL-safe の Base64・GitLab の glpat-…）の4文字までのかけらが語として残る）。それより前は、英字の語のかけら（glpat・sk・live・
@@ -111,14 +126,12 @@ const digitRun = (nums: string[]): boolean => { let n = 0, len = 0; for (const p
  */
 function allowRun(run: string): string {
   const pieces = run.split(JOIN_SPLIT);   // 偶数番目がかけら、奇数番目が区切り
-  // 数字だけのかけらが続く番号（カード番号 4111-1111-1111-1111・電話番号、語のあとの card%204111%201111…）は、まとめて伏せる
+  // 数字だけのかけらが続く12桁以上の番号（カード番号 4111-1111-1111-1111。10〜11桁の電話番号は残す。語のあとの card%204111%201111…）は、まとめて伏せる
   // （並び全体が数字のときだけにすると、前に語が付いたものを残す）
   const nums = pieces.filter((_, i) => i % 2 === 0);
   if (digitRun(nums)) return `…(${run.length} chars)`;
-  // 同じ長さ（3〜5文字）の英数字のかけらを3つ以上つないだ番号（招待・パスワードの再設定の /invite/QWER-TYUI-ZXCV-ASDF・K7QX-9MZP-A2B4-C6D8）は、
-  // かけらの半分以上が randomPiece ならまとめて伏せる（4文字までのかけらとして残さない）。長さのそろわない暗号の名前（ECDHE-RSA-RC4-SHA）は対象外
-  if (nums.length >= 3 && nums.every(p => /^[A-Za-z0-9]{3,5}$/.test(p) && p.length === nums[0].length) && !nums.every(p => /^\d+$/.test(p))
-    && nums.filter(randomPiece).length * 2 >= nums.length) return `…(${run.length} chars)`;
+  // 招待・パスワードの再設定のコード（/invite/QWER-TYUI-ZXCV-ASDF・K7QX-9MZP）は、まとめて伏せる（4文字までのかけらとして残さない）
+  if (codeGroups(nums)) return `…(${run.length} chars)`;
   const bad = pieces.findIndex((p, i) => i % 2 === 0 && !allowedWord(p));
   if (bad < 0) return run;
   let keep = 0;
@@ -132,7 +145,7 @@ function allowRun(run: string): string {
 }
 
 /** 残してよい形の語だけを残す（それ以外は「…(N chars)」） */
-export const allowText = (s: string): string => maskMixedDigits(s).replace(WORDS, (w: string, esc: string | undefined, keep: string | undefined) => (esc ? escapeRun(esc) : keep ? w : allowRun(w)));
+export const allowText = (s: string): string => maskDottedCodes(maskMixedDigits(s)).replace(WORDS, (w: string, esc: string | undefined, keep: string | undefined) => (esc ? escapeRun(esc) : keep ? w : allowRun(w)));
 
 /**
  * パーセントエンコードした文字の並び。3つまで（区切りの %2F・%3D、1文字の日本語）はそのまま残す。4つ以上は戻して見て、読める文字
@@ -149,6 +162,22 @@ function escapeRun(run: string): string {
   // 語ごとに見たうえで、生の文字列と同じく並びとしても見る（戻した 4111_1111_… を4桁の語ごとに残さない）
   return (d.match(/[A-Za-z0-9]+/g) ?? []).every(allowedWord) && allowText(d) === d ? run : `…(${run.length} chars)`;
 }
+
+/** URL.host の形（英小文字・数字・ハイフンのラベル（末尾の . を含む）、IPv4、[IPv6]、ポート） */
+const HOST_SHAPE = /^(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})*\.?|\[[0-9a-f:.]+\])(?::\d{1,5})?$/;
+/**
+ * 画面の「対象」の列に出す文字列（指摘の一覧・ホスト単位の表・差分の表・例外の登録のダイアログ）：
+ * - 今のターゲットのラベル（labels）は、そのまま出す（ターゲットの一覧・見出し・エクスポートと同じ。web01 を伏せると、どのターゲットか分からない）
+ * - ホスト単位の指摘の対象（host と同じ URL.host）は、URL の列と同じ出し方にする：「https://ホスト/」と、ユーザー情報の付いた「https://u@ホスト/」の
+ *   どちらで showText を通してもホスト名が変わらなければ、そのまま出す（スキームのないホスト名は、知らない最上位ドメインの乱数のラベル・IDN の xn-- を
+ *   伏せてしまう）。URL の列で伏せるもの（カード番号のラベル、ユーザー情報のあとの点のない乱数のホスト名）は伏せる
+ * - それ以外（ホスト名の形でないもの、横断のラベルの組、前回の結果にだけある対象）は showText を通す
+ */
+export const showTarget = (target: string, host?: string, labels?: ReadonlySet<string>): string => {
+  if (labels?.has(target)) return target;
+  const asUrlHost = HOST_SHAPE.test(target) && showText(`https://${target}/`) === `https://${target}/` && showText(`https://u@${target}/`).endsWith(`@${target}/`);
+  return host !== undefined && target === host && asUrlHost ? target : showText(target);
+};
 
 /**
  * 画面・エクスポートに出す文字列（証跡・URL）：名前による伏せ方（maskText）のあとに、許可リストを通す。変わらなくなるまで繰り返して冪等にする

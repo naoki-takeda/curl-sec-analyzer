@@ -18,7 +18,10 @@ t() { local label=$1 url=$2 s=$3; shift 3
 
 {
   t top          "$H/"            ""  -v -o /dev/null
-  t http         "http://${HOST%:*}/" "" -L -D - -o /dev/null   # ポートを除く（http は 80 番）
+  # ポートを除く（http は 80 番。HOST は名前か IPv4 で書く）。num_redirects= は -L でたどったホップの数（ないと、chunked の 3xx の
+  # あとのホップをトレーラとみなして捨てる）
+  t http         "http://${HOST%:*}/" "" -L -D - -o /dev/null \
+                 -w '\n#META response_code=%{response_code} num_redirects=%{num_redirects} url_effective=%{url_effective} http_version=%{http_version} run='"$RUN"'\n'
   t notfound     "$H/no-such-page-csa404" "" -D - -o /dev/null
   t cors-reflect "$H/"            ""  -v -o /dev/null -H 'Origin: https://evil.example'
   # 認証後のページ（Cookie は jar.txt から渡す。jar.txt はブラウザやログイン手順で用意し、chmod 600 にする）
