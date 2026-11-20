@@ -23,13 +23,14 @@ function validFinding(x: unknown): Finding | undefined {
   if (!m || typeof f.target !== 'string' || !f.target) return undefined;
   if (!SEVERITIES.includes(f.severity as Severity) || !STATUSES.includes(f.status as Finding['status'])) return undefined;
   if (f.item !== undefined && f.item !== m[1]) return undefined;               // ruleId と item が食い違うものは信用しない
-  if (!knownItem(m[1])) return undefined;                                       // チェックリストにない項目（H-99）の title を画面に出さない
-  const condition = /^\d+$/.test(m[2]) ? Number(m[2]) : undefined;              // 条件番号は ruleId から作り直す
+  if (!knownItem(m[1])) return undefined;                                       // チェックリストにない項目（H-99）は読み込まない
+  // 条件番号は ruleId から作り直し、ruleId も作り直す（先頭が0の H-01.01 を H-01.1 と突き合わせる。同じ指摘が「新規」と「解消」に分かれない）
+  const condition = /^\d+$/.test(m[2]) ? Number(m[2]) : undefined;
   // 差分で使う項目だけを、型を確かめて取り出す（"evidence": 1 のような値で差分の計算を例外にしない）。
   // 長さは切らない（大きな CSP の証跡の後ろのホスト名が前回のキーからだけ落ち、同じ結果どうしが新規と解消に分かれるため）
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
   // title は使わない（表示はチェックリストの項目名。知らない項目は上で除く）
-  return { ruleId: f.ruleId!, item: m[1], condition, title: '', severity: f.severity!, status: f.status!, target: f.target,
+  return { ruleId: condition === undefined ? f.ruleId! : `${m[1]}.${condition}`, item: m[1], condition, title: '', severity: f.severity!, status: f.status!, target: f.target,
            targetKey: typeof f.targetKey === 'string' ? f.targetKey : undefined, evidence: str(f.evidence), recommendation: '', references: [] };
 }
 

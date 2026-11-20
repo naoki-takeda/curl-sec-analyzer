@@ -70,7 +70,7 @@ robots | A-02.ok | info | pass | URL・Location・本文にトークンなし
 robots | E-04.na | info | na | HTTP 301（転送先を採取していない）
 robots | H-01.1 | high | fail | (ヘッダなし)
 robots | H-02.na | info | na | HSTSがない（H-01で判定）
-robots | H-08.na | info | na | HTTP 301（本文のない応答）
+robots | H-08.na | info | na | HTTP 301（転送の応答）
 robots | H-11.na | info | na | HTTP 301（転送の応答）
 robots | H-12.3 | info | fail | (ヘッダなし)
 robots | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし

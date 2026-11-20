@@ -244,3 +244,32 @@ describe('第76回：トークンの形のチャンクのキー', () => {
       .toEqual(['Product-Guide-*', 'Spring-Sale-*-Banner.png']);
   });
 });
+
+describe('第77回：キーのビルドした名前・前回の結果の条件番号', () => {
+  it('キーで残すビルドした名前は、ハッシュの前がすべて3文字以上の英語の語のものだけ（アップロードした画像のトークンのかけらを残さない）', async () => {
+    const { urlKey } = await import('../src/engine/targetKey');
+    const k = (p: string) => urlKey(`https://a.example/${p}`).slice('https://a.example/'.length);
+    expect([k('avatars/cE-Xk29Lq7MpZ3RtYb8w.png'), k('assets/AdminDashboard-Dk3x9Lq2.js'), k('assets/vendor-react-BxYz12Ab.js')])
+      .toEqual(['avatars/*.png', 'assets/AdminDashboard-*.js', 'assets/vendor-react-*.js']);
+  });
+  it('前回の結果の先頭が0の条件番号（H-01.01）は、H-01.1 として突き合わせる（「新規」と「解消」に分けない）', async () => {
+    const { parseBaseline, diff } = await import('../src/engine/diff');
+    const f = (ruleId: string) => ({ ruleId, item: 'H-01', severity: 'high', status: 'fail', target: 'top' });
+    const b = parseBaseline(JSON.stringify({ findings: [f('H-01.01')] })).baseline!;
+    expect(b.findings.map(x => x.ruleId)).toEqual(['H-01.1']);
+    expect(diff(b.findings, b.findings).map(r => r.kind)).toEqual(['continuing']);
+  });
+});
+
+describe('第77回：CSV の横断の行の実施日時', () => {
+  it('付け直したラベル（session-sample-1#2）は、判定と同じく使わない', async () => {
+    const { toCsv } = await import('../src/export/csv');
+    const sid = (n: string) => `set-cookie: sessionid=${n}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+    const t = (label: string, at: string, cookie: string) => `#TARGET url=https://a.example/ label=${label}\n#META at=${at} cmd=C18\nHTTP/2 200\ncontent-type: text/html\n${cookie}\n\n<p>x</p>\n`;
+    const { targets } = parseInput(t('session-sample-1', '2026-11-01T10:00:00', sid('a'.repeat(32))) + t('session-sample-2', '2026-11-01T10:00:05', sid('a'.repeat(31) + 'b'))
+      + t('session-sample-1', '2026-11-19T09:00:00', sid('c'.repeat(32))));
+    const row = toCsv(runAll(targets), targets).split('\n').find(l => l.includes('C-07'));
+    expect(row).toBeDefined();
+    expect(row).not.toContain('2026-11-19');
+  });
+});

@@ -2,9 +2,9 @@
 import type { Finding, HttpResponse, Rule, RuleContext } from '../model';
 import { SESSION_PARAM_NAMES, maskValue, paramRegex } from '../mask';
 import { cookieDate, isChunkMarker, isChunkPiece, isDeletion, isInfraCookie, looksLikeSession, looksLikeSessionName, parseSetCookie, sessionConfig, type SetCookie } from '../parser/setCookie';
-import { baseLabel, firstStatus, hostnameOf, siteResponses, targetUrl } from '../parser/target';
-import { logoutFailed } from './html';
-import { LOGOUT_FAILED_REC, cacheDirectives, directiveNames, mk, noResponse } from './util';
+import { baseLabel, hostnameOf, siteResponses, targetUrl } from '../parser/target';
+import { logoutProblem } from './html';
+import { cacheDirectives, directiveNames, mk, noResponse } from './util';
 
 /** 応答（既定はターゲットと同じサイトの応答。-L のホップを含む。parser/target.ts の siteResponses）から、削除用でない Set-Cookie を取り出す */
 function cookiesOf(ctx: RuleContext, responses = siteResponses(ctx.target)): SetCookie[] {
@@ -226,7 +226,7 @@ export const logoutDeletesCookie: Rule = { id: 'C-12', title: 'ログアウト�
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'logout') return [];            // ①は横断ルール（logout と after-logout）
     if (!ctx.final) return [noResponse(logoutDeletesCookie, ctx)];
-    if (logoutFailed(ctx.target)) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
+    const lp = logoutProblem(ctx.target); if (lp) return [mk(logoutDeletesCookie, ctx, 'na', 'info', 'na', lp.ev, lp.rec)];
     const del = siteResponses(ctx.target).flatMap(r => r.headers.get('set-cookie') ?? []).map(raw => parseSetCookie(raw)).filter(c => isDeletion(c, ctx.now));
     // Clear-Site-Data: "cookies"（か "*"）で消すログアウトは、名前を挙げずにすべての Cookie を消す（H-15 と同じ扱い）
     const csd = siteResponses(ctx.target).flatMap(r => r.headers.get('clear-site-data') ?? []).join(',');

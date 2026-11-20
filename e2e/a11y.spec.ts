@@ -31,7 +31,7 @@ test('英語UIとHARのエントリ一覧', async ({ page }) => {
   await analyzed(page);
   await check(page, '英語UI');
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   await expect(page.getByText('HARのエントリ一覧（har_chrome.har）')).toBeVisible();
   await check(page, 'HARのエントリ一覧');
 });

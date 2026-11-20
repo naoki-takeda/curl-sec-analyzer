@@ -73,7 +73,7 @@ font | T-12.ok | info | pass | HTTP/2
 invite | A-02.ok | info | pass | URL・Location・本文にトークンなし
 invite | H-01.4 | low | fail | max-age=31536000
 invite | H-02.2 | info | fail | max-age=31536000
-invite | H-08.na | info | na | HTTP 302（本文のない応答）
+invite | H-08.na | info | na | HTTP 302（転送の応答）
 invite | H-11.na | info | na | HTTP 302（転送の応答）
 invite | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 invite | H-16.ok | info | pass | 製品・デバッグ情報のヘッダなし

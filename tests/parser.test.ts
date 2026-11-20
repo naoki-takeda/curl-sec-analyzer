@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { attrs, parseInput } from '../src/parser/input';
 import { finalResponse, isHttps, siteOf } from '../src/parser/target';
-import { logoutFailed } from '../src/rules/html';
+import { logoutProblem } from '../src/rules/html';
 import { importHar } from '../src/parser/har';
 import { fixture, sampleText } from './helpers';
 import { analyze } from './golden/analyze';
@@ -67,7 +67,7 @@ content-type: text/html
 
 ${body}
 `);
-    expect(logoutFailed(targets[0])).toBe(true);
+    expect(logoutProblem(targets[0])).toBeDefined();
   });
   it('siteOf はポート・角かっこを外し、国別の第2レベルは3つのラベルにする', () => {
     expect(siteOf('www.Example.com:8443')).toBe('example.com');

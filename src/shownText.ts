@@ -126,7 +126,7 @@ const JOIN_SPLIT = new RegExp(`(${JOIN})`);
  */
 function allowRun(run: string): string {
   const pieces = run.split(JOIN_SPLIT);   // 偶数番目がかけら、奇数番目が区切り
-  // 数字だけのかけらが続く番号（カード番号 4111-1111-1111-1111・電話番号、語のあとの card%204111%201111…）は、まとめて伏せる
+  // 数字だけのかけらが続く12桁以上の番号（カード番号 4111-1111-1111-1111。10〜11桁の電話番号は残す。語のあとの card%204111%201111…）は、まとめて伏せる
   // （並び全体が数字のときだけにすると、前に語が付いたものを残す）
   const nums = pieces.filter((_, i) => i % 2 === 0);
   if (digitRun(nums)) return `…(${run.length} chars)`;

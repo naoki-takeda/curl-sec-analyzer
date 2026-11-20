@@ -730,3 +730,24 @@ describe('第76回：プリフライトの R-02・R-03、レート制限（429�
     expect(r.findings.filter(f => f.item === 'C-12' && f.target === 'after-logout').map(f => f.ruleId)).toContain('C-12.na');
   });
 });
+
+describe('第77回：ログアウトの同じページへの転送・CORS と T- の 5xx・429・TRACE の転送', () => {
+  const page = (label: string, status = 'HTTP/1.1 200 OK') => [`#TARGET url=https://www.example.com/mypage label=${label}`, status, 'content-type: text/html', '', '<p>alice@example.com</p>', ''];
+  it('ログアウトの同じページへの転送は、たどった先で「ログアウトできていない」かを見る（転送の 301 をログアウトの成功としない）', () => {
+    const logout = (tail: string[]) => evaluate([...page('mypage'), '#TARGET url=https://example.com/logout label=logout', 'HTTP/1.1 301 Moved Permanently', 'location: https://www.example.com/logout', '',
+      ...tail, ...page('after-logout')].join('\n')).findings.filter(f => ['C-12', 'H-15'].includes(f.item)).map(f => f.ruleId).sort();
+    expect(logout(['HTTP/1.1 405 Method Not Allowed', 'content-type: text/html', '', '<p>no</p>', ''])).toEqual(['C-12.na', 'C-12.na', 'H-15.na']);
+    expect(logout([])).toEqual(['C-12.na', 'C-12.na', 'H-15.na']);   // 転送先を採取していない
+  });
+  it('CORS の R-01〜R-04：ACAO のない 5xx・429 は、許可外の Origin を断ったとしない', () => {
+    for (const st of ['HTTP/2 503', 'HTTP/2 429']) {
+      const r = evaluate(['#TARGET url=https://api.example.com/v1/me label=cors-reflect', '* Connected to api.example.com (192.0.2.20) port 443', '> GET /v1/me HTTP/2', '> Origin: https://evil.example', '>', `< ${st}`, '<', ''].join('\n'));
+      expect(r.findings.filter(f => /^R-0[14]/.test(f.ruleId)).map(f => f.ruleId).sort(), st).toEqual(['R-01.na', 'R-04.na']);
+    }
+  });
+  it('T-01（TRACE）の転送、T-07・T-08 の 5xx・429 は合格にしない', () => {
+    const one = (label: string, head: string, item: string) => evaluate(`#TARGET url=https://www.example.com/ label=${label}\n${head}\n\n`).ids(label).filter(i => i.startsWith(item));
+    expect([one('trace', 'HTTP/1.1 301 Moved Permanently\nlocation: https://www.example.com/', 'T-01'), one('host-inj', 'HTTP/1.1 429 Too Many Requests', 'T-07'), one('crlf', 'HTTP/1.1 503 Service Unavailable', 'T-08')])
+      .toEqual([['T-01.na'], ['T-07.na'], ['T-08.na']]);
+  });
+});

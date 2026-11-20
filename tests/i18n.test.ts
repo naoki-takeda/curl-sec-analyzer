@@ -45,9 +45,30 @@ function literals(): string[] {
   return [...out].filter(s => /[ぁ-んァ-ヶ一-龠]/.test(s));
 }
 
+/** 判定不能（na）で推奨対応が空なのに、証跡をテンプレートで作るもの（文言の表で英訳できないので、推奨対応を付ける） */
+function naTemplateReasons(): string[] {
+  const dir = new URL('../src/rules/', import.meta.url);
+  const out: string[] = [];
+  for (const f of readdirSync(dir).filter(x => x.endsWith('.ts'))) {
+    const src = ts.createSourceFile(f, readFileSync(new URL(f, dir), 'utf8'), ts.ScriptTarget.Latest, true);
+    const visit = (n: ts.Node): void => {
+      if (ts.isCallExpression(n) && ['mk', 'hf', 'cf'].includes(n.expression.getText())) {
+        const a = n.arguments;
+        if (a[2]?.getText() === "'na'" && a[6] && ts.isStringLiteralLike(a[6]) && a[6].text === '' && a[5] && !ts.isStringLiteralLike(a[5])) out.push(`${f}: ${a[5].getText().slice(0, 60)}`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(src);
+  }
+  return out;
+}
+
 describe('推奨対応の英訳', () => {
   it('判定不能の理由（推奨対応が空のときの証跡）も、すべて英訳がある', () => {
     expect(naReasons().filter(s => !hasEnglish(s))).toEqual([]);
+  });
+  it('判定不能で推奨対応が空のときは、証跡をテンプレートで作らない（英訳できない理由が診断カバレッジに出る）', () => {
+    expect(naTemplateReasons()).toEqual([]);
   });
   it('ルールの日本語の推奨対応は、すべて英訳がある', () => {
     const missing = literals().filter(s => !hasEnglish(s));

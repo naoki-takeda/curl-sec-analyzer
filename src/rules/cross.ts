@@ -3,9 +3,9 @@ import type { Finding, Rule, Target } from '../model';
 import { capturedAt, finalResponse, firstStatus, hostOf, isHttps, ownChain, sameDocumentHop, siteResponses, trimPath } from '../parser/target';
 import { MAIN_SESSION, isChunkMarker, isDeletion, looksLikeSession, looksLikeSessionName, notSessionName, parseSetCookie } from '../parser/setCookie';
 import { maskValue } from '../mask';
-import { FOLLOW_REC, LOGIN_FAILED_REC, LOGOUT_FAILED_REC, NO_BODY_REC, cf, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies } from './util';
+import { FOLLOW_REC, LOGIN_FAILED_REC, NO_BODY_REC, RETRY_REC, cf, errorJson, graphqlError, hstsDirective, noDataJson, parseCsp, parseHsts, splitPolicies, unavailable } from './util';
 import { apexHop } from './headers';
-import { LOGIN_ACTION, LOGIN_PATH, hasPasswordField, loginForm, logoutFailed, metaCspFromHtml, passwordFormActions } from './html';
+import { LOGIN_ACTION, LOGIN_PATH, hasPasswordField, loginForm, logoutProblem, metaCspFromHtml, passwordFormActions } from './html';
 
 const na = (rule: Rule, target: string, need: string) => [cf(rule, target, 'na', 'info', 'na', '', `必要なラベル: ${need}`)];
 
@@ -291,7 +291,7 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
     if (!f) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', '応答がない', '')];
     // ログアウトが失敗した（GET の /logout に 405 など）なら、旧Cookieが使えても当然なので①にしない。
     // ログイン後のページ（mypage）が 2xx でないなら、そもそもセッションがなく、旧Cookieが使えないのも当然なので合格にしない
-    if (logoutFailed(lo)) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(lo)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
+    const lp = logoutProblem(lo); if (lp) return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', lp.ev, lp.rec)];
     // mypage も after-logout と同じく、同じページへの転送（末尾の /、apex から www）はたどった先で見る（転送の 301 を「ログインできていない」にしない）
     const mp = x.byLabel('mypage'), mh = mp ? sameDocumentHop(mp) : undefined; const ms = mh?.hop?.status ?? 0;
     // mypage の転送先を採取していなければ、ログインできていたかが分からない（after-logout の転送と同じく na）
@@ -354,7 +354,8 @@ export const logoutInvalidation: Rule = { id: 'C-12', title: 'ログアウト後
       }
       return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（転送先がログイン画面か分からない）`, '転送先まで（-L）採取し直す')];
     }
-    return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（セッションが無効になったかは分からない）`, '')];
+    return [cf(logoutInvalidation, 'after-logout', 'na', 'info', 'na', `${ev}（セッションが無効になったかは分からない）`,
+      unavailable(r.status) ? RETRY_REC : '存在する認証後ページの URL を after-logout として採取し直す')];
   } };
 
 export const apexHsts: Rule = { id: 'H-02', title: 'HSTS preload', appliesTo: 'any', scope: 'cross',

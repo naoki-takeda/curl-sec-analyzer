@@ -145,7 +145,7 @@ session-sample-* | C-07.na | info | na |
 top | A-02.ok | info | pass | URL・Location・本文にトークンなし
 top | H-01.ok | info | pass | max-age=31536000; includeSubDomains
 top | H-02.2 | info | fail | max-age=31536000; includeSubDomains
-top | H-08.na | info | na | HTTP 302（本文のない応答）
+top | H-08.na | info | na | HTTP 302（転送の応答）
 top | H-11.na | info | na | HTTP 302（転送の応答）
 top | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 top | H-13.na | info | na | HTTP 302（別のサイトへの転送で終わる。転送先の応答は判定しない）

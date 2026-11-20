@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { type Locator, expect, test } from '@playwright/test';
-import { analyzed, fakeWorker, setWorkerMode } from './helpers';
+import { analyzed, fakeWorker, heldWorkers, releaseWorkers, setWorkerMode } from './helpers';
 
 test('サンプルを判定でき、外部へのリクエストが発生しない', async ({ page }) => {
   const external: string[] = [];
@@ -57,7 +57,7 @@ test('コマンド生成器：ホスト名を入れると #TARGET 付きのコ�
 
 test('HAR を読み込み、パスワードを画面に出さずに判定する', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   await expect(page.getByText('HARのエントリ一覧（har_chrome.har）')).toBeVisible();
   await expect(page.getByRole('combobox', { name: /POST https:\/\/www\.example\.com\/login のラベル/ })).toHaveValue('login');
   await page.getByRole('button', { name: '判定する' }).click();
@@ -76,7 +76,7 @@ test('英語UIに切り替えられ、前回の結果との差分を表示する
   await expect(page.getByRole('heading', { name: 'Findings (check × condition)' })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'Session fixation' }).first()).toBeVisible();
   await page.getByText('Settings files').click();
-  await page.locator('input[type=file]').nth(3).setInputFiles(path!);
+  await page.locator('#base-in').setInputFiles(path!);
   await expect(page.getByRole('heading', { name: 'Changes since previous results' })).toBeVisible();
   await expect(page.getByText(/0 new, 0 resolved/)).toBeVisible();
 });
@@ -159,7 +159,7 @@ test('判定のあとに読み込んだ設定ファイルのエラーが消え�
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
-  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await expect(page.getByRole('status')).toHaveText(/例外ファイルを読み込めませんでした：JSONとして読めません。/);
 });
 
@@ -167,7 +167,7 @@ test('HAR の一覧の読み上げ名でもトークンをマスクし、HAR を
   const har = JSON.parse(readFileSync('tests/fixtures/har_chrome.har', 'utf8'));
   for (const e of har.log.entries) if (e.request.url === 'https://www.example.com/mypage') e.request.url += '?access_token=SECRETTOKENVALUE1234567890abcdef';
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles({ name: 'tok.har', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(har)) });
+  await page.locator('#file-in').setInputFiles({ name: 'tok.har', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(har)) });
   await expect(page.getByText('HARのエントリ一覧（tok.har）')).toBeVisible();
   expect(await page.locator('[aria-label*="SECRETTOKENVALUE"]').count()).toBe(0);
   expect(await page.locator('[aria-label*="access_token="]').count()).toBeGreaterThan(0);
@@ -300,14 +300,14 @@ test('形式の違うファイルを例外ファイルとして読んでも、�
   await page.getByRole('button', { name: '例外に登録' }).first().click();
   await page.getByLabel('理由（必須）').fill('検証環境のため');
   await page.getByRole('button', { name: '登録する' }).click();
-  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await page.getByText('設定ファイル').click();
   await expect(page.getByText(/例外 1件（有効 1件/)).toBeVisible();
 });
 
 test('HAR の一覧で操作してもフォーカスを失わない', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   const sel = page.locator('select[data-focus^="har-label-"]').first();
   await expect(sel).toBeVisible();
   await sel.focus();
@@ -326,7 +326,7 @@ test('ホスト単位の表に対象の列を出し、ホスト名を入れる',
 
 test('HAR のラベルを矢印で見て回っても、ほかのエントリの予約ラベルを失わない', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   const labels = async () => page.locator('select[data-focus^="har-label-"]').evaluateAll(els => els.map(e => (e as HTMLSelectElement).value));
   await expect(page.locator('select[data-focus^="har-label-"]').first()).toBeVisible();
   const before = await labels();
@@ -419,7 +419,7 @@ test('HAR の Worker を作れない・Worker がエラーになるときは、�
   const status = page.getByRole('status');
   for (const mode of ['throw', 'error'] as const) {
     await setWorkerMode(page, mode);
-    await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+    await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
     await expect(status).toHaveText(/^HARを読み込めませんでした。ブラウザが Web Worker を使えない/);
   }
   await expect(page.getByText('HARのエントリ一覧')).toHaveCount(0);
@@ -427,17 +427,17 @@ test('HAR の Worker を作れない・Worker がエラーになるときは、�
 
 test('HAR を外すと、フォーカスを「ファイルを開く」に移す', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   await page.getByRole('button', { name: 'HARを外す' }).click();
   await expect(page.getByRole('button', { name: 'ファイルを開く' })).toBeFocused();
 });
 
 test('判定する前の HAR は、設定ファイルを読み込んでも判定しない（ホストとラベルを確かめてから判定する）', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   const status = page.getByRole('status');
   await expect(status).toHaveText(/件のリクエストを読み込みました/);
-  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
+  await page.locator('#prof-in').setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
   await expect(page.getByText('組織プロファイル：x')).toBeAttached();   // 設定の欄は閉じている
   await expect(status).toHaveText(/件のリクエストを読み込みました/);
   await expect(page.getByRole('heading', { name: /指摘/ })).toHaveCount(0);
@@ -466,13 +466,13 @@ test('例外の登録・設定ファイルの読み込みで判定し直すと�
   const suppressed = page.getByText(/例外を当てた指摘/);
   await expect(suppressed).toHaveCount(1);
   await page.locator('#input').fill('');
-  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
   await expect(suppressed).toHaveCount(0);
   await analyzed(page);
   await expect(status).toHaveText(new RegExp(`^${count}.*入力欄の変更`));
   await expect(page.locator('#input')).toBeVisible();
   // 読み込みのエラーを出すときも、入力欄の変更をまだ判定していないことを残す
-  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await expect(status).toHaveText(/JSONとして読めません.*入力欄の変更/);
   // 「判定する」で、入力欄の内容を判定する
   await page.locator('#input').fill(other);
@@ -490,7 +490,7 @@ test('「判定する」の判定中に設定ファイルを読み込むと、�
   // 結果を返さない Worker で「判定する」を押し、その判定中に例外ファイルを読み込む（判定中の判定の入力で判定し直す）
   await setWorkerMode(page, 'hang');
   await page.getByRole('button', { name: '判定する' }).click();
-  await page.locator('input[type=file]').nth(1).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
+  await page.locator('#sup-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('[]') });
   await page.getByText('設定ファイル').click();
   await expect(page.getByText('例外の登録はありません')).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('判定しています…');
@@ -506,7 +506,7 @@ test('組織プロファイルで重要度を変えた指摘の「*」の意味�
   await analyzed(page);
   const legend = page.getByText('「*」は、組織プロファイルで重要度を変えた指摘です');
   await expect(legend).toHaveCount(0);
-  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"t","severity":{"C-01.1":"low"}}') });
+  await page.locator('#prof-in').setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"t","severity":{"C-01.1":"low"}}') });
   await expect(legend).toBeVisible();
   // 元の重要度は文字で出す（title だけではキーボード・読み上げで分からない）。「*」は読み上げない
   await expect(page.getByRole('cell', { name: /^低（元：高）$/ }).first()).toBeVisible();
@@ -528,10 +528,10 @@ test('組織プロファイルの読み込みのエラーは、ボタンの文�
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
-  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await page.locator('#prof-in').setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await expect(page.getByRole('status')).toHaveText(/^組織プロファイルを読み込めませんでした：JSONとして読めません。/);
   // 組織プロファイルでないファイル（例外ファイル）も、読み込み済みのプロファイルがなくても使わない（名前のないプロファイルにしない）
-  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{"suppressions":[]}') });
+  await page.locator('#prof-in').setInputFiles({ name: 'suppressions.json', mimeType: 'application/json', buffer: Buffer.from('{"suppressions":[]}') });
   await expect(page.getByRole('status')).toHaveText(/^組織プロファイルを読み込めませんでした：「suppressions」は組織プロファイルの項目ではありません。$/);
   await page.getByText('設定ファイル').click();
   await expect(page.getByText('組織プロファイル：なし（既定の重要度）')).toBeVisible();
@@ -551,7 +551,7 @@ test('前回の結果の読み込みのエラーは、どのファイルかを�
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
-  await page.locator('input[type=file]').nth(3).setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
+  await page.locator('#base-in').setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from('{not json') });
   await expect(page.getByRole('status')).toHaveText(/^前回の結果を読み込めませんでした：.+。$/);
 });
 
@@ -603,7 +603,7 @@ test('指摘の一覧・例外の登録のダイアログ・差分の表の対�
   // 前回の結果にだけある行の対象は、host を書いてあってもファイルの値なので許可リストを通す
   const token = 'glpat-abcdefghijklmnopqrst';
   const baseline = { generatedAt: '2026-11-01T00:00:00Z', findings: [{ ruleId: 'T-09.1', item: 'T-09', severity: 'high', status: 'fail', target: token, host: token, evidence: '' }] };
-  await page.locator('input[type=file]').nth(3).setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(baseline)) });
+  await page.locator('#base-in').setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(baseline)) });
   const diff = page.getByRole('region', { name: '前回との差分の一覧' });
   await expect(diff).toContainText('glpat-…(20 chars)');
   await expect(diff).not.toContainText(token);
@@ -613,7 +613,7 @@ test('指摘がどれも形式の違う前回の結果は使わず、読み込�
   await page.goto('/');
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
-  const base = page.locator('input[type=file]').nth(3);
+  const base = page.locator('#base-in');
   await base.setInputFiles({ name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ generatedAt: '2026-11-01T00:00:00Z',
     findings: [{ ruleId: 'H-01.1', item: 'H-01', severity: 'high', status: 'fail', target: 'top' }] })) });
   await expect(page.getByText('前回の結果：2026-11-01T00:00:00Z')).toBeAttached();   // 1つ目を読み終えてから2つ目を読む
@@ -625,7 +625,7 @@ test('指摘がどれも形式の違う前回の結果は使わず、読み込�
 
 test('HAR を読んだまま「サンプルを入れる」と、確かめてから HAR を外す', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   await expect(page.getByRole('button', { name: 'HARを外す' })).toBeVisible();
   const dialogs: string[] = [];
   page.on('dialog', d => { dialogs.push(d.message()); void d.accept(); });
@@ -637,7 +637,7 @@ test('HAR を読んだまま「サンプルを入れる」と、確かめてか�
 
 test('HAR のエントリをすべて外して判定すると、curl のオプションではなく HAR の選択を案内する。入力欄を空にすると「入力を隠す」を出さない', async ({ page }) => {
   await page.goto('/');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   const hosts = page.locator('input[type=checkbox][id^="har-host-"]');
   await expect(hosts.first()).toBeVisible();
   for (const cb of await hosts.all()) await cb.uncheck();
@@ -652,11 +652,13 @@ test('HAR のエントリをすべて外して判定すると、curl のオプ�
 test('HAR の読み込み中：設定ファイルを読んでも案内を残し、「サンプルを入れる」は確かめてから読み込みを止める', async ({ page }) => {
   await fakeWorker(page);
   await page.goto('/');
-  await setWorkerMode(page, 'hang');
-  await page.locator('input[type=file]').first().setInputFiles('tests/fixtures/har_chrome.har');
+  // HAR を読み込む Worker の結果をためておく（読み込み中のまま）
+  await setWorkerMode(page, 'hold');
+  await page.locator('#file-in').setInputFiles('tests/fixtures/har_chrome.har');
   const status = page.getByRole('status');
   await expect(status).toHaveText('HARを読み込んでいます…');
-  await page.locator('input[type=file]').nth(2).setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
+  await expect.poll(() => heldWorkers(page)).toBe(1);
+  await page.locator('#prof-in').setInputFiles({ name: 'profile.json', mimeType: 'application/json', buffer: Buffer.from('{"name":"x"}') });
   await expect(page.getByText('組織プロファイル：x')).toBeAttached();
   await expect(status).toHaveText('HARを読み込んでいます…');
   await setWorkerMode(page, 'real');
@@ -666,5 +668,25 @@ test('HAR の読み込み中：設定ファイルを読んでも案内を残し�
   await page.getByRole('button', { name: 'サンプルを入れる' }).click();
   await analyzed(page);
   expect(dialogs).toEqual([expect.stringMatching(/^読み込んだ（読み込み中の）HARを外し、貼り付けた内容/)]);
+  const before = await status.textContent();
+  // ためていた HAR の結果を届けても、止めた読み込みなので使わない（HAR の一覧が出ず、結果も変わらない）
+  await releaseWorkers(page);
   await expect(page.getByRole('button', { name: 'HARを外す' })).toHaveCount(0);
+  await expect(status).toHaveText(before!);
+});
+
+test('例外の期限に過去の日付を入れると、登録せずに知らせる。言語を切り替えても設定の欄の開閉を保つ', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'サンプルを入れる' }).click();
+  await analyzed(page);
+  await page.getByRole('button', { name: '例外に登録' }).first().click();
+  await page.getByLabel('理由（必須）').fill('検証環境のため');
+  await page.locator('#sup-until').fill('2020-01-01');
+  await page.getByRole('button', { name: '登録する' }).click();
+  await expect(page.getByRole('alert')).toHaveText(/期限が過去の日付です/);
+  await page.keyboard.press('Escape');
+  await page.getByText('設定ファイル').click();
+  await expect(page.locator('#settings-box')).toHaveAttribute('open', '');
+  await page.getByRole('button', { name: 'English' }).click();
+  await expect(page.locator('#settings-box')).toHaveAttribute('open', '');
 });

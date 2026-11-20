@@ -1,6 +1,6 @@
 // rules/transport.ts：第4章 メソッド・転送・ヘッダインジェクション（T-01、T-04〜T-08、T-12。TLSは rules/hostRules.ts）
 import type { HttpResponse, Rule } from '../model';
-import { INTERNAL_HOST, NO_BODY_REC, TEST_HOST_RE, bodyNotCaptured, mk, noResponse } from './util';
+import { INTERNAL_HOST, NO_BODY_REC, RETRY_REC, TEST_HOST_RE, bodyNotCaptured, mk, noResponse, unavailable } from './util';
 import { baseLabel, isRedirectWithLocation, sameDocument, trimPath } from '../parser/target';
 import { LOGIN_PATH } from './html';
 
@@ -17,13 +17,12 @@ export const httpsRedirect: Rule = { id: 'T-04', title: 'HTTP→HTTPSリダイ�
     if (!first.status) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', 'ステータスが分からない（HTTP 0）', 'ステータス行を含めて採取し直す（C10 なら #META response_code= も付ける）')];
     // HTTP を 4xx で断る（CloudFront の「HTTPS のみ」、HTTP を拒否する API）は、HTTP でコンテンツを返していないので①にしない。
     // 5xx はサーバの不調、429 はレート制限で、HTTP をどう扱う設定かが分からない
-    if (first.status === 429) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', 'HTTP 429（レート制限）', '時間をおいて採取し直す')];
+    if (unavailable(first.status)) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `HTTP ${first.status}（サーバのエラー・レート制限）`, RETRY_REC)];
     if (first.status >= 400 && first.status < 500) return [mk(httpsRedirect, ctx, 'ok', 'info', 'pass', `HTTP ${first.status}（HTTP のリクエストを拒否）`, '')];
-    if (first.status >= 500) return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `HTTP ${first.status}（サーバエラー）`, '')];
     if (first.status < 300 || !loc)
       return [mk(httpsRedirect, ctx, 1, 'high', 'fail', `HTTP ${first.status}（転送なし）`, rec)];
     let to: URL;
-    try { to = new URL(loc, url); } catch { return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `Location を解釈できない: ${loc}`, '')]; }
+    try { to = new URL(loc, url); } catch { return [mk(httpsRedirect, ctx, 'na', 'info', 'na', `Location を解釈できない: ${loc}`, 'Location の値を確かめて採取し直す')]; }
     const from = new URL(url);
     const ev = `HTTP ${first.status} → ${to.href}`;
     if (to.protocol !== 'https:') return [mk(httpsRedirect, ctx, 2, 'medium', 'fail', ev, rec)];
@@ -64,6 +63,8 @@ export const hostInjection: Rule = { id: 'T-07', title: 'Host・X-Forwarded-Host
     // スキームのない URL（<script src="//evil.example/app.js">）も、ブラウザは同じスキームの外部ホストとして読み込む
     const body = ctx.final.body?.match(new RegExp(String.raw`(?:https?:)?//[^\s"'<>/]*${TEST_HOST_RE.source}[^\s"'<>]*`, 'i'))?.[0];
     if (loc || body) return [mk(hostInjection, ctx, 2, 'medium', 'fail', loc ? `Location: ${loc}` : `本文の絶対URL: ${body}`, '絶対URLは設定値のホスト名から作り、Host・X-Forwarded-Host を信頼しない')];
+    // サーバのエラー・レート制限の応答は、テスト値を使う処理まで届いたかが分からない
+    if (unavailable(ctx.final.status)) return [mk(hostInjection, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（サーバのエラー・レート制限）`, RETRY_REC)];
     return [mk(hostInjection, ctx, 'ok', 'info', 'pass', 'テスト値（evil.example）は応答に現れない', '')];
   } };
 
@@ -72,6 +73,7 @@ export const crlfInjection: Rule = { id: 'T-08', title: 'CRLFインジェクシ�
   run(ctx) {
     if (!ctx.final) return [noResponse(crlfInjection, ctx)];
     const hit = ctx.target.responses.some(r => (r.headers.get('set-cookie') ?? []).some(v => /^crlf=1\b/i.test(v)));
+    if (!hit && unavailable(ctx.final.status)) return [mk(crlfInjection, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（サーバのエラー・レート制限）`, RETRY_REC)];
     return hit ? [mk(crlfInjection, ctx, 1, 'high', 'fail', '注入したヘッダ（Set-Cookie: crlf=1）が応答に現れた', 'ヘッダに出力する値から CR・LF を除去する（フレームワークのAPIでヘッダを設定する）')]
                : [mk(crlfInjection, ctx, 'ok', 'info', 'pass', '注入したヘッダは応答に現れない', '')];
   } };
@@ -84,13 +86,15 @@ export const methods: Rule = { id: 'T-01', title: 'OPTIONS・TRACE', appliesTo: 
     if (!f) return [noResponse(methods, ctx)];
     if (baseLabel(ctx.target.label) === 'trace') {
       if (f.status === 200 && bodyNotCaptured(ctx)) return [mk(methods, ctx, 'na', 'info', 'na', 'HTTP 200（本文を採取していない。反射したかが分からない）', NO_BODY_REC)];
-      if (f.status >= 500 || f.status === 429) return [mk(methods, ctx, 'na', 'info', 'na', `HTTP ${f.status}（サーバのエラー・レート制限で、TRACE を受け付けるかは分からない）`, '時間をおいて採取し直す')];
+      // -L を付けない C9 の転送（apex → www）は、転送先が TRACE を受け付けるかを示さない
+      if (isRedirectWithLocation(f)) return [mk(methods, ctx, 'na', 'info', 'na', `HTTP ${f.status}（転送の応答。転送先が TRACE を受け付けるかは分からない）`, '転送先の URL を #TARGET の url= にして採取し直す')];
+      if (unavailable(f.status)) return [mk(methods, ctx, 'na', 'info', 'na', `HTTP ${f.status}（サーバのエラー・レート制限で、TRACE を受け付けるかは分からない）`, RETRY_REC)];
       const reflected = f.status === 200 && /^TRACE \S+ HTTP\//m.test(f.body ?? '');
       return reflected ? [mk(methods, ctx, 1, 'medium', 'fail', `HTTP ${f.status}（リクエストを反射）`, 'TRACE を無効にする（405 か 501 を返す）')]
                        : [mk(methods, ctx, 'ok', 'info', 'pass', `HTTP ${f.status}`, '')];
     }
     const allow = [...(f.headers.get('allow') ?? []), ...(f.headers.get('access-control-allow-methods') ?? [])].join(', ');
-    if (!allow) return [mk(methods, ctx, 'na', 'info', 'na', `HTTP ${f.status}（Allow ヘッダなし）`, '')];
+    if (!allow) return [mk(methods, ctx, 'na', 'info', 'na', `HTTP ${f.status}（Allow ヘッダなし）`, 'C9 のとおり OPTIONS で採取し直す（Allow を返さないサーバでは判定できない）')];
     const risky = [...new Set(allow.match(RISKY_METHODS)?.map(m => m.toUpperCase()) ?? [])];
     return risky.length ? [mk(methods, ctx, 2, 'low', 'fail', `Allow: ${allow}`, `使っていなければ ${risky.join('・')} を無効にする`)]
                         : [mk(methods, ctx, 'ok', 'info', 'pass', `Allow: ${allow}`, '')];

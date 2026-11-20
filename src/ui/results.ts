@@ -202,7 +202,8 @@ function crossBlock(findings: Finding[], targets: Target[], names: TargetNames) 
 /** 前回との差分の警告（ルールセットの版・組織プロファイルの違い）。画面と Markdown で同じものを出す */
 function diffWarnings(): { rulesetWarning?: string; profileWarning?: string } {
   const s = state.last?.settings; const b = s?.baseline; const T = tr();
-  return { rulesetWarning: b?.rulesetVersion && b.rulesetVersion !== RULESET_VERSION ? T.diffRulesetWarning(b.rulesetVersion === UNKNOWN_RULESET ? T.unknownRuleset : b.rulesetVersion, RULESET_VERSION) : undefined,
+  return { rulesetWarning: b?.rulesetVersion === UNKNOWN_RULESET ? T.diffRulesetUnknown(RULESET_VERSION)
+    : b?.rulesetVersion && b.rulesetVersion !== RULESET_VERSION ? T.diffRulesetWarning(b.rulesetVersion, RULESET_VERSION) : undefined,
            profileWarning: profileDiffers(b?.profile, s?.profile) ? T.diffProfileWarning : undefined };
 }
 function diffBlock(rows: DiffRow[], names: TargetNames) {

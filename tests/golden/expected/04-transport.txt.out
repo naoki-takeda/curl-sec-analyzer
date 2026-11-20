@@ -17,7 +17,7 @@ chain | A-02.ok | info | pass | URL・Location・本文にトークンなし
 chain | C-10.ok | info | pass | HTTP応答でCookieを発行していない
 chain | H-01.1 | high | fail | (ヘッダなし)
 chain | H-02.na | info | na | HSTSがない（H-01で判定）
-chain | H-08.na | info | na | HTTP 302（本文のない応答）
+chain | H-08.na | info | na | HTTP 302（転送の応答）
 chain | H-11.na | info | na | HTTP 302（転送の応答）
 chain | H-12.na | info | na | HTTP 302（鮮度の指定がなく、キャッシュされない応答）
 chain | H-13.na | info | na | HTTP 302（別のサイトへの転送で終わる。転送先の応答は判定しない）

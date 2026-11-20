@@ -14,14 +14,15 @@ import sample from './sample.txt?raw';   // 「サンプルを入れる」の入
 import { BTN, LINK, PRIMARY, button, download, el, fileInput as hidden, focusResultsIfLost, labelFor, link, reducedMotion } from './ui/dom';
 import { type AnalyzeSource, type AnalyzedInput, type Message, actions, refs, state } from './ui/state';
 import { render, renderEmpty } from './ui/results';
-import { cancelHarLoad, harNotice, isHarLoading, loadHar, renderHar } from './ui/har';
+import { cancelHarLoad, harNotice, isHarLoading, keepHarView, loadHar, renderHar, setPendingSettings } from './ui/har';
+import { currentMessage, joined, say } from './ui/message';
 import { commandGenerator } from './ui/generator';
 import { joinMessages } from './messagesEn';
 
 const MAX_MB = 5; const MAX_BYTES = MAX_MB * 1024 * 1024;
 const app = document.querySelector<HTMLDivElement>('#app')!;
 refs.dialog = el('dialog', 'm-auto w-[min(32rem,92vw)] rounded-md border border-line bg-surface p-0 text-ink backdrop:bg-black/40');
-Object.assign(actions, { analyze, cancelAnalysis, isAnalyzing: () => !!analyzing, say, message: () => current, renderSettings, openGenerator, loadSample });
+Object.assign(actions, { analyze, cancelAnalysis, isAnalyzing: () => !!analyzing, renderSettings, openGenerator, loadSample });
 
 // ?lang= は ja・en（en-US などは en）だけを受け付け、それ以外の値はブラウザの言語で決める
 const qLang = new URLSearchParams(location.search).get('lang')?.toLowerCase() ?? '';
@@ -104,7 +105,11 @@ function buildShell() {
           el('h1', 'text-2xl font-bold tracking-tight', 'curl-sec-analyzer'),
           el('span', 'num text-sm text-muted', T.versions(TOOL_VERSION, RULESET_VERSION)),
           // ボタンの文言（English・日本語）は切り替え先の言語なので lang を付ける（WCAG 3.1.2）。作り直したあとはボタンにフォーカスを戻す（WCAG 2.4.3）
-          Object.assign(button(T.langSwitch, `${LINK} ml-auto`, () => { keepDraft(); const m = current; setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); setBusy(!!analyzing); if (m) say(m);
+          Object.assign(button(T.langSwitch, `${LINK} ml-auto`, () => {
+            // 作り直す前に、入力・メッセージ・HAR の一覧と設定の欄の開閉を覚え、作り直したあとに戻す
+            keepDraft(); keepHarView(); const m = currentMessage(); const settingsOpen = document.querySelector<HTMLDetailsElement>('#settings-box')?.open;
+            setLang(getLang() === 'ja' ? 'en' : 'ja'); buildShell(); setBusy(!!analyzing); if (m) say(m);
+            const sb = document.querySelector<HTMLDetailsElement>('#settings-box'); if (sb && settingsOpen) sb.open = true;
             document.querySelector<HTMLButtonElement>('#lang-switch')?.focus(); }), { id: 'lang-switch', lang: getLang() === 'ja' ? 'en' : 'ja' })),
         el('p', 'mt-1 text-muted', T.tagline),
         el('ul', 'mt-2 list-disc pl-5 text-sm text-muted', el('li', '', T.notice1), el('li', '', T.notice2), el('li', '', T.notice3),
@@ -120,18 +125,19 @@ function buildShell() {
             Object.assign(button(T.openFile, BTN, () => fileIn.click()), { id: 'open-file' }),
             button(T.sample, BTN, loadSample),
             button(T.clear, 'rounded-md px-3 py-2 text-muted underline-offset-4 hover:underline', clearAll),
-            fileIn, supIn, profIn, baseIn),
+            // 隠したファイルの入力には id を付ける（E2E が並びの順番ではなく id で選ぶ）
+            Object.assign(fileIn, { id: 'file-in' }), Object.assign(supIn, { id: 'sup-in' }), Object.assign(profIn, { id: 'prof-in' }), Object.assign(baseIn, { id: 'base-in' })),
           refs.message,
           refs.genDetails,
           refs.harBox,
-          el('details', 'mt-4 rounded-md border border-line bg-surface p-4',
+          Object.assign(el('details', 'mt-4 rounded-md border border-line bg-surface p-4',
             el('summary', 'cursor-pointer font-bold', T.settings),
             el('div', 'mt-3 flex flex-wrap gap-2',
               button(T.loadSuppressions, BTN, () => supIn.click()),
               button(T.loadProfile, BTN, () => profIn.click()),
               button(T.loadBaseline, BTN, () => baseIn.click()),
               button(T.profileTemplate, LINK, () => download('profile.json', 'application/json', profileTemplate()))),
-            refs.settingsStatus),
+            refs.settingsStatus), { id: 'settings-box' }),
           el('p', 'mt-3 text-sm text-muted', T.maskNote)),
         refs.results)),
     refs.dialog);
@@ -153,25 +159,23 @@ function clearAll() {
   state.last = null; state.view.inputHidden = false; applyInputVisibility(); renderEmpty(); refs.input.focus();
 }
 function keepDraft() { state.draft = { input: refs.input.value, url: refs.urlInput.value }; }
-// 状態のメッセージ（件数、入力がない、読み込みのエラーなど）は、文言を作る関数で受け取る。言語を切り替えたら、その言語で出し直す
-// （文字列のまま残すと、英語の画面に日本語のメッセージが残る）。引数なしで消す
-let current: Message | undefined;
-function say(m?: Message) { current = m; refs.message.textContent = m ? m() : ''; }
 /**
  * 設定を読み込んだあとに判定し直す。読み込みのエラーは判定のあとに表示する（analyze は最初に表示を消すため、先に出すと消えてしまう）。
  * 判定の結果を表示できなかった（失敗・中止・置き換わった）ときは、判定のメッセージを消さずに読み込みのエラーを後ろに足す
  */
 async function refresh(msg: Message) {
   renderSettings();
+  // HAR の読み込み中は、読み込みの案内・判定し直しのあとにも出せるよう、この知らせを HAR の読み込みに預ける（新しい設定ファイルで置き換える）
+  if (isHarLoading()) setPendingSettings(msg() ? msg : undefined);
   // 判定する前の HAR は判定しない（ホストとラベルを確かめてから「判定する」を押す）。読み込みのエラーがなければ HAR の案内（読み込み中・読み込み済み）
   // を出し直す（前の設定ファイルのエラーを残さない）
   if (!(state.last || analyzing)) { say(msg() ? msg : harNotice()); return; }
   const shown = await analyze('result');
   if (!msg()) return;
-  const prev = current;
+  const prev = currentMessage();
   // 表示できたら読み込みのメッセージに置き換える。書き換えた入力欄をまだ判定していないことは残す
   const note = shown && formNotAnalyzed;
-  say(shown || !prev ? (note ? () => msg() + tr().formNotAnalyzed : msg) : () => `${prev()} ${msg()}`);
+  say(shown || !prev ? (note ? () => msg() + tr().formNotAnalyzed : msg) : joined(prev, msg));
 }
 function renderSettings() {
   const T = tr();
@@ -257,6 +261,8 @@ function analyze(source: AnalyzeSource = 'form'): Promise<boolean> {
   const fromResult = source === 'result' && (analyzing ? analyzing.source === 'result' : !!state.last);
   const { text } = input;
   const fail = (m: () => string) => { cancelAnalysis(); say(m); state.last = null; renderEmpty(); };
+  // 入力欄が空で HAR を読み込んでいる途中なら、入力がないとは言わずに読み込み中と知らせる（結果は消さない）
+  if (!text.trim() && !state.har && isHarLoading()) { say(() => tr().har.loading); return Promise.resolve(false); }
   if (!text.trim() && !state.har) { fail(() => tr().emptyInput); return Promise.resolve(false); }
   // 判定できなかったときは前の結果を消す（残すと、言語の切り替えなどで別の入力の結果が表示・出力される）
   if (new Blob([text]).size > MAX_BYTES) { fail(() => tr().tooLarge(MAX_MB)); return Promise.resolve(false); }
@@ -306,7 +312,8 @@ function show({ targets, warnings, findings, cov }: AnalyzeResult, input: Analyz
   const rows = overall(findings); const high = countBySeverity(rows).high;
   const note = formNotAnalyzed;
   say(() => tr().analyzed(targets.length, rows.length, high) + (note ? tr().formNotAnalyzed : ''));
-  if (matchMedia('(max-width: 1023px)').matches)
+  // 1列の画面では結果欄までスクロールする。設定ファイル・例外の登録での判定し直しでは、読み込みの知らせ（入力欄の下）を画面の外に出さない
+  if (!fromResult && matchMedia('(max-width: 1023px)').matches)
     refs.results.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth' });
   return true;
 }

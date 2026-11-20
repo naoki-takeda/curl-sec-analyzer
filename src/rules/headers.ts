@@ -1,9 +1,9 @@
 // rules/headers.ts：第1章 HTTPレスポンスヘッダ（H-01〜H-17。H-02③・H-04⑤は横断ルール rules/cross.ts）
 import type { Rule, RuleContext, Target } from '../model';
-import { INTERNAL_HOST_IN_TEXT, LOGOUT_FAILED_REC, NO_BODY_REC, NO_CONTENT_OR_REDIRECT_REC, NO_CONTENT_REC, SENSITIVE_REC, cacheDirectives, cspPolicies, directiveNames, header, hstsDirective, isNosniff, isStaticResource, mk, noContent, noResponse, nothingToSniff, parseCsp, parseHsts, sensitiveUnlessStatic, zeroLength } from './util';
+import { INTERNAL_HOST_IN_TEXT, NO_BODY_REC, NO_CONTENT_OR_REDIRECT_REC, NO_CONTENT_REC, SENSITIVE_REC, cacheDirectives, cspPolicies, directiveNames, header, hstsDirective, isNosniff, isStaticResource, mk, noContent, noResponse, nothingToSniff, parseCsp, parseHsts, sensitiveUnlessStatic, zeroLength } from './util';
 import { excerpt, maskValue } from '../mask';
-import { baseLabel, chainOf, firstStatus, hostnameOf, isRedirectWithLocation, isToken, siteResponses } from '../parser/target';
-import { htmlBody, logoutFailed, metaCspPolicies, mixedContent, tags } from './html';
+import { baseLabel, chainOf, hostnameOf, isRedirectWithLocation, isToken, siteResponses } from '../parser/target';
+import { htmlBody, logoutProblem, metaCspPolicies, mixedContent, tags } from './html';
 import { type CspIssue, EVALUATOR_ERROR, evaluateCsp, issueEvidence } from './csp';
 
 /** CSP のソースのうち、スキームだけの指定（https:・data:）。H-05②・H-06④ */
@@ -107,7 +107,7 @@ export const nosniff: Rule = { id: 'H-08', title: 'X-Content-Type-Options', appl
   basis: ['OWASP HTTP Headers CS'],
   run(ctx) {
     if (!ctx.final) return [noResponse(nosniff, ctx)];
-    if (nothingToSniff(ctx)) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（本文のない応答）`, NO_CONTENT_OR_REDIRECT_REC)];
+    if (nothingToSniff(ctx)) return [mk(nosniff, ctx, 'na', 'info', 'na', `HTTP ${ctx.final.status}（${isRedirectWithLocation(ctx.final) ? '転送の応答' : '本文のない応答'}）`, NO_CONTENT_OR_REDIRECT_REC)];
     const v = header(ctx, 'x-content-type-options').join(', ');
     if (isNosniff(ctx)) return [mk(nosniff, ctx, 'ok', 'info', 'pass', v, '')];
     return [mk(nosniff, ctx, 1, 'medium', 'fail', v || '(ヘッダなし)', 'X-Content-Type-Options: nosniff')];
@@ -406,7 +406,7 @@ export const clearSiteData: Rule = { id: 'H-15', title: 'Clear-Site-Data', appli
   run(ctx) {
     if (baseLabel(ctx.target.label) !== 'logout') return [];          // ログアウト応答だけ
     if (!ctx.final) return [noResponse(clearSiteData, ctx)];
-    if (logoutFailed(ctx.target)) return [mk(clearSiteData, ctx, 'na', 'info', 'na', `ログアウトの応答が HTTP ${firstStatus(ctx.target)}（ログアウトできていない）`, LOGOUT_FAILED_REC)];
+    const lp = logoutProblem(ctx.target); if (lp) return [mk(clearSiteData, ctx, 'na', 'info', 'na', lp.ev, lp.rec)];
     const csd = siteResponses(ctx.target).flatMap(r => r.headers.get('clear-site-data') ?? []).join(', ');
     const rec = 'Clear-Site-Data: "cache", "cookies", "storage"';
     if (!csd) return [mk(clearSiteData, ctx, 1, 'info', 'fail', '(ヘッダなし)', rec)];

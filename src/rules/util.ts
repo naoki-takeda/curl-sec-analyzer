@@ -125,6 +125,9 @@ export const LOGIN_FAILED_REC = 'テスト用アカウントでログインで�
 export const SENSITIVE_REC = '認証後ページや個人情報を含むAPIには #TARGET に sensitive=1 を付ける';
 /** 転送先を採取していないときの推奨 */
 export const FOLLOW_REC = '-L を付けて、転送先まで採取し直す';
+/** 一時的に使えない応答（5xx・429 のレート制限）。リクエストを処理したかが分からないので、合格にも指摘にもしない */
+export const unavailable = (status: number): boolean => status >= 500 || status === 429;
+export const RETRY_REC = '時間をおいて採取し直す';
 /**
  * 本文を見て判定するルールで、本文を採取していないとき（-v、-D - -o /dev/null、HAR の本文なし）の推奨。
  * 本文がないのに「反映されない」「参照なし」と合格にすると、見逃しになり、カバレッジも水増しになる

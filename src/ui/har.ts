@@ -7,15 +7,21 @@ import { showTarget, showText } from '../shownText';
 import { BTN, button, el, focusable, focusedKey, labelFor, options, restoreFocus, table, td } from './dom';
 import HarWorker from '../harWorker.ts?worker&inline';
 import { type Message, actions, refs, state } from './state';
+import { currentMessage, joined, say } from './message';
 import { renderEmpty } from './results';
 
-const say = (m?: Message) => actions.say(m);
 
 // 読み込みの世代。読み込み中に別の HAR を読んだり、消去・HARを外す・サンプルを入れるを押したりしたら、前の読み込みの結果は使わない
 let harLoad = 0; let harWorker: Worker | undefined;
-export const cancelHarLoad = () => { harLoad++; harWorker?.terminate(); harWorker = undefined; };
+export const cancelHarLoad = () => { harLoad++; harWorker?.terminate(); harWorker = undefined; pendingSettings = undefined; };
+/** 読み込み中に読み込んだ設定ファイルの知らせ（main.ts の refresh が預ける）。読み込みが終わったら、その案内・判定し直しの結果のあとに出す */
+let pendingSettings: Message | undefined;
+export const setPendingSettings = (m?: Message) => { pendingSettings = m; };
 /** HAR を読み込んでいる途中か（読み込み中のファイルは、まだ state.har に入っていない） */
 export const isHarLoading = () => !!harWorker;
+let kept: { open?: boolean; scroll: number } | undefined;
+/** 画面を作り直す前（言語の切り替え）に、HAR の一覧の開閉とスクロール位置を覚える（作り直した一覧で戻す） */
+export const keepHarView = () => { kept = { open: refs.harBox.querySelector('details')?.open, scroll: refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? 0 }; };
 /** HAR の案内（読み込み中・読み込み済み）。HAR がなければ undefined */
 export const harNotice = (): Message | undefined => {
   const h = state.har;
@@ -38,16 +44,18 @@ export function loadHar(f: File) {
     if (gen !== harLoad) return;                     // 古い読み込みの結果
     if (!e.data.ok || !e.data.result) { const err = e.data.error === 'JSON' ? 'json' : 'format'; say(() => tr().har.failed(err)); return; }
     const imp = e.data.result;
-    // 読み込み中に出た設定ファイルのエラーは、読み込みの案内のあとに残す（案内で上書きしない）
-    const prev = actions.message(); const pending = prev && prev() !== tr().har.loading ? prev : undefined;
+    // 読み込み中に読み込んだ設定ファイルの知らせは、読み込みの案内・判定し直しの結果のあとに残す（上書きしない）
+    const pending = pendingSettings; pendingSettings = undefined;
     // Worker の中では組織プロファイルが分からないため、プロファイルがあればセッションCookieの名前を反映して候補を作り直す
     if (state.profile) withProfile(state.profile, () => suggestLabels(imp.chains));
     state.har = { imp, hosts: defaultHarHosts(imp), name: f.name };
     renderHar(); say();
     // 別の HAR に入れ替えたとき、前の HAR の判定結果を残さない。判定中（初回を含む）なら、読み込んだ HAR も入れて判定し直す
-    if (state.last || actions.isAnalyzing()) actions.analyze();
-    // 判定し直したときは、判定のメッセージ（判定中・エラー）を残す
-    if (!refs.message.textContent) say(pending ? () => `${tr().har.loaded(f.name, imp.chains.length)} ${pending()}` : () => tr().har.loaded(f.name, imp.chains.length));
+    if (state.last || actions.isAnalyzing()) {
+      void actions.analyze().then(() => { const m = currentMessage(); if (pending && gen === harLoad) say(m ? joined(m, pending) : pending); });
+      return;   // 判定し直したときは、判定のメッセージ（判定中・件数・エラー）を出す
+    }
+    say(joined(harNotice()!, pending));
   };
   w.onerror = w.onmessageerror = () => failed('worker');
   f.text().then(t => { try { w.postMessage(t); } catch { failed('worker'); } }, () => failed('read'));
@@ -84,8 +92,10 @@ export function renderHar() {
   const focusKey = focusedKey();
   const T = tr().har; const { imp, hosts } = state.har;
   const same = shownImp === imp; shownImp = imp; if (!same) moved.clear();
-  const prevScroll = same ? refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? 0 : 0;
-  const prevOpen = same ? refs.harBox.querySelector('details')?.open : undefined;
+  // 画面を作り直したあと（言語の切り替え）は、作り直す前に覚えた開閉とスクロール位置を使う
+  const k = kept; kept = undefined;
+  const prevScroll = same ? refs.harBox.querySelector<HTMLElement>('[data-scroll="har"]')?.scrollTop ?? k?.scroll ?? 0 : 0;
+  const prevOpen = same ? refs.harBox.querySelector('details')?.open ?? k?.open : undefined;
   // ホスト名は URL の列と同じ出し方にする（URL の列で伏せるカード番号のラベルのホスト名を、ここでそのまま出さない）
   const hostBoxes = imp.hosts.map(h => {
     const cb = el('input'); cb.type = 'checkbox'; cb.checked = hosts.has(h); cb.id = `har-host-${h}`; focusable(cb, `har-host-${h}`);

@@ -45,7 +45,7 @@ const DEDUPE: { keep: string; drop: string; why: string; perCookie?: boolean; wh
   ...['C-04.1', 'C-04.3'].map(drop => ({ keep: 'C-06.2', drop, why: 'Domain を付けた __Host- の Cookie はブラウザが拒否する（C-06② で数える）', perCookie: true, when: hostPrefixed })),
   // プリフライトの応答（cors-preflight）の許可外の Origin の反射・*・null（実際の応答を読めるかは示さない）は、状態を変えるメソッドの許可（R-05①）と
   // 同じ事象なので、重要度の高いほうで数える（R-01①・R-02①・R-03① は高、R-05① は中、R-01②〜R-04 は中以下）
-  ...['R-01.1', 'R-02.1', 'R-03.1'].map(keep => ({ keep, drop: 'R-05.1', why: `プリフライトの応答の許可外の Origin の許可は ${keep} で数える（重要度の高いほう）`, when: preflight })),
+  ...['R-01.1', 'R-02.1', 'R-03.1'].map(keep => ({ keep, drop: 'R-05.1', why: 'プリフライトの応答の許可外の Origin の許可は、重要度の高いほう（R-01①〜R-03①）で数える', when: preflight })),
   ...['R-01.2', 'R-02.2', 'R-03.2', 'R-04.1', 'R-04.2', 'R-04.3'].map(drop => ({ keep: 'R-05.1', drop, why: 'プリフライトの応答の許可外の Origin の許可は R-05① で数える', when: preflight })),
   // 普通の応答（プリフライトでない）の Access-Control-Allow-Methods はブラウザが使わないので、許可外の Origin の許可は R-01〜R-04 で数える
   ...['R-01.1', 'R-01.2', 'R-02.1', 'R-02.2', 'R-03.1', 'R-03.2', 'R-04.1', 'R-04.2', 'R-04.3'].map(keep => ({ keep, drop: 'R-05.1',
